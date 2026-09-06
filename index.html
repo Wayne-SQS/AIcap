@@ -293,6 +293,74 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:11px 20px;font-size:14px;border:2px solid var(--ink);box-shadow:4px 4px 0 rgba(34,52,44,.4);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:999;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
 
+/* ============ 需求池 ============ */
+.pool-note{font-size:13px;color:var(--muted);border:2px dashed var(--line);padding:10px 14px;margin-bottom:16px;background:rgba(255,255,255,.4)}
+.pool-list{display:flex;flex-direction:column;gap:12px}
+.pool-item{border:2px solid var(--ink);background:var(--paper);padding:14px 16px;box-shadow:var(--shadow);display:flex;gap:14px;align-items:flex-start}
+.pool-item .picon{font-size:20px;font-family:var(--mono);width:38px;height:38px;border:2px solid var(--ink);background:var(--yellow);display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 var(--ink);flex:0 0 auto}
+.pool-item .pbody{flex:1;min-width:0}
+.pool-item h3{margin:0 0 4px;font-size:15.5px}
+.pool-item .pdesc{margin:0;font-size:13px;color:var(--muted)}
+.pool-item .pmeta{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;font-family:var(--mono);color:var(--muted)}
+.pool-item .pacts{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
+.pool-form{border:2px solid var(--ink);background:var(--paper-2);padding:14px;box-shadow:var(--shadow);margin-bottom:14px;display:none}
+.pool-form input,.pool-form textarea{width:100%;margin-bottom:10px}
+.pool-form .row{display:flex;gap:10px;justify-content:flex-end;align-items:center}
+
+/* ============ AI 审核中心 ============ */
+.sug-card{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.sug-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.sug-agent{font-family:var(--mono);font-weight:700;font-size:12.5px;border:2px solid var(--ink);padding:2px 9px;box-shadow:2px 2px 0 var(--ink);background:var(--lilac)}
+.sug-agent.submit{background:var(--blue)}
+.sug-status{font-size:11px;font-family:var(--mono);font-weight:700;border:1.5px solid var(--ink);padding:1px 8px;box-shadow:2px 2px 0 var(--ink)}
+.sug-status.pending{background:var(--yellow)}
+.sug-status.approved{background:var(--green)}
+.sug-status.rejected{background:var(--red);color:#fff}
+.sug-status.modified{background:var(--orange)}
+.sug-row{display:grid;grid-template-columns:100px 1fr;gap:8px;font-size:13px;margin-bottom:6px}
+.sug-row b{font-family:var(--mono);color:var(--muted);font-weight:700}
+.sug-diff{background:var(--paper-2);border:2px solid var(--line);padding:10px 12px;font-size:12.5px;font-family:var(--mono);margin:8px 0;line-height:1.9}
+.sug-diff .add{color:#3a7d2e}.sug-diff .del{color:#b2402a;text-decoration:line-through}
+.sug-acts{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+.sug-acts .approve{background:var(--green)}
+.sug-acts .reject{background:var(--pink)}
+.decision{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);margin-top:16px}
+.decision summary{padding:10px 14px;cursor:pointer;font-weight:bold}
+.decision .logbody{padding:8px 14px 14px;max-height:240px;overflow-y:auto;font-size:13px}
+
+/* ============ 成员：容量 + 绿格子 ============ */
+.bw-row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12.5px}
+.bw-track{flex:1;height:16px;border:2px solid var(--ink);background:var(--paper);position:relative;overflow:hidden}
+.bw-track .used{height:100%;background:repeating-linear-gradient(45deg,var(--orange) 0 7px,var(--orange-2) 7px 14px);display:block}
+.bw-track .cap{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
+.contrib-wrap{overflow-x:auto;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:16px}
+.contrib{margin-bottom:18px}
+.contrib:last-child{margin-bottom:0}
+.contrib .chead{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-weight:bold;font-size:13px}
+.contrib-grid{display:grid;grid-template-columns:repeat(12,13px);grid-auto-rows:13px;gap:3px}
+.c-cell{width:13px;height:13px;border:1px solid rgba(34,52,44,.22);background:var(--paper-2)}
+.c0{background:#eef0e6}.c1{background:var(--green)}.c2{background:var(--green-2)}.c3{background:#7fb55a}.c4{background:#4d8a3a}
+.c-legend{display:flex;gap:6px;align-items:center;font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:6px}
+.c-legend .sw{width:13px;height:13px;border:1px solid rgba(34,52,44,.22)}
+
+/* ============ AI 智能体演示 ============ */
+.rec{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+.rec .rec-dot{width:12px;height:12px;background:var(--red);border:1.5px solid var(--ink);border-radius:50%;display:inline-block;animation:blink 1s steps(1) infinite;vertical-align:middle}
+.transcript{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:14px;font-size:13px;max-height:190px;overflow-y:auto;margin-bottom:14px}
+.transcript .tl{display:flex;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:12.5px}
+.transcript .tl b{color:var(--muted);flex:0 0 52px;font-weight:700}
+.transcript .tl .spk{color:var(--muted);flex:0 0 52px}
+.sum-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.sum-card{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:12px 14px}
+.sum-card h4{margin:0 0 6px;font-size:13px;font-family:var(--mono)}
+.sum-card ul{margin:0;padding-left:18px;font-size:12.5px}
+.sum-card li{margin-bottom:4px}
+.commit-row{display:flex;gap:12px;align-items:center;padding:9px 12px;border:2px solid var(--ink);background:var(--paper);box-shadow:2px 2px 0 var(--ink);margin-bottom:8px;font-family:var(--mono);font-size:12px}
+.commit-row .sha{background:var(--paper-2);border:1px solid var(--ink);padding:0 6px}
+.commit-row .msg{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.commit-row .tag2{font-size:10px;border:1px solid var(--ink);padding:0 5px;background:var(--green)}
+@media(max-width:700px){.sum-grid{grid-template-columns:1fr}.pool-item{flex-direction:column}.pool-item .pacts{flex-direction:row}}
+
 /* 响应式 */
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
@@ -321,12 +389,14 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
     <nav aria-label="功能导航">
       <div class="navtitle">项目空间</div>
       <div class="navitem active" data-view="overview"><span class="navicon">◈</span>项目总览</div>
+      <div class="navitem" data-view="pool"><span class="navicon">◆</span>需求池</div>
       <div class="navitem" data-view="board"><span class="navicon">▦</span>用户故事看板</div>
       <div class="navitem" data-view="gantt"><span class="navicon">▤</span>甘特图</div>
       <div class="navitem" data-view="members"><span class="navicon">▥</span>成员任务图</div>
       <div class="navitem" data-view="uml"><span class="navicon">◇</span>UML 图</div>
       <div class="navtitle" style="margin-top:24px">智能协作</div>
       <div class="navitem" data-view="ai"><span class="navicon">✦</span>AI 助手</div>
+      <div class="navitem" data-view="review"><span class="navicon">✓</span>AI 审核中心</div>
     </nav>
     <div class="sidebottom">
       <span class="eyebrow">PARTY / 04</span>
@@ -362,6 +432,9 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
         <div class="stat"><label>团队成员</label><strong>04</strong><span class="small">人 · DRI 轮值</span></div>
         <div class="stat"><label>迭代周期</label><strong>06</strong><span class="small">周 · 3 个 Sprint</span></div>
       </div>
+
+      <div class="h-sec">实时进度 · 看板</div>
+      <div id="realtime"></div>
 
       <div class="h-sec">Sprint 进度 · 三阶段递进</div>
       <div class="sprint-grid" id="sprint-grid"></div>
@@ -469,6 +542,10 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
       <div class="member-grid" id="member-grid"></div>
       <div class="h-sec">周负载热力图</div>
       <div class="heat-wrap"><div class="heat" id="heat"></div></div>
+      <div class="h-sec">容量与分配 · Bandwidth</div>
+      <div id="bandwidth"></div>
+      <div class="h-sec">成员贡献绿格子 · 样例数据</div>
+      <div class="contrib-wrap" id="contrib"></div>
     </section>
 
     <!-- UML -->
@@ -491,12 +568,19 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
     <section class="view" id="view-ai">
       <div class="hero">
         <div>
-          <div class="eyebrow">AI COPILOT / 六项智能</div>
+          <div class="eyebrow">AI COPILOT / 智能体协作</div>
           <h1>AI 助手</h1>
-          <p>AI 提出可追溯的建议，人验证依据、决定采纳并承担结果责任。</p>
+          <p>会议智能体 · 任务提交智能体 · 六项能力 —— AI 提出可追溯的建议，人验证依据、决定采纳并承担结果责任。</p>
         </div>
       </div>
       <div class="ai-grid" id="ai-grid"></div>
+
+      <div class="h-sec">会议智能体 · Meeting Agent</div>
+      <div id="meeting"></div>
+
+      <div class="h-sec">任务提交智能体 · Commit Agent</div>
+      <div id="submit-agent"></div>
+
       <div class="h-sec">对话演示</div>
       <div class="ai-chat">
         <div class="chatbox">
@@ -516,6 +600,42 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
           <p class="small" style="margin:10px 0 0">演示回复为静态文案，实际接入需配置模型。</p>
         </div>
       </div>
+    </section>
+
+    <!-- 需求池 -->
+    <section class="view" id="view-pool">
+      <div class="hero">
+        <div>
+          <div class="eyebrow">REQUIREMENT POOL / 需求池</div>
+          <h1>需求池</h1>
+          <p>会议中临时出现、尚未确定 Sprint 或负责人的需求先放这里，不丢失、不提前承诺。</p>
+        </div>
+        <button class="primary" id="pool-add">＋ 新增需求</button>
+      </div>
+      <p class="pool-note">需求池条目允许 Sprint / 负责人为空；细化后可「移入看板」成为正式用户故事，并保留来源与历史。需求池不计入已承诺 Sprint 完成率。</p>
+      <div class="pool-form" id="pool-form">
+        <input id="pool-title" placeholder="需求标题（如：支持第三方账号登录）">
+        <textarea id="pool-desc" placeholder="描述 / 来源（如：会议 2026-09-06 · 成员2 提出）"></textarea>
+        <div class="row">
+          <select id="pool-pri"><option>Must</option><option>Should</option><option selected>Could</option></select>
+          <button class="primary" id="pool-save">保存到需求池</button>
+          <button id="pool-cancel">取消</button>
+        </div>
+      </div>
+      <div class="pool-list" id="pool-list"></div>
+    </section>
+
+    <!-- AI 建议审核中心 -->
+    <section class="view" id="view-review">
+      <div class="hero">
+        <div>
+          <div class="eyebrow">AI REVIEW / 人在回路</div>
+          <h1>AI 建议审核中心</h1>
+          <p>集中查看 AI 提出的项目变更，采纳、修改或拒绝 —— 每条建议保留来源、证据与影响对象。</p>
+        </div>
+      </div>
+      <div id="sug-list"></div>
+      <details class="decision"><summary>📋 决策留痕（本机）</summary><div class="logbody" id="decision-log"></div></details>
     </section>
   </main>
 </div>
@@ -658,7 +778,7 @@ function notify(s){const t=$('#toast');t.textContent=s;t.classList.add('show');c
 function persist(){try{localStorage.setItem(key,JSON.stringify(stories));storageOK=true;}catch{storageOK=false;}$('#savehint').textContent=storageOK?'已保存在本机 · 拖动更新状态 / 点击编辑':'浏览器未允许保存 · 数据仅在本次打开期间保留';}
 
 /* ==================== 视图切换 ==================== */
-const VIEW_NAMES={overview:'项目总览',board:'用户故事看板',gantt:'甘特图',members:'成员任务图',uml:'UML 图',ai:'AI 助手'};
+const VIEW_NAMES={overview:'项目总览',pool:'需求池',board:'用户故事看板',gantt:'甘特图',members:'成员任务图',uml:'UML 图',ai:'AI 助手',review:'AI 审核中心'};
 function go(v){
   $$('.view').forEach(x=>x.classList.remove('active'));
   $('#view-'+v).classList.add('active');
@@ -668,9 +788,11 @@ function go(v){
   if(v==='overview')renderOverview();
   if(v==='board')render();
   if(v==='gantt')renderGantt();
-  if(v==='members')renderMembers();
+  if(v==='members'){renderMembers();renderBandwidth();renderContrib();}
   if(v==='uml')renderUML();
   if(v==='ai')renderAI();
+  if(v==='pool')renderPool();
+  if(v==='review')renderReview();
 }
 $$('.navitem').forEach(n=>n.addEventListener('click',()=>go(n.dataset.view)));
 
@@ -688,6 +810,7 @@ function renderOverview(){
     return `<div class="sprint ${sp.cls}"><div class="top"><h3>${sp.name}</h3><span class="pct">${p}%</span></div><div class="tagline">${sp.tag} · ${list.length} 个故事</div><div class="bar"><i style="width:${p}%"></i></div><div class="meta">完成 ${d} / ${list.length} · ${['W1–W2','W3–W4','W5–W6'][i]}</div></div>`;
   }).join('');
   $('#mile-grid').innerHTML=MILESTONES.map(m=>`<div class="milecard ${m.week<=2?'done':''}"><span class="wk">W${m.week}</span><span class="mid">${m.id}</span><h4>${m.name}</h4><p>${m.desc}</p></div>`).join('');
+  renderRealtime();
 }
 
 /* ==================== 看板 ==================== */
@@ -864,6 +987,8 @@ function renderUML(){
 let chatInit=false;
 function renderAI(){
   $('#ai-grid').innerHTML=AIS.map(a=>`<div class="aicard"><span class="ic">${a.ic}</span><h3>${a.name}</h3><p>${a.desc}</p></div>`).join('');
+  renderMeeting();
+  renderSubmitAgent();
   if(!chatInit){
     chatInit=true;
     const body=$('#chatbody');
@@ -893,6 +1018,153 @@ function sendChat(text){
 }
 $('#chatsend').onclick=()=>sendChat($('#chatinput').value);
 $('#chatinput').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat(e.target.value);});
+
+/* ==================== 需求池 ==================== */
+const POOL_SEED=[
+{id:"R01",title:"支持第三方账号登录（微信 / 企业微信）",desc:"会议中提出，尚未确认是否纳入 6 周范围。",source:"会议 2026-09-06 · 成员2",created:"09-06",priority:"Could"},
+{id:"R02",title:"报表导出为 PDF",desc:"老师反馈建议，待确认是否替代 CSV 导出。",source:"课堂反馈 · 成员1",created:"09-06",priority:"Should"},
+{id:"R03",title:"多语言界面（i18n）",desc:"候选 Won't，蓝图外扩展，暂缓。",source:"范围讨论 · 成员3",created:"09-06",priority:"Could"},
+{id:"R04",title:"移动端原生客户端",desc:"明确 Won't，本学期不做。",source:"范围讨论 · 成员3",created:"09-06",priority:"Could"}
+];
+const poolKey='aiguanli-pixel-pool-v1';
+let pool=structuredClone(POOL_SEED);
+try{const sl=JSON.parse(localStorage.getItem(poolKey));if(Array.isArray(sl)&&sl.length)pool=sl;}catch{}
+function persistPool(){try{localStorage.setItem(poolKey,JSON.stringify(pool));}catch{}}
+function renderPool(){
+  $('#pool-list').innerHTML=pool.map(p=>`<div class="pool-item"><span class="picon">◈</span><div class="pbody"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.title)}</h3><span class="tag ${p.priority}">${p.priority}</span><span class="mono small">${p.id}</span></div><p class="pdesc">${esc(p.desc)}</p><div class="pmeta"><span>来源 · ${esc(p.source)}</span><span>创建 · ${p.created}</span></div></div><div class="pacts"><button class="primary" data-promote="${p.id}">移入看板</button><button class="danger" data-drop="${p.id}">移除</button></div></div>`).join('')||'<div class="empty">需求池为空</div>';
+}
+function promotePool(id){
+  const p=pool.find(x=>x.id===id);if(!p)return;
+  const newId='M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0');
+  stories.push({id:newId,activity:2,sprint:1,title:p.title,description:p.desc,priority:p.priority,acceptance:'来源：'+p.source+'（待补充验收条件）',owner:0,status:0});
+  pool=pool.filter(x=>x.id!==id);
+  persistPool();persist();renderPool();render();renderOverview();
+  notify(`${newId} 已移入看板（Sprint 1 · A2 梳理需求）`);
+}
+function dropPool(id){pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');}
+
+/* ==================== AI 建议审核中心 ==================== */
+const SUGGESTION_SEED=[
+{id:"SG01",agent:"会议智能体",kind:"meeting",time:"09-06 14:22",evidence:"会议决议 #3：确认 Sprint 2 聚焦会议闭环",affected:"US14（AI PRD 拆解）",change:[{t:"优先级 Must",d:true},{t:"优先级 Should",d:false}],note:"拆解能力保留，但不高于两个核心智能体。",status:"pending"},
+{id:"SG02",agent:"会议智能体",kind:"meeting",time:"09-06 14:25",evidence:"转写片段：'成员任务图暂时先做负载热力图'",affected:"新需求 → 需求池",change:[{t:"新增需求：成员任务图绿格子后置",d:false}],note:"新需求默认进入需求池，不提前承诺。",status:"pending"},
+{id:"SG03",agent:"任务提交智能体",kind:"submit",time:"09-06 18:05",evidence:"成员3 近 3 天无 commit，且 T07 甘特与成员图未关闭",affected:"T07 · 成员3",change:[{t:"状态：进行中",d:true},{t:"状态：需检查阻塞",d:false}],note:"建议确认是否被接口联调阻塞，或重新分配。",status:"pending"},
+{id:"SG04",agent:"任务提交智能体",kind:"submit",time:"09-06 18:08",evidence:"成员4 昨日 6 次提交集中在 T08 UML，变更规模大",affected:"T08 · 成员4",change:[{t:"负载：正常",d:true},{t:"负载：偏忙",d:false}],note:"建议把 T08 编辑交互后置 W4，或由成员3 支援。",status:"approved"}
+];
+const sugKey='aiguanli-pixel-sug-v1',decKey='aiguanli-pixel-dec-v1';
+let suggestions=structuredClone(SUGGESTION_SEED);
+try{const sl=JSON.parse(localStorage.getItem(sugKey));if(Array.isArray(sl)&&sl.length)suggestions=sl;}catch{}
+let decisions=[];
+try{const sl=JSON.parse(localStorage.getItem(decKey));if(Array.isArray(sl))decisions=sl;}catch{}
+function renderDecisionLog(){
+  const el=document.getElementById('decision-log');if(!el)return;
+  el.innerHTML=decisions.length?decisions.slice().reverse().map(d=>`<div class="logrow"><time>${esc(d.t)}</time><b>${esc(d.id)}</b><span>${esc(d.act)}${d.reason?' · '+esc(d.reason):''}</span></div>`).join(''):'<div class="empty">暂无决策记录（采纳 / 修改 / 拒绝后自动记录）</div>';
+}
+function renderReview(){
+  $('#sug-list').innerHTML=suggestions.map(s=>{
+    const diff=(s.change||[]).map(c=>`<span class="${c.d?'del':'add'}">${c.d?'− ':'＋ '}${esc(c.t)}</span>`).join('<br>');
+    const map={pending:'待审核',approved:'已采纳',rejected:'已拒绝',modified:'已修改'};
+    const acts=s.status==='pending'?`<div class="sug-acts"><button class="approve" data-sug="${s.id}" data-act="approved">✓ 采纳</button><button data-sug="${s.id}" data-act="modified">✎ 修改后采纳</button><button class="reject" data-sug="${s.id}" data-act="rejected">✕ 拒绝</button></div>`:'';
+    return `<div class="sug-card"><div class="sug-head"><span class="sug-agent ${s.kind}">${s.kind==='meeting'?'🎙':'🚀'} ${esc(s.agent)}</span><span class="sug-status ${s.status}">${map[s.status]||'待审核'}</span><span class="small mono" style="margin-left:auto">${esc(s.id)} · ${esc(s.time)}</span></div><div class="sug-row"><b>证据</b><span>${esc(s.evidence)}</span></div><div class="sug-row"><b>影响对象</b><span>${esc(s.affected)}</span></div><div class="sug-row"><b>建议说明</b><span>${esc(s.note||'')}</span></div><div class="sug-diff">${diff}</div>${acts}</div>`;
+  }).join('')||'<div class="empty">暂无 AI 建议</div>';
+  renderDecisionLog();
+}
+function decideSug(id,act){
+  const s=suggestions.find(x=>x.id===id);if(!s)return;
+  const reason=prompt('决策理由（留空则记为已确认）：');
+  s.status=act;
+  const actTxt=act==='approved'?'采纳':(act==='modified'?'修改后采纳':'拒绝');
+  decisions.push({t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),id,act:actTxt,reason:reason||''});
+  if(decisions.length>50)decisions=decisions.slice(-50);
+  try{localStorage.setItem(sugKey,JSON.stringify(suggestions));localStorage.setItem(decKey,JSON.stringify(decisions));}catch{}
+  renderReview();
+  notify(`${id} 已${actTxt}`);
+}
+
+/* ==================== 实时进度 ==================== */
+function renderRealtime(){
+  const done=stories.filter(s=>s.status===2).length;
+  const doing=stories.filter(s=>s.status===1).length;
+  const lastUpdate=log.length?log[log.length-1].t:'—';
+  $('#realtime').innerHTML=`<div class="stats"><div class="stat"><label>完成比例</label><strong>${Math.round(done/stories.length*100)}%</strong><span class="small">${done} / ${stories.length} 故事</span></div><div class="stat"><label>进行中</label><strong>${String(doing).padStart(2,'0')}</strong><span class="small">个故事</span></div><div class="stat"><label>待关注 / 阻塞</label><strong>03</strong><span class="small">个任务需确认</span></div><div class="stat"><label>最近更新</label><strong class="mono" style="font-size:20px">${esc(lastUpdate)}</strong><span class="small">本机变更时间</span></div></div>`;
+}
+
+/* ==================== 容量 + 贡献绿格子 ==================== */
+const BANDWIDTH=[[10,10,10,10,10,10],[8,8,8,8,8,8],[10,10,10,10,10,10],[9,9,9,9,9,9]];
+function seeded(s){let x=s>>>0;return()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296;};}
+function makeContrib(){
+  const out=[];
+  for(let m=0;m<4;m++){
+    const rnd=seeded(1000+m*77),weeks=[];
+    for(let w=0;w<12;w++){
+      const days=[],idle=0.5-(w/11)*0.32;
+      for(let d=0;d<7;d++){
+        const v=rnd();let lv=0;
+        if(v>idle){lv=v>idle+(1-idle)*0.75?4:v>idle+(1-idle)*0.5?3:v>idle+(1-idle)*0.25?2:1;}
+        days.push(lv);
+      }
+      weeks.push(days);
+    }
+    out.push(weeks);
+  }
+  return out;
+}
+const CONTRIB=makeContrib();
+function renderBandwidth(){
+  const load=loadByOwner();
+  $('#bandwidth').innerHTML=MEMBERS.map((m,i)=>{
+    const alloc=load[i].reduce((a,b)=>a+b,0);
+    const cap=BANDWIDTH[i].reduce((a,b)=>a+b,0);
+    const pct=Math.round(alloc/cap*100),over=alloc>cap;
+    return `<div class="mcard"><div class="head"><span class="avatar a${m.id}">P${m.id+1}</span><div><h3>${m.name}</h3><div class="role">可用容量 ${cap}h / 6周 · 已分配 ${alloc}h</div></div><span class="loadflag ${over?'hot':'ok'}" style="margin-left:auto">${over?'超载':'充足'}</span></div><div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" style="width:${Math.min(pct,100)}%"></i><i class="cap" style="left:100%"></i></div><span class="mono small">${pct}%</span></div></div>`;
+  }).join('');
+}
+function renderContrib(){
+  $('#contrib').innerHTML=MEMBERS.map((m,i)=>{
+    const flat=CONTRIB[i].flat();
+    const cells=flat.map((v,d)=>`<div class="c-cell c${v}" title="成员${m.id+1} · 第${Math.floor(d/7)+1}周 周${d%7+1} · 活跃度 ${v}"></div>`).join('');
+    const total=flat.reduce((a,b)=>a+b,0);
+    return `<div class="contrib"><div class="chead"><span class="avatar a${m.id}">P${m.id+1}</span>${m.name}<span class="small mono" style="margin-left:auto">近 12 周 · 活动强度 ${total}</span></div><div class="contrib-grid">${cells}</div></div>`;
+  }).join('')+`<div class="c-legend"><span>少</span><span class="sw c0"></span><span class="sw c1"></span><span class="sw c2"></span><span class="sw c3"></span><span class="sw c4"></span><span>多</span><span style="margin-left:10px">样例数据（非真实 GitHub 事件）</span></div>`;
+}
+
+/* ==================== 会议智能体 / 任务提交智能体 ==================== */
+function renderMeeting(){
+  $('#meeting').innerHTML=`<div class="rec"><div class="eyebrow" style="margin-bottom:8px">MEETING AGENT · Sprint 2 规划会</div><div style="display:flex;align-items:center;gap:10px"><span class="rec-dot"></span><b>录音中 12:34</b><span class="small">已获参会者知情同意 · 实时转写</span></div></div><div class="transcript" id="meeting-transcript"></div><div class="sum-grid"><div class="sum-card"><h4>📌 会议摘要</h4><ul><li>确认 Sprint 2 聚焦「会议闭环 + 审核中心」</li><li>AI PRD 拆解降级为 Should</li><li>成员任务图先做负载热力图</li></ul></div><div class="sum-card"><h4>✅ 决议</h4><ul><li>#3 会议闭环优先于六项能力</li><li>#4 需求池承接未确认需求</li></ul></div><div class="sum-card"><h4>🚩 行动项</h4><ul><li>成员2 整理会议转写（W3）</li><li>成员3 验证录音接口（W3）</li><li>成员4 复核隐私同意机制</li></ul></div><div class="sum-card"><h4>❓ 遗留问题</h4><ul><li>是否要求说话人分离？待确认</li><li>录音用浏览器还是平台接入？</li></ul></div></div><button class="primary" id="meeting-gen">＋ 从会议生成需求/排期建议 → 送审</button>`;
+  const tl=document.getElementById('meeting-transcript');
+  tl.innerHTML=[["00:12","成员1","好，Sprint 2 的重点大家都清楚吗？"],["00:31","成员2","建议把 AI 拆解往后放，先做会议闭环。"],["00:52","成员3","成员任务图先做负载热力图，绿格子后置。"],["01:20","成员4","录音前要有知情同意，这个验收要写清楚。"]].map(l=>`<div class="tl"><b>${l[0]}</b><span class="spk">${l[1]}</span><span>${esc(l[2])}</span></div>`).join('');
+  $('#meeting-gen').onclick=()=>{
+    suggestions.unshift({id:'SG0'+(suggestions.length+1),agent:'会议智能体',kind:'meeting',time:new Date().toLocaleTimeString('zh-CN',{hour12:false}),evidence:'会议决议 #3 / 转写 00:52',affected:'成员任务图 · 需求池',change:[{t:'新增需求：贡献绿格子（US28）进入需求池',d:false}],note:'会议智能体根据转写生成，未经审核不改动正式数据。',status:'pending'});
+    try{localStorage.setItem(sugKey,JSON.stringify(suggestions));}catch{}
+    notify('已生成建议，前往「AI 审核中心」处理');
+  };
+}
+function renderSubmitAgent(){
+  $('#submit-agent').innerHTML=`<p class="pool-note">任务提交智能体读取 GitHub commit / PR / review 事件（演示为样例数据）。结论区分事实与推断，不把次数等同于质量，也不作为人员奖惩依据。</p><div class="h-sec" style="margin-top:0">最近提交</div><div id="commits" style="margin-bottom:14px"></div><div class="sum-grid"><div class="sum-card"><h4>🧾 成员工作状态（事实）</h4><ul><li>成员3 近 3 天无可见提交</li><li>成员4 昨日 6 次提交集中在 T08</li><li>成员1 / 成员2 活动稳定</li></ul></div><div class="sum-card"><h4>⚠ 推断与风险</h4><ul><li>成员3 可能被接口联调阻塞（待确认）</li><li>成员4 单点负载偏高</li></ul></div></div><button class="primary" id="submit-gen">＋ 生成协调建议 → 送审</button>`;
+  const commits=[["a363255","成员1","部署爱管理像素风团队工作台网站","T15"],["7c2d73c","成员2","初始化仓库与 README","T01"],["f0e1d2c","成员4","UML 用例图渲染修复","T08"],["b3a4f5e","成员4","时序图消息箭头优化","T08"],["c9d8e7f","成员1","看板拖拽状态持久化","T04"]];
+  $('#commits').innerHTML=commits.map(c=>`<div class="commit-row"><span class="sha">${c[0].slice(0,7)}</span><span class="msg">${esc(c[2])}</span><span class="tag2">${c[3]}</span><span class="small" style="flex:0 0 auto">${c[1]}</span></div>`).join('');
+  $('#submit-gen').onclick=()=>{
+    suggestions.unshift({id:'SG0'+(suggestions.length+1),agent:'任务提交智能体',kind:'submit',time:new Date().toLocaleTimeString('zh-CN',{hour12:false}),evidence:'成员3 近 3 天无 commit 且 T07 未关闭',affected:'T07 · 成员3',change:[{t:'建议确认阻塞或重新分配',d:false}],note:'项目层面的协调建议，人员调整仍需人工确认。',status:'pending'});
+    try{localStorage.setItem(sugKey,JSON.stringify(suggestions));}catch{}
+    notify('已生成协调建议，前往「AI 审核中心」处理');
+  };
+}
+
+/* 需求池 / 审核中心的交互委托 */
+document.addEventListener('click',e=>{
+  const pr=e.target.closest('[data-promote]');if(pr){promotePool(pr.dataset.promote);return;}
+  const dr=e.target.closest('[data-drop]');if(dr){dropPool(dr.dataset.drop);return;}
+  const sg=e.target.closest('[data-sug]');if(sg){decideSug(sg.dataset.sug,sg.dataset.act);return;}
+});
+$('#pool-add').onclick=()=>{$('#pool-form').style.display='block';};
+$('#pool-cancel').onclick=()=>{$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';};
+$('#pool-save').onclick=()=>{
+  const title=$('#pool-title').value.trim(),desc=$('#pool-desc').value.trim();
+  if(!title){notify('请填写需求标题');return;}
+  pool.unshift({id:'R'+String(Math.max(4,...pool.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0'),title,desc:desc||'（待补充描述）',source:'手动新增 · 成员1',created:(new Date().getMonth()+1).toString().padStart(2,'0')+'-'+new Date().getDate().toString().padStart(2,'0'),priority:$('#pool-pri').value});
+  persistPool();renderPool();
+  $('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';
+  notify('已保存到需求池');
+};
 
 /* ==================== 初始化 ==================== */
 renderOverview();
