@@ -361,6 +361,14 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .commit-row .tag2{font-size:10px;border:1px solid var(--ink);padding:0 5px;background:var(--green)}
 @media(max-width:700px){.sum-grid{grid-template-columns:1fr}.pool-item{flex-direction:column}.pool-item .pacts{flex-direction:row}}
 
+/* ============ 登录 / 在线状态 ============ */
+#mode-chip{cursor:pointer;user-select:none}
+#user-chip{background:var(--blue);color:var(--ink)}
+.login-accounts{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
+.acct{border:2px solid var(--ink);background:var(--paper);padding:6px 13px;box-shadow:2px 2px 0 var(--ink);font-family:var(--mono);font-weight:700}
+.acct:hover{background:var(--green)}
+#login{max-width:400px}
+
 /* 响应式 */
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
@@ -412,7 +420,11 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   <main class="main">
     <div class="topbar">
       <span class="crumb">爱管理 <span aria-hidden="true">/</span> <b id="crumb-name">项目总览</b></span>
-      <span class="demo">可交互原型 · 示例进度</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <span class="demo" id="mode-chip">检测中…</span>
+        <span class="demo" id="user-chip" style="display:none"></span>
+        <button id="logout-btn" style="display:none;padding:3px 9px;font-size:12px">退出</button>
+      </span>
     </div>
 
     <!-- 总览 -->
@@ -640,6 +652,26 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   </main>
 </div>
 
+<!-- 登录弹窗 -->
+<dialog id="login">
+  <form id="login-form">
+    <header>
+      <h2>登录 · 爱管理</h2>
+      <button type="button" id="login-close" aria-label="关闭">×</button>
+    </header>
+    <div class="formbody">
+      <p class="small" style="margin:0">已连接后端 · 请选择成员登录(演示密码 123456)</p>
+      <div class="login-accounts" id="login-accounts"></div>
+      <label class="field">账号<input id="login-user" required placeholder="成员1"></label>
+      <label class="field">密码<input id="login-pass" type="password" required value="123456"></label>
+      <div class="actions">
+        <button type="button" id="login-offline">离线演示模式</button>
+        <button type="submit" class="primary">登录</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
 <!-- 故事编辑弹窗 -->
 <dialog id="editor" aria-labelledby="editheading">
   <form id="form">
@@ -779,7 +811,9 @@ function persist(){try{localStorage.setItem(key,JSON.stringify(stories));storage
 
 /* ==================== 视图切换 ==================== */
 const VIEW_NAMES={overview:'项目总览',pool:'需求池',board:'用户故事看板',gantt:'甘特图',members:'成员任务图',uml:'UML 图',ai:'AI 助手',review:'AI 审核中心'};
+let curView='overview';
 function go(v){
+  curView=v;
   $$('.view').forEach(x=>x.classList.remove('active'));
   $('#view-'+v).classList.add('active');
   $$('.navitem').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
@@ -800,7 +834,7 @@ $$('.navitem').forEach(n=>n.addEventListener('click',()=>go(n.dataset.view)));
 function renderOverview(){
   const done=stories.filter(s=>s.status===2).length,pct=Math.round(done/stories.length*100);
   $('#ov-total').textContent=String(stories.length).padStart(2,'0');
-  $('#ov-tasks').textContent=TASKS.length;
+  $('#ov-tasks').textContent=tasks.length;
   $('#ov-percent').textContent=pct+'%';
   $('#ov-fill').style.width=pct+'%';
   $('#sprint-grid').innerHTML=SPRINTS.map((sp,i)=>{
@@ -891,8 +925,17 @@ document.addEventListener('dragend',()=>$$('.dragover').forEach(c=>c.classList.r
 document.addEventListener('drop',e=>{
   const c=e.target.closest('.column');if(!c)return;
   e.preventDefault();c.classList.remove('dragover');
-  const s=stories.find(s=>s.id===e.dataTransfer.getData('text/plain'));
-  if(s&&s.status!==+c.dataset.status){s.status=+c.dataset.status;addlog('move',s.id,s.title+' → '+statuses[s.status]);persist();render();renderOverview();notify(`${s.id} → ${statuses[s.status]}${storageOK?'':' · 暂未保存到本机'}`);}
+  const id=e.dataTransfer.getData('text/plain');
+  const s=stories.find(s=>s.id===id);
+  if(s&&s.status!==+c.dataset.status){
+    const newStatus=+c.dataset.status;
+    if(apiMode){
+      api('/api/stories/'+id,{method:'PATCH',body:JSON.stringify({status:newStatus})})
+        .then(()=>loadAll()).catch(err=>notify(err.message));
+    }else{
+      s.status=newStatus;addlog('move',s.id,s.title+' → '+statuses[s.status]);persist();render();renderOverview();notify(`${s.id} → ${statuses[s.status]}${storageOK?'':' · 暂未保存到本机'}`);
+    }
+  }
 });
 function dl(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 $('#expjson').onclick=()=>{dl('爱管理-用户故事-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify(stories,null,2)],{type:'application/json'}));notify('已导出 JSON 备份');};
@@ -918,7 +961,7 @@ function renderLog(){const el=document.getElementById('logbody');if(!el)return;e
 function renderGantt(){
   const sprintLabel=['','S1','S1','S2','S2','S3','S3'];
   const head=`<div class="gantt-head"><div class="taskh">任务 / 责任人</div>${[1,2,3,4,5,6].map(w=>`<div class="wk">W${w}<small>${sprintLabel[w]}</small></div>`).join('')}</div>`;
-  const rows=TASKS.map(t=>{
+  const rows=tasks.map(t=>{
     const cells=[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
     const span=t.w[1]-t.w[0]+1;
     const bar=`<div class="gbar o${t.owner}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.h}h · 成员${t.owner+1}">${t.id}</div>`;
@@ -932,14 +975,14 @@ function renderGantt(){
 /* ==================== 成员任务 ==================== */
 function loadByOwner(){
   const map=[0,1,2,3].map(()=>[0,0,0,0,0,0]);
-  TASKS.forEach(t=>{for(let w=t.w[0];w<=t.w[1];w++){map[t.owner][w-1]+=Math.round(t.h/(t.w[1]-t.w[0]+1));}});
+  tasks.forEach(t=>{for(let w=t.w[0];w<=t.w[1];w++){map[t.owner][w-1]+=Math.round(t.h/(t.w[1]-t.w[0]+1));}});
   return map;
 }
 function renderMembers(){
   const load=loadByOwner();
-  const total=TASKS.reduce((a,t)=>a+t.h,0);
+  const total=tasks.reduce((a,t)=>a+t.h,0);
   $('#member-grid').innerHTML=MEMBERS.map(m=>{
-    const mine=TASKS.filter(t=>t.owner===m.id);
+    const mine=tasks.filter(t=>t.owner===m.id);
     const myH=mine.reduce((a,t)=>a+t.h,0);
     const pct=Math.round(myH/total*100);
     const myStories=stories.filter(s=>s.owner===m.id);
@@ -1166,11 +1209,178 @@ $('#pool-save').onclick=()=>{
   notify('已保存到需求池');
 };
 
-/* ==================== 初始化 ==================== */
-renderOverview();
-render();
-renderLog();
-if(!storageOK)$('#savehint').textContent='浏览器未允许保存 · 数据仅在本次打开期间保留';
+/* ==================== 后端接入(在线走 API / 离线回退演示) ==================== */
+const API_BASE='http://127.0.0.1:8000';
+const TOKEN_KEY='aiguanli_token';
+let tasks=structuredClone(TASKS);
+let apiMode=false;
+let authToken=localStorage.getItem(TOKEN_KEY)||null;
+let currentUser=null;
+
+async function api(path,opts={}){
+  const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  if(authToken)headers['Authorization']='Bearer '+authToken;
+  const res=await fetch(API_BASE+path,Object.assign({},opts,{headers}));
+  if(res.status===401){apiMode=false;authToken=null;currentUser=null;localStorage.removeItem(TOKEN_KEY);updateChip();notify('登录已过期，请重新登录');openLogin();throw new Error('未登录');}
+  if(!res.ok){let msg='请求失败 ('+res.status+')';try{const j=await res.json();msg=(typeof j.detail==='string')?j.detail:msg;}catch(e){}throw new Error(msg);}
+  if(res.status===204)return null;
+  return res.json();
+}
+
+function roleName(r){return ({admin:'管理员',owner:'负责人',member:'成员',viewer:'查看者'})[r]||r;}
+function updateChip(){
+  const chip=$('#mode-chip'),uc=$('#user-chip'),lo=$('#logout-btn');
+  if(apiMode){
+    chip.textContent=currentUser?'在线 · 已连接后端':'在线 · 未登录';
+    chip.style.background='var(--green)';
+    if(currentUser){uc.style.display='';uc.textContent=currentUser.display_name+' · '+roleName(currentUser.role);lo.style.display='';}
+    else{uc.style.display='none';lo.style.display='none';}
+  }else{
+    chip.textContent='离线 · 演示数据(点击重连)';
+    chip.style.background='var(--orange)';
+    uc.style.display='none';lo.style.display='none';
+  }
+}
+
+function mapStory(s){return {id:s.id,title:s.title,description:s.description,acceptance:s.acceptance,priority:s.priority,sprint:s.sprint,activity:s.activity,status:s.status,owner:(s.owner_id==null?0:s.owner_id-1)};}
+
+async function loadAll(){
+  const [st,tk,pl,lg]=await Promise.all([
+    api('/api/stories'),api('/api/tasks'),api('/api/pool'),api('/api/stories/logs')
+  ]);
+  stories=st.map(mapStory);
+  tasks=tk.map(t=>({id:t.id,name:t.name,owner:t.owner_id-1,h:t.hours,w:[t.week_start,t.week_end],story:t.story_ref}));
+  pool=pl.map(p=>({id:p.id,title:p.title,desc:p.description,source:p.source,created:'—',priority:p.priority}));
+  log=lg.map(l=>({t:(l.created_at||'').slice(11,19),type:l.log_type,id:l.story_id,detail:l.detail})).slice(-50);
+  $('#savehint').textContent='已连接后端 · 数据实时同步到服务器';
+  renderLog();
+}
+
+function renderAll(){
+  renderOverview();render();renderLog();renderPool();renderReview();
+  if(curView==='gantt')renderGantt();
+  if(curView==='members'){renderMembers();renderBandwidth();renderContrib();}
+  if(curView==='uml')renderUML();
+  if(curView==='ai')renderAI();
+}
+
+function restoreLocal(){
+  try{const s=JSON.parse(localStorage.getItem(key));stories=(Array.isArray(s)&&s.length)?s:structuredClone(SEED);}catch(e){stories=structuredClone(SEED);}
+  try{const p=JSON.parse(localStorage.getItem(poolKey));pool=(Array.isArray(p)&&p.length)?p:structuredClone(POOL_SEED);}catch(e){pool=structuredClone(POOL_SEED);}
+  tasks=structuredClone(TASKS);
+  try{const sl=JSON.parse(localStorage.getItem(logkey));log=Array.isArray(sl)?sl.slice(-50):[];}catch(e){log=[];}
+}
+
+function openLogin(){$('#login').showModal();renderAccounts();}
+const ACCOUNTS=['成员1','成员2','成员3','成员4'];
+function renderAccounts(){$('#login-accounts').innerHTML=ACCOUNTS.map(n=>`<button type="button" class="acct" data-acct="${n}">${n}</button>`).join('');}
+document.addEventListener('click',e=>{const a=e.target.closest('[data-acct]');if(a){$('#login-user').value=a.dataset.acct;$('#login-pass').value='123456';}});
+
+async function doLogin(username,password){
+  const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username,password})});
+  authToken=data.access_token;currentUser=data.user;
+  localStorage.setItem(TOKEN_KEY,authToken);
+  apiMode=true;updateChip();$('#login').close();
+  await loadAll();renderAll();
+  notify('欢迎，'+currentUser.display_name);
+}
+
+$('#login-form').onsubmit=e=>{e.preventDefault();doLogin($('#login-user').value.trim(),$('#login-pass').value).catch(err=>notify('登录失败：'+err.message));};
+$('#login-offline').onclick=()=>{$('#login').close();apiMode=false;authToken=null;currentUser=null;localStorage.removeItem(TOKEN_KEY);updateChip();restoreLocal();renderAll();notify('已切换离线演示模式');};
+$('#logout-btn').onclick=()=>{authToken=null;currentUser=null;localStorage.removeItem(TOKEN_KEY);apiMode=false;updateChip();restoreLocal();renderAll();notify('已退出登录，回到演示数据');};
+$('#login').addEventListener('close',()=>{if(apiMode&&!currentUser){apiMode=false;updateChip();restoreLocal();renderAll();}});
+$('#mode-chip').onclick=()=>{if(!apiMode)bootstrap();};
+
+/* 覆盖写操作:在线走 API,离线沿用本地 */
+$('#form').onsubmit=async function(e){
+  e.preventDefault();
+  const f=new FormData(e.target);
+  const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
+  if(!payload.title||!payload.description||!payload.acceptance){notify('请填写标题、用户故事和验收条件');return;}
+  if(apiMode){
+    try{
+      if(editing){await api('/api/stories/'+editing,{method:'PATCH',body:JSON.stringify(payload)});}
+      else{await api('/api/stories',{method:'POST',body:JSON.stringify(payload)});}
+      $('#editor').close();await loadAll();renderAll();
+      notify((editing?'已更新':'已创建')+' · 已同步到服务器');
+    }catch(err){notify(err.message);}
+  }else{
+    const s={id:editing||'M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
+    for(const k of ['title','description','acceptance','priority'])s[k]=payload[k];
+    for(const k of ['status','sprint','activity'])s[k]=payload[k];
+    s.owner=+f.get('owner');
+    if(editing){const old=stories.find(x=>x.id===editing);stories[stories.findIndex(x=>x.id===editing)]=s;addlog('edit',s.id,s.title+(old&&old.status!==s.status?' · '+statuses[s.status]:''));}
+    else{stories.push(s);addlog('create',s.id,s.title);}
+    persist();render();renderOverview();$('#editor').close();
+    notify(`${s.id} 已${editing?'更新':'创建'}${selected().some(x=>x.id===s.id)?'':'（当前筛选范围外）'}`);
+  }
+};
+$('#del').onclick=async function(){
+  if(!editing)return;
+  const t=stories.find(x=>x.id===editing);
+  if(!confirm('确认删除 '+editing+'（'+(t?t.title:'')+'）？此操作不可撤销。'))return;
+  if(apiMode){
+    try{await api('/api/stories/'+editing,{method:'DELETE'});$('#editor').close();await loadAll();renderAll();notify(editing+' 已删除');}
+    catch(err){notify(err.message);}
+  }else{
+    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t?t.title:'');persist();render();renderOverview();$('#editor').close();notify(editing+' 已删除');
+  }
+};
+$('#reset').onclick=async function(){
+  if(apiMode){if(!confirm('在线模式下将重新拉取服务器数据(不会重置服务器)。继续？'))return;try{await loadAll();renderAll();notify('已重新拉取服务器数据');}catch(e){notify(e.message);}return;}
+  if(!confirm('确定恢复为演示数据？当前所有修改将丢失。'))return;
+  stories=structuredClone(SEED);log=[];try{localStorage.setItem(key,JSON.stringify(stories));localStorage.setItem(logkey,'[]');}catch(e){}
+  renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M20）');
+};
+$('#pool-save').onclick=async function(){
+  const title=$('#pool-title').value.trim(),desc=$('#pool-desc').value.trim();
+  if(!title){notify('请填写需求标题');return;}
+  const pri=$('#pool-pri').value;
+  if(apiMode){
+    try{await api('/api/pool',{method:'POST',body:JSON.stringify({title,description:desc||'（待补充描述）',source:'手动新增',priority:pri})});
+      $('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';
+      await loadAll();renderAll();notify('已保存到需求池（服务器）');
+    }catch(err){notify(err.message);}
+  }else{
+    pool.unshift({id:'R'+String(Math.max(4,...pool.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0'),title,desc:desc||'（待补充描述）',source:'手动新增 · 成员1',created:(new Date().getMonth()+1).toString().padStart(2,'0')+'-'+new Date().getDate().toString().padStart(2,'0'),priority:pri});
+    persistPool();renderPool();$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';notify('已保存到需求池');
+  }
+};
+promotePool=async function(id){
+  if(apiMode){try{await api('/api/pool/'+id+'/promote',{method:'POST'});await loadAll();renderAll();notify('已移入看板');}catch(err){notify(err.message);}return;}
+  const p=pool.find(x=>x.id===id);if(!p)return;
+  const newId='M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0');
+  stories.push({id:newId,activity:2,sprint:1,title:p.title,description:p.desc,priority:p.priority,acceptance:'来源：'+p.source+'（待补充验收条件）',owner:0,status:0});
+  pool=pool.filter(x=>x.id!==id);
+  persistPool();persist();renderPool();render();renderOverview();
+  notify(`${newId} 已移入看板（Sprint 1 · A2 梳理需求）`);
+};
+dropPool=async function(id){
+  if(apiMode){try{await api('/api/pool/'+id,{method:'DELETE'});await loadAll();renderAll();notify(id+' 已从需求池移除');}catch(err){notify(err.message);}return;}
+  pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');
+};
+
+/* ==================== 启动 ==================== */
+async function bootstrap(){
+  try{
+    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),2500);
+    const r=await fetch(API_BASE+'/api/health',{signal:ctrl.signal});
+    clearTimeout(t);
+    apiMode=r.ok;
+  }catch(e){apiMode=false;}
+
+  if(apiMode){
+    updateChip();
+    if(authToken){
+      try{currentUser=await api('/api/auth/me');updateChip();await loadAll();renderAll();}
+      catch(e){authToken=null;localStorage.removeItem(TOKEN_KEY);openLogin();}
+    }else{openLogin();}
+  }else{
+    updateChip();restoreLocal();renderAll();
+    if(!storageOK)$('#savehint').textContent='浏览器未允许保存 · 数据仅在本次打开期间保留';
+  }
+}
+bootstrap();
 </script>
 </body>
 </html>
