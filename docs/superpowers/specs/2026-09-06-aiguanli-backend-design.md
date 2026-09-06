@@ -11,12 +11,12 @@
 1. 一套共享数据库,替代 localStorage 承载故事、任务、需求池、进度统计。
 2. 最小登录与权限(管理员/负责人/成员),对应 US01/US02 最小可运行版。
 3. 前端通过 HTTP API 读写数据,UI 与像素风格保持不变。
-4. 全流程可在本机(免费)运行;架构上保证日后可无痛迁移到"租服务器 + PostgreSQL + 多人访问"。
+4. 全流程可在本机(免费)运行;架构上保证日后可无痛迁移到"租服务器 + 同一套 Docker 环境 + 多人访问"。
 
 ## 2. 范围
 
 ### 阶段 1 做(本次行走骨架)
-- FastAPI 服务 + SQLAlchemy + SQLite
+- FastAPI 服务 + SQLAlchemy + MySQL 8.0(Docker 容器运行,数据卷位于 D 盘,见 §9)
 - 数据模型:用户/成员、故事、任务、需求池、变更日志、AI 建议(仅建表与查询,决策动作留待阶段 2 接通)
 - 登录 + JWT + 最小权限校验
 - 种子数据:4 名成员、20 条故事(M01–M20,与前端 seed 一致)、16 个任务(T01–T16)
@@ -40,7 +40,7 @@
    ├─ auth.py  登录/校验/角色
    ├─ stories.py / pool.py / tasks.py / dashboard.py
    ▼
- SQLAlchemy → SQLite(本地) → 以后换 PostgreSQL(只改 .env 一行)
+ SQLAlchemy → MySQL 8.0(Docker 容器 · 数据卷 D:\aiguanli-mysql)
 ```
 
 - 前端目录保持不动;后端独立为 `backend/` 文件夹。
@@ -118,22 +118,24 @@ backend/
 - 密码用 bcrypt;演示账号密码统一 `123456`(README 注明仅演示用)。
 - 演示账号:成员1(admin)/成员2(owner)/成员3(member)/成员4(member)。
 
-## 9. 配置与密钥
+## 9. 配置与密钥(Docker MySQL)
 
-- `.env`(不进 git):`DATABASE_URL=sqlite:///./aiguanli.db`、`JWT_SECRET=<随机>`。
+- MySQL 8.0 跑在 Docker 容器;宿主机端口 **`3307`**(避开本机 C 盘 MySQL80 占用的 3306);数据卷目录 **`D:\aiguanli-mysql\mysql-data`**(不占 C 盘)。`docker-compose.yml` 与数据目录同放 `D:\aiguanli-mysql\`。
+- 数据库名 **`AIcap`**(与 GitHub 仓库同名);用户 `aiguanli`;密码 `aiguanli-2026`(演示用,仅存于 .env)。
+- `.env`(不进 git):`DATABASE_URL=mysql+pymysql://aiguanli:aiguanli-2026@localhost:3307/AIcap?charset=utf8mb4`、`JWT_SECRET=<随机>`。
 - `.env.example` 提交进仓库作模板。
-- 上线时 `DATABASE_URL` 换成 `postgresql+psycopg://…`,其余代码不变。
+- 上线时:把同一份 docker-compose 部署到服务器,`.env` 里 host 改一下,其余代码不变。
 
 ## 10. 可迁移性设计(为什么"单机→线上"无痛)
 
-1. 所有数据库访问经 SQLAlchemy ORM,不写原生 SQLite 语法 → 换库只改连接串。
-2. 配置全部读 `.env` / 环境变量,无硬编码路径。
-3. 前端 API 地址集中在 `API_BASE` 一处。
-4. uvicorn 启动方式本地与服务器完全一致。
+1. 所有数据库访问经 SQLAlchemy ORM;本地与线上同为 MySQL 8.0,无方言差异。
+2. 本地与线上共用同一份 docker-compose.yml(MySQL + 后端),只是换台机器运行。
+3. 配置全部读 `.env` / 环境变量,无硬编码路径;前端 API 地址集中在 `API_BASE` 一处。
+4. uvicorn / Docker 启动方式本地与服务器完全一致。
 
 ## 11. 测试策略
 
-- pytest + FastAPI TestClient(SQLite 临时库)。
+- pytest + FastAPI TestClient(独立测试库,同样用 MySQL/Docker 或内存库)。
 - 覆盖:登录/鉴权、故事 CRUD 与状态变更日志、需求池移入看板生成正确 M 编号、dashboard 统计口径与数据一致。
 - 验收后手动走一遍:两个浏览器同时开 → A 拖故事 → B 刷新看到变化(证明共享数据库生效)。
 
@@ -144,7 +146,7 @@ backend/
 | 1(本次) | 后端骨架 + 登录 + 故事/需求池 CRUD + 前端接 API | Sprint 1 |
 | 2 | AI 审核中心决策落地、会议智能体(录音→转写→摘要→建议)、六项 AI 服务端调用 | Sprint 2 |
 | 3 | 任务提交智能体 + GitHub 事件同步 + AI 最小闭环 | Sprint 3 |
-| 4(可选) | PostgreSQL + 租服务器 + HTTPS + 真多人访问 | 上线时 |
+| 4(可选) | 租服务器 + 同一套 Docker 部署 + HTTPS + 真多人访问 | 上线时 |
 
 ## 13. 成功标准(阶段 1 演示口径)
 
