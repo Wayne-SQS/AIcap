@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from .database import Base
 
@@ -71,3 +71,34 @@ class Suggestion(Base):
     change_json = Column(Text, nullable=False, default="[]")
     status = Column(String(20), nullable=False, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class Meeting(Base):
+    """Immutable transcript: new text is saved as a new meeting in this MVP."""
+    __tablename__ = "meetings"
+    id = Column(String(36), primary_key=True)
+    title = Column(String(200), nullable=False)
+    transcript = Column(Text, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MeetingSuggestionRecord(Base):
+    """Additive extension of Suggestion; also the immutable review/execution audit."""
+    __tablename__ = "meeting_suggestion_records"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "submitted_by", "client_request_id",
+                         name="uq_meeting_suggestion_request"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suggestion_id = Column(String(10), ForeignKey("suggestions.id"), nullable=False, unique=True)
+    meeting_id = Column(String(36), ForeignKey("meetings.id"), nullable=False)
+    client_request_id = Column(String(80), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    submitted_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    origin = Column(String(20), nullable=False)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reason = Column(String(1000), nullable=False, default="")
+    execution_status = Column(String(20), nullable=False, default="not_started")
+    # Not a foreign key: preserve the audit after a pool item is promoted/deleted.
+    pool_item_id = Column(String(10), nullable=True)

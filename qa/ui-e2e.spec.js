@@ -14,7 +14,7 @@ const { chromium } = require('playwright-core');
 const fs = require('fs');
 const path = require('path');
 
-const REPO = 'E:/桌面/软件项目管理实验';
+const REPO = path.resolve(__dirname, '..');
 const PAGE_URL = 'http://127.0.0.1:8090/index.html';
 const QA = 'http://127.0.0.1:8001';
 const DEAD = 'http://127.0.0.1:59999';
