@@ -1431,7 +1431,7 @@ $('#reset').onclick=async function(){
   if(apiMode){if(!confirm('在线模式下将重新拉取服务器数据(不会重置服务器)。继续？'))return;try{await loadAll();renderAll();notify('已重新拉取服务器数据');}catch(e){notify(e.message);}return;}
   if(!confirm('确定恢复为演示数据？当前所有修改将丢失。'))return;
   stories=structuredClone(SEED);log=[];try{localStorage.setItem(key,JSON.stringify(stories));localStorage.setItem(logkey,'[]');}catch(e){}
-  renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M20）');
+  renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M23）');
 };
 $('#pool-save').onclick=async function(){
   const title=$('#pool-title').value.trim(),desc=$('#pool-desc').value.trim();
