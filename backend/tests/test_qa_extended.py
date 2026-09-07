@@ -214,16 +214,16 @@ def test_pool_promote_creates_story_and_removes_item(client, member1_token):
         "title": "移入目标需求", "description": "移入描述", "source": "会议 09-07", "priority": "Must"
     }, headers=h).json()["id"]
 
-    r = client.post(f"/api/pool/{pid}/promote", headers=h)
+    r = client.post(f"/api/pool/{pid}/promote", headers=h, json={"sprint":2})
     assert r.status_code == 200
     story = r.json()
-    assert story["sprint"] == 1 and story["status"] == 0
+    assert story["sprint"] == 2 and story["status"] == 0
     assert story["description"] == "移入描述"
     assert "会议 09-07" in story["acceptance"]
     assert story["priority"] == "Must"
 
     assert all(x["id"] != pid for x in client.get("/api/pool", headers=h).json())
-    assert client.post(f"/api/pool/{pid}/promote", headers=h).status_code == 404
+    assert client.post(f"/api/pool/{pid}/promote", headers=h, json={"sprint":2}).status_code == 404
 
 
 def test_pool_promote_requires_token(client):

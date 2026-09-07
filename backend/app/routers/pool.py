@@ -46,7 +46,7 @@ def delete_pool(pool_id: str, db: Session = Depends(get_db),
 
 
 @router.post("/{pool_id}/promote", response_model=schemas.StoryOut)
-def promote_pool(pool_id: str, db: Session = Depends(get_db),
+def promote_pool(pool_id: str, body: schemas.PoolPromoteIn, db: Session = Depends(get_db),
                  user: models.User = Depends(security.get_current_user)):
     item = db.get(models.PoolItem, pool_id)
     if item is None:
@@ -60,14 +60,15 @@ def promote_pool(pool_id: str, db: Session = Depends(get_db),
                 nums.append(int(m.group(1)))
         return f"M{((max(nums) if nums else 0) + 1):02d}"
 
+    if body.owner_id is not None and db.get(models.User, body.owner_id) is None:
+        raise HTTPException(422, "所选负责人不存在")
     sid = _next_story_id()
     story = models.Story(id=sid, title=item.title, description=item.description or "（待补充描述）",
                          acceptance=f"来源：{item.source or '需求池'}（待补充验收条件）",
-                         priority=item.priority, sprint=1, activity=2, status=0, owner_id=None)
+                         priority=item.priority, sprint=body.sprint, activity=body.activity, status=0, owner_id=body.owner_id)
     db.add(story)
     db.delete(item)
+    db.add(models.StoryLog(story_id=sid, log_type="create", detail=f"由需求池 {pool_id} 移入 Sprint {body.sprint}，负责人 {body.owner_id or '未分配'}", user_id=user.id))
     db.commit()
     db.refresh(story)
-    db.add(models.StoryLog(story_id=sid, log_type="create", detail=f"由需求池 {pool_id} 移入", user_id=user.id))
-    db.commit()
     return story

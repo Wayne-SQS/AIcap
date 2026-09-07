@@ -12,3 +12,8 @@ backend/mysql-data/
 backend/backup_*.sql
 __pycache__/
 *.pyc
+
+# Local runtime and isolated test artifacts
+backend/.venv/
+.pytest_cache/
+*.sqlite3

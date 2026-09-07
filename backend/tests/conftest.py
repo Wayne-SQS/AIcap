@@ -1,11 +1,18 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+import app.main as main_module
 from sqlalchemy.orm import sessionmaker
 
 from app import config, models, security
 from app.database import Base, get_db
 from app.main import app
+
+# This suite rebuilds tables. Refuse accidental use of a development database.
+test_url = make_url(config.TEST_DATABASE_URL)
+if not test_url.database or not test_url.database.endswith("_test"):
+    raise RuntimeError("TEST_DATABASE_URL must name a disposable database ending in _test")
 
 test_engine = create_engine(config.TEST_DATABASE_URL, pool_pre_ping=True)
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
@@ -30,7 +37,11 @@ def db_setup():
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(config, "AICAP_AGENT_WORKER_ENABLED", False)
+    # Lifespan and health must use the same isolated DB as request dependencies.
+    monkeypatch.setattr(main_module, "engine", test_engine)
+    monkeypatch.setattr(main_module, "SessionLocal", TestSession)
     def override():
         db = TestSession()
         try:

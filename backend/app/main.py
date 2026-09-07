@@ -5,8 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import Base, SessionLocal, engine
-from .routers import auth, dashboard, pool, stories, tasks
+from .routers import auth, dashboard, pool, stories, tasks, meetings, agent
 from .seed import seed_all
+from . import config
+from .meeting_agent.jobs import Worker
 
 
 @asynccontextmanager
@@ -17,7 +19,14 @@ async def lifespan(_: FastAPI):
         seed_all(db)
     finally:
         db.close()
-    yield
+    worker = Worker(SessionLocal) if config.AICAP_AGENT_WORKER_ENABLED else None
+    if worker:
+        worker.start()
+    try:
+        yield
+    finally:
+        if worker:
+            worker.close()
 
 
 app = FastAPI(title="爱管理 API", version="0.1.0", lifespan=lifespan)
@@ -29,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in (auth.router, stories.router, pool.router, tasks.router, dashboard.router):
+for router in (auth.router, stories.router, pool.router, tasks.router, dashboard.router, meetings.router, agent.router):
     app.include_router(router, prefix="/api")
 
 
