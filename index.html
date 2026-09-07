@@ -943,26 +943,7 @@ function openEditor(id=null,status=0){
 }
 $('#new').onclick=()=>openEditor();
 $('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();
-$('#del').onclick=()=>{
-  if(!editing)return;
-  const t=stories.find(x=>x.id===editing);
-  if(!confirm('确认删除 '+editing+'（'+(t?t.title:'')+'）？此操作不可撤销。'))return;
-  stories=stories.filter(x=>x.id!==editing);
-  addlog('del',editing,t?t.title:'');
-  persist();render();renderOverview();$('#editor').close();notify(editing+' 已删除');
-};
 $('#editor').addEventListener('click',e=>{if(e.target===$('#editor')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
-$('#form').onsubmit=e=>{
-  e.preventDefault();
-  const f=new FormData(e.target),s={id:editing||'M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
-  for(const k of ['title','description','acceptance','priority'])s[k]=f.get(k).trim();
-  for(const k of ['status','owner','sprint','activity'])s[k]=+f.get(k);
-  if(!s.title||!s.description||!s.acceptance){notify('请填写标题、用户故事和验收条件');return;}
-  if(editing){const old=stories.find(x=>x.id===editing);stories[stories.findIndex(x=>x.id===editing)]=s;addlog('edit',s.id,s.title+(old&&old.status!==s.status?' · '+statuses[s.status]:''));}
-  else{stories.push(s);addlog('create',s.id,s.title);}
-  persist();render();renderOverview();$('#editor').close();
-  notify(`${s.id} 已${editing?'更新':'创建'}${selected().some(x=>x.id===s.id)?'':'（当前筛选范围外）'}${storageOK?'':' · 暂未保存到本机'}`);
-};
 for(const id of ['search','sprint','owner'])$('#'+id).addEventListener(id==='search'?'input':'change',render);
 function setBoardView(v){
   boardView=v;
@@ -1006,12 +987,6 @@ $('#expcsv').onclick=()=>{
   const rows=stories.map(s=>[s.id,s.title,s.description,s.priority,'S'+s.sprint,'A'+s.activity+' '+activities[s.activity-1],(s.owner==null?'未分配':'成员'+(s.owner+1)),statuses[s.status],s.acceptance].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
   dl('爱管理-用户故事.csv',new Blob(['\ufeff'+head.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));notify('已导出 CSV（可用 Excel 打开）');
 };
-$('#reset').onclick=()=>{
-  if(!confirm('确定恢复为演示数据？当前所有修改将丢失。'))return;
-  stories=structuredClone(SEED);log=[];
-  try{localStorage.setItem(key,JSON.stringify(stories));localStorage.setItem(logkey,'[]');}catch{}
-  renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M20）');
-};
 
 /* 变更记录 */
 const logkey='aiguanli-pixel-log-v1';
@@ -1027,14 +1002,15 @@ function renderGantt(){
   const grid=()=>[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
   const barHtml=(t,extra='')=>{
     const span=t.w[1]-t.w[0]+1;
-    const cross=sprintOf(t.w[0])!==sprintOf(t.w[1]);  // 跨 Sprint 红标
+    const cross=sprintOf(t.w[0])!==sprintOf(t.w[1]);  // 跨 Sprint:正常排期现象,仅工具提示说明
     const st=t.status===2?' task-done':(t.status===3?' mgmt':'');
-    return `<div class="gbar o${t.owner}${st}${extra}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.eh||t.h}h · 成员${t.owner+1} · ${['待办','进行中','已完成','已取消'][t.status||0]}${cross?' · 跨迭代':''}">${t.id}${cross?' <span class="x-sprint">⚠</span>':''}</div>`;
+    return `<div class="gbar o${t.owner}${st}${extra}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.eh||t.h}h · 成员${t.owner+1} · ${['待办','进行中','已完成','已取消'][t.status||0]}${cross?' · 跨迭代实施(横跨两个 Sprint)':''}">${t.id}</div>`;
   };
   /* 开发任务按看板卡分组:父行(卡+加权进度,起止=子任务周并集) + 子行(缩进+竖线) */
   const groups={};
   tasks.filter(t=>t.type!=='management'&&t.card).forEach(t=>{(groups[t.card]??=[]).push(t);});
   const mgmts=tasks.filter(t=>t.type==='management');
+  const orphans=tasks.filter(t=>t.type!=='management'&&!t.card);  // 解绑/未挂卡的开发任务
   const rows=Object.entries(groups).map(([cardId,subs])=>{
     const s=stories.find(x=>x.id===cardId);
     const w0=Math.min(...subs.map(t=>t.w[0])),w1=Math.max(...subs.map(t=>t.w[1]));
@@ -1046,11 +1022,13 @@ function renderGantt(){
     return prow+crows;
   }).join('')
   /* 管理类任务:灰色虚线,不挂卡 */
-  +mgmts.map(t=>`<div class="grow mgmt"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 管理 · ${t.eh||t.h}h</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('');
+  +mgmts.map(t=>`<div class="grow mgmt"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 管理 · ${t.eh||t.h}h</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('')
+  /* 独立任务:解绑/未挂卡的开发任务在此可见(删卡级联后不再隐形) */
+  +(orphans.length?`<div class="grow mgmt"><div class="tname"><b>独立任务</b><small>已解绑/未挂卡的开发任务 · ${orphans.length} 条</small></div><div class="gtrack"><div class="ggrid">${grid()}</div></div></div>`+orphans.map(t=>`<div class="grow child"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 成员${t.owner+1} · ${t.eh||t.h}h · ${['待办','进行中','已完成','已取消'][t.status||0]}</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join(''):'');
   const miles=`<div class="mile-row"><div class="tname" style="border-right:2px solid var(--line);padding:8px 10px;font-weight:bold;display:flex;align-items:center">◆ 里程碑</div><div class="mile-track">${MILESTONES.map(m=>`<span class="mlabel" style="left:${((m.week-0.5)/6*100).toFixed(2)}%">${m.id} ${m.name}</span>`).join('')}</div></div>`;
   $('#gantt').innerHTML=head+rows+miles;
   $('#gantt-legend').innerHTML=MEMBERS.map(m=>`<span class="chip"><span class="sw" style="background:var(--${['green','orange','blue','pink'][m.id]})"></span>${m.name} · ${m.role}</span>`).join('')
-    +`<span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span><span class="chip" style="margin-left:auto"><span class="sw" style="background:var(--yellow)"></span>◆ 里程碑 · <span class="x-sprint">⚠</span> 跨迭代</span>`;
+    +`<span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span><span class="chip" style="margin-left:auto"><span class="sw" style="background:var(--yellow)"></span>◆ 里程碑</span>`;
 }
 
 /* ==================== 成员任务 ==================== */
@@ -1159,7 +1137,7 @@ function renderPool(){
 }
 // Assigned by meeting-improvements.js before bootstrap.
 let promotePool;
-function dropPool(id){pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');}
+let dropPool;  // 定义见「后端接入」节:在线走 API、离线改本地
 
 /* ==================== AI 建议审核中心 ==================== */
 const SUGGESTION_SEED=[
@@ -1275,14 +1253,6 @@ document.addEventListener('click',e=>{
 });
 $('#pool-add').onclick=()=>{$('#pool-form').style.display='block';};
 $('#pool-cancel').onclick=()=>{$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';};
-$('#pool-save').onclick=()=>{
-  const title=$('#pool-title').value.trim(),desc=$('#pool-desc').value.trim();
-  if(!title){notify('请填写需求标题');return;}
-  pool.unshift({id:'R'+String(Math.max(4,...pool.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0'),title,desc:desc||'（待补充描述）',source:'手动新增 · 成员1',created:(new Date().getMonth()+1).toString().padStart(2,'0')+'-'+new Date().getDate().toString().padStart(2,'0'),priority:$('#pool-pri').value});
-  persistPool();renderPool();
-  $('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';
-  notify('已保存到需求池');
-};
 
 /* ==================== 后端接入(在线走 API / 离线回退演示) ==================== */
 const API_BASE='http://127.0.0.1:8000';
@@ -1446,14 +1416,15 @@ $('#del').onclick=async function(){
       notify(editing+' 已删除 · 子任务级联:'+({cancel:'标记已取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
     }catch(err){notify(err.message);}
   }else{
-    /* 离线等效级联 */
-    for(const x of undone){
-      if(strategy==='cancel'){x.status=3;x.card=null;}
-      else{x.card=null;if(strategy==='detach'){x.w=[Math.min(x.w[0]+2,6),Math.min(x.w[1]+2,6)];}}
+    /* 离线等效级联:全部子任务解绑(与在线库 FK ON DELETE SET NULL 一致),避免幽灵父行 */
+    for(const x of subs){
+      if(strategy==='cancel'&&x.status!==2&&x.status!==3)x.status=3;
+      x.card=null;
+      if(strategy==='detach'&&x.status!==2&&x.status!==3)x.w=[Math.min(x.w[0]+2,6),Math.min(x.w[1]+2,6)];
     }
-    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t.title+' · 子任务级联:'+strategy+'('+undone.length+' 条)');
+    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t.title+' · 子任务级联:'+strategy+'('+undone.length+' 条未完成)');
     persist();render();renderOverview();$('#editor').close();
-    notify(editing+' 已删除 · 子任务级联:'+({cancel:'标记已取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
+    notify(editing+' 已删除 · 子任务已解绑:'+({cancel:'未完成标取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
   }
 };
 $('#reset').onclick=async function(){

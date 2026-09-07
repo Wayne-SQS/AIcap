@@ -51,7 +51,7 @@ class Task(Base):
     week_end = Column(Integer, nullable=False)
     story_ref = Column(String(100), nullable=True)
     # 看板与甘特「强制血缘对应」重构字段
-    kanban_card_id = Column(String(10), ForeignKey("stories.id"), nullable=True)  # 所属看板卡(管理类任务为 NULL)
+    kanban_card_id = Column(String(10), ForeignKey("stories.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True)  # 所属看板卡(管理类任务为 NULL);删卡时数据库自动解绑,与迁移 SQL 的 FK 一致
     estimated_hours = Column(Integer, nullable=False, default=0)  # 预估工时(加权进度分母)
     task_type = Column(String(10), nullable=False, default="feature")  # feature=开发任务挂卡 / management=管理任务
     status = Column(Integer, nullable=False, default=0)  # 0待办 1进行中 2完成 3已取消
