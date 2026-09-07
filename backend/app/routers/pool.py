@@ -25,7 +25,7 @@ def list_pool(db: Session = Depends(get_db), _=Depends(security.get_current_user
 
 @router.post("", response_model=schemas.PoolOut)
 def create_pool(body: schemas.PoolIn, db: Session = Depends(get_db),
-                _=Depends(security.get_current_user)):
+                _=Depends(security.require_roles("admin", "owner", "member"))):
     pid = _next_pool_id(db)
     item = models.PoolItem(id=pid, **body.model_dump())
     db.add(item)
@@ -36,7 +36,7 @@ def create_pool(body: schemas.PoolIn, db: Session = Depends(get_db),
 
 @router.delete("/{pool_id}")
 def delete_pool(pool_id: str, db: Session = Depends(get_db),
-                _=Depends(security.get_current_user)):
+                _=Depends(security.require_roles("admin", "owner", "member"))):
     item = db.get(models.PoolItem, pool_id)
     if item is None:
         raise HTTPException(status_code=404, detail="需求池条目不存在")
@@ -47,7 +47,7 @@ def delete_pool(pool_id: str, db: Session = Depends(get_db),
 
 @router.post("/{pool_id}/promote", response_model=schemas.StoryOut)
 def promote_pool(pool_id: str, body: schemas.PoolPromoteIn, db: Session = Depends(get_db),
-                 user: models.User = Depends(security.get_current_user)):
+                 user: models.User = Depends(security.require_roles("admin", "owner", "member"))):
     item = db.get(models.PoolItem, pool_id)
     if item is None:
         raise HTTPException(status_code=404, detail="需求池条目不存在")

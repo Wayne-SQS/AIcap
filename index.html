@@ -932,6 +932,7 @@ function render(){
   if(!data.length)$('#map').innerHTML+='<div class="empty" style="grid-column:1/-1">没有匹配的故事，试试调整筛选条件。</div>';
 }
 function openEditor(id=null,status=0){
+  if(isViewer()){viewerDeny('新建或编辑故事');return;}
   editing=id;
   const s=id?stories.find(x=>x.id===id):{title:'',description:'',acceptance:'',priority:'Must',status,owner:$('#owner').value==='all'?null:+$('#owner').value,sprint:$('#sprint').value==='all'?1:+$('#sprint').value,activity:2};
   if(!s)return;
@@ -970,6 +971,7 @@ document.addEventListener('drop',e=>{
   const id=e.dataTransfer.getData('text/plain');
   const s=stories.find(s=>s.id===id);
   if(s&&s.status!==+c.dataset.status){
+    if(isViewer()){viewerDeny('拖拽修改状态');return;}
     const newStatus=+c.dataset.status;
     if(apiMode){
       api('/api/stories/'+id,{method:'PATCH',body:JSON.stringify({status:newStatus})})
@@ -1247,11 +1249,11 @@ function renderSubmitAgent(){
 
 /* 需求池 / 审核中心的交互委托 */
 document.addEventListener('click',e=>{
-  const pr=e.target.closest('[data-promote]');if(pr){promotePool(pr.dataset.promote);return;}
+  const pr=e.target.closest('[data-promote]');if(pr){if(isViewer()){viewerDeny('移入看板');return;}promotePool(pr.dataset.promote);return;}
   const dr=e.target.closest('[data-drop]');if(dr){dropPool(dr.dataset.drop);return;}
   const sg=e.target.closest('[data-sug]');if(sg){decideSug(sg.dataset.sug,sg.dataset.act);return;}
 });
-$('#pool-add').onclick=()=>{$('#pool-form').style.display='block';};
+$('#pool-add').onclick=()=>{if(isViewer()){viewerDeny('新增需求');return;}$('#pool-form').style.display='block';};
 $('#pool-cancel').onclick=()=>{$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';};
 
 /* ==================== 后端接入(在线走 API / 离线回退演示) ==================== */
@@ -1273,6 +1275,9 @@ async function api(path,opts={}){
 }
 
 function roleName(r){return ({admin:'管理员',owner:'负责人',member:'成员',viewer:'查看者'})[r]||r;}
+/* 只读角色(viewer)写操作拦截:仅在线且角色为 viewer 时生效,不影响其他用户 */
+function isViewer(){return apiMode&&currentUser&&currentUser.role==='viewer';}
+function viewerDeny(action){notify('只读角色（查看者）不能'+(action||'执行写操作')+'，如需修改请联系管理员');}
 function updateChip(){
   const chip=$('#mode-chip'),uc=$('#user-chip'),lo=$('#logout-btn');
   if(apiMode){
@@ -1317,7 +1322,7 @@ function restoreLocal(){
 }
 
 function openLogin(){$('#login').showModal();renderAccounts();}
-const ACCOUNTS=['成员1','成员2','成员3','成员4'];
+const ACCOUNTS=['成员1','成员2','成员3','成员4','成员5'];
 function renderAccounts(){$('#login-accounts').innerHTML=ACCOUNTS.map(n=>`<button type="button" class="acct" data-acct="${n}">${n}</button>`).join('');}
 document.addEventListener('click',e=>{const a=e.target.closest('[data-acct]');if(a){$('#login-user').value=a.dataset.acct;$('#login-pass').value='123456';}});
 
@@ -1434,6 +1439,7 @@ $('#reset').onclick=async function(){
   renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M23）');
 };
 $('#pool-save').onclick=async function(){
+  if(isViewer()){viewerDeny('保存需求');return;}
   const title=$('#pool-title').value.trim(),desc=$('#pool-desc').value.trim();
   if(!title){notify('请填写需求标题');return;}
   const pri=$('#pool-pri').value;
@@ -1448,6 +1454,7 @@ $('#pool-save').onclick=async function(){
   }
 };
 dropPool=async function(id){
+  if(isViewer()){viewerDeny('移除需求');return;}
   if(apiMode){try{await api('/api/pool/'+id,{method:'DELETE'});await loadAll();renderAll();notify(id+' 已从需求池移除');}catch(err){notify(err.message);}return;}
   pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');
 };

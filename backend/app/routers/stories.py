@@ -53,7 +53,7 @@ def list_stories(owner: Optional[int] = None, sprint: Optional[int] = None,
 
 @router.post("", response_model=schemas.StoryOut)
 def create_story(body: schemas.StoryIn, db: Session = Depends(get_db),
-                 user: models.User = Depends(security.get_current_user)):
+                 user: models.User = Depends(security.require_roles("admin", "owner", "member"))):
     if body.owner_id is not None and db.get(models.User, body.owner_id) is None:
         raise HTTPException(status_code=400, detail="负责人不存在")
     sid = _next_story_id(db)
@@ -67,7 +67,7 @@ def create_story(body: schemas.StoryIn, db: Session = Depends(get_db),
 
 @router.patch("/{story_id}", response_model=schemas.StoryOut)
 def patch_story(story_id: str, body: schemas.StoryPatch, db: Session = Depends(get_db),
-                user: models.User = Depends(security.get_current_user)):
+                user: models.User = Depends(security.require_roles("admin", "owner", "member"))):
     story = db.get(models.Story, story_id)
     if story is None:
         raise HTTPException(status_code=404, detail="故事不存在")

@@ -5,7 +5,8 @@ def seed_users(db):
     if db.query(models.User).count():
         return
     rows = [("成员1", "成员1", "admin", "green"), ("成员2", "成员2", "owner", "orange"),
-            ("成员3", "成员3", "member", "blue"), ("成员4", "成员4", "member", "pink")]
+            ("成员3", "成员3", "member", "blue"), ("成员4", "成员4", "member", "pink"),
+            ("成员5", "成员5", "viewer", "gray")]
     for username, display, role, color in rows:
         db.add(models.User(username=username, display_name=display, role=role, color=color,
                            password_hash=security.hash_password("123456")))

@@ -14,7 +14,7 @@ def list_tasks(db: Session = Depends(get_db), _=Depends(security.get_current_use
 
 @router.patch("/{task_id}", response_model=schemas.TaskOut)
 def patch_task(task_id: str, body: schemas.TaskPatch, db: Session = Depends(get_db),
-               _=Depends(security.get_current_user)):
+               _=Depends(security.require_roles("admin", "owner", "member"))):
     """任务局部更新:status/kanban_card_id/week_start/week_end。
 
     用途:关卡三选一的子任务级联(cancel/keep/detach)、跨 Sprint 挪动未完成子任务。
