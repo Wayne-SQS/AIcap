@@ -89,12 +89,33 @@ def patch_story(story_id: str, body: schemas.StoryPatch, db: Session = Depends(g
 
 
 @router.delete("/{story_id}")
-def delete_story(story_id: str, db: Session = Depends(get_db),
+def delete_story(story_id: str, undone: str = "keep", db: Session = Depends(get_db),
                  user: models.User = Depends(security.require_roles("admin", "owner"))):
+    """删除看板卡,并按 undone 策略级联处理其未完成子任务:
+    - cancel: 标记已取消(status=3),真废弃
+    - keep:   保留当前状态,仅解绑(脱离该卡继续跟踪)
+    - detach: 解绑并整体挪到下个 Sprint 时间轴(+2 周,脱离该卡独立推进)
+    已完成子任务一律保留原记录不动。
+    """
     story = db.get(models.Story, story_id)
     if story is None:
         raise HTTPException(status_code=404, detail="故事不存在")
+    if undone not in ("cancel", "keep", "detach"):
+        raise HTTPException(status_code=400, detail="undone 策略仅支持 cancel/keep/detach")
+    subs = db.query(models.Task).filter(models.Task.kanban_card_id == story_id).all()
+    undone_rows = [t for t in subs if t.status not in (2, 3)]  # 未完成且未取消
+    if undone == "cancel":
+        for t in undone_rows:
+            t.status = 3
+            t.kanban_card_id = None  # 解绑,避免 FK 指向已删卡
+    else:
+        for t in undone_rows:
+            t.kanban_card_id = None
+            if undone == "detach":
+                t.week_start = min(t.week_start + 2, 6)
+                t.week_end = min(t.week_end + 2, 6)
     db.delete(story)
     db.commit()
-    _add_log(db, story_id, "del", story.title, user.id)
-    return {"ok": True}
+    detail = f"{story.title} · 子任务级联:{undone}({len(undone_rows)} 条)"
+    _add_log(db, story_id, "del", detail, user.id)
+    return {"ok": True, "undone": undone, "affected": len(undone_rows)}

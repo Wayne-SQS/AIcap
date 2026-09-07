@@ -196,6 +196,22 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .gbar{position:absolute;top:50%;transform:translateY(-50%);height:20px;border:2px solid var(--ink);box-shadow:2px 2px 0 rgba(34,52,44,.35);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:2}
 .gbar:hover{filter:brightness(1.06)}
 .gbar.o0{background:var(--green)}.gbar.o1{background:var(--orange)}.gbar.o2{background:var(--blue)}.gbar.o3{background:var(--pink)}
+/* 甘特图父子血缘层级(看板与甘特强制对应) */
+.grow.parent{background:var(--paper-2)}
+.grow.parent .tname b{font-size:13.5px}
+.grow.parent .tname::before{content:"▦";font-size:11px;color:var(--muted);margin-right:4px}
+.grow.child .tname{padding-left:20px;border-left:2px solid var(--line);margin-left:12px}
+.grow.child .tname::before{content:"└";color:var(--muted);margin-right:4px;font-family:var(--mono)}
+.grow.mgmt{opacity:.85}
+.grow.mgmt .tname::before{content:"◇";font-size:11px;color:var(--muted);margin-right:4px}
+.gbar.parent{height:24px}
+.gbar.parent .pfill{position:absolute;left:0;top:0;bottom:0;background:rgba(34,52,44,.28)}
+.gbar.mgmt{background:repeating-linear-gradient(90deg,var(--muted) 0 6px,transparent 6px 12px) !important;border-style:dashed;box-shadow:none}
+.gbar.task-done{border-style:double;filter:saturate(.7)}
+.x-sprint{color:var(--red);font-weight:700;font-size:10px}
+/* 看板卡子任务进度徽章 */
+.subprog{font-family:var(--mono);font-size:10.5px;font-weight:700;background:var(--yellow);border:1px solid var(--ink);padding:0 5px;white-space:nowrap}
+.subprog.full{background:var(--green)}
 .mile-row{display:grid;grid-template-columns:210px 1fr;border-top:2px solid var(--ink);background:var(--paper-2)}
 .mile-track{position:relative;height:34px;border-left:1px solid var(--line)}
 .mile-track .mlabel{position:absolute;top:2px;transform:translateX(-50%);font-family:var(--mono);font-weight:700;font-size:11px;background:var(--yellow);border:1.5px solid var(--ink);padding:0 6px;box-shadow:2px 2px 0 var(--ink);white-space:nowrap}
@@ -532,9 +548,9 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
     <section class="view" id="view-gantt">
       <div class="hero">
         <div>
-          <div class="eyebrow">GANTT CHART / 6 周排期</div>
+          <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
           <h1>甘特图</h1>
-          <p>16 项开发任务 · 4 个里程碑 · 按成员着色。</p>
+          <p>开发任务强制挂载看板卡(父条=子任务并集,工时加权进度) · 管理任务独立虚线 · 4 个里程碑。</p>
         </div>
         <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
       </div>
@@ -708,6 +724,25 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   </form>
 </dialog>
 
+<!-- 关卡三选一弹窗:未完成子任务级联策略 -->
+<dialog id="undone-choice" aria-labelledby="undone-heading">
+  <form onsubmit="event.preventDefault()">
+    <header>
+      <h2 id="undone-heading">删除看板卡 · 未完成子任务处理</h2>
+    </header>
+    <div class="formbody">
+      <p class="small" id="undone-text" style="margin:0"></p>
+      <div class="actions" style="flex-direction:column;gap:10px;align-items:stretch">
+        <button type="button" data-undone="cancel" class="danger">① 标记已取消(真废弃,子任务状态改为「已取消」)</button>
+        <button type="button" data-undone="keep" class="primary">② 保留状态继续跟踪(默认 · 仅解绑,脱离该卡)</button>
+        <button type="button" data-undone="detach">③ 转为独立任务(脱离该卡,整体挪入下个 Sprint)</button>
+      </div>
+      <p class="small" style="margin:8px 0 0">已完成子任务一律保留原记录不动,不影响历史。</p>
+      <div class="actions"><button type="button" onclick="document.getElementById('undone-choice').close()">取消删除</button></div>
+    </div>
+  </form>
+</dialog>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -732,26 +767,31 @@ const SEED=[
 {id:"M17",activity:2,sprint:3,title:"登记需求变更与影响",description:"作为项目负责人，我希望登记需求变更并标记影响，以便控制范围蔓延",priority:"Should",acceptance:"变更记录、影响说明、版本保留",owner:0,status:0},
 {id:"M18",activity:3,sprint:3,title:"设置并关联里程碑",description:"作为项目负责人，我希望设置里程碑并关联任务/故事，以便掌握交付节奏",priority:"Must",acceptance:"里程碑与任务关联可查、可展示",owner:1,status:0},
 {id:"M19",activity:4,sprint:3,title:"查看里程碑进度总览",description:"作为团队，我希望查看里程碑进度与项目总览视图，以便向干系人汇报",priority:"Should",acceptance:"视图数字与底层数据一致",owner:2,status:0},
-{id:"M20",activity:5,sprint:3,title:"将改进项转为任务",description:"作为项目负责人，我希望把复盘中的改进项转成任务并复查，以便持续改进",priority:"Could",acceptance:"改进项可转任务、可追踪状态",owner:3,status:0}
+{id:"M20",activity:5,sprint:3,title:"将改进项转为任务",description:"作为项目负责人，我希望把复盘中的改进项转成任务并复查，以便持续改进",priority:"Could",acceptance:"改进项可转任务、可追踪状态",owner:3,status:0},
+{id:"M21",activity:2,sprint:3,title:"智能生成:UML与类图联动",description:"作为技术负责人，我希望UML自动生成与类图影响传播联动，以便设计变更可视化追踪",priority:"Should",acceptance:"UML可生成编辑；类图关联可查；影响传播可展示；关联US13/US21",owner:2,status:0},
+{id:"M22",activity:3,sprint:3,title:"AI辅助开发:拆解与排期",description:"作为项目负责人，我希望AI辅助需求拆解与进度排期，以便降低估算偏差",priority:"Should",acceptance:"AI拆解可估算工时；进度预测可排期；关联US14/US17/US18/US19",owner:1,status:0},
+{id:"M23",activity:4,sprint:3,title:"AI质量保障:分析与风险闭环",description:"作为质量负责人，我希望AI分析质量与风险并闭环改进，以便持续交付",priority:"Should",acceptance:"质量分析可定位缺口；风险预警可应对；闭环改进可追踪；关联US22/US23/US24",owner:3,status:0}
 ];
 
+/* 看板与甘特「强制血缘对应」:开发任务(card)必须挂看板卡;管理任务(type=management)不挂卡
+   status:0待办 1进行中 2完成 3已取消;eh=预估工时(加权进度分母) */
 const TASKS=[
-{id:"T01",name:"启动规划与基线",owner:0,h:12,w:[1,1],story:"范围基线"},
-{id:"T02",name:"共享数据与接口小样",owner:2,h:12,w:[1,1],story:"技术约定"},
-{id:"T03",name:"项目/成员/自定义权限",owner:0,h:16,w:[1,2],story:"US01,02"},
-{id:"T04",name:"故事/地图/基础看板",owner:1,h:16,w:[1,2],story:"US03-06"},
-{id:"T05",name:"基础报表与 S1 验证",owner:3,h:12,w:[2,2],story:"US07"},
-{id:"T06",name:"看板增强与趋势",owner:1,h:12,w:[3,3],story:"US09,15"},
-{id:"T07",name:"甘特图与成员任务图",owner:2,h:12,w:[3,4],story:"US10,11"},
-{id:"T08",name:"UML 自动生成与编辑",owner:3,h:20,w:[2,4],story:"US13"},
-{id:"T09",name:"权限扩展与联动",owner:0,h:8,w:[4,4],story:"US08,12"},
-{id:"T10",name:"AI 拆解与估算",owner:1,h:12,w:[2,4],story:"US14,17"},
-{id:"T11",name:"AI 进度预测与排期",owner:2,h:12,w:[4,5],story:"US18,19"},
-{id:"T12",name:"AI 质量分析",owner:3,h:12,w:[4,5],story:"US22"},
-{id:"T13",name:"AI 风险/效率/闭环",owner:0,h:12,w:[5,6],story:"US16,20,23,24"},
-{id:"T14",name:"类图关联与影响传播",owner:3,h:12,w:[4,5],story:"US21"},
-{id:"T15",name:"完整回归与部署演示",owner:2,h:12,w:[6,6],story:"全量回归"},
-{id:"T16",name:"Scrum 管理与证据",owner:0,h:8,w:[1,6],story:"持续管理"}
+{id:"T01",name:"启动规划与基线",owner:0,h:12,w:[1,1],story:"范围基线",card:null,type:"management",status:2},
+{id:"T02",name:"共享数据与接口小样",owner:2,h:12,w:[1,1],story:"技术约定",card:null,type:"management",status:2},
+{id:"T03",name:"项目/成员/自定义权限",owner:0,h:16,w:[1,2],story:"US01,02",card:"M02",type:"feature",status:2},
+{id:"T04",name:"故事/地图/基础看板",owner:1,h:16,w:[1,2],story:"US03-06",card:"M04",type:"feature",status:1},
+{id:"T05",name:"基础报表与 S1 验证",owner:3,h:12,w:[2,2],story:"US07",card:"M08",type:"feature",status:1},
+{id:"T06",name:"看板增强与趋势",owner:1,h:12,w:[3,3],story:"US09,15",card:"M15",type:"feature",status:0},
+{id:"T07",name:"甘特图与成员任务图",owner:2,h:12,w:[3,4],story:"US10,11",card:"M11",type:"feature",status:0},
+{id:"T08",name:"UML 自动生成与编辑",owner:3,h:20,w:[2,4],story:"US13",card:"M21",type:"feature",status:1},
+{id:"T09",name:"权限扩展与联动",owner:0,h:8,w:[4,4],story:"US08,12",card:"M03",type:"feature",status:0},
+{id:"T10",name:"AI 拆解与估算",owner:1,h:12,w:[2,4],story:"US14,17",card:"M22",type:"feature",status:0},
+{id:"T11",name:"AI 进度预测与排期",owner:2,h:12,w:[4,5],story:"US18,19",card:"M22",type:"feature",status:0},
+{id:"T12",name:"AI 质量分析",owner:3,h:12,w:[4,5],story:"US22",card:"M23",type:"feature",status:0},
+{id:"T13",name:"AI 风险/效率/闭环",owner:0,h:12,w:[5,6],story:"US16,20,23,24",card:"M23",type:"feature",status:0},
+{id:"T14",name:"类图关联与影响传播",owner:3,h:12,w:[4,5],story:"US21",card:"M21",type:"feature",status:0},
+{id:"T15",name:"完整回归与部署演示",owner:2,h:12,w:[6,6],story:"全量回归",card:null,type:"management",status:0},
+{id:"T16",name:"Scrum 管理与证据",owner:0,h:8,w:[1,6],story:"持续管理",card:null,type:"management",status:1}
 ];
 
 const MEMBERS=[
@@ -831,8 +871,27 @@ function go(v){
 $$('.navitem').forEach(n=>n.addEventListener('click',()=>go(n.dataset.view)));
 
 /* ==================== 总览 ==================== */
+/* 血缘进度:有子任务的卡按预估工时加权,无子任务的卡按状态折算(待办0/进行中0.5/完成1) */
+function subTasksOf(cardId){return tasks.filter(t=>t.card===cardId&&t.type==='feature');}
+function cardPct(s){
+  const subs=subTasksOf(s.id);
+  if(!subs.length)return s.status===2?1:(s.status===1?0.5:0);
+  const total=subs.reduce((a,t)=>a+(t.eh||t.h),0);
+  const done=subs.filter(t=>t.status===2).reduce((a,t)=>a+(t.eh||t.h),0);
+  return total?done/total:0;
+}
+function groupPct(list){
+  if(!list.length)return 0;
+  let doneW=0,totalW=0;
+  list.forEach(s=>{
+    const subs=subTasksOf(s.id);
+    if(subs.length){totalW+=subs.reduce((a,t)=>a+(t.eh||t.h),0);doneW+=subs.filter(t=>t.status===2).reduce((a,t)=>a+(t.eh||t.h),0);}
+    else{totalW+=1;doneW+=s.status===2?1:(s.status===1?0.5:0);}
+  });
+  return totalW?Math.round(doneW/totalW*100):0;
+}
 function renderOverview(){
-  const done=stories.filter(s=>s.status===2).length,pct=Math.round(done/stories.length*100);
+  const pct=groupPct(stories);
   $('#ov-total').textContent=String(stories.length).padStart(2,'0');
   $('#ov-tasks').textContent=tasks.length;
   $('#ov-percent').textContent=pct+'%';
@@ -840,8 +899,8 @@ function renderOverview(){
   $('#sprint-grid').innerHTML=SPRINTS.map((sp,i)=>{
     const list=stories.filter(s=>s.sprint===i+1);
     const d=list.filter(s=>s.status===2).length;
-    const p=Math.round(d/list.length*100);
-    return `<div class="sprint ${sp.cls}"><div class="top"><h3>${sp.name}</h3><span class="pct">${p}%</span></div><div class="tagline">${sp.tag} · ${list.length} 个故事</div><div class="bar"><i style="width:${p}%"></i></div><div class="meta">完成 ${d} / ${list.length} · ${['W1–W2','W3–W4','W5–W6'][i]}</div></div>`;
+    const p=groupPct(list);
+    return `<div class="sprint ${sp.cls}"><div class="top"><h3>${sp.name}</h3><span class="pct">${p}%</span></div><div class="tagline">${sp.tag} · ${list.length} 个故事</div><div class="bar"><i style="width:${p}%"></i></div><div class="meta">完成 ${d} / ${list.length} · 工时加权 ${p}% · ${['W1–W2','W3–W4','W5–W6'][i]}</div></div>`;
   }).join('');
   $('#mile-grid').innerHTML=MILESTONES.map(m=>`<div class="milecard ${m.week<=2?'done':''}"><span class="wk">W${m.week}</span><span class="mid">${m.id}</span><h4>${m.name}</h4><p>${m.desc}</p></div>`).join('');
   renderRealtime();
@@ -853,7 +912,9 @@ function selected(){
   return stories.filter(s=>($('#sprint').value==='all'||s.sprint===+$('#sprint').value)&&($('#owner').value==='all'||s.owner===+$('#owner').value)&&(!q||[s.id,s.title,s.description,s.acceptance,'成员'+(s.owner+1),activities[s.activity-1]].join(' ').toLowerCase().includes(q)));
 }
 function card(s,map=false){
-  return `<button type="button" class="card" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span><span class="owner"><span class="avatar a${s.owner}">P${s.owner+1}</span><span>成员 ${s.owner+1}</span></span></div></button>`;
+  const subs=subTasksOf(s.id),sp=subs.length?Math.round(cardPct(s)*100):null;
+  const badge=sp===null?'':`<span class="subprog${sp>=100?' full':''}" title="子任务工时加权进度 ${sp}%${subs.length?` · ${subs.filter(t=>t.status===2).length}/${subs.length} 条完成`:''}">▣ ${subs.filter(t=>t.status===2).length}/${subs.length} · ${sp}%</span>`;
+  return `<button type="button" class="card" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span><span class="owner">${badge}<span class="avatar a${s.owner}">P${s.owner+1}</span><span>成员 ${s.owner+1}</span></span></div></button>`;
 }
 function render(){
   const data=selected(),done=data.filter(s=>s.status===2).length,pct=data.length?Math.round(done/data.length*100):0;
@@ -862,7 +923,7 @@ function render(){
   $('#percent').textContent=pct+'%';
   $('#progressfill').style.width=pct+'%';
   $('#progressdesc').textContent=`${done} / ${data.length} 个故事已完成`;
-  $('#hintcount').textContent=`已同步 ${stories.length} 条故事（M01–M20）`;
+  $('#hintcount').textContent=`已同步 ${stories.length} 条故事（${stories[0]?stories[0].id:'M01'}–${stories[stories.length-1]?stories[stories.length-1].id:''}）`;
   $('#board').innerHTML=statuses.map((name,i)=>{
     const list=data.filter(s=>s.status===i);
     return `<section class="column" data-status="${i}" aria-label="${name}"><div class="colhead"><span>${['□','▣','■'][i]} ${name}</span><span class="count">${list.length}</span></div><div class="colnote">${['准备好后，就开始吧','专注当前，逐一推进','每一步完成，都算数'][i]}</div><div class="cards">${list.map(s=>card(s)).join('')||'<div class="empty">此列暂无故事</div>'}</div><button class="addcol" data-new="${i}">＋ 添加故事</button></section>`;
@@ -931,7 +992,8 @@ document.addEventListener('drop',e=>{
     const newStatus=+c.dataset.status;
     if(apiMode){
       api('/api/stories/'+id,{method:'PATCH',body:JSON.stringify({status:newStatus})})
-        .then(()=>loadAll()).catch(err=>notify(err.message));
+        .then(async()=>{await loadAll();renderAll();notify(id+' → '+statuses[newStatus]+' · 已同步到服务器');})
+        .catch(err=>notify(err.message));
     }else{
       s.status=newStatus;addlog('move',s.id,s.title+' → '+statuses[s.status]);persist();render();renderOverview();notify(`${s.id} → ${statuses[s.status]}${storageOK?'':' · 暂未保存到本机'}`);
     }
@@ -957,19 +1019,38 @@ try{const sl=JSON.parse(localStorage.getItem(logkey));if(Array.isArray(sl))log=s
 function addlog(type,id,detail){log.push({t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),type,id,detail:detail||''});if(log.length>50)log=log.slice(-50);try{localStorage.setItem(logkey,JSON.stringify(log));}catch{}renderLog();}
 function renderLog(){const el=document.getElementById('logbody');if(!el)return;el.innerHTML=log.length?log.slice().reverse().map(l=>`<div class="logrow"><time>${esc(l.t)}</time><b class="t-${l.type}">${esc(l.id)}</b><span>${esc(l.detail)}</span></div>`).join(''):'<div class="empty">暂无变更记录（操作后自动记录）</div>';}
 
-/* ==================== 甘特图 ==================== */
+/* ==================== 甘特图(父子血缘层级) ==================== */
 function renderGantt(){
   const sprintLabel=['','S1','S1','S2','S2','S3','S3'];
+  const sprintOf=w=>Math.ceil(w/2);  // 周所属 Sprint:S1=W1-2 S2=W3-4 S3=W5-6
   const head=`<div class="gantt-head"><div class="taskh">任务 / 责任人</div>${[1,2,3,4,5,6].map(w=>`<div class="wk">W${w}<small>${sprintLabel[w]}</small></div>`).join('')}</div>`;
-  const rows=tasks.map(t=>{
-    const cells=[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
+  const grid=()=>[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
+  const barHtml=(t,extra='')=>{
     const span=t.w[1]-t.w[0]+1;
-    const bar=`<div class="gbar o${t.owner}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.h}h · 成员${t.owner+1}">${t.id}</div>`;
-    return `<div class="grow"><div class="tname"><b>${t.name}</b><small>${t.id} · 成员${t.owner+1} · ${t.h}h${t.story?' · '+t.story:''}</small></div><div class="gtrack">${bar}<div class="ggrid">${cells}</div></div></div>`;
-  }).join('');
+    const cross=sprintOf(t.w[0])!==sprintOf(t.w[1]);  // 跨 Sprint 红标
+    const st=t.status===2?' task-done':(t.status===3?' mgmt':'');
+    return `<div class="gbar o${t.owner}${st}${extra}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.eh||t.h}h · 成员${t.owner+1} · ${['待办','进行中','已完成','已取消'][t.status||0]}${cross?' · 跨迭代':''}">${t.id}${cross?' <span class="x-sprint">⚠</span>':''}</div>`;
+  };
+  /* 开发任务按看板卡分组:父行(卡+加权进度,起止=子任务周并集) + 子行(缩进+竖线) */
+  const groups={};
+  tasks.filter(t=>t.type!=='management'&&t.card).forEach(t=>{(groups[t.card]??=[]).push(t);});
+  const mgmts=tasks.filter(t=>t.type==='management');
+  const rows=Object.entries(groups).map(([cardId,subs])=>{
+    const s=stories.find(x=>x.id===cardId);
+    const w0=Math.min(...subs.map(t=>t.w[0])),w1=Math.max(...subs.map(t=>t.w[1]));
+    const pct=Math.round(cardPct(s||{status:0,id:cardId})*100);
+    const eh=subs.reduce((a,t)=>a+(t.eh||t.h),0);
+    const pbar=`<div class="gbar parent" style="left:${((w0-1)/6*100).toFixed(2)}%;width:${((w1-w0+1)/6*100).toFixed(2)}%" title="看板卡 ${cardId} · ${s?s.title:''} · ${subs.length} 条子任务 · ${eh}h · 工时加权进度 ${pct}%"><i class="pfill" style="width:${pct}%"></i><span style="position:relative;z-index:1">${cardId} · ${pct}%</span></div>`;
+    const prow=`<div class="grow parent"><div class="tname"><b>${cardId} ${s?esc(s.title):''}</b><small>父卡 · ${subs.length} 子任务 · ${eh}h · 加权 ${pct}%</small></div><div class="gtrack">${pbar}<div class="ggrid">${grid()}</div></div></div>`;
+    const crows=subs.map(t=>`<div class="grow child"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 成员${t.owner+1} · ${t.eh||t.h}h${t.story?' · '+t.story:''}${t.status===2?' · ✓完成':(t.status===1?' · ▶进行中':'')}</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('');
+    return prow+crows;
+  }).join('')
+  /* 管理类任务:灰色虚线,不挂卡 */
+  +mgmts.map(t=>`<div class="grow mgmt"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 管理 · ${t.eh||t.h}h</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('');
   const miles=`<div class="mile-row"><div class="tname" style="border-right:2px solid var(--line);padding:8px 10px;font-weight:bold;display:flex;align-items:center">◆ 里程碑</div><div class="mile-track">${MILESTONES.map(m=>`<span class="mlabel" style="left:${((m.week-0.5)/6*100).toFixed(2)}%">${m.id} ${m.name}</span>`).join('')}</div></div>`;
   $('#gantt').innerHTML=head+rows+miles;
-  $('#gantt-legend').innerHTML=MEMBERS.map(m=>`<span class="chip"><span class="sw" style="background:var(--${['green','orange','blue','pink'][m.id]})"></span>${m.name} · ${m.role}</span>`).join('')+`<span class="chip" style="margin-left:auto"><span class="sw" style="background:var(--yellow)"></span>◆ 里程碑</span>`;
+  $('#gantt-legend').innerHTML=MEMBERS.map(m=>`<span class="chip"><span class="sw" style="background:var(--${['green','orange','blue','pink'][m.id]})"></span>${m.name} · ${m.role}</span>`).join('')
+    +`<span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span><span class="chip" style="margin-left:auto"><span class="sw" style="background:var(--yellow)"></span>◆ 里程碑 · <span class="x-sprint">⚠</span> 跨迭代</span>`;
 }
 
 /* ==================== 成员任务 ==================== */
@@ -1249,7 +1330,7 @@ async function loadAll(){
     api('/api/stories'),api('/api/tasks'),api('/api/pool'),api('/api/stories/logs')
   ]);
   stories=st.map(mapStory);
-  tasks=tk.map(t=>({id:t.id,name:t.name,owner:t.owner_id-1,h:t.hours,w:[t.week_start,t.week_end],story:t.story_ref}));
+  tasks=tk.map(t=>({id:t.id,name:t.name,owner:t.owner_id-1,h:t.hours,eh:t.estimated_hours!=null?t.estimated_hours:t.hours,w:[t.week_start,t.week_end],story:t.story_ref,card:t.kanban_card_id||null,type:t.task_type||'feature',status:t.status!=null?t.status:0}));
   pool=pl.map(p=>({id:p.id,title:p.title,desc:p.description,source:p.source,created:'—',priority:p.priority}));
   log=lg.map(l=>({t:(l.created_at||'').slice(11,19),type:l.log_type,id:l.story_id,detail:l.detail})).slice(-50);
   $('#savehint').textContent='已连接后端 · 数据实时同步到服务器';
@@ -1297,6 +1378,24 @@ $('#form').onsubmit=async function(e){
   const f=new FormData(e.target);
   const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
   if(!payload.title||!payload.description||!payload.acceptance){notify('请填写标题、用户故事和验收条件');return;}
+  /* 跨 Sprint 变更:默认仅挪动未完成子任务到新时间轴,已完成子任务保留原记录(防误伤历史) */
+  if(editing){
+    const old=stories.find(x=>x.id===editing);
+    if(old&&old.sprint!==payload.sprint){
+      const subs=subTasksOf(editing),undone=subs.filter(t=>t.status!==2);
+      if(subs.length){
+        const ok=confirm(`该卡 Sprint 由 S${old.sprint} 变更为 S${payload.sprint}。\n默认仅挪动 ${undone.length} 条未完成子任务到新时间轴,${subs.length-undone.length} 条已完成子任务将保留原记录。确认?`);
+        if(ok){
+          const shift=(payload.sprint-old.sprint)*2;
+          for(const t of undone){
+            const ws=Math.min(Math.max(t.w[0]+shift,1),6),we=Math.min(Math.max(t.w[1]+shift,ws),6);
+            t.w=[ws,we];
+            if(apiMode){try{await api('/api/tasks/'+t.id,{method:'PATCH',body:JSON.stringify({week_start:ws,week_end:we})});}catch(err){notify('子任务 '+t.id+' 挪动失败:'+err.message);}}
+          }
+        }
+      }
+    }
+  }
   if(apiMode){
     try{
       if(editing){await api('/api/stories/'+editing,{method:'PATCH',body:JSON.stringify(payload)});}
@@ -1315,15 +1414,52 @@ $('#form').onsubmit=async function(e){
     notify(`${s.id} 已${editing?'更新':'创建'}${selected().some(x=>x.id===s.id)?'':'（当前筛选范围外）'}`);
   }
 };
+/* 关卡三选一:未完成子任务 → 取消(真废弃)/保留跟踪/转独立任务(进下个Sprint) */
+function openUndoneChoice(cardId,undoneCount){
+  return new Promise(resolve=>{
+    const d=$('#undone-choice');
+    $('#undone-text').textContent=`看板卡 ${cardId} 下有 ${undoneCount} 条未完成子任务,请选择处理方式:`;
+    const done=()=>{d.removeEventListener('close',onClose);resolve(null);};
+    const onClose=()=>done();
+    d.addEventListener('close',onClose);
+    for(const btn of d.querySelectorAll('[data-undone]')){
+      btn.onclick=()=>{
+        d.removeEventListener('close',onClose);
+        const v=btn.dataset.undone;d.close();resolve(v);
+      };
+    }
+    d.showModal();
+  });
+}
 $('#del').onclick=async function(){
   if(!editing)return;
   const t=stories.find(x=>x.id===editing);
-  if(!confirm('确认删除 '+editing+'（'+(t?t.title:'')+'）？此操作不可撤销。'))return;
-  if(apiMode){
-    try{await api('/api/stories/'+editing,{method:'DELETE'});$('#editor').close();await loadAll();renderAll();notify(editing+' 已删除');}
-    catch(err){notify(err.message);}
+  if(!t)return;
+  const subs=subTasksOf(editing),undone=subs.filter(x=>x.status!==2&&x.status!==3);
+  let strategy='keep';
+  if(undone.length){
+    if(!confirm('确认删除 '+editing+'（'+t.title+'）？该卡含未完成子任务,需选择级联策略。'))return;
+    const choice=await openUndoneChoice(editing,undone.length);
+    if(!choice){notify('已取消删除');return;}
+    strategy=choice;
   }else{
-    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t?t.title:'');persist();render();renderOverview();$('#editor').close();notify(editing+' 已删除');
+    if(!confirm('确认删除 '+editing+'（'+t.title+'）？此操作不可撤销。'))return;
+  }
+  if(apiMode){
+    try{
+      await api('/api/stories/'+editing+'?undone='+strategy,{method:'DELETE'});
+      $('#editor').close();await loadAll();renderAll();
+      notify(editing+' 已删除 · 子任务级联:'+({cancel:'标记已取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
+    }catch(err){notify(err.message);}
+  }else{
+    /* 离线等效级联 */
+    for(const x of undone){
+      if(strategy==='cancel'){x.status=3;x.card=null;}
+      else{x.card=null;if(strategy==='detach'){x.w=[Math.min(x.w[0]+2,6),Math.min(x.w[1]+2,6)];}}
+    }
+    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t.title+' · 子任务级联:'+strategy+'('+undone.length+' 条)');
+    persist();render();renderOverview();$('#editor').close();
+    notify(editing+' 已删除 · 子任务级联:'+({cancel:'标记已取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
   }
 };
 $('#reset').onclick=async function(){

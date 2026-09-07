@@ -88,6 +88,18 @@ class TaskOut(BaseModel):
     week_start: int
     week_end: int
     story_ref: Optional[str]
+    kanban_card_id: Optional[str] = None
+    estimated_hours: int = 0
+    task_type: str = "feature"
+    status: int = 0
+
+
+class TaskPatch(BaseModel):
+    """任务局部更新:状态/所属卡/时间轴(用于关卡级联与跨 Sprint 挪动)。"""
+    status: Optional[int] = Field(default=None, ge=0, le=3)
+    kanban_card_id: Optional[str] = None  # 传 null 解绑(脱离看板卡)
+    week_start: Optional[int] = Field(default=None, ge=1, le=6)
+    week_end: Optional[int] = Field(default=None, ge=1, le=6)
 
 
 class LogOut(BaseModel):

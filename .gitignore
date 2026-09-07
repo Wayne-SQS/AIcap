@@ -9,5 +9,6 @@ Thumbs.db
 # python / backend
 backend/.env
 backend/mysql-data/
+backend/backup_*.sql
 __pycache__/
 *.pyc
