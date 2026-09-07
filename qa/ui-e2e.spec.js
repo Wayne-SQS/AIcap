@@ -82,18 +82,18 @@ async function suiteOffline(browser) {
 
   await page.click('.navitem[data-view="overview"]');
   await waitFor(() => page.locator('#ov-total').textContent().then(t => t.trim() !== ''));
-  check('FE-03 总览故事总数=20', (await page.textContent('#ov-total')).trim() === '20');
+  check('FE-03 总览故事总数=23', (await page.textContent('#ov-total')).trim() === '23');
   check('FE-04 总览规划任务=16', (await page.textContent('#ov-tasks')).trim() === '16');
 
   await page.click('.navitem[data-view="board"]');
   await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '09'), 4000);
   check('FE-05 看板默认过滤 Sprint1 显示 9 条', (await page.textContent('#total')).trim() === '09');
   await page.selectOption('#sprint', 'all');
-  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '20'));
-  check('FE-06 全部Sprint显示 20 条', (await page.textContent('#total')).trim() === '20');
+  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '23'));
+  check('FE-06 全部Sprint显示 23 条', (await page.textContent('#total')).trim() === '23');
   check('FE-07 看板三列存在', (await page.locator('.column').count()) === 3);
   const colCounts = await page.evaluate(() => [...document.querySelectorAll('.column')].map(x => x.querySelector('.count').textContent));
-  check('FE-08 列计数=待办15/进行中3/完成2', colCounts.join(',') === '15,3,2', colCounts.join(','));
+  check('FE-08 列计数=待办18/进行中3/完成2', colCounts.join(',') === '18,3,2', colCounts.join(','));
 
   await page.selectOption('#sprint', '1');
   await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '09'));
@@ -114,17 +114,17 @@ async function suiteOffline(browser) {
   check('FE-12 故事地图面板可切换显示', (await page.locator('#map .mapcell').count()) > 0);
   await page.click('#boardtab');
 
-  // 新建(当前过滤全部,默认落入 Sprint1)
+  // 新建(当前过滤全部,默认落入 Sprint1;M21-M23 已被 AI 域卡占用,新卡编号为 M24)
   await newStory(page, 'E2E新建故事');
-  await waitFor(() => page.locator('#board .card[data-id="M21"]').count() === 1);
-  check('FE-13 新建故事生成 M21', (await page.locator('#board .card[data-id="M21"]').count()) === 1);
-  check('FE-14 新建后总数=21', (await page.textContent('#total')).trim() === '21');
+  await waitFor(() => page.locator('#board .card[data-id="M24"]').count() === 1);
+  check('FE-13 新建故事生成 M24', (await page.locator('#board .card[data-id="M24"]').count()) === 1);
+  check('FE-14 新建后总数=24', (await page.textContent('#total')).trim() === '24');
 
   // 编辑
-  await clickCard(page, 'M21');
+  await clickCard(page, 'M24');
   await page.fill('#form input[name="title"]', 'E2E改名故事');
   await page.click('#form button[type="submit"]');
-  await waitFor(() => page.locator('#board .card[data-id="M21"] h3').textContent().then(t => t === 'E2E改名故事'));
+  await waitFor(() => page.locator('#board .card[data-id="M24"] h3').textContent().then(t => t === 'E2E改名故事'));
   check('FE-15 编辑故事标题生效', true);
 
   // 拖拽 M05(待办)到"已完成"
@@ -138,12 +138,12 @@ async function suiteOffline(browser) {
   // 变更记录
   check('FE-17 变更记录有内容', (await page.textContent('#logbody')).length > 0);
 
-  // 删除
+  // 删除(新卡 M24 无子任务,confirm 后直接删,不触发三选一弹窗)
   onConfirm(page);
-  await clickCard(page, 'M21');
+  await clickCard(page, 'M24');
   await page.click('#del');
-  await waitFor(() => page.locator('#board .card[data-id="M21"]').count() === 0);
-  check('FE-18 删除 M21 生效', true);
+  await waitFor(() => page.locator('#board .card[data-id="M24"]').count() === 0);
+  check('FE-18 删除 M24 生效', true);
 
   // 需求池
   await page.click('.navitem[data-view="pool"]');
@@ -182,10 +182,10 @@ async function suiteOffline(browser) {
   await waitFor(() => page.locator('.msg.bot').count() >= 3, 8000);
   check('FE-27 对话演示有机器人回复', (await page.locator('.msg.bot').count()) >= 3);
 
-  // 甘特图
+  // 甘特图(血缘重构后:9 父行[看板卡] + 12 子行[开发任务] + 4 管理行 = 25 行)
   await page.click('.navitem[data-view="gantt"]');
-  await waitFor(() => page.locator('.grow').count() === 16);
-  check('FE-28 甘特图渲染 16 行任务', true);
+  await waitFor(() => page.locator('.grow').count() === 25);
+  check('FE-28 甘特图渲染 25 行(9父+12子+4管理)', true);
   check('FE-29 甘特图含 4 个里程碑', (await page.locator('.mlabel').count()) === 4);
 
   // 成员任务图
@@ -210,8 +210,8 @@ async function suiteOffline(browser) {
   // 恢复演示
   onConfirm(page);
   await page.click('#reset');
-  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '20'));
-  check('FE-35 恢复演示回 20 条且无 M21', (await page.locator('#board .card[data-id="M21"]').count()) === 0);
+  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '23'));
+  check('FE-35 恢复演示回 23 条且无 M24', (await page.locator('#board .card[data-id="M24"]').count()) === 0);
 
   await ctx.close();
 }
@@ -229,19 +229,19 @@ async function suiteOnline(browser) {
   await waitFor(() => page.locator('#user-chip').textContent().then(t => t.includes('成员1')), 6000);
   check('OE-02 登录成员1(管理员)成功', (await page.textContent('#user-chip')).includes('成员1'));
   check('OE-03 状态芯片显示在线已连接', (await page.textContent('#mode-chip')).includes('在线 · 已连接后端'));
-  await waitFor(() => page.locator('#hintcount').textContent().then(t => t.includes('已同步 20 条故事')), 6000);
-  check('OE-04 登录后同步服务器 20 条故事', true);
+  await waitFor(() => page.locator('#hintcount').textContent().then(t => t.includes('已同步 23 条故事')), 6000);
+  check('OE-04 登录后同步服务器 23 条故事', true);
   check('OE-05 在线模式无 JS 异常', jsErr.length === 0, jsErr.join(' | '));
 
   // 服务端数据与渲染一致
   await page.click('.navitem[data-view="board"]');
   await page.selectOption('#sprint', 'all');
-  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '20'));
+  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '23'));
   const apiCount = await page.evaluate(async (base) => {
     const r = await fetch(base + '/api/stories', { headers: { Authorization: 'Bearer ' + localStorage.getItem('aiguanli_token') } });
     return (await r.json()).length;
   }, QA);
-  check('OE-06 渲染总数与服务端一致(20)', apiCount === 20 && (await page.textContent('#total')).trim() === '20', 'api=' + apiCount);
+  check('OE-06 渲染总数与服务端一致(23)', apiCount === 23 && (await page.textContent('#total')).trim() === '23', 'api=' + apiCount);
 
   // 在线新建 → 服务端可见
   await newStory(page, '在线E2E故事');
@@ -252,12 +252,12 @@ async function suiteOnline(browser) {
     const s = list.find(x => x.title === '在线E2E故事');
     return s ? { id: s.id, count: list.length } : null;
   }, QA);
-  check('OE-07 在线新建落库可查(' + (created ? created.id : '?') + ')', !!created && created.count === 21, JSON.stringify(created));
+  check('OE-07 在线新建落库可查(' + (created ? created.id : '?') + ')', !!created && created.count === 24, JSON.stringify(created));
 
   // 在线拖拽 → PATCH → 服务端状态改变
   await page.selectOption('#sprint', 'all');
   await page.selectOption('#owner', 'all');
-  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '21'));
+  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '24'));
   const dragOk = await dragCard(page, 'M05', 2);
   const serverDone = await waitFor(() => page.evaluate(async (base) => {
     const h = { Authorization: 'Bearer ' + localStorage.getItem('aiguanli_token') };
@@ -268,11 +268,11 @@ async function suiteOnline(browser) {
 
   // 刷新(相当于另一浏览器/另一用户视角)数据一致 —— 并回归验证 BUG-FE-01:刷新后登录态 UI 应保持"已连接"
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await waitFor(() => page.evaluate(() => document.querySelector('#hintcount').textContent.includes('已同步 21')), 7000);
+  await waitFor(() => page.evaluate(() => document.querySelector('#hintcount').textContent.includes('已同步 24')), 7000);
   await page.click('.navitem[data-view="board"]');
   await page.selectOption('#sprint', 'all');
   await page.selectOption('#owner', 'all');
-  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '21'));
+  await waitFor(() => page.locator('#total').textContent().then(t => t.trim() === '24'));
   const afterReload = await page.evaluate(() => {
     const col = [...document.querySelectorAll('#board .column')].find(x => x.dataset.status === '2');
     return col && [...col.querySelectorAll('.card')].some(c => c.dataset.id === 'M05');
@@ -294,16 +294,17 @@ async function suiteOnline(browser) {
   await waitFor(() => page3.locator('#user-chip').textContent().then(t => t.includes('成员3')), 6000);
   await page3.click('.navitem[data-view="board"]');
   await page3.selectOption('#sprint', 'all');
-  await waitFor(() => page3.locator('#board .card[data-id="M03"]').count() === 1, 5000);
+  await waitFor(() => page3.locator('#board .card[data-id="M01"]').count() === 1, 5000);
   const beforeCount = (await page3.textContent('#total')).trim();
   onConfirm(page3);
-  await clickCard(page3, 'M03');
+  // 用 M01(无子任务)验证越权:M03 挂有子任务 T09,删除会先弹三选一弹窗,该场景由 kanban-gantt-e2e 覆盖
+  await clickCard(page3, 'M01');
   await page3.click('#del');
   const denied = await waitFor(() => page3.locator('.toast').textContent().then(t => t.includes('无权限')), 6000);
   check('OE-10 成员3 删除被服务端拒绝并提示', denied);
   await page3.waitForSelector('#editor:not([open])', { timeout: 6000 }).catch(() => {});
   await page3.click('#close').catch(() => {});
-  check('OE-11 拒绝后 M03 仍在', (await page3.locator('#board .card[data-id="M03"]').count()) === 1);
+  check('OE-11 拒绝后 M01 仍在', (await page3.locator('#board .card[data-id="M01"]').count()) === 1);
   await ctx3.close();
 }
 
@@ -325,7 +326,7 @@ async function suiteCleanup(browser) {
     if (m05 && m05.status === 2) { await fetch(base + '/api/stories/M05', { method: 'PATCH', headers: h, body: JSON.stringify({ status: 0 }) }); }
     return { del, left: (await (await fetch(base + '/api/stories', { headers: h })).json()).length };
   }, QA);
-  check('OE-C1 清理 E2E 新建故事且总数回 20', cleaned.del === 1 && cleaned.left === 20, JSON.stringify(cleaned));
+  check('OE-C1 清理 E2E 新建故事且总数回 23', cleaned.del === 1 && cleaned.left === 23, JSON.stringify(cleaned));
   await ctx.close();
 }
 
