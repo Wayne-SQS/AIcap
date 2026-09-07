@@ -15,8 +15,8 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
-const PAGE_URL = 'http://127.0.0.1:8090/index.html';
-const QA = 'http://127.0.0.1:8001';
+const PAGE_URL = process.env.AICAP_UI_URL || 'http://127.0.0.1:8090/index.html';
+const QA = process.env.AICAP_QA_URL || 'http://127.0.0.1:8001';
 const DEAD = 'http://127.0.0.1:59999';
 
 const results = [];
@@ -35,6 +35,7 @@ async function waitFor(fn, ms = 6000, step = 80) {
 /** 把 index.html 中的 API_BASE 替换为目标地址后交给浏览器(不改原文件) */
 async function openApp(browser, apiBase) {
   const ctx = await browser.newContext({ acceptDownloads: true });
+  await ctx.grantPermissions(['local-network-access']);
   const page = await ctx.newPage();
   const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8')
     .replace("const API_BASE='http://127.0.0.1:8000';", `const API_BASE='${apiBase}';`);
@@ -154,6 +155,8 @@ async function suiteOffline(browser) {
   await waitFor(() => page.locator('.pool-item').count() === 5);
   check('FE-20 需求池新增至 5 条', true);
   await page.click('.pool-item .pacts [data-promote="R01"]');
+  await page.selectOption('dialog[open] [name=sprint]', '1');
+  await page.click('dialog[open] button[type=submit]');
   await waitFor(() => page.locator('.pool-item').count() === 4);
   check('FE-21 R01 移入看板后池剩 4 条', true);
   await page.click('.pool-item .pacts [data-drop="R02"]');
@@ -329,8 +332,8 @@ async function suiteCleanup(browser) {
 (async () => {
   // 优先系统已装 Edge(Playwright channel msedge),避免下载 Chromium
   let browser = null;
-  try { browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--disable-web-security', '--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights'] }); }
-  catch (e) { browser = await chromium.launch({ args: ['--disable-web-security'] }); }
+  try { browser = await chromium.launch({ channel: 'msedge', headless: true }); }
+  catch (e) { browser = await chromium.launch({ headless: true }); }
   console.log('浏览器已启动(' + (browser.browserType().name() || 'chromium') + ')');
   try { await suiteOffline(browser); } catch (e) { failed++; results.push({ name: 'suiteOffline', ok: false, extra: e.message }); console.log('  ✘ suiteOffline 异常:', e.message); }
   try { await suiteOnline(browser); } catch (e) { failed++; results.push({ name: 'suiteOnline', ok: false, extra: e.message }); console.log('  ✘ suiteOnline 异常:', e.message); }

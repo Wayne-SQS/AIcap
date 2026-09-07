@@ -38,6 +38,7 @@ def db_setup():
 
 @pytest.fixture()
 def client(monkeypatch):
+    monkeypatch.setattr(config, "AICAP_AGENT_WORKER_ENABLED", False)
     # Lifespan and health must use the same isolated DB as request dependencies.
     monkeypatch.setattr(main_module, "engine", test_engine)
     monkeypatch.setattr(main_module, "SessionLocal", TestSession)

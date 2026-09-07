@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Input(BaseModel):
@@ -38,11 +38,20 @@ class SuggestionIn(Input):
 
 
 class ReviewIn(Input):
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "modify_and_approve"]
+    changes: PoolChanges | None = None
     reason: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_changes(self):
+        if (self.decision == "modify_and_approve") != (self.changes is not None):
+            raise ValueError("仅修改后采纳必须提供 changes")
+        return self
 
 
 class SuggestionOut(BaseModel):
+    agent_run_id: str | None = None
+    approved_changes: PoolChanges | None = None
     id: str
     meeting_id: str
     meeting_title: str

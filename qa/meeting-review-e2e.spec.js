@@ -36,7 +36,7 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
   }
   try {
     const member = await open('成员3');
-    check((await member.textContent('#meeting')).includes('会议 Agent 尚未接入'), 'manual entry clearly labelled');
+    check((await member.textContent('#meeting')).includes('手动录入建议'), 'manual entry clearly labelled');
     const suffix = Date.now().toString();
     const title = '会议审核E2E-' + suffix;
     const transcript = '会议决定新增导出周报。另一个想法暂时不做。';

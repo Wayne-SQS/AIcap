@@ -688,7 +688,7 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
         <label class="field">MoSCoW 优先级<select name="priority"><option>Must</option><option>Should</option><option>Could</option></select></label>
       </div>
       <div class="formrow">
-        <label class="field">负责人<select name="owner"><option value="0">成员 1</option><option value="1">成员 2</option><option value="2">成员 3</option><option value="3">成员 4</option></select></label>
+        <label class="field">负责人<select name="owner"><option value="">未分配</option><option value="0">成员 1</option><option value="1">成员 2</option><option value="2">成员 3</option><option value="3">成员 4</option></select></label>
         <label class="field">迭代<select name="sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option></select></label>
       </div>
       <label class="field">骨干活动<select name="activity">
@@ -801,7 +801,7 @@ let stories=structuredClone(SEED),storageOK=true,boardView='board',editing=null,
 
 try{
   const saved=JSON.parse(localStorage.getItem(key));
-  if(Array.isArray(saved)&&saved.length&&saved.every(x=>typeof x.id==='string'&&typeof x.title==='string'&&typeof x.description==='string'&&typeof x.acceptance==='string'&&['Must','Should','Could'].includes(x.priority)&&[0,1,2].includes(x.status)&&[1,2,3].includes(x.sprint)&&[0,1,2,3].includes(x.owner)&&[1,2,3,4,5].includes(x.activity)))stories=saved;
+  if(Array.isArray(saved)&&saved.length&&saved.every(x=>typeof x.id==='string'&&typeof x.title==='string'&&typeof x.description==='string'&&typeof x.acceptance==='string'&&['Must','Should','Could'].includes(x.priority)&&[0,1,2].includes(x.status)&&[1,2,3].includes(x.sprint)&&[null,0,1,2,3].includes(x.owner)&&[1,2,3,4,5].includes(x.activity)))stories=saved;
 }catch{storageOK=false;}
 
 /* ==================== 工具 ==================== */
@@ -850,10 +850,10 @@ function renderOverview(){
 /* ==================== 看板 ==================== */
 function selected(){
   const q=$('#search').value.trim().toLowerCase();
-  return stories.filter(s=>($('#sprint').value==='all'||s.sprint===+$('#sprint').value)&&($('#owner').value==='all'||s.owner===+$('#owner').value)&&(!q||[s.id,s.title,s.description,s.acceptance,'成员'+(s.owner+1),activities[s.activity-1]].join(' ').toLowerCase().includes(q)));
+  return stories.filter(s=>($('#sprint').value==='all'||s.sprint===+$('#sprint').value)&&($('#owner').value==='all'||s.owner===+$('#owner').value)&&(!q||[s.id,s.title,s.description,s.acceptance,(s.owner==null?'未分配':'成员'+(s.owner+1)),activities[s.activity-1]].join(' ').toLowerCase().includes(q)));
 }
 function card(s,map=false){
-  return `<button type="button" class="card" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span><span class="owner"><span class="avatar a${s.owner}">P${s.owner+1}</span><span>成员 ${s.owner+1}</span></span></div></button>`;
+  return `<button type="button" class="card" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span><span class="owner"><span class="avatar a${s.owner}">${s.owner==null?'—':'P'+(s.owner+1)}</span><span>${s.owner==null?'未分配':'成员 '+(s.owner+1)}</span></span></div></button>`;
 }
 function render(){
   const data=selected(),done=data.filter(s=>s.status===2).length,pct=data.length?Math.round(done/data.length*100):0;
@@ -872,12 +872,12 @@ function render(){
 }
 function openEditor(id=null,status=0){
   editing=id;
-  const s=id?stories.find(x=>x.id===id):{title:'',description:'',acceptance:'',priority:'Must',status,owner:$('#owner').value==='all'?0:+$('#owner').value,sprint:$('#sprint').value==='all'?1:+$('#sprint').value,activity:2};
+  const s=id?stories.find(x=>x.id===id):{title:'',description:'',acceptance:'',priority:'Must',status,owner:$('#owner').value==='all'?null:+$('#owner').value,sprint:$('#sprint').value==='all'?1:+$('#sprint').value,activity:2};
   if(!s)return;
   $('#del').style.display=id?'':'none';
   $('#editheading').textContent=id?'编辑用户故事':'新建用户故事';
   $('#editid').textContent=id?`${id} · 修改会同步到看板与故事地图`:'保存后将生成唯一故事编号';
-  for(const k of ['title','description','acceptance','priority','status','owner','sprint','activity'])$('#form').elements[k].value=s[k];
+  for(const k of ['title','description','acceptance','priority','status','owner','sprint','activity'])$('#form').elements[k].value=s[k]??'';
   $('#editor').showModal();
 }
 $('#new').onclick=()=>openEditor();
@@ -941,7 +941,7 @@ function dl(name,blob){const a=document.createElement('a');a.href=URL.createObje
 $('#expjson').onclick=()=>{dl('爱管理-用户故事-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify(stories,null,2)],{type:'application/json'}));notify('已导出 JSON 备份');};
 $('#expcsv').onclick=()=>{
   const head=['ID','标题','用户故事','MoSCoW','Sprint','骨干活动','负责人','状态','验收条件'];
-  const rows=stories.map(s=>[s.id,s.title,s.description,s.priority,'S'+s.sprint,'A'+s.activity+' '+activities[s.activity-1],'成员'+(s.owner+1),statuses[s.status],s.acceptance].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
+  const rows=stories.map(s=>[s.id,s.title,s.description,s.priority,'S'+s.sprint,'A'+s.activity+' '+activities[s.activity-1],(s.owner==null?'未分配':'成员'+(s.owner+1)),statuses[s.status],s.acceptance].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
   dl('爱管理-用户故事.csv',new Blob(['\ufeff'+head.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));notify('已导出 CSV（可用 Excel 打开）');
 };
 $('#reset').onclick=()=>{
@@ -1076,14 +1076,8 @@ function persistPool(){try{localStorage.setItem(poolKey,JSON.stringify(pool));}c
 function renderPool(){
   $('#pool-list').innerHTML=pool.map(p=>`<div class="pool-item"><span class="picon">◈</span><div class="pbody"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.title)}</h3><span class="tag ${p.priority}">${p.priority}</span><span class="mono small">${p.id}</span></div><p class="pdesc">${esc(p.desc)}</p><div class="pmeta"><span>来源 · ${esc(p.source)}</span><span>创建 · ${p.created}</span></div></div><div class="pacts"><button class="primary" data-promote="${p.id}">移入看板</button><button class="danger" data-drop="${p.id}">移除</button></div></div>`).join('')||'<div class="empty">需求池为空</div>';
 }
-function promotePool(id){
-  const p=pool.find(x=>x.id===id);if(!p)return;
-  const newId='M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0');
-  stories.push({id:newId,activity:2,sprint:1,title:p.title,description:p.desc,priority:p.priority,acceptance:'来源：'+p.source+'（待补充验收条件）',owner:0,status:0});
-  pool=pool.filter(x=>x.id!==id);
-  persistPool();persist();renderPool();render();renderOverview();
-  notify(`${newId} 已移入看板（Sprint 1 · A2 梳理需求）`);
-}
+// Assigned by meeting-improvements.js before bootstrap.
+let promotePool;
 function dropPool(id){pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');}
 
 /* ==================== AI 建议审核中心 ==================== */
@@ -1242,7 +1236,7 @@ function updateChip(){
   }
 }
 
-function mapStory(s){return {id:s.id,title:s.title,description:s.description,acceptance:s.acceptance,priority:s.priority,sprint:s.sprint,activity:s.activity,status:s.status,owner:(s.owner_id==null?0:s.owner_id-1)};}
+function mapStory(s){return {id:s.id,title:s.title,description:s.description,acceptance:s.acceptance,priority:s.priority,sprint:s.sprint,activity:s.activity,status:s.status,owner:(s.owner_id==null?null:s.owner_id-1)};}
 
 async function loadAll(){
   const [st,tk,pl,lg]=await Promise.all([
@@ -1295,7 +1289,7 @@ $('#mode-chip').onclick=()=>{if(!apiMode)bootstrap();};
 $('#form').onsubmit=async function(e){
   e.preventDefault();
   const f=new FormData(e.target);
-  const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
+  const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:f.get('owner')===''?null:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
   if(!payload.title||!payload.description||!payload.acceptance){notify('请填写标题、用户故事和验收条件');return;}
   if(apiMode){
     try{
@@ -1308,7 +1302,7 @@ $('#form').onsubmit=async function(e){
     const s={id:editing||'M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
     for(const k of ['title','description','acceptance','priority'])s[k]=payload[k];
     for(const k of ['status','sprint','activity'])s[k]=payload[k];
-    s.owner=+f.get('owner');
+    s.owner=f.get('owner')===''?null:+f.get('owner');
     if(editing){const old=stories.find(x=>x.id===editing);stories[stories.findIndex(x=>x.id===editing)]=s;addlog('edit',s.id,s.title+(old&&old.status!==s.status?' · '+statuses[s.status]:''));}
     else{stories.push(s);addlog('create',s.id,s.title);}
     persist();render();renderOverview();$('#editor').close();
@@ -1346,15 +1340,6 @@ $('#pool-save').onclick=async function(){
     persistPool();renderPool();$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';notify('已保存到需求池');
   }
 };
-promotePool=async function(id){
-  if(apiMode){try{await api('/api/pool/'+id+'/promote',{method:'POST'});await loadAll();renderAll();notify('已移入看板');}catch(err){notify(err.message);}return;}
-  const p=pool.find(x=>x.id===id);if(!p)return;
-  const newId='M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0');
-  stories.push({id:newId,activity:2,sprint:1,title:p.title,description:p.desc,priority:p.priority,acceptance:'来源：'+p.source+'（待补充验收条件）',owner:0,status:0});
-  pool=pool.filter(x=>x.id!==id);
-  persistPool();persist();renderPool();render();renderOverview();
-  notify(`${newId} 已移入看板（Sprint 1 · A2 梳理需求）`);
-};
 dropPool=async function(id){
   if(apiMode){try{await api('/api/pool/'+id,{method:'DELETE'});await loadAll();renderAll();notify(id+' 已从需求池移除');}catch(err){notify(err.message);}return;}
   pool=pool.filter(x=>x.id!==id);persistPool();renderPool();notify(id+' 已从需求池移除');
@@ -1382,6 +1367,8 @@ async function bootstrap(){
 }
 </script>
 <script src="meeting-review.js"></script>
+<script src="meeting-agent.js"></script>
+<script src="meeting-improvements.js"></script>
 <script>bootstrap();</script>
 </body>
 </html>

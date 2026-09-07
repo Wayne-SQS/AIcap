@@ -107,3 +107,10 @@ class DashboardOut(BaseModel):
     todo: int
     percent: int
     by_sprint: list[dict]
+
+
+class PoolPromoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sprint: int = Field(ge=1, le=3)
+    owner_id: int | None = Field(default=None, ge=1)
+    activity: int = Field(default=2, ge=1, le=5)

@@ -185,7 +185,7 @@ def test_audit_survives_pool_promotion(client, member1_token):
     sid = response.json()['id']; h = headers(member1_token)
     result = client.post(f'/api/suggestions/{sid}/review', headers=h, json={'decision': 'approve'}).json()
     pid = result['pool_item_id']
-    assert client.post(f'/api/pool/{pid}/promote', headers=h).status_code == 200
+    assert client.post(f'/api/pool/{pid}/promote', headers=h, json={'sprint':2}).status_code == 200
     assert client.get(f'/api/suggestions/{sid}', headers=h).json() == result
     assert client.post(f'/api/suggestions/{sid}/review', headers=h, json={'decision': 'approve'}).json() == result
     assert not any(p['id'] == pid for p in client.get('/api/pool', headers=h).json())

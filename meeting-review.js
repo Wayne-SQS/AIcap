@@ -23,7 +23,7 @@ renderMeeting = function () {
   const state = meetingReviewState;
   const selected = state.meetings.find(m => m.id === state.selected);
   $('#meeting').innerHTML = `
-    <p class="pool-note">项目侧接入 · 会议 Agent 尚未接入。此处手动录入会议和建议，用于验证审核闭环；不会自动分析或写入需求池。</p>
+    <p class="pool-note">会议转写与建议 · 保存后可使用下方会议 Agent 分析，也可手动录入建议；所有建议经审核后执行。</p>
     <form id="meeting-save-form">
       <label class="field">会议标题<input name="title" required maxlength="200"></label>
       <label class="field">会议转写<textarea name="transcript" required maxlength="16000" rows="5"></textarea></label>
@@ -93,16 +93,18 @@ renderReview = function () {
   }
   if (summary) summary.textContent = '📋 决策留痕（服务器）';
   const statusName = {pending: '待审核', approved: '已采纳', rejected: '已拒绝'};
-  $('#sug-list').innerHTML = `<p class="pool-note">真实会议建议 · 本轮仅支持新增需求池条目。${mayReviewMeeting() ? '你可以采纳或拒绝。' : '仅管理员或负责人可以审核。'}</p><button id="review-refresh">刷新建议</button>` +
+  $('#sug-list').innerHTML = `<p class="pool-note">真实会议建议 · 本轮仅支持新增需求池条目。${mayReviewMeeting() ? '你可以采纳、修改后采纳或拒绝。行动项与协调事项请查看对应会议的完整分析。' : '仅管理员或负责人可以审核。'}</p><button id="review-refresh">刷新建议</button>` +
     (meetingReviewState.suggestions.map(s => `<div class="sug-card" data-meeting-suggestion="${esc(s.id)}">
-      <div class="sug-head"><b>${s.origin === 'manual' ? '手动录入' : '外部 Agent（提交方标记）'}</b><span class="sug-status ${esc(s.status)}">${statusName[s.status]}</span><span>${esc(s.id)}</span></div>
+      <div class="sug-head"><b>${s.agent_run_id ? '会议 Agent · 运行已记录' : s.origin === 'manual' ? '手动录入' : '外部 Agent（提交方标记）'}</b><span class="sug-status ${esc(s.status)}">${statusName[s.status]}</span><span>${esc(s.id)}</span></div>
       <div class="sug-row"><b>会议</b><span>${esc(s.meeting_title)}</span></div>
       <div class="sug-row"><b>原文证据</b><span>${esc(s.evidence)}</span></div>
       <div class="sug-row"><b>新增需求</b><span>${esc(s.changes.title)} · ${esc(s.changes.priority)}</span></div>
       <div class="sug-row"><b>描述</b><span>${esc(s.changes.description)}</span></div>
       <div class="sug-row"><b>说明</b><span>${esc(s.note)}</span></div>
+      ${s.approved_changes ? `<div class="sug-row"><b>最终采纳内容</b><span>${esc(s.approved_changes.title)} · ${esc(s.approved_changes.priority)}<br>${esc(s.approved_changes.description)}</span></div>` : ''}
+      <button data-open-meeting="${esc(s.meeting_id)}">查看会议完整分析与待跟进事项</button>
       <div class="sug-row"><b>执行结果</b><span>${s.pool_item_id ? '已创建需求 ' + esc(s.pool_item_id) + '（后续可能移入看板或删除）' : s.status === 'rejected' ? '未执行，业务数据未改变' : '未执行'}</span></div>
-      ${s.status === 'pending' && mayReviewMeeting() ? `<div class="sug-acts"><button data-meeting-review="${esc(s.id)}" data-decision="approve" ${meetingReviewState.busy.has(s.id) ? 'disabled' : ''}>采纳</button><button data-meeting-review="${esc(s.id)}" data-decision="reject" ${meetingReviewState.busy.has(s.id) ? 'disabled' : ''}>拒绝</button></div>` : ''}
+      ${s.status === 'pending' && mayReviewMeeting() ? `<div class="sug-acts"><button data-edit-suggestion="${esc(s.id)}" ${meetingReviewState.busy.has(s.id) ? 'disabled' : ''}>修改后采纳</button><button data-meeting-review="${esc(s.id)}" data-decision="approve" ${meetingReviewState.busy.has(s.id) ? 'disabled' : ''}>采纳</button><button data-meeting-review="${esc(s.id)}" data-decision="reject" ${meetingReviewState.busy.has(s.id) ? 'disabled' : ''}>拒绝</button></div>` : ''}
     </div>`).join('') || '<div class="empty">暂无待审建议，请到 AI 助手保存会议并录入建议。</div>');
   $('#decision-log').innerHTML = meetingReviewState.suggestions.filter(s => s.reviewed_at).map(s => `<div class="logrow"><time>${esc(s.reviewed_at)} UTC</time><b>${esc(s.id)}</b><span>审核人 #${s.reviewed_by} · ${statusName[s.status]} · ${esc(s.reason || '未填写理由')}${s.pool_item_id ? ' · ' + esc(s.pool_item_id) : ''}</span></div>`).join('') || '<div class="empty">暂无服务器审核记录</div>';
   $('#review-refresh').onclick = async () => {

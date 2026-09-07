@@ -1,5 +1,4 @@
 """Meetings and proposal-only ingestion; no model or automatic write access."""
-import hashlib
 import json
 from datetime import datetime
 from uuid import uuid4
@@ -11,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, security
 from ..database import get_db
+from ..services.meeting_suggestions import stage_suggestion
 from ..meeting_schemas import MeetingIn, MeetingOut, ReviewIn, SuggestionIn, SuggestionOut
 
 router = APIRouter(tags=["meeting-review"])
@@ -27,7 +27,16 @@ def _rows(db, suggestion_id):
 
 def _out(db, suggestion, record):
     meeting = db.get(models.Meeting, record.meeting_id)
+    agent_run_id = None
+    parts = record.client_request_id.split(':')
+    if len(parts) == 3 and parts[0] == 'agent':
+        run = db.get(models.MeetingAgentRun, parts[1])
+        if run and run.result_json and suggestion.id in json.loads(run.result_json).get('suggestion_ids', []):
+            agent_run_id = run.id
+    approved = db.get(models.MeetingApprovalPayload, suggestion.id)
     return SuggestionOut(
+        approved_changes=json.loads(approved.changes_json) if approved else None,
+        agent_run_id=agent_run_id,
         id=suggestion.id, meeting_id=meeting.id, meeting_title=meeting.title,
         action="pool.create", origin=record.origin, evidence=suggestion.evidence,
         note=suggestion.note, changes=json.loads(suggestion.change_json),
@@ -62,51 +71,14 @@ def get_meeting(meeting_id: str, db: Session = Depends(get_db), _=Depends(securi
 
 @router.post("/suggestions", response_model=SuggestionOut)
 def submit_suggestion(body: SuggestionIn, db: Session = Depends(get_db), user=Depends(writer)):
-    meeting = db.get(models.Meeting, body.meeting_id)
-    if meeting is None:
-        raise HTTPException(404, "会议不存在")
-    if body.evidence not in meeting.transcript:
-        raise HTTPException(422, "证据必须是会议原文中的连续片段")
-    fingerprint = hashlib.sha256(
-        json.dumps(body.model_dump(), sort_keys=True, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-
-    def previous():
-        return db.query(models.MeetingSuggestionRecord).filter_by(
-            meeting_id=body.meeting_id, submitted_by=user.id,
-            client_request_id=body.client_request_id).first()
-
-    def replay(record):
-        if record.request_hash != fingerprint:
-            raise HTTPException(409, "同一 client_request_id 不能用于不同建议")
-        return _out(db, db.get(models.Suggestion, record.suggestion_id), record)
-
-    existing = previous()
-    if existing:
-        return replay(existing)
-    # Retry the rare short-ID collision without changing the ingestion key.
     for _ in range(3):
-        suggestion = models.Suggestion(
-            id="S" + uuid4().hex[:9], agent="手动录入" if body.origin == "manual" else "外部 Agent（提交方标记）",
-            kind="meeting", evidence=body.evidence, affected="新需求 → 需求池",
-            note=body.note, change_json=json.dumps(body.changes.model_dump(), ensure_ascii=False),
-            status="pending")
-        record = models.MeetingSuggestionRecord(
-            suggestion_id=suggestion.id, meeting_id=body.meeting_id,
-            submitted_by=user.id, client_request_id=body.client_request_id,
-            request_hash=fingerprint, origin=body.origin)
         try:
-            db.add(suggestion)
-            db.flush()
-            db.add(record)
+            suggestion, record = stage_suggestion(db, body, user)
             db.commit()
             return _out(db, suggestion, record)
         except IntegrityError:
             db.rollback()
-            existing = previous()
-            if existing:
-                return replay(existing)
-    raise HTTPException(409, "建议编号冲突，请重试")
+    raise HTTPException(409, "建议编号或提交冲突，请重试")
 
 
 @router.get("/suggestions", response_model=list[SuggestionOut])
@@ -131,7 +103,7 @@ def get_suggestion(suggestion_id: str, db: Session = Depends(get_db),
 def review_suggestion(suggestion_id: str, body: ReviewIn, db: Session = Depends(get_db),
                       user=Depends(reviewer)):
     suggestion, record = _rows(db, suggestion_id)
-    target_status = "approved" if body.decision == "approve" else "rejected"
+    target_status = "approved" if body.decision != "reject" else "rejected"
     # Atomic claim works on MySQL and SQLite. Business write and audit share this transaction.
     claimed = db.execute(update(models.Suggestion).where(
         models.Suggestion.id == suggestion_id, models.Suggestion.status == "pending"
@@ -141,18 +113,25 @@ def review_suggestion(suggestion_id: str, body: ReviewIn, db: Session = Depends(
         suggestion, record = _rows(db, suggestion_id)
         if suggestion.status != target_status:
             raise HTTPException(409, "建议已审核，不能改变审核结论")
+        previous = db.get(models.MeetingApprovalPayload, suggestion_id)
+        applied = json.loads(previous.changes_json) if previous else json.loads(suggestion.change_json)
+        requested = body.changes.model_dump() if body.changes else json.loads(suggestion.change_json)
+        if target_status == "approved" and applied != requested:
+            raise HTTPException(409, "建议已采纳，不能覆盖已执行的内容")
         return _out(db, suggestion, record)
 
     record.reviewed_by = user.id
     record.reviewed_at = datetime.utcnow()
     record.reason = body.reason
-    if body.decision == "approve":
+    if body.decision != "reject":
         # Dedicated A namespace avoids the legacy R max+1 allocator; one row per proposal.
         pool_id = f"A{record.id:09d}"
         if len(pool_id) > 10:
             db.rollback()
             raise HTTPException(409, "需求池编号容量已满")
-        changes = json.loads(suggestion.change_json)
+        changes = body.changes.model_dump() if body.changes else json.loads(suggestion.change_json)
+        db.add(models.MeetingApprovalPayload(suggestion_id=suggestion_id,
+                                             changes_json=json.dumps(changes, ensure_ascii=False)))
         db.add(models.PoolItem(id=pool_id, source=f"会议 {record.meeting_id} / 建议 {suggestion_id}",
                                **changes))
         record.pool_item_id = pool_id
