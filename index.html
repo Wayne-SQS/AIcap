@@ -537,7 +537,7 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
       <div class="footer">
         <span>■ Must 必须做　■ Should 应该做　■ Could 可以做</span>
         <span id="savehint">拖动卡片更新状态 · 点击编辑 · 本机自动保存</span>
-        <span class="hintcard" id="hintcount">已同步 20 条故事</span>
+        <span class="hintcard" id="hintcount">已同步 23 条故事</span>
         <span style="display:flex;gap:8px;flex-wrap:wrap"><button id="expjson">导出 JSON</button><button id="expcsv">导出 CSV</button><button id="reset" class="danger">恢复演示</button></span>
       </div>
 
@@ -805,7 +805,7 @@ const MILESTONES=[
 {id:"M1",week:1,name:"需求与规划基线",desc:"六项实验材料完整；≥3 切片；≥2 AI 角色记录"},
 {id:"M2",week:2,name:"Sprint 1 评审",desc:"US01–07 通过：可创建项目/配角色/组织需求"},
 {id:"M3",week:4,name:"中期评审",desc:"四视图联动，用例/时序自动生成可演示"},
-{id:"M4",week:6,name:"成果展演",desc:"全 24 条回归，六项 AI + 跨视图同步演示"}
+{id:"M4",week:6,name:"成果展演",desc:"US01–US24 需求全量回归，六项 AI + 跨视图同步演示"}
 ];
 
 const SPRINTS=[
@@ -1368,7 +1368,7 @@ $('#form').onsubmit=async function(e){
       notify((editing?'已更新':'已创建')+' · 已同步到服务器');
     }catch(err){notify(err.message);}
   }else{
-    const s={id:editing||'M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
+    const s={id:editing||'M'+String(Math.max(23,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
     for(const k of ['title','description','acceptance','priority'])s[k]=payload[k];
     for(const k of ['status','sprint','activity'])s[k]=payload[k];
     s.owner=f.get('owner')===''?null:+f.get('owner');
