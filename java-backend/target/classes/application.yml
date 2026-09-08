@@ -1,0 +1,36 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: aicap-java-backend
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3307/AIcap?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USER:aiguanli}
+    password: ${DB_PASSWORD:aiguanli-2026}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# 与 FastAPI 版相同的 JWT 契约(python-jose HS256,payload: {sub: str(user_id), exp})
+aicap:
+  jwt:
+    # 与 FastAPI .env 的 JWT_SECRET 同一把 key;默认值 ≥32 字节以满足 HS256 最低要求(生产必须用环境变量覆盖)
+    secret: ${JWT_SECRET:aicap-dev-secret-change-me-please-use-env-0123456789}
+    algorithm: HS256
+    expire-minutes: ${JWT_EXPIRE_MINUTES:720}
+  llm:
+    api-key: ${AICAP_LLM_API_KEY:}
+    base-url: ${AICAP_LLM_BASE_URL:https://api.deepseek.com}
+    model: ${AICAP_LLM_MODEL:deepseek-v4-flash}
+    timeout-seconds: 45
+    agent-worker-enabled: ${AICAP_AGENT_WORKER_ENABLED:true}
