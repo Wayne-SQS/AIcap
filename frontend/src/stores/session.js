@@ -52,7 +52,10 @@ export const useSessionStore = defineStore('session', {
             this.openLogin()
           }
         } else {
-          useProjectStoreSafe()?.restoreLocal()
+          const project = useProjectStoreSafe()
+          project?.restoreLocal()
+          // 对齐旧版 bootstrap:离线且浏览器未允许保存时的提示
+          if (project && !project.storageOK) project.savehint = '浏览器未允许保存 · 数据仅在本次打开期间保留'
         }
       } finally {
         this.booting = false

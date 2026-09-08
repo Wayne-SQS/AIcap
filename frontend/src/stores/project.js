@@ -50,7 +50,8 @@ export const useProjectStore = defineStore('project', {
       tasks: structuredClone(TASKS),
       pool: loadPool(),
       log: loadLog(),
-      serverSync: false  // 在线且已完成 loadAll(控制 #savehint 文案)
+      serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
+      savehint: '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     }
   },
   getters: {
@@ -111,6 +112,7 @@ export const useProjectStore = defineStore('project', {
       this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
       this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(-50)
       this.serverSync = true
+      this.savehint = '已连接后端 · 数据实时同步到服务器'
     },
     restoreLocal() {
       this.stories = loadStories().stories
