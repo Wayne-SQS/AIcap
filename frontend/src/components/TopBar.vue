@@ -2,17 +2,22 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { VIEW_NAMES } from '@/constants'
-import { useToast } from '@/composables/useToast'
+import { useSessionStore } from '@/stores/session'
 
-// 顶栏结构对齐旧版 index.html L437-444(#crumb-name/#mode-chip/#user-chip/#logout-btn)
+/* 顶栏对齐旧版 L437-444 + updateChip(L1281-1292):chip 文案/配色逐字保留 */
 const route = useRoute()
+const session = useSessionStore()
 const crumb = computed(() => VIEW_NAMES[route.name] || '')
 
-// PR-1 接入 session store 后接管 chip 的在线/离线状态与点击重连;当前为骨架占位
-const chipText = '检测中…'
-const chipBg = 'var(--orange)'
-const { notify } = useToast()
-function onChipClick() { notify('正在接入后端检测(PR-1 完成)') }
+const chipText = computed(() => session.apiMode
+  ? (session.currentUser ? '在线 · 已连接后端' : '在线 · 未登录')
+  : (session.booting ? '检测中…' : '离线 · 演示数据(点击重连)'))
+const chipBg = computed(() => session.apiMode ? 'var(--green)' : 'var(--orange)')
+const userChipText = computed(() => session.currentUser ? session.currentUser.display_name + ' · ' + session.roleName(session.currentUser.role) : '')
+
+function onChipClick() {
+  if (!session.apiMode) session.bootstrap()
+}
 </script>
 
 <template>
@@ -20,8 +25,8 @@ function onChipClick() { notify('正在接入后端检测(PR-1 完成)') }
     <span class="crumb">爱管理 <span aria-hidden="true">/</span> <b id="crumb-name">{{ crumb }}</b></span>
     <span style="display:flex;gap:8px;align-items:center">
       <span class="demo" id="mode-chip" :style="{ background: chipBg }" @click="onChipClick">{{ chipText }}</span>
-      <span class="demo" id="user-chip" style="display:none"></span>
-      <button id="logout-btn" style="display:none;padding:3px 9px;font-size:12px">退出</button>
+      <span v-if="session.currentUser" class="demo" id="user-chip">{{ userChipText }}</span>
+      <button v-if="session.currentUser" id="logout-btn" style="padding:3px 9px;font-size:12px" @click="session.logout()">退出</button>
     </span>
   </div>
 </template>

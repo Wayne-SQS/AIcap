@@ -2,6 +2,7 @@
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ToastBox from '@/components/ToastBox.vue'
+import LoginDialog from '@/components/LoginDialog.vue'
 </script>
 
 <template>
@@ -13,4 +14,5 @@ import ToastBox from '@/components/ToastBox.vue'
     </main>
   </div>
   <ToastBox />
+  <LoginDialog />
 </template>
