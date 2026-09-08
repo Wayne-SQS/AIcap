@@ -1,11 +1,11 @@
 /* ==========================================================================
  * 爱管理 E2E 双模式公共助手
  * --------------------------------------------------------------------------
- * AICAP_UI_FLAVOR=legacy(默认)  读仓库根 index.html,锚点 const API_BASE='...'
- * AICAP_UI_FLAVOR=vue            读 frontend/dist/index.html,锚点 window.__AICAP_API_BASE__='...'
+ * AICAP_UI_FLAVOR=legacy(默认)  读 legacy/index.html(Vue 改造前的旧版前端,归档保留),锚点 const API_BASE='...'
+ * AICAP_UI_FLAVOR=vue            读 frontend/dist/index.html(Vue3 现行前端),锚点 window.__AICAP_API_BASE__='...'
  *
  * vue 模式运行前提:cd frontend && npm run build,且静态服务器指向 frontend/dist
- * (默认端口 8092,可用 AICAP_UI_URL 覆盖;legacy 默认 8090 指向仓库根)。
+ * (默认端口 8092,可用 AICAP_UI_URL 覆盖;legacy 默认 8090,静态服务器仍指向仓库根,页面在 /legacy/)。
  * vue 为 SPA,首屏需加载模块脚本,waitFor 默认超时放宽 2.5 倍(6s→15s)。
  * ========================================================================== */
 const fs = require('node:fs');
@@ -20,17 +20,17 @@ const VUE_ANCHOR = "window.__AICAP_API_BASE__='http://127.0.0.1:8000';";
 function flavor() { return FLAVOR; }
 function isVue() { return FLAVOR === 'vue'; }
 
-/** 默认页面地址:legacy=8090(仓库根静态服务),vue=8092(frontend/dist 静态服务) */
+/** 默认页面地址:legacy=8090/legacy/(仓库根静态服务,旧版页面已归档),vue=8092(frontend/dist 静态服务) */
 function defaultPageUrl() {
   if (isVue()) return process.env.AICAP_UI_URL || 'http://127.0.0.1:8092/index.html';
-  return process.env.AICAP_UI_URL || 'http://127.0.0.1:8090/index.html';
+  return process.env.AICAP_UI_URL || 'http://127.0.0.1:8090/legacy/index.html';
 }
 
 /** 读取当前 flavor 的 HTML 并把 API 锚点替换为 apiBase(不改原文件) */
 function flavorHtml(apiBase) {
   const file = isVue()
     ? path.join(REPO, 'frontend', 'dist', 'index.html')
-    : path.join(REPO, 'index.html');
+    : path.join(REPO, 'legacy', 'index.html');
   return fs.readFileSync(file, 'utf8')
     .replace(LEGACY_ANCHOR, `const API_BASE='${apiBase}';`)
     .replace(VUE_ANCHOR, `window.__AICAP_API_BASE__='${apiBase}';`);

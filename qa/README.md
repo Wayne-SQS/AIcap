@@ -73,8 +73,8 @@ node <repo>\qa\meeting-review-e2e.spec.js  # 会议审核(需先起 agent_provid
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `AICAP_UI_FLAVOR` | `legacy` | `legacy`=仓库根 `index.html`(静态源 8090/8091);`vue`=`frontend/dist` 构建产物(静态源 8092) |
-| `AICAP_UI_URL` | 按 flavor | 覆盖页面地址:legacy 默认 `http://127.0.0.1:8090/index.html`,vue 默认 `http://127.0.0.1:8092/index.html` |
+| `AICAP_UI_FLAVOR` | `legacy` | `legacy`=`legacy/index.html`(Vue 改造前的旧版前端,已归档到 `legacy/`,静态源 8090/8091);`vue`=`frontend/dist` 构建产物(Vue3 现行前端,静态源 8092) |
+| `AICAP_UI_URL` | 按 flavor | 覆盖页面地址:legacy 默认 `http://127.0.0.1:8090/legacy/index.html`,vue 默认 `http://127.0.0.1:8092/index.html` |
 
 ```powershell
 # vue 模式运行前置:先构建产物,再起 dist 静态服务(8092)

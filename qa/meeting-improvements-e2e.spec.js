@@ -6,8 +6,8 @@ const {flavorHtml, isVue, defaultPageUrl} = require('./e2e-helpers');
 const root = path.resolve(__dirname,'..');
 const base = 'http://127.0.0.1:8001';
 const html = flavorHtml(base);
-/* legacy 沿用 8091 独立静态源(与 ui-e2e 的 8090 隔离);vue 走 dist 静态源(默认 8092) */
-const pageUrl = process.env.AICAP_UI_URL || (isVue() ? defaultPageUrl() : 'http://127.0.0.1:8091/index.html');
+/* legacy 沿用 8091 独立静态源(与 ui-e2e 的 8090 隔离),旧版页面在 /legacy/;vue 走 dist 静态源(默认 8092) */
+const pageUrl = process.env.AICAP_UI_URL || (isVue() ? defaultPageUrl() : 'http://127.0.0.1:8091/legacy/index.html');
 (async () => {
  const browser = await chromium.launch({channel:'msedge',headless:true});
  let checks=0;
