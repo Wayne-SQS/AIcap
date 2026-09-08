@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import Base, SessionLocal, engine
-from .routers import auth, dashboard, pool, stories, tasks, meetings, agent
+from .routers import auth, dashboard, pool, stories, tasks, meetings, agent, canvas_agent, profile_agent
 from .seed import seed_all
 from . import config
 from .meeting_agent.jobs import Worker
@@ -38,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in (auth.router, stories.router, pool.router, tasks.router, dashboard.router, meetings.router, agent.router):
+for router in (auth.router, stories.router, pool.router, tasks.router, dashboard.router, meetings.router, agent.router, canvas_agent.router, profile_agent.router):
     app.include_router(router, prefix="/api")
 
 

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .. import config, models, security
 from ..database import get_db
+from . import canvas_agent, profile_agent
 from ..meeting_agent import jobs
 from ..meeting_agent.model_client import settings_ready
 from ..meeting_agent.prompts import PROMPT_VERSION
@@ -101,3 +102,16 @@ def retry_run(run_id: str, db: Session = Depends(get_db), user=Depends(writer)):
     jobs.event(db, run, 'queued', {'requested_by': user.id, 'retry': True})
     db.commit()
     return output(run)
+
+
+@router.get('/agents', tags=['agents'])
+def list_agents(_=Depends(security.get_current_user)):
+    meeting = {'agent_id': 'meeting', 'name': 'AI 会议执行智能体',
+               'description': '把会议内容转化为任务、负责人和执行计划',
+               'status': 'available', 'available': True, 'configured': settings_ready(),
+               'model': config.AICAP_LLM_MODEL, 'worker_enabled': config.AICAP_AGENT_WORKER_ENABLED,
+               'supported_actions': ['pool.create'], 'prompt_version': PROMPT_VERSION,
+               'config_path': '/api/agent/config'}
+    return {'agents': [meeting,
+                       {**canvas_agent.CAPABILITY, 'config_path': '/api/canvas-agent/config'},
+                       {**profile_agent.CAPABILITY, 'config_path': '/api/profile-agent/config'}]}
