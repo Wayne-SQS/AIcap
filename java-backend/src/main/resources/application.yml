@@ -11,7 +11,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
   jackson:
     time-zone: Asia/Shanghai
-    default-property-inclusion: non_null
+    # 对齐 FastAPI:字段恒输出(含 null),不裁剪
 
 mybatis-plus:
   configuration:
