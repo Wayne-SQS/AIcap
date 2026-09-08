@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
 import { useToast } from '@/composables/useToast'
@@ -62,6 +62,8 @@ function facts(items) {
 }
 
 onMounted(() => { generation++; refreshRun() })
+/* SPA 重载/后到数据:loadAll 异步补选会议后(selected 由空变有值)补拉运行状态并恢复轮询 */
+watch(() => meeting.selected, v => { if (v) { generation++; refreshRun() } })
 onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 

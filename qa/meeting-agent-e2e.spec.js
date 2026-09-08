@@ -3,12 +3,11 @@
  */
 const {chromium} = require('playwright-core');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
+const {flavorHtml, defaultPageUrl} = require('./e2e-helpers');
 const repo = path.resolve(__dirname, '..');
 const apiBase = 'http://127.0.0.1:8001';
-const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8').replace(
-  "const API_BASE='http://127.0.0.1:8000';", `const API_BASE='${apiBase}';`);
+const html = flavorHtml(apiBase);
 (async () => {
   const browser = await chromium.launch({channel: 'msedge', headless: true});
   const errors = [];
@@ -20,10 +19,11 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8').replace(
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/index.html', r => r.fulfill({contentType: 'text/html', body: html}));
-    await page.goto('http://127.0.0.1:8090/index.html');
+    await page.goto(defaultPageUrl());
     await page.fill('#login-user', username); await page.fill('#login-pass', '123456');
     await page.click('#login-form button[type="submit"]');
-    await page.waitForFunction(() => document.querySelector('#savehint').textContent.includes('已连接后端'));
+    /* 登录就绪信标:vue SPA 中 #savehint 随 BoardView 挂载,改用常驻顶栏 mode-chip(两版文案一致) */
+    await page.waitForFunction(() => document.querySelector('#mode-chip')?.textContent.includes('已连接后端'));
     await page.click('[data-view="ai"]'); await page.waitForSelector('#agent-start');
     return page;
   }
@@ -31,8 +31,8 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8').replace(
     await page.fill('#meeting-save-form [name="title"]', title);
     await page.fill('#meeting-save-form [name="transcript"]', title + '\n负责人和Sprint下次再定。');
     await page.click('#meeting-save-form button');
-    await page.waitForFunction(t => document.querySelector('#saved-transcript').textContent.includes(t), title);
-    await page.waitForFunction(() => !document.querySelector('#agent-start').disabled);
+    await page.waitForFunction(t => document.querySelector('#saved-transcript')?.textContent.includes(t), title);
+    await page.waitForFunction(() => !document.querySelector('#agent-start')?.disabled);
   }
   async function start(page) {
     const response = page.waitForResponse(r => r.request().method() === 'POST' && /\/meetings\/[^/]+\/runs$/.test(r.url()));
@@ -64,7 +64,7 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8').replace(
     await adminCard.locator('[data-decision="approve"]').click();
     await adminCard.getByText(/已创建需求/).waitFor();
     await admin.click('[data-view="pool"]');
-    await admin.waitForFunction(t => document.querySelector('#pool-list').textContent.includes(t), title);
+    await admin.waitForFunction(t => document.querySelector('#pool-list')?.textContent.includes(t), title);
     check(true, 'human approval creates actual pool item');
     await page.click('[data-view="ai"]');
     await save(page, 'Agent演示 [FAIL_ONCE] ' + suffix);

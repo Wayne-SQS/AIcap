@@ -316,7 +316,8 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .pool-item .pdesc{margin:0;font-size:13px;color:var(--muted)}
 .pool-item .pmeta{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;font-family:var(--mono);color:var(--muted)}
 .pool-item .pacts{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
-.pool-form{border:2px solid var(--ink);background:var(--paper-2);padding:14px;box-shadow:var(--shadow);margin-bottom:14px;display:none}
+/* 旧版由 JS 内联 display 控制;Vue 侧由 PoolView 的 v-show 接管,类规则不再隐藏 */
+.pool-form{border:2px solid var(--ink);background:var(--paper-2);padding:14px;box-shadow:var(--shadow);margin-bottom:14px}
 .pool-form input,.pool-form textarea{width:100%;margin-bottom:10px}
 .pool-form .row{display:flex;gap:10px;justify-content:flex-end;align-items:center}
 

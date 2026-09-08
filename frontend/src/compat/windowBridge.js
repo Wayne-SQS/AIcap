@@ -22,4 +22,9 @@ export function installWindowBridge({ router, app }) {
   Object.defineProperty(window, 'curView', {
     get: () => router.currentRoute.value.name
   })
+  /* spec 直接 evaluate 访问全局 stories/tasks(旧版顶层 const 在全局词法环境),Vue 版以 getter 等效暴露 */
+  Object.defineProperty(window, 'stories', { get: () => useProjectStore().stories })
+  Object.defineProperty(window, 'tasks', { get: () => useProjectStore().tasks })
+  /* 旧版 render() 手动重绘在 Vue 响应式下为 no-op,仅为兼容 spec 调用序列 */
+  window.render = () => {}
 }

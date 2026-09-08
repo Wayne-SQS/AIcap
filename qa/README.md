@@ -13,6 +13,7 @@
 | `meeting-review-e2e.spec.js` | 会议审核工作流 E2E |
 | `meeting-improvements-e2e.spec.js` | 会议改进项 E2E(修改后采纳/Sprint 必选/owner 可空) |
 | `meeting-agent-e2e.spec.js` | 会议 Agent E2E(fixture 供应商/失败重试/证据伪造拒绝) |
+| `e2e-helpers.js` | E2E 双模式公共助手:按 `AICAP_UI_FLAVOR` 读 legacy/vue 页面并注入 API_BASE(见下「E2E 双模式」) |
 | `agent_provider_fixture.py` | 本地 LLM fixture 供应商(端口 9009,会议 Agent E2E 依赖) |
 | `reset_qa_db.py` | 重置 QA 库 `AIcap_qa` 到干净播种状态(重复执行 E2E 前使用) |
 | `verify_migration.py` | 血缘迁移校验(只读,固化 v2 用例 DB-01~04;对 dev 库或 `--qa` QA 库执行) |
@@ -66,6 +67,32 @@ node <repo>\qa\kanban-gantt-e2e.spec.js    # 血缘 FE-KGN+OE-KGN(36 用例,在�
 node <repo>\qa\meeting-review-e2e.spec.js  # 会议审核(需先起 agent_provider_fixture 的场合见各 spec 头注释)
 ```
 
+## E2E 双模式(legacy / vue)
+
+自 Vue3 化改造(`frontend/`,分支 `feat/vue-frontend`)起,全部 5 个 E2E spec 同时支持两种页面形态,由环境变量切换:
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AICAP_UI_FLAVOR` | `legacy` | `legacy`=仓库根 `index.html`(静态源 8090/8091);`vue`=`frontend/dist` 构建产物(静态源 8092) |
+| `AICAP_UI_URL` | 按 flavor | 覆盖页面地址:legacy 默认 `http://127.0.0.1:8090/index.html`,vue 默认 `http://127.0.0.1:8092/index.html` |
+
+```powershell
+# vue 模式运行前置:先构建产物,再起 dist 静态服务(8092)
+cd frontend
+npm install        # 仅首次
+npm run build      # 产物输出 frontend/dist
+cd dist
+python -m http.server 8092 --bind 127.0.0.1
+
+# 同一套 spec,两套页面各跑一遍即为双模式回归:
+$env:AICAP_UI_FLAVOR="vue"       # 缺省或置 legacy 即旧版单页
+node <repo>\qa\ui-e2e.spec.js
+```
+
+- 注入方式与 legacy 一致:`e2e-helpers.js` 读取对应 HTML,把 API 锚点(legacy `const API_BASE='...'` / vue `window.__AICAP_API_BASE__='...'`)替换为 QA 后端后经 Playwright route 拦截下发,不修改源文件。
+- vue 为 SPA,首屏需加载模块脚本,等待超时自动放宽 2.5 倍(6s→15s);登录就绪信标统一改用常驻顶栏 `#mode-chip`(`已连接后端` 文案两版一致)。
+- 双模式基线(2026-09-08):legacy 与 vue 各 120 用例全通过(48 ui-e2e + 36 kanban-gantt + 12 meeting-review + 13 meeting-agent + 11 meeting-improvements)。
+
 ## 迁移/重建库后的校验
 
 ```powershell
@@ -80,3 +107,4 @@ D:\aiguanli-venv\Scripts\python.exe <repo>\qa\verify_migration.py --qa   # QA �
 - `index.html` 内 `API_BASE` 固定 `127.0.0.1:8000`;E2E 通过改写内存 HTML 指向 8001,不修改源文件。
 - 页面经 `http://127.0.0.1:8090` 打开以提供 localStorage 源;离线用例将 API_BASE 指向无人监听端口(59999),触发前端自动回退。
 - 会议 Agent E2E 依赖:fixture 供应商(9009,uvicorn 启动见 2b)、QA 后端带 `NO_PROXY` 且 `AICAP_LLM_BASE_URL` 覆写为 `http://127.0.0.1:9009`(否则后端会按 `.env` 调用真实 DeepSeek,分析结果不可复现)。
+- vue 模式前提是 `frontend/dist` 为最新构建(`npm run build`);spec 读取 `dist/index.html` 中的 `window.__AICAP_API_BASE__` 锚点注入 QA 后端地址。

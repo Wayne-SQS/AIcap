@@ -10,11 +10,11 @@
  * 在线用例全部设计为可逆(测后恢复 QA 库原状)。
  */
 const { chromium } = require('playwright-core');
-const fs = require('fs');
 const path = require('path');
+const { defaultPageUrl, waitScale, openApp: openFlavor } = require('./e2e-helpers');
 
 const REPO = path.resolve(__dirname, '..');
-const PAGE_URL = process.env.AICAP_UI_URL || 'http://127.0.0.1:8090/index.html';
+const PAGE_URL = defaultPageUrl();
 const QA = process.env.AICAP_QA_URL || 'http://127.0.0.1:8001';
 const DEAD = 'http://127.0.0.1:59999';
 
@@ -25,21 +25,14 @@ function check(name, cond, extra = '') {
   if (cond) { passed++; results.push({ name, ok: true }); console.log('  ✔ ' + name); }
   else { failed++; results.push({ name, ok: false, extra }); console.log('  ✘ ' + name + (extra ? ' :: ' + extra : '')); }
 }
-async function waitFor(fn, ms = 6000, step = 80) {
+async function waitFor(fn, ms = 6000 * waitScale(), step = 80) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) { try { if (await fn()) return true; } catch (e) {} await new Promise(r => setTimeout(r, step)); }
   return false;
 }
 
 async function openApp(browser, apiBase) {
-  const ctx = await browser.newContext({ acceptDownloads: true });
-  await ctx.grantPermissions(['local-network-access']);
-  const page = await ctx.newPage();
-  const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8')
-    .replace("const API_BASE='http://127.0.0.1:8000';", `const API_BASE='${apiBase}';`);
-  await page.route('**/index.html', r => r.fulfill({ contentType: 'text/html', body: html }));
-  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
-  return { ctx, page };
+  return openFlavor(browser, apiBase, { ctxOpts: { acceptDownloads: true }, pageUrl: PAGE_URL });
 }
 
 async function clickCard(page, storyId) { await page.click(`#board .card[data-id="${storyId}"]`); await page.waitForSelector('#editor[open]'); }

@@ -72,6 +72,7 @@ async function serverEdit(id) {
   } catch (err) { notify('审核未确认，请刷新核对后重试：' + err.message) }
   finally {
     meeting.busy = meeting.busy.filter(x => x !== id)
+    editRef.value?.finish()
   }
 }
 

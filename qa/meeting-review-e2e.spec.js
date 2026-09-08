@@ -4,13 +4,12 @@
  */
 const {chromium} = require('playwright-core');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
+const {flavorHtml, defaultPageUrl} = require('./e2e-helpers');
 const repo = path.resolve(__dirname, '..');
 const apiBase = process.env.MEETING_QA_API || 'http://127.0.0.1:8001';
-const pageUrl = process.env.MEETING_QA_PAGE || 'http://127.0.0.1:8090/index.html';
-const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
-  .replace("const API_BASE='http://127.0.0.1:8000';", `const API_BASE='${apiBase}';`);
+const pageUrl = process.env.MEETING_QA_PAGE || defaultPageUrl();
+const html = flavorHtml(apiBase);
 
 (async () => {
   const browser = await chromium.launch({channel: 'msedge', headless: true});
@@ -29,7 +28,8 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
     await page.fill('#login-user', username);
     await page.fill('#login-pass', '123456');
     await page.click('#login-form button[type="submit"]');
-    await page.waitForFunction(() => document.querySelector('#savehint').textContent.includes('已连接后端'));
+    /* 登录就绪信标:vue SPA 中 #savehint 随 BoardView 挂载,改用常驻顶栏 mode-chip(两版文案一致) */
+    await page.waitForFunction(() => document.querySelector('#mode-chip')?.textContent.includes('已连接后端'));
     await page.click('[data-view="ai"]');
     await page.waitForSelector('#meeting-save-form');
     return page;
@@ -43,7 +43,7 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
     await member.fill('#meeting-save-form [name="title"]', title);
     await member.fill('#meeting-save-form [name="transcript"]', transcript);
     await member.click('#meeting-save-form button');
-    await member.waitForFunction(t => document.querySelector('#saved-transcript').textContent === t, transcript);
+    await member.waitForFunction(t => document.querySelector('#saved-transcript')?.textContent === t, transcript);
     check(true, 'meeting saved and transcript loaded');
     async function submit(name, evidence) {
       await member.fill('#meeting-proposal-form [name="title"]', name);
@@ -57,7 +57,7 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
     const approvedTitle = '周报 <img src=x onerror=alert(1)> ' + suffix;
     const sid = await submit(approvedTitle, '会议决定新增导出周报。');
     // Ensure UI response handling has finished before filling the next form.
-    await member.waitForFunction(() => document.querySelector('#meeting-proposal-form [name="title"]').value === '');
+    await member.waitForFunction(() => document.querySelector('#meeting-proposal-form [name="title"]')?.value === '');
     const rejectedId = await submit('暂缓需求-' + suffix, '另一个想法暂时不做。');
     await member.click('[data-view="review"]');
     await member.waitForSelector(`[data-meeting-suggestion="${sid}"]`);
@@ -74,14 +74,14 @@ const html = fs.readFileSync(path.join(repo, 'index.html'), 'utf8')
     await approveButton.click();
     const approved = await (await approvedResponse).json();
     check(approved.execution_status === 'succeeded' && !!approved.pool_item_id, 'approve executes pool creation');
-    await admin.waitForFunction(id => document.querySelector(`[data-meeting-suggestion="${id}"]`).textContent.includes('已创建需求'), sid);
+    await admin.waitForFunction(id => document.querySelector(`[data-meeting-suggestion="${id}"]`)?.textContent.includes('已创建需求'), sid);
     admin.once('dialog', d => d.accept('本轮不做'));
     const rejectedResponse = admin.waitForResponse(r => r.url().endsWith(`/suggestions/${rejectedId}/review`));
     await admin.click(`[data-meeting-review="${rejectedId}"][data-decision="reject"]`);
     const rejected = await (await rejectedResponse).json();
     check(rejected.status === 'rejected' && rejected.pool_item_id === null, 'reject executes no business change');
     await admin.click('[data-view="pool"]');
-    await admin.waitForFunction(t => document.querySelector('#pool-list').textContent.includes(t), approvedTitle);
+    await admin.waitForFunction(t => document.querySelector('#pool-list')?.textContent.includes(t), approvedTitle);
     check(!(await admin.textContent('#pool-list')).includes('暂缓需求-' + suffix), 'rejected item absent from pool');
     await member.reload();
     await member.click('[data-view="review"]');

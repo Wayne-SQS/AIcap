@@ -1,11 +1,13 @@
 /* Browser regression for review edits, explicit scheduling and unassigned owners. */
 const {chromium} = require('playwright-core');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
+const {flavorHtml, isVue, defaultPageUrl} = require('./e2e-helpers');
 const root = path.resolve(__dirname,'..');
 const base = 'http://127.0.0.1:8001';
-const html = fs.readFileSync(path.join(root,'index.html'),'utf8').replace("const API_BASE='http://127.0.0.1:8000';",`const API_BASE='${base}';`);
+const html = flavorHtml(base);
+/* legacy 沿用 8091 独立静态源(与 ui-e2e 的 8090 隔离);vue 走 dist 静态源(默认 8092) */
+const pageUrl = process.env.AICAP_UI_URL || (isVue() ? defaultPageUrl() : 'http://127.0.0.1:8091/index.html');
 (async () => {
  const browser = await chromium.launch({channel:'msedge',headless:true});
  let checks=0;
@@ -16,10 +18,10 @@ const html = fs.readFileSync(path.join(root,'index.html'),'utf8').replace("const
   const page=await context.newPage();
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/index.html',r=>r.fulfill({contentType:'text/html',body:html}));
-  await page.goto('http://127.0.0.1:8091/index.html');
+  await page.goto(pageUrl);
   await page.fill('#login-user','成员1');await page.fill('#login-pass','123456');
   await page.click('#login-form button[type=submit]');
-  await page.waitForFunction(()=>document.querySelector('#savehint').textContent.includes('已连接后端'));
+  await page.waitForFunction(()=>document.querySelector('#mode-chip')?.textContent.includes('已连接后端'));
   const title='交互回归-'+Date.now();
   const suggestion=await page.evaluate(async title=>{
    const m=await api('/api/meetings',{method:'POST',body:JSON.stringify({title,transcript:'希望增加导出周报功能。'})});
@@ -50,7 +52,10 @@ const html = fs.readFileSync(path.join(root,'index.html'),'utf8').replace("const
   await page.waitForSelector('dialog[open]',{state:'hidden'});
   const story=await page.evaluate(async title=>(await api('/api/stories')).find(s=>s.title===title),title+'-已修正');
   check(story.sprint===3 && story.owner_id===null && story.activity===4,'chosen Sprint and unassigned owner persisted');
-  await page.evaluate(()=>{go('board');document.querySelector('#sprint').value='all';document.querySelector('#owner').value='all';render();});
+  /* vue SPA:go() 为异步路由,先等 BoardView 挂载出过滤控件再设置(legacy 下等待立即满足) */
+  await page.evaluate(()=>{go('board')});
+  await page.waitForSelector('#sprint');
+  await page.evaluate(()=>{for(const id of ['#sprint','#owner']){const el=document.querySelector(id);el.value='all';el.dispatchEvent(new Event('change'));}render();});
   const storyCard=page.locator(`#board [data-id="${story.id}"]`);
   check((await storyCard.textContent()).includes('未分配') && !(await storyCard.textContent()).includes('成员 1'),'unassigned story does not display member 1');
   await storyCard.click();
@@ -60,7 +65,7 @@ const html = fs.readFileSync(path.join(root,'index.html'),'utf8').replace("const
   await page.waitForSelector('#editor[open]',{state:'hidden'});
   check((await page.evaluate(async id=>(await api('/api/stories')).find(s=>s.id===id),story.id)).owner_id===null,'editing title does not assign member 1');
   await page.reload();
-  await page.waitForFunction(()=>document.querySelector('#savehint').textContent.includes('已连接后端'));
+  await page.waitForFunction(()=>document.querySelector('#mode-chip')?.textContent.includes('已连接后端'));
   await page.evaluate(()=>go('review'));
   check((await page.locator(`[data-meeting-suggestion="${suggestion.id}"]`).textContent()).includes('最终采纳内容'),'revision survives reload');
   check(errors.length===0,'no browser JavaScript errors');
