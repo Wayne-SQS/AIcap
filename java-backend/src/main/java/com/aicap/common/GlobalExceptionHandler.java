@@ -49,6 +49,13 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.NOT_FOUND, "路径不存在: " + e.getResourcePath());
     }
 
+    /** 路径存在但 HTTP 方法不支持 → 405(对齐 FastAPI,勿被兜底 Exception 吞成 500) */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, String>> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        return error(HttpStatus.METHOD_NOT_ALLOWED, "请求方法不支持: " + e.getMethod());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleOther(Exception e) {
         return error(HttpStatus.INTERNAL_SERVER_ERROR,

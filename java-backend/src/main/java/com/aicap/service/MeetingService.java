@@ -166,6 +166,11 @@ public class MeetingService {
     /** 审核:原子认领 pending→目标;approve/modify 落 pool + payload */
     @Transactional
     public SuggestionOutHolder review(String suggestionId, MeetingDtos.ReviewIn in, User user) {
+        // 决策⇔载荷一致性(对齐 FastAPI ReviewIn model_validator):modify_and_approve 必须带 changes,其余不得带
+        boolean isModify = "modify_and_approve".equals(in.decision());
+        if (isModify != (in.changes() != null)) {
+            throw ApiException.unprocessable("仅修改后采纳必须提供 changes");
+        }
         Suggestion suggestion = suggestionMapper.selectById(suggestionId);
         MeetingSuggestionRecord record = getRecordBySuggestionId(suggestionId);
         if (suggestion == null) throw ApiException.notFound("会议建议不存在");

@@ -1,6 +1,7 @@
 package com.aicap.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -16,7 +17,7 @@ public final class MeetingDtos {
     private MeetingDtos() {
     }
 
-    /** POST /api/meetings */
+    /** POST /api/meetings(MeetingIn;FastAPI extra=forbid → 未知字段拒绝,不加 ignoreUnknown) */
     public record MeetingIn(@NotBlank @Size(max = 200) String title,
                             @NotBlank @Size(max = 16000) String transcript) {
     }
@@ -27,7 +28,7 @@ public final class MeetingDtos {
                              @JsonProperty("created_at") LocalDateTime createdAt) {
     }
 
-    /** 需求池变更载荷(PoolChanges) */
+    /** 需求池变更载荷(PoolChanges;FastAPI extra=forbid → 未知字段拒绝) */
     public record PoolChanges(@NotBlank @Size(max = 200) String title,
                               @Size(max = 10000) String description,
                               @Pattern(regexp = "^(Must|Should|Could)$") String priority) {
@@ -37,7 +38,7 @@ public final class MeetingDtos {
         }
     }
 
-    /** POST /api/suggestions(SuggestionIn) */
+    /** POST /api/suggestions(SuggestionIn;FastAPI extra=forbid → 未知字段拒绝) */
     public record SuggestionIn(
             @NotBlank @Size(max = 36) @JsonProperty("meeting_id") String meetingId,
             @NotBlank @Size(max = 80) @JsonProperty("client_request_id") String clientRequestId,
@@ -45,7 +46,7 @@ public final class MeetingDtos {
             @Pattern(regexp = "^(manual|agent)$") String origin,
             @NotBlank @Size(max = 5000) String evidence,
             @Size(max = 2000) String note,
-            @NotNull PoolChanges changes) {
+            @NotNull @Valid PoolChanges changes) {
         public SuggestionIn {
             if (action == null) action = "pool.create";
             if (origin == null) origin = "manual";
@@ -53,10 +54,10 @@ public final class MeetingDtos {
         }
     }
 
-    /** POST /api/suggestions/{id}/review(ReviewIn;modify_and_approve 必须带 changes) */
+    /** POST /api/suggestions/{id}/review(ReviewIn;modify_and_approve 必须带 changes,其余不得带;FastAPI extra=forbid) */
     public record ReviewIn(
             @NotBlank @Pattern(regexp = "^(approve|reject|modify_and_approve)$") String decision,
-            PoolChanges changes,
+            @Valid PoolChanges changes,
             @Size(max = 1000) String reason) {
         public ReviewIn {
             if (reason == null) reason = "";

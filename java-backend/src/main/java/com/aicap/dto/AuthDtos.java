@@ -1,5 +1,6 @@
 package com.aicap.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /** 认证域 DTO(输出字段名对齐 FastAPI schemas:snake_case) */
@@ -8,7 +9,8 @@ public final class AuthDtos {
     private AuthDtos() {
     }
 
-    /** POST /api/auth/login 请求体 */
+    /** POST /api/auth/login 请求体(FastAPI LoginIn 默认忽略未知字段) */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record LoginIn(String username, String password) {
     }
 

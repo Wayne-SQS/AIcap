@@ -1,6 +1,7 @@
 package com.aicap.dto;
 
 import com.aicap.entity.Story;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -16,8 +17,9 @@ public final class StoryDtos {
     private StoryDtos() {
     }
 
-    /** POST /api/stories 请求体(StoryIn;校验对齐 pydantic:priority 枚举,sprint/activity/status 范围) */
-    public record StoryIn(@Size(max = 200) String title,
+    /** POST /api/stories 请求体(StoryIn;校验对齐 pydantic:title 必填≤200,priority 枚举,sprint/activity/status 范围) */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record StoryIn(@NotNull @Size(max = 200) String title,
                           String description,
                           String acceptance,
                           @Pattern(regexp = "^(Must|Should|Could)$", message = "priority 必须是 Must/Should/Could")
@@ -27,7 +29,6 @@ public final class StoryDtos {
                           @NotNull @Min(0) @Max(2) Integer status,
                           @JsonProperty("owner_id") Integer ownerId) {
         public StoryIn {
-            if (title == null) title = "";
             if (description == null) description = "";
             if (acceptance == null) acceptance = "";
             if (priority == null) priority = "Must";
@@ -38,6 +39,7 @@ public final class StoryDtos {
     }
 
     /** PATCH /api/stories/{id} 请求体(StoryPatch:字段可空,null 表示不更新;owner_id 传 null 也视为未提供) */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record StoryPatch(@Size(max = 200) String title,
                              String description,
                              String acceptance,
