@@ -15,6 +15,7 @@ class User(Base):
     role = Column(String(20), nullable=False, default="member")
     password_hash = Column(String(255), nullable=False)
     color = Column(String(20), nullable=False, default="green")
+    capacity_hours = Column(Integer, nullable=False, default=60)
 
 
 class Story(Base):
@@ -50,11 +51,25 @@ class Task(Base):
     week_start = Column(Integer, nullable=False)
     week_end = Column(Integer, nullable=False)
     story_ref = Column(String(100), nullable=True)
-    # 看板与甘特「强制血缘对应」重构字段
-    kanban_card_id = Column(String(10), ForeignKey("stories.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True)  # 所属看板卡(管理类任务为 NULL);删卡时数据库自动解绑,与迁移 SQL 的 FK 一致
-    estimated_hours = Column(Integer, nullable=False, default=0)  # 预估工时(加权进度分母)
-    task_type = Column(String(10), nullable=False, default="feature")  # feature=开发任务挂卡 / management=管理任务
-    status = Column(Integer, nullable=False, default=0)  # 0待办 1进行中 2完成 3已取消
+    # Execution and cross-view linkage fields share one task record.
+    kanban_card_id = Column(
+        String(10),
+        ForeignKey("stories.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+    )
+    estimated_hours = Column(Integer, nullable=False, default=0)
+    task_type = Column(String(10), nullable=False, default="feature")
+    depends_on = Column(String(100), nullable=True, default="")
+    status = Column(Integer, nullable=False, default=0)
+    progress = Column(Integer, nullable=False, default=0)
+    blocked = Column(Integer, nullable=False, default=0)
+
+    @property
+    def sprints(self) -> list[int]:
+        """Sprint is derived from the execution schedule, not copied from Story."""
+        start = max(1, self.week_start)
+        end = min(6, self.week_end)
+        return sorted({(week - 1) // 2 + 1 for week in range(start, end + 1)})
 
 
 class PoolItem(Base):

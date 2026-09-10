@@ -277,7 +277,7 @@ def test_fk_on_delete_set_null_via_raw_delete(client, member1_token):
 
 
 def test_seed_lineage_complete(client):
-    """DB-07 新库 seed_all 血缘完整:M21-23 存在,12 feature 挂 9 卡,4 管理任务。"""
+    """DB-07 新库使用 US01-US37 基线，12 个 feature 任务挂卡，4 个管理任务不挂卡。"""
     with TestSession() as db:
         # 自包含:先清场(播种前快照为空),测完恢复空场,不依赖执行顺序
         db.query(models.Task).delete()
@@ -286,13 +286,13 @@ def test_seed_lineage_complete(client):
         db.commit()
         assert db.query(models.Story).count() == 0
         seed.seed_all(db)
-        assert db.query(models.Story).count() == 23
-        assert {s.id for s in db.query(models.Story)} >= {"M21", "M22", "M23"}
+        assert db.query(models.Story).count() == 37
+        assert {s.id for s in db.query(models.Story)} >= {"US01", "US21", "US37"}
         tasks = {t.id: t for t in db.query(models.Task)}
         assert len(tasks) == 16
-        expected = {"T03": "M02", "T04": "M04", "T05": "M08", "T06": "M15", "T07": "M11",
-                    "T08": "M21", "T09": "M03", "T10": "M22", "T11": "M22",
-                    "T12": "M23", "T13": "M23", "T14": "M21"}
+        expected = {"T03": "US01", "T04": "US03", "T05": "US07", "T06": "US25", "T07": "US10",
+                    "T08": "US13", "T09": "US08", "T10": "US29", "T11": "US31",
+                    "T12": "US14", "T13": "US16", "T14": "US34"}
         for tid, cid in expected.items():
             assert tasks[tid].kanban_card_id == cid and tasks[tid].task_type == "feature"
         for tid in ("T01", "T02", "T15", "T16"):

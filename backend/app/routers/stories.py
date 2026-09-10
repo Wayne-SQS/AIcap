@@ -13,10 +13,10 @@ router = APIRouter(prefix="/stories", tags=["stories"])
 def _next_story_id(db: Session) -> str:
     nums = []
     for (sid,) in db.query(models.Story.id).all():
-        m = re.match(r"^M(\d+)$", sid or "")
+        m = re.match(r"^US(\d+)$", sid or "")
         if m:
             nums.append(int(m.group(1)))
-    return f"M{((max(nums) if nums else 0) + 1):02d}"
+    return f"US{((max(nums) if nums else 0) + 1):02d}"
 
 
 def _add_log(db: Session, story_id: str, log_type: str, detail: str, user_id: Optional[int]):

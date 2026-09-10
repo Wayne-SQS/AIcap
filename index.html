@@ -157,16 +157,43 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .cardfoot{display:flex;justify-content:space-between;align-items:center;margin-top:9px;font-size:11.5px;color:var(--muted);font-family:var(--mono)}
 .owner{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
 .owner .avatar{width:20px;height:20px;font-size:9px;box-shadow:1px 1px 0 var(--ink);border-width:1.5px}
+.board .card{height:128px;min-height:128px;padding:8px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden}
+.board .cardtop{margin-bottom:3px;flex:0 0 auto}
+.board .card h3{height:36px;margin:0 0 3px;font-size:13.5px;line-height:1.35;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.board .carddesc{height:32px;font-size:11.5px;line-height:1.4;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.board .cardfoot{margin-top:auto;padding-top:3px;font-size:10.5px;line-height:1.2;gap:4px}
+.board .cardfoot>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board .owner{min-width:0;white-space:nowrap;gap:4px}
+.board .owner>span:last-child{overflow:hidden;text-overflow:ellipsis}
+.board .owner .avatar{width:18px;height:18px;font-size:8px}
 .mapstatus{font-size:11px;font-family:var(--mono);margin:6px 0 0;color:var(--muted)}
 .empty{border:2px dashed var(--line);padding:16px;text-align:center;font-size:13px;color:var(--muted)}
 .addcol{width:100%;margin-top:10px;border-style:dashed;box-shadow:2px 2px 0 var(--ink)}
 .mapnote{font-size:13px;color:var(--muted);border:2px dashed var(--line);padding:10px 14px;margin:0 0 14px}
 .mapwrap{overflow-x:auto;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow)}
-.mapgrid{display:grid;grid-template-columns:130px repeat(5,minmax(160px,1fr));min-width:900px}
-.maphead{border-bottom:2px solid var(--ink);border-right:2px solid var(--ink);padding:8px 10px;font-weight:bold;background:var(--paper-2);font-size:13px}
-.mapcell{border-right:2px solid var(--line);border-bottom:2px solid var(--line);padding:8px;min-height:64px;display:flex;flex-direction:column;gap:6px}
-.sprinthead{border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);padding:8px 10px;background:var(--yellow);font-family:var(--mono);font-weight:700;font-size:13px}
+.mapgrid{display:grid;grid-template-columns:88px repeat(5,minmax(176px,1fr));min-width:968px}
+.maphead{border-bottom:2px solid var(--ink);border-right:1px solid var(--ink);padding:10px 12px;min-height:68px;background:#e3eadc;font-size:13px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.maphead:first-child{background:var(--paper-2);font-family:var(--mono);font-size:11px;letter-spacing:.5px}
+.maphead strong{font-size:14px;line-height:1.35}
+.map-code{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px}
+.mapcell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px;min-height:168px;display:flex;flex-direction:column;gap:6px}
+.mapcell.s1{background:rgba(201,227,154,.12)}
+.mapcell.s2{background:rgba(246,189,118,.08)}
+.mapcell.s3{background:rgba(183,211,232,.1)}
+.mapcell.s4{background:rgba(211,193,230,.08)}
+.sprinthead{border-right:1px solid var(--ink);border-bottom:2px solid var(--ink);padding:9px 8px;background:var(--paper-2);font-family:var(--mono);font-weight:700;font-size:12px;line-height:1.45}
+.sprinthead.s1{background:#e1ecd5}.sprinthead.s2{background:#eee8da}.sprinthead.s3{background:#e1eaed}.sprinthead.s4{background:#e8e3dc}
 .sprinthead .small{color:var(--ink-soft)}
+.mapcell>.small{display:flex;align-items:flex-start;justify-content:center;min-height:30px;padding-top:8px;opacity:.48;font-size:11px}
+.mapcard{height:148px;min-height:148px;padding:8px;display:flex;flex-direction:column;overflow:hidden}
+.mapcard .cardtop{margin-bottom:3px;flex:0 0 auto}
+.mapcard h3{height:38px;margin:0 0 3px;font-size:13px;line-height:1.45;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.mapcard .carddesc{height:39px;font-size:11.5px;line-height:1.42;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.mapcard .mapstatus{height:16px;margin:3px 0 0;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mapcard .cardfoot{margin-top:auto;padding-top:3px;font-size:10px;line-height:1.25;gap:5px}
+.mapcard .cardfoot>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mapcard .owner{min-width:0;white-space:nowrap}
+.mapcard .owner>span:last-child{overflow:hidden;text-overflow:ellipsis}
 .footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px;padding:12px 14px;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);font-size:12.5px}
 .footer .hintcard{font-family:var(--mono);color:var(--muted)}
 .danger{border-color:var(--ink);background:var(--pink)}
@@ -180,48 +207,72 @@ input:focus,select:focus,textarea:focus{background:#fff}
 
 /* ============ 甘特图 ============ */
 .gantt-wrap{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);overflow-x:auto}
-.gantt{min-width:860px}
-.gantt-head{display:grid;grid-template-columns:210px repeat(6,1fr);border-bottom:2px solid var(--ink);background:var(--paper-2)}
-.gantt-head .taskh{font-family:var(--mono);font-weight:700;padding:10px;border-right:2px solid var(--ink)}
-.gantt-head .wk{text-align:center;font-family:var(--mono);font-weight:700;padding:10px 4px;border-right:1px solid var(--line);font-size:13px}
-.gantt-head .wk small{display:block;font-weight:400;font-size:10px;color:var(--muted)}
-.grow{display:grid;grid-template-columns:210px 1fr;border-bottom:1px solid var(--line);position:relative}
-.grow:hover{background:#fdfcf6}
-.grow .tname{padding:8px 10px;border-right:2px solid var(--line);font-size:12.5px;display:flex;flex-direction:column;justify-content:center}
-.grow .tname b{font-size:13px}
-.grow .tname small{font-family:var(--mono);color:var(--muted)}
-.gtrack{position:relative;border-left:1px solid var(--line)}
-.ggrid{display:grid;grid-template-columns:repeat(6,1fr);min-height:44px}
-.gcell{border-right:1px solid var(--line);min-height:44px}
-.gbar{position:absolute;top:50%;transform:translateY(-50%);height:20px;border:2px solid var(--ink);box-shadow:2px 2px 0 rgba(34,52,44,.35);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:2}
-.gbar:hover{filter:brightness(1.06)}
+.gantt{min-width:1040px}
+.gantt-head{display:grid;grid-template-columns:280px repeat(6,1fr);background:var(--paper-2)}
+.gantt-sprint{border-bottom:1px solid var(--ink)}
+.gantt-head .taskh{font-family:var(--mono);font-weight:700;padding:8px 10px;border-right:2px solid var(--ink);display:flex;align-items:center;font-size:12px;letter-spacing:.3px}
+.gantt-head .sprinth{text-align:center;padding:7px 4px;border-right:1px solid var(--line);font-family:var(--mono);font-weight:700;font-size:11px}
+.gantt-head .sprinth.s1{grid-column:span 2;background:#e1ecd5}.gantt-head .sprinth.s2{grid-column:span 2;background:#eee8da}.gantt-head .sprinth.s3{grid-column:span 2;background:#e1eaed}
+.gantt-head .wk{text-align:center;font-family:var(--mono);font-weight:700;padding:9px 4px;border-right:1px solid rgba(65,84,72,.35);font-size:14px;background:#f7f5ec}
+.gantt-head .wk small{display:block;font-weight:400;font-size:10px;color:var(--muted);margin-top:2px}
+.grow{display:grid;grid-template-columns:280px 1fr;border-bottom:1px solid rgba(65,84,72,.18);position:relative}
+.grow:hover,.grow.selected{background:#fdfcf6}
+.grow.selected .tname{background:#eff5e9}
+.grow .tname{padding:6px 10px;border-right:2px solid var(--line);font-size:12px;display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:54px}
+.grow .tname b{font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.taskmeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-family:var(--mono);color:var(--muted);font-size:10px;line-height:1.3}
+.taskmeta .taskid{color:var(--ink);font-weight:700}.taskmeta .storyref{max-width:108px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.taskmeta .ownerref{font-weight:700}
+.gtrack{position:relative;border-left:1px solid var(--line);isolation:isolate}
+.gtrack::before{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(90deg,rgba(201,227,154,.12) 0 33.333%,rgba(246,189,118,.08) 33.333% 66.666%,rgba(183,211,232,.11) 66.666%)}
+.ggrid{display:grid;grid-template-columns:repeat(6,1fr);min-height:54px;position:relative;z-index:1}
+.gcell{border-right:1px solid rgba(65,84,72,.18);min-height:54px}.gcell:nth-child(2),.gcell:nth-child(4){border-right:2px solid rgba(34,52,44,.58)}
+.gbar{appearance:none;color:var(--ink);position:absolute;top:50%;transform:translateY(-50%);height:24px;border:2px solid var(--ink);box-shadow:2px 2px 0 rgba(34,52,44,.35);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:2;padding:0 7px;background:var(--paper)}
+.gbar:hover{filter:brightness(1.06);transform:translateY(-50%) translate(-1px,-1px)}
+.gbar.selected{outline:3px solid var(--ink);outline-offset:2px;z-index:3}.gbar.predecessor{box-shadow:0 0 0 3px rgba(54,112,74,.42)}.gbar.dependent{box-shadow:0 0 0 3px rgba(184,115,31,.42)}
 .gbar.o0{background:var(--green)}.gbar.o1{background:var(--orange)}.gbar.o2{background:var(--blue)}.gbar.o3{background:var(--pink)}
-/* 甘特图父子血缘层级(看板与甘特强制对应) */
-.grow.parent{background:var(--paper-2)}
-.grow.parent .tname b{font-size:13.5px}
-.grow.parent .tname::before{content:"▦";font-size:11px;color:var(--muted);margin-right:4px}
-.grow.child .tname{padding-left:20px;border-left:2px solid var(--line);margin-left:12px}
-.grow.child .tname::before{content:"└";color:var(--muted);margin-right:4px;font-family:var(--mono)}
-.grow.mgmt{opacity:.85}
-.grow.mgmt .tname::before{content:"◇";font-size:11px;color:var(--muted);margin-right:4px}
-.gbar.parent{height:24px}
-.gbar.parent .pfill{position:absolute;left:0;top:0;bottom:0;background:rgba(34,52,44,.28)}
-.gbar.mgmt{background:repeating-linear-gradient(90deg,var(--muted) 0 6px,transparent 6px 12px) !important;border-style:dashed;box-shadow:none}
-.gbar.task-done{border-style:double;filter:saturate(.7)}
-.x-sprint{color:var(--red);font-weight:700;font-size:10px}
-/* 看板卡子任务进度徽章 */
-.subprog{font-family:var(--mono);font-size:10.5px;font-weight:700;background:var(--yellow);border:1px solid var(--ink);padding:0 5px;white-space:nowrap}
-.subprog.full{background:var(--green)}
-.mile-row{display:grid;grid-template-columns:210px 1fr;border-top:2px solid var(--ink);background:var(--paper-2)}
-.mile-track{position:relative;height:34px;border-left:1px solid var(--line)}
-.mile-track .mlabel{position:absolute;top:2px;transform:translateX(-50%);font-family:var(--mono);font-weight:700;font-size:11px;background:var(--yellow);border:1.5px solid var(--ink);padding:0 6px;box-shadow:2px 2px 0 var(--ink);white-space:nowrap}
-.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:12.5px}
+.mile-row{display:grid;grid-template-columns:280px 1fr;border-top:2px solid var(--ink);background:var(--paper-2)}
+.mile-row .mile-title{border-right:2px solid var(--line);padding:8px 10px;font-family:var(--mono);font-size:12px;font-weight:700;display:flex;align-items:center}
+.mile-track{position:relative;height:52px;border-left:1px solid var(--line);background:linear-gradient(90deg,rgba(201,227,154,.12) 0 33.333%,rgba(246,189,118,.08) 33.333% 66.666%,rgba(183,211,232,.11) 66.666%)}
+.milestone{position:absolute;top:8px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;max-width:140px;text-align:center;font-family:var(--mono);font-size:9px;line-height:1.25;font-weight:700;z-index:2}
+.milestone .diamond{width:15px;height:15px;transform:rotate(45deg);border:2px solid var(--ink);background:var(--yellow);box-shadow:2px 2px 0 rgba(34,52,44,.35)}
+.milestone span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.legend{display:flex;gap:9px 14px;flex-wrap:wrap;margin-top:14px;font-size:12px;padding:10px 12px;border:1px solid var(--line);background:var(--paper)}
 .legend .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono)}
-.legend .sw{width:14px;height:14px;border:2px solid var(--ink)}
+.legend .sw{width:14px;height:14px;border:2px solid var(--ink);flex:0 0 auto}.legend .diamond-key{width:11px;height:11px;transform:rotate(45deg);background:var(--yellow);border:2px solid var(--ink);display:inline-block}.legend .note{color:var(--muted);font-family:var(--mono)}
+.gantt-detail{margin-top:14px;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:12px 14px;min-height:78px}
+.gantt-detail.empty{color:var(--muted);font-family:var(--mono);display:flex;align-items:center}.gantt-detail .detail-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:7px}.gantt-detail h3{font-size:15px;margin:0}.gantt-detail .detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;font-size:12px}.gantt-detail .detail-grid div{min-width:0}.gantt-detail .detail-grid b{display:block;color:var(--muted);font-family:var(--mono);font-size:10px;margin-bottom:2px}.gantt-detail .detail-grid span{overflow-wrap:anywhere}
+@media(max-width:720px){.gantt-detail .detail-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){.drawer-panel{width:100%;min-width:0}.contrib-wrap{grid-template-columns:1fr}.contrib-grid{grid-template-columns:32px repeat(6,22px);grid-template-rows:22px repeat(7,22px)}.contrib-grid .c-cell{width:22px;height:22px;min-width:22px;min-height:22px}}
 
 /* ============ 成员任务 ============ */
 .member-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
 .mcard{border:2px solid var(--ink);background:var(--paper);padding:16px;box-shadow:var(--shadow)}
+.mcard.clickable{cursor:pointer;transition:transform .12s,background .12s}
+.mcard.clickable:hover,.mcard.clickable.selected{transform:translate(-2px,-2px);background:#eff5e9}
+.mcard.clickable.selected{outline:3px solid var(--green-2);outline-offset:2px}
+.member-drawer[hidden]{display:none}
+.member-drawer{position:fixed;inset:0;z-index:80}
+.drawer-backdrop{position:absolute;inset:0;background:rgba(34,52,44,.34)}
+.drawer-panel{position:absolute;top:0;right:0;height:100%;width:min(40vw,620px);min-width:420px;background:var(--paper);border-left:3px solid var(--ink);box-shadow:-8px 0 0 rgba(34,52,44,.2);display:flex;flex-direction:column}
+.drawer-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:2px solid var(--ink);background:var(--paper-2)}
+.drawer-head h2{margin:0;font-size:17px}.drawer-head .small{margin-left:auto}
+.drawer-close{font-size:22px;padding:2px 8px;background:transparent;box-shadow:none}
+.member-detail{padding:16px;overflow-y:auto;flex:1}
+.member-detail-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.member-filter{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.member-filter button{padding:4px 8px;font-size:11px}
+.member-filter button.active{background:var(--green);font-weight:700}
+.task-list{display:grid;gap:8px}
+.task-item{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);background:var(--paper-2);padding:8px 10px;font-size:12px}
+.task-item .task-key{font-family:var(--mono);font-weight:700}
+.task-item .task-summary{min-width:0}.task-item .task-summary b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-item .task-meta{font-family:var(--mono);color:var(--muted);font-size:10px;margin-top:3px}
+.task-state{font-family:var(--mono);font-size:10px;font-weight:700;border:1px solid var(--ink);padding:2px 6px;white-space:nowrap}
+.task-state.todo{background:var(--paper)}.task-state.doing{background:var(--orange)}.task-state.done{background:var(--green)}.task-state.blocked,.task-state.overdue{background:var(--pink)}
+.load-note{margin:0 0 8px;color:var(--muted);font-size:12px}
+.load-legend{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 8px;font:11px var(--mono);color:var(--muted)}
+.load-legend span{display:inline-flex;align-items:center;gap:4px}.load-legend i{width:12px;height:12px;border:1px solid var(--ink);display:inline-block}.load-legend .low{background:var(--paper)}.load-legend .normal{background:var(--green)}.load-legend .busy{background:var(--orange)}.load-legend .over{background:var(--pink)}
 .mcard .head{display:flex;gap:12px;align-items:center;margin-bottom:12px}
 .mcard .avatar{width:46px;height:46px;font-size:15px}
 .mcard h3{margin:0;font-size:17px}
@@ -229,45 +280,57 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .mcard .statline{display:flex;gap:18px;margin-bottom:12px;font-size:12.5px}
 .mcard .statline b{font-family:var(--mono);font-size:15px}
 .loadflag{display:inline-block;font-size:11px;font-family:var(--mono);font-weight:700;border:1.5px solid var(--ink);padding:1px 8px;box-shadow:2px 2px 0 var(--ink)}
-.loadflag.ok{background:var(--green)}.loadflag.mid{background:var(--orange)}.loadflag.hot{background:var(--red);color:#fff}
+.loadflag.low{background:#e7efdf}.loadflag.normal{background:var(--green)}.loadflag.busy{background:var(--orange)}.loadflag.over{background:var(--red);color:#fff}
 .heat-wrap{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);overflow-x:auto}
 .heat{min-width:640px}
 .heat-row{display:grid;grid-template-columns:150px repeat(6,1fr);border-bottom:1px solid var(--line)}
 .heat-row:last-child{border-bottom:none}
 .heat-name{padding:10px;border-right:2px solid var(--ink);font-weight:bold;display:flex;align-items:center;gap:8px;background:var(--paper-2)}
-.heat-cell{border-right:1px solid var(--line);padding:8px;text-align:center;font-family:var(--mono);font-size:12px}
+.heat-cell{border-right:1px solid var(--line);padding:8px;text-align:center;font-family:var(--mono);font-size:12px;cursor:help}
 .heat-cell .hrs{display:inline-block;min-width:40px;padding:3px 6px;border:1.5px solid var(--ink);font-weight:700;box-shadow:1.5px 1.5px 0 var(--ink)}
-.hl0{background:var(--paper)}.hl1{background:var(--green)}.hl2{background:var(--orange)}.hl3{background:var(--pink)}
+.hl0{background:#e7efdf}.hl1{background:var(--green)}.hl2{background:var(--orange)}.hl3{background:#efb0a4}
 .heat-head{display:grid;grid-template-columns:150px repeat(6,1fr);border-bottom:2px solid var(--ink);background:var(--paper-2);font-family:var(--mono);font-weight:700;font-size:12px}
 .heat-head div{padding:9px;border-right:1px solid var(--line);text-align:center}
 
 /* ============ UML ============ */
 .uml-note{font-size:13px;color:var(--muted);border:2px dashed var(--line);padding:10px 14px;margin-bottom:16px}
 .uml-canvas{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:22px;overflow-x:auto;position:relative}
-.uc-wrap{position:relative;min-width:760px;min-height:420px;display:block}
-.sysbound{position:absolute;left:190px;top:24px;right:24px;bottom:24px;border:2px dashed var(--ink-soft);background:rgba(255,255,255,.3)}
-.sysbound .sysname{position:absolute;top:-12px;left:16px;background:var(--paper);padding:0 8px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--muted)}
-.actor{position:absolute;left:24px;display:flex;flex-direction:column;align-items:center;gap:4px;width:120px}
-.actor .fig{width:34px;height:44px;border:2px solid var(--ink);background:var(--blue);position:relative;box-shadow:2px 2px 0 var(--ink)}
-.actor .fig::after{content:"";position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:22px;height:8px;border:2px solid var(--ink);border-top:none;background:var(--blue)}
-.actor span{font-size:12px;font-family:var(--mono);font-weight:700}
-.uc{position:absolute;border:2px solid var(--ink);background:var(--green);padding:8px 12px;font-size:12.5px;font-weight:bold;box-shadow:3px 3px 0 var(--ink);text-align:center;white-space:nowrap}
-.uc.warn{background:var(--orange)}
-.uc.dim{background:var(--paper)}
-.uc.ai{background:var(--lilac)}
-.line{position:absolute;height:2px;background:var(--ink);transform-origin:left center}
-.line::after{content:"●";position:absolute;right:-5px;top:-7px;font-size:12px}
-.seq{display:flex;flex-direction:column;gap:0;min-width:620px;margin-top:26px}
-.seq-lifelines{display:flex;justify-content:space-around;position:relative;margin-bottom:8px}
-.ll{display:flex;flex-direction:column;align-items:center;gap:6px}
-.ll .box{border:2px solid var(--ink);background:var(--paper);padding:8px 14px;font-family:var(--mono);font-weight:700;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
-.ll .dash{width:2px;height:170px;border-left:2px dashed var(--line)}
-.seq-msgs{display:flex;flex-direction:column;gap:14px;position:relative;margin-top:-170px;padding-top:6px}
-.seq-msg{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;min-height:22px}
-.seq-msg .lbl{background:var(--paper);border:1px solid var(--ink);padding:1px 7px;white-space:nowrap;box-shadow:1px 1px 0 var(--ink)}
-.seq-msg .arrow{flex:1;height:0;border-top:2px solid var(--ink);position:relative}
-.seq-msg .arrow.r{transform:none}
-.seq-msg .arrow::after{content:"▶";position:absolute;right:-2px;top:-9px;font-size:10px}
+.uml-svg{display:block;width:100%;height:auto;min-width:1100px;font-family:var(--mono);letter-spacing:0}
+.uml-svg .system-boundary{fill:rgba(255,255,255,.3);stroke:var(--ink);stroke-width:2}
+.uml-svg .system-title-bg{fill:var(--paper)}
+.uml-svg .system-title{fill:var(--ink);font-size:14px;font-weight:700}
+.uml-svg .association{fill:none;stroke-width:2;stroke-linecap:square;opacity:.9}
+.uml-svg .association.admin{stroke:#2f6b4f}
+.uml-svg .association.dri{stroke:#3f6f8f}
+.uml-svg .association.member{stroke:#b85f2d}
+.uml-svg .association.viewer{stroke:#6b7f8f}
+.uml-svg .actor-stroke{fill:none;stroke:var(--ink);stroke-width:2.2;stroke-linecap:square}
+.uml-svg .actor-head{fill:var(--blue);stroke:var(--ink);stroke-width:2.2}
+.uml-svg .actor-name{fill:var(--ink);font-size:12px;font-weight:700;text-anchor:middle}
+.uml-svg .actor-key{stroke:var(--paper);stroke-width:2}
+.uml-svg .actor-key.admin{fill:#2f6b4f}.uml-svg .actor-key.dri{fill:#3f6f8f}.uml-svg .actor-key.member{fill:#b85f2d}.uml-svg .actor-key.viewer{fill:#6b7f8f}
+.uml-svg .legend-bg{fill:var(--paper-2);stroke:var(--line);stroke-width:1.2}
+.uml-svg .legend-title{fill:var(--muted);font-size:10px;font-weight:700}
+.uml-svg .legend-label{fill:var(--ink);font-size:10.5px}
+.uml-svg .legend-line{stroke-width:3}
+.uml-svg .usecase{stroke:var(--ink);stroke-width:2}
+.uml-svg .usecase.core{fill:var(--green)}
+.uml-svg .usecase.observe{fill:var(--paper)}
+.uml-svg .usecase.ai{fill:var(--lilac)}
+.uml-svg .usecase.github{fill:var(--orange)}
+.uml-svg .usecase-label{fill:var(--ink);font-size:12px;font-weight:700;text-anchor:middle}
+.uml-svg .story-ref{fill:var(--muted);font-size:9px;font-weight:400;text-anchor:middle}
+.uml-svg .participant{fill:var(--paper);stroke:var(--ink);stroke-width:2}
+.uml-svg .participant-label{fill:var(--ink);font-size:12px;font-weight:700;text-anchor:middle}
+.uml-svg .lifeline{stroke:var(--line);stroke-width:1.7;stroke-dasharray:7 5}
+.uml-svg .activation{fill:var(--green);stroke:var(--ink);stroke-width:1.4}
+.uml-svg .message{fill:none;stroke:var(--ink);stroke-width:1.7;marker-end:url(#seq-arrow)}
+.uml-svg .message.return{stroke-dasharray:7 5;marker-end:url(#seq-open-arrow)}
+.uml-svg .message-label-bg{display:none}
+.uml-svg .message-label{fill:var(--ink);font-size:11px;text-anchor:middle}
+.uml-svg .message-detail{fill:var(--muted);font-size:9.5px;text-anchor:middle}
+.uml-svg .sequence-frame{fill:none;stroke:var(--line);stroke-width:1.2}
+.uml-svg .sequence-caption{fill:var(--muted);font-size:11px;font-weight:700}
 
 /* ============ AI 助手 ============ */
 .ai-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
@@ -347,14 +410,20 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 /* ============ 成员：容量 + 绿格子 ============ */
 .bw-row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12.5px}
 .bw-track{flex:1;height:16px;border:2px solid var(--ink);background:var(--paper);position:relative;overflow:hidden}
-.bw-track .used{height:100%;background:repeating-linear-gradient(45deg,var(--orange) 0 7px,var(--orange-2) 7px 14px);display:block}
+.bw-track .used{height:100%;display:block}.bw-track .used.low{background:repeating-linear-gradient(45deg,#9bc77c 0 7px,#75aa59 7px 14px)}.bw-track .used.normal{background:repeating-linear-gradient(45deg,var(--green) 0 7px,var(--green-2) 7px 14px)}.bw-track .used.busy{background:repeating-linear-gradient(45deg,var(--orange) 0 7px,var(--orange-2) 7px 14px)}.bw-track .used.over{background:repeating-linear-gradient(45deg,#d96d5d 0 7px,#b84638 7px 14px)}
 .bw-track .cap{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
-.contrib-wrap{overflow-x:auto;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:16px}
-.contrib{margin-bottom:18px}
-.contrib:last-child{margin-bottom:0}
+.contrib-wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:14px}
+.contrib{min-width:0;border:1px solid var(--line);background:var(--paper-2);padding:12px}
 .contrib .chead{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-weight:bold;font-size:13px}
-.contrib-grid{display:grid;grid-template-columns:repeat(12,13px);grid-auto-rows:13px;gap:3px}
+.contrib-grid{display:grid;grid-template-columns:36px repeat(6,24px);grid-template-rows:22px repeat(7,24px);gap:3px;justify-content:center;align-items:center;box-sizing:border-box}
+.contrib-grid .grid-corner,.contrib-grid .week-label,.contrib-grid .day-label{font:10px var(--mono);color:var(--muted);text-align:center;box-sizing:border-box}
+.contrib-grid .grid-corner{grid-column:1;grid-row:1}
+.contrib-grid .week-label{display:flex;align-items:center;justify-content:center}
+.contrib-grid .day-label{display:flex;align-items:center;justify-content:flex-start;padding-left:2px}
 .c-cell{width:13px;height:13px;border:1px solid rgba(34,52,44,.22);background:var(--paper-2)}
+.contrib-grid .c-cell{width:24px;height:24px;min-width:24px;min-height:24px;box-sizing:border-box;border:1px solid rgba(34,52,44,.22);cursor:help}
+.contrib-note{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:2px;font:11px var(--mono);color:var(--muted)}
+@media(max-width:720px){.contrib-grid{grid-template-columns:32px repeat(6,22px);grid-template-rows:22px repeat(7,22px)}.contrib-grid .c-cell{width:22px;height:22px;min-width:22px;min-height:22px}}
 .c0{background:#eef0e6}.c1{background:var(--green)}.c2{background:var(--green-2)}.c3{background:#7fb55a}.c4{background:#4d8a3a}
 .c-legend{display:flex;gap:6px;align-items:center;font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:6px}
 .c-legend .sw{width:13px;height:13px;border:1px solid rgba(34,52,44,.22)}
@@ -507,8 +576,8 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 
       <div class="toolbar">
         <div class="tabs" role="tablist" aria-label="故事视图">
-          <button role="tab" aria-selected="true" id="boardtab" aria-controls="boardpanel">▦ 状态看板</button>
-          <button role="tab" aria-selected="false" id="maptab" aria-controls="mappanel">▤ 故事地图</button>
+          <button role="tab" aria-selected="true" id="maptab" aria-controls="mappanel">▤ 故事地图</button>
+          <button role="tab" aria-selected="false" id="boardtab" aria-controls="boardpanel">▦ 状态看板</button>
         </div>
         <div class="filters">
           <input id="search" type="search" aria-label="搜索故事" placeholder="搜索标题 / ID…">
@@ -516,20 +585,21 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
             <option value="1">Sprint 1 · 行走骨架</option>
             <option value="2">Sprint 2 · 深化协作</option>
             <option value="3">Sprint 3 · 交付收口</option>
-            <option value="all">全部 Sprint</option>
+            <option value="4plus">Sprint 4+ · 后续路线</option>
+            <option value="all" selected>全部 Sprint</option>
           </select>
           <select id="owner" aria-label="筛选负责人">
             <option value="all">所有成员</option>
-            <option value="0">成员 1</option>
-            <option value="1">成员 2</option>
-            <option value="2">成员 3</option>
-            <option value="3">成员 4</option>
+            <option value="0">李锐铭</option>
+            <option value="1">高思晗</option>
+            <option value="2">孙秋实</option>
+            <option value="3">罗子涵</option>
           </select>
         </div>
       </div>
 
-      <div id="boardpanel" role="tabpanel" aria-labelledby="boardtab"><div class="board" id="board"></div></div>
-      <div id="mappanel" role="tabpanel" aria-labelledby="maptab" hidden>
+      <div id="boardpanel" role="tabpanel" aria-labelledby="boardtab" hidden><div class="board" id="board"></div></div>
+      <div id="mappanel" role="tabpanel" aria-labelledby="maptab">
         <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；点击故事可查看验收条件。</p>
         <div class="mapwrap" tabindex="0" aria-label="可横向滚动的故事地图"><div class="mapgrid" id="map"></div></div>
       </div>
@@ -537,7 +607,7 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
       <div class="footer">
         <span>■ Must 必须做　■ Should 应该做　■ Could 可以做</span>
         <span id="savehint">拖动卡片更新状态 · 点击编辑 · 本机自动保存</span>
-        <span class="hintcard" id="hintcount">已同步 23 条故事</span>
+        <span class="hintcard" id="hintcount">已同步 20 条故事</span>
         <span style="display:flex;gap:8px;flex-wrap:wrap"><button id="expjson">导出 JSON</button><button id="expcsv">导出 CSV</button><button id="reset" class="danger">恢复演示</button></span>
       </div>
 
@@ -548,14 +618,15 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
     <section class="view" id="view-gantt">
       <div class="hero">
         <div>
-          <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
+          <div class="eyebrow">GANTT CHART / 6 周排期</div>
           <h1>甘特图</h1>
-          <p>开发任务强制挂载看板卡(父条=子任务并集,工时加权进度) · 管理任务独立虚线 · 4 个里程碑。</p>
+          <p>16 项开发任务 · 4 个里程碑 · 按成员着色。</p>
         </div>
         <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
       </div>
       <div class="gantt-wrap"><div class="gantt" id="gantt"></div></div>
       <div class="legend" id="gantt-legend"></div>
+      <div class="gantt-detail empty" id="gantt-detail">点击任务条可查看关联故事、前置任务与后续任务；任务条表示计划起止时间范围，不按工时比例绘制。</div>
     </section>
 
     <!-- 成员任务图 -->
@@ -569,10 +640,12 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
       </div>
       <div class="member-grid" id="member-grid"></div>
       <div class="h-sec">周负载热力图</div>
+      <p class="load-note">数字表示该成员在该周的计划工时；颜色表示该周负载等级。0 表示该周暂无计划工时。</p>
+      <div class="load-legend"><span><i class="low"></i>低负载</span><span><i class="normal"></i>正常</span><span><i class="busy"></i>偏忙</span><span><i class="over"></i>超载</span></div>
       <div class="heat-wrap"><div class="heat" id="heat"></div></div>
       <div class="h-sec">容量与分配 · Bandwidth</div>
       <div id="bandwidth"></div>
-      <div class="h-sec">成员贡献绿格子 · 样例数据</div>
+      <div class="h-sec">成员开发活动图 · 样例数据</div>
       <div class="contrib-wrap" id="contrib"></div>
     </section>
 
@@ -585,10 +658,10 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
           <p>用例图 · 时序图（从看板与甘特数据自动生成）。</p>
         </div>
       </div>
-      <p class="uml-note">演示版：用例图由需求数据汇总生成；时序图示例展示“创建项目”主流程的消息交互。完整版支持交互编辑。</p>
+      <p class="uml-note">演示版：用例图从 US01-US37 汇总核心角色与用例；时序图按当前 FastAPI 真实路由展示“登录并加载项目工作台”流程。完整版支持交互编辑。</p>
       <div class="h-sec">用例图 · Use Case</div>
       <div class="uml-canvas"><div class="uc-wrap" id="uc"></div></div>
-      <div class="h-sec">时序图 · Sequence（创建项目）</div>
+      <div class="h-sec">时序图 · Sequence（登录并加载项目工作台）</div>
       <div class="uml-canvas"><div class="seq" id="seq"></div></div>
     </section>
 
@@ -668,6 +741,14 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   </main>
 </div>
 
+<div class="member-drawer" id="member-drawer" hidden>
+  <div class="drawer-backdrop" data-drawer-close></div>
+  <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-head"><h2 id="drawer-title">成员任务明细</h2><span class="small">任务执行视图</span><button type="button" class="drawer-close" data-drawer-close aria-label="关闭成员任务明细">×</button></div>
+    <div class="member-detail" id="member-detail"></div>
+  </aside>
+</div>
+
 <!-- 登录弹窗 -->
 <dialog id="login">
   <form id="login-form">
@@ -704,8 +785,8 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
         <label class="field">MoSCoW 优先级<select name="priority"><option>Must</option><option>Should</option><option>Could</option></select></label>
       </div>
       <div class="formrow">
-        <label class="field">负责人<select name="owner"><option value="">未分配</option><option value="0">成员 1</option><option value="1">成员 2</option><option value="2">成员 3</option><option value="3">成员 4</option></select></label>
-        <label class="field">迭代<select name="sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option></select></label>
+      <label class="field">负责人<select name="owner"><option value="0">李锐铭</option><option value="1">高思晗</option><option value="2">孙秋实</option><option value="3">罗子涵</option></select></label>
+        <label class="field">迭代<select name="sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option><option value="4">Sprint 4+ · 后续路线</option></select></label>
       </div>
       <label class="field">骨干活动<select name="activity">
         <option value="1">A1 进入与组织项目</option>
@@ -724,21 +805,47 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   </form>
 </dialog>
 
-<!-- 关卡三选一弹窗:未完成子任务级联策略 -->
+<!-- 任务编辑弹窗 -->
+<dialog id="task-editor" aria-labelledby="task-editheading">
+  <form id="task-form">
+    <header>
+      <h2 id="task-editheading">任务详情</h2>
+      <button type="button" id="task-close" aria-label="关闭">×</button>
+    </header>
+    <div class="formbody">
+      <div class="small" id="task-editid"></div>
+      <label class="field">任务名称<input name="name" required maxlength="200"></label>
+      <div class="formrow">
+        <label class="field">负责人<select name="owner"><option value="0">李锐铭</option><option value="1">高思晗</option><option value="2">孙秋实</option><option value="3">罗子涵</option></select></label>
+        <label class="field">预计工时<input name="hours" type="number" min="0" max="999" required></label>
+      </div>
+      <div class="formrow">
+        <label class="field">开始周<select name="weekStart"><option value="1">W1</option><option value="2">W2</option><option value="3">W3</option><option value="4">W4</option><option value="5">W5</option><option value="6">W6</option></select></label>
+        <label class="field">结束周<select name="weekEnd"><option value="1">W1</option><option value="2">W2</option><option value="3">W3</option><option value="4">W4</option><option value="5">W5</option><option value="6">W6</option></select></label>
+      </div>
+      <label class="field">关联故事（US 编号，逗号分隔）<input name="storyRef" placeholder="例如 US29,US30"></label>
+      <label class="field">前置任务（T 编号，逗号分隔）<input name="dependsOn" placeholder="例如 T06,T07"></label>
+      <p class="small" style="margin:0">Story 属于需求层；任务日期和负责人属于执行层。调整任务排期不会自动改写 Story Sprint。</p>
+      <div class="actions">
+        <button type="button" id="task-cancel">取消</button>
+        <button type="submit" class="primary">保存任务</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="undone-choice" aria-labelledby="undone-heading">
   <form onsubmit="event.preventDefault()">
-    <header>
-      <h2 id="undone-heading">删除看板卡 · 未完成子任务处理</h2>
-    </header>
+    <header><h2 id="undone-heading">删除故事 · 未完成任务处理</h2></header>
     <div class="formbody">
       <p class="small" id="undone-text" style="margin:0"></p>
       <div class="actions" style="flex-direction:column;gap:10px;align-items:stretch">
-        <button type="button" data-undone="cancel" class="danger">① 标记已取消(真废弃,子任务状态改为「已取消」)</button>
-        <button type="button" data-undone="keep" class="primary">② 保留状态继续跟踪(默认 · 仅解绑,脱离该卡)</button>
-        <button type="button" data-undone="detach">③ 转为独立任务(脱离该卡,整体挪入下个 Sprint)</button>
+        <button type="button" data-undone="cancel" class="danger">标记已取消并解绑</button>
+        <button type="button" data-undone="keep" class="primary">保留状态并解绑</button>
+        <button type="button" data-undone="detach">转为独立任务并移入下个 Sprint</button>
       </div>
-      <p class="small" style="margin:8px 0 0">已完成子任务一律保留原记录不动,不影响历史。</p>
-      <div class="actions"><button type="button" onclick="document.getElementById('undone-choice').close()">取消删除</button></div>
+      <p class="small" style="margin:8px 0 0">已完成任务保留历史记录，仅由数据库外键自动解绑。</p>
+      <div class="actions"><button type="button" data-undone-close>取消删除</button></div>
     </div>
   </form>
 </dialog>
@@ -748,70 +855,93 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 <script>
 /* ==================== 数据 ==================== */
 const SEED=[
-{id:"M01",activity:1,sprint:1,title:"登录与退出系统",description:"作为用户，我希望登录/退出系统，以便安全使用平台",priority:"Must",acceptance:"未登录不可访问项目页；会话过期处理",owner:0,status:2},
-{id:"M02",activity:1,sprint:1,title:"创建项目并添加成员",description:"作为管理员，我希望创建项目并添加成员，以便限定协作范围",priority:"Must",acceptance:"成员可进入所属项目，非成员页面与接口拒绝；关联 US01",owner:1,status:2},
-{id:"M03",activity:1,sprint:1,title:"创建角色与分配权限",description:"作为管理员，我希望创建角色并分配权限，以便控制操作边界",priority:"Must",acceptance:"新建只读角色确实改不了东西；关联 US02",owner:2,status:1},
-{id:"M04",activity:2,sprint:1,title:"维护史诗、故事与验收条件",description:"作为项目负责人，我希望维护史诗、故事和验收条件，以便形成需求基线",priority:"Must",acceptance:"故事含角色/目标/价值/优先级/稳定ID；关联 US03",owner:3,status:1},
-{id:"M05",activity:2,sprint:1,title:"按活动与迭代浏览故事地图",description:"作为团队成员，我希望按活动和 Sprint 查看故事地图，以便理解版本目标",priority:"Must",acceptance:"至少 3 个发布切片、与需求条目数据一致；关联 US04",owner:0,status:0},
-{id:"M06",activity:3,sprint:1,title:"拆分任务并指派负责人",description:"作为项目负责人，我希望把故事拆成任务并指派负责人、设定日期，以便成员开展工作",priority:"Must",acceptance:"任务关联故事，负责人/日期合法可再读；关联 US05",owner:1,status:0},
-{id:"M07",activity:3,sprint:1,title:"在看板上更新任务状态",description:"作为团队成员，我希望在看板上把任务从待办移到进行中/完成，以便团队知道进展",priority:"Must",acceptance:"状态/负责人/优先级可见，刷新保留，记录变更历史；关联 US06",owner:2,status:1},
-{id:"M08",activity:4,sprint:1,title:"查看项目基础报表",description:"作为普通用户，我希望查看基础报表，以便掌握当前进度",priority:"Must",acceptance:"状态数/完成比例与任务清单一致；空项目正确；关联 US07",owner:3,status:0},
-{id:"M09",activity:5,sprint:1,title:"记录 Sprint 评审与复盘",description:"作为项目负责人，我希望记录第一次 Sprint 评审结论与未完成项，以便复盘",priority:"Should",acceptance:"Sprint1 末评审产出可见（M2 里程碑）",owner:0,status:0},
-{id:"M10",activity:1,sprint:2,title:"停用成员并回收权限",description:"作为管理员，我希望停用/移除成员并回收其权限，以便控制人员变更",priority:"Must",acceptance:"停用后无法登录/无项目数据入口；关联 US01 扩展",owner:1,status:0},
-{id:"M11",activity:2,sprint:2,title:"细化故事与记录变更",description:"作为项目负责人，我希望细化故事并记录变更说明，以便需求可控",priority:"Should",acceptance:"变更前后与理由可查",owner:2,status:0},
-{id:"M12",activity:3,sprint:2,title:"任务评论与 @ 提及",description:"作为成员，我希望在任务下评论/@提及，以便协同沟通",priority:"Could",acceptance:"有则必存有记录；不影响任何 Must 验收",owner:3,status:0},
-{id:"M13",activity:3,sprint:2,title:"按负责人和状态筛选任务",description:"作为项目负责人，我希望按负责人/状态筛选任务，以便快速定位",priority:"Could",acceptance:"筛选结果与任务清单一致",owner:0,status:0},
-{id:"M14",activity:4,sprint:2,title:"组合筛选项目统计",description:"作为项目负责人，我希望按人/状态/史诗组合筛选统计，以便识别变化",priority:"Should",acceptance:"组合筛选口径一致；关联 US15",owner:1,status:0},
-{id:"M15",activity:4,sprint:2,title:"查看完成趋势与燃尽图",description:"作为项目负责人，我希望查看完成趋势/燃尽图，以便提前发现偏差",priority:"Should",acceptance:"使用真实历史或标注样例；不编数据；关联 US07/US15",owner:2,status:0},
-{id:"M16",activity:5,sprint:2,title:"归档复盘与变更历史",description:"作为项目负责人，我希望把复盘结论与变更历史入库，以便改进可追溯",priority:"Should",acceptance:"复盘记录可按 Sprint 回溯",owner:3,status:0},
-{id:"M17",activity:2,sprint:3,title:"登记需求变更与影响",description:"作为项目负责人，我希望登记需求变更并标记影响，以便控制范围蔓延",priority:"Should",acceptance:"变更记录、影响说明、版本保留",owner:0,status:0},
-{id:"M18",activity:3,sprint:3,title:"设置并关联里程碑",description:"作为项目负责人，我希望设置里程碑并关联任务/故事，以便掌握交付节奏",priority:"Must",acceptance:"里程碑与任务关联可查、可展示",owner:1,status:0},
-{id:"M19",activity:4,sprint:3,title:"查看里程碑进度总览",description:"作为团队，我希望查看里程碑进度与项目总览视图，以便向干系人汇报",priority:"Should",acceptance:"视图数字与底层数据一致",owner:2,status:0},
-{id:"M20",activity:5,sprint:3,title:"将改进项转为任务",description:"作为项目负责人，我希望把复盘中的改进项转成任务并复查，以便持续改进",priority:"Could",acceptance:"改进项可转任务、可追踪状态",owner:3,status:0},
-{id:"M21",activity:2,sprint:3,title:"智能生成:UML与类图联动",description:"作为技术负责人，我希望UML自动生成与类图影响传播联动，以便设计变更可视化追踪",priority:"Should",acceptance:"UML可生成编辑；类图关联可查；影响传播可展示；关联US13/US21",owner:2,status:0},
-{id:"M22",activity:3,sprint:3,title:"AI辅助开发:拆解与排期",description:"作为项目负责人，我希望AI辅助需求拆解与进度排期，以便降低估算偏差",priority:"Should",acceptance:"AI拆解可估算工时；进度预测可排期；关联US14/US17/US18/US19",owner:1,status:0},
-{id:"M23",activity:4,sprint:3,title:"AI质量保障:分析与风险闭环",description:"作为质量负责人，我希望AI分析质量与风险并闭环改进，以便持续交付",priority:"Should",acceptance:"质量分析可定位缺口；风险预警可应对；闭环改进可追踪；关联US22/US23/US24",owner:3,status:0}
+{id:"US01",activity:1,sprint:1,title:"项目与成员范围",description:"作为管理员，我希望创建项目并管理成员，以便限定协作范围",priority:"Must",acceptance:"成员可进入所属项目；非成员访问被拒绝",owner:0,status:2},
+{id:"US02",activity:1,sprint:1,title:"角色与权限边界",description:"作为管理员，我希望配置角色和权限，以便控制操作边界",priority:"Should",acceptance:"只读角色不能修改项目数据",owner:1,status:2},
+{id:"US03",activity:2,sprint:1,title:"史诗、故事与验收条件",description:"作为负责人，我希望维护史诗、故事和验收条件，以便形成需求基线",priority:"Must",acceptance:"故事包含角色、目标、价值、优先级和稳定 ID",owner:1,status:1},
+{id:"US04",activity:2,sprint:1,title:"用户故事地图",description:"作为成员，我希望按活动和 Sprint 查看故事地图，以便理解版本目标",priority:"Must",acceptance:"地图至少包含三个发布切片并与故事数据一致",owner:1,status:0},
+{id:"US05",activity:3,sprint:1,title:"任务拆分与指派",description:"作为负责人，我希望拆分任务、分配负责人并设定日期，以便成员开展工作",priority:"Must",acceptance:"任务关联故事且负责人和日期可校验",owner:2,status:0},
+{id:"US06",activity:4,sprint:1,title:"任务状态协同",description:"作为成员，我希望更新任务状态，以便团队知道进展",priority:"Must",acceptance:"状态、负责人、优先级可见并记录变更",owner:2,status:1},
+{id:"US07",activity:5,sprint:1,title:"基础报表",description:"作为查看者，我希望查看项目进度，以便掌握当前状态",priority:"Should",acceptance:"报表与任务清单一致",owner:3,status:0},
+{id:"US08",activity:1,sprint:2,title:"四视图权限一致",description:"作为管理员，我希望不同视图遵守统一权限，以便协作可控",priority:"Should",acceptance:"看板、地图、甘特和 UML 按角色校验",owner:0,status:0},
+{id:"US09",activity:3,sprint:4,title:"拖拽与 WIP 控制",description:"作为成员，我希望拖拽卡片并限制 WIP，以便控制流程",priority:"Could",acceptance:"后续路线，不纳入本学期六周承诺",owner:2,status:0},
+{id:"US10",activity:3,sprint:1,title:"甘特图",description:"作为负责人，我希望编辑任务排期和里程碑，以便掌握交付节奏",priority:"Must",acceptance:"任务依赖、关键路径和里程碑清晰",owner:2,status:0},
+{id:"US11",activity:3,sprint:1,title:"成员任务图",description:"作为负责人，我希望查看成员任务和负载，以便合理分配工作",priority:"Must",acceptance:"成员、任务、周负载和容量数据一致",owner:2,status:0},
+{id:"US12",activity:4,sprint:2,title:"四视图数据联动",description:"作为成员，我希望状态和指派变更同步到各视图，以便避免重复维护",priority:"Must",acceptance:"同一数据源驱动四视图",owner:1,status:0},
+{id:"US13",activity:4,sprint:2,title:"UML 自动生成与编辑",description:"作为设计成员，我希望生成并编辑 UML 图，以便支持设计协作",priority:"Should",acceptance:"图来源可追溯并支持修改预览",owner:3,status:0},
+{id:"US14",activity:2,sprint:3,title:"AI PRD 拆解",description:"作为负责人，我希望 AI 拆解需求并估算工作量，以便辅助需求细化",priority:"Should",acceptance:"输出事实、依据和不确定性",owner:2,status:0},
+{id:"US15",activity:5,sprint:4,title:"筛选与趋势分析",description:"作为负责人，我希望筛选并对比趋势，以便识别变化",priority:"Could",acceptance:"后续路线，不纳入本学期六周承诺",owner:1,status:0},
+{id:"US16",activity:1,sprint:3,title:"AI 数据访问权限",description:"作为管理员，我希望控制 AI 可访问的数据范围，以便保护项目数据",priority:"Should",acceptance:"越权 AI 读取和写入都被阻止",owner:0,status:0},
+{id:"US17",activity:2,sprint:2,title:"AI 建议修订与来源追溯",description:"作为负责人，我希望修订 AI 建议并追溯来源，以便保持可审计",priority:"Must",acceptance:"保留前后差异、证据和审核记录",owner:2,status:0},
+{id:"US18",activity:3,sprint:3,title:"智能排期",description:"作为负责人，我希望 AI 综合依赖、优先级和容量给出排期，以便获得可执行安排",priority:"Must",acceptance:"说明依据并经人工确认",owner:2,status:0},
+{id:"US19",activity:4,sprint:3,title:"进度预测",description:"作为负责人，我希望根据历史和当前范围预测交付，以便提前调整",priority:"Should",acceptance:"说明历史范围和预测假设",owner:1,status:0},
+{id:"US20",activity:4,sprint:3,title:"风险预警",description:"作为负责人，我希望收到延期、阻塞和过载风险，以便及时采取行动",priority:"Must",acceptance:"风险包含证据、影响和建议",owner:0,status:0}
 ];
 
-/* 看板与甘特「强制血缘对应」:开发任务(card)必须挂看板卡;管理任务(type=management)不挂卡
-   status:0待办 1进行中 2完成 3已取消;eh=预估工时(加权进度分母) */
+SEED.push(
+  {id:'US21',activity:5,sprint:4,title:'图与任务影响传播',description:'作为设计成员，我希望查看图变更对任务的影响，以便保持一致',priority:'Could',acceptance:'后续路线，不纳入本学期六周承诺',owner:3,status:0},
+  {id:'US22',activity:5,sprint:3,title:'代码文档测试质量分析',description:'作为团队成员，我希望分析代码、文档和测试质量，以便发现缺口',priority:'Should',acceptance:'结论引用真实证据，不虚构测试',owner:3,status:0},
+  {id:'US23',activity:5,sprint:3,title:'效率优化',description:'作为负责人，我希望识别瓶颈并转成改进任务，以便优化流程',priority:'Should',acceptance:'改进建议可追踪结果',owner:0,status:0},
+  {id:'US24',activity:5,sprint:3,title:'AI 闭环',description:'作为负责人，我希望建议经审核后执行并可回滚，以便形成可追溯闭环',priority:'Must',acceptance:'记录建议、审核、执行和回滚',owner:0,status:0},
+  {id:'US25',activity:5,sprint:1,title:'实时项目进度',description:'作为负责人，我希望查看实时或准实时进度，以便判断 Sprint 是否偏离目标',priority:'Must',acceptance:'刷新后与底层数据一致',owner:0,status:0},
+  {id:'US26',activity:2,sprint:1,title:'需求池',description:'作为负责人，我希望保存未确认需求，以便不丢失来源并控制承诺',priority:'Must',acceptance:'需求池记录来源、优先级和状态',owner:1,status:0},
+  {id:'US27',activity:3,sprint:1,title:'成员 Bandwidth',description:'作为负责人，我希望维护成员容量和已分配工时，以便避免超载',priority:'Must',acceptance:'容量口径统一且可计算',owner:2,status:0},
+  {id:'US28',activity:4,sprint:2,title:'成员开发活动图',description:'作为负责人，我希望查看成员活动分布，以便了解阶段性工作活跃度',priority:'Should',acceptance:'明确标记活动统计口径',owner:1,status:0},
+  {id:'US29',activity:4,sprint:2,title:'会议录音与转写',description:'作为主持人，我希望在知情同意后录音并生成可编辑转写，以便提取决策',priority:'Must',acceptance:'保留时间和说话人信息',owner:1,status:0},
+  {id:'US30',activity:4,sprint:2,title:'会议总结与行动项',description:'作为 DRI，我希望会议智能体生成摘要、决议和行动项，以便形成记录',priority:'Must',acceptance:'不明确责任人或日期时标记待确认',owner:1,status:0},
+  {id:'US31',activity:2,sprint:2,title:'会议到需求修改建议',description:'作为负责人，我希望会议决议生成故事修改建议，以便更新需求基线',priority:'Must',acceptance:'建议包含证据和前后差异',owner:1,status:0},
+  {id:'US32',activity:3,sprint:2,title:'会议到任务调整建议',description:'作为负责人，我希望会议识别过载和依赖冲突并提出调整建议，以便降低协调成本',priority:'Must',acceptance:'建议必须人工批准',owner:0,status:0},
+  {id:'US33',activity:4,sprint:2,title:'AI 建议审核中心',description:'作为负责人，我希望采纳、修改或拒绝 AI 建议，以便保持人在回路',priority:'Must',acceptance:'记录审核人、结果、理由和影响范围',owner:0,status:0},
+  {id:'US34',activity:4,sprint:3,title:'GitHub 仓库与成员映射',description:'作为管理员，我希望绑定仓库并映射成员，以便分析真实开发活动',priority:'Must',acceptance:'同步 commit、push、PR、review、issue',owner:0,status:0},
+  {id:'US35',activity:4,sprint:3,title:'任务提交智能体工作状态分析',description:'作为负责人，我希望分析提交、任务关联和协作行为，以便发现阻塞和无进展',priority:'Must',acceptance:'输出事实、时间范围、证据和不确定性',owner:3,status:0},
+  {id:'US36',activity:4,sprint:3,title:'成员工作状态汇总',description:'作为负责人，我希望查看成员完成内容、负载和工作摘要，以便进行有依据的协调',priority:'Must',acceptance:'区分事实与推断并支持下钻',owner:3,status:0},
+  {id:'US37',activity:5,sprint:3,title:'项目层面协调建议',description:'作为负责人，我希望在项目层面获得可解释的协调建议，以便处理异常模式',priority:'Should',acceptance:'建议说明范围、依据和影响',owner:0,status:0}
+);
 const TASKS=[
-{id:"T01",name:"启动规划与基线",owner:0,h:12,w:[1,1],story:"范围基线",card:null,type:"management",status:2},
-{id:"T02",name:"共享数据与接口小样",owner:2,h:12,w:[1,1],story:"技术约定",card:null,type:"management",status:2},
-{id:"T03",name:"项目/成员/自定义权限",owner:0,h:16,w:[1,2],story:"US01,02",card:"M02",type:"feature",status:2},
-{id:"T04",name:"故事/地图/基础看板",owner:1,h:16,w:[1,2],story:"US03-06",card:"M04",type:"feature",status:1},
-{id:"T05",name:"基础报表与 S1 验证",owner:3,h:12,w:[2,2],story:"US07",card:"M08",type:"feature",status:1},
-{id:"T06",name:"看板增强与趋势",owner:1,h:12,w:[3,3],story:"US09,15",card:"M15",type:"feature",status:0},
-{id:"T07",name:"甘特图与成员任务图",owner:2,h:12,w:[3,4],story:"US10,11",card:"M11",type:"feature",status:0},
-{id:"T08",name:"UML 自动生成与编辑",owner:3,h:20,w:[2,4],story:"US13",card:"M21",type:"feature",status:1},
-{id:"T09",name:"权限扩展与联动",owner:0,h:8,w:[4,4],story:"US08,12",card:"M03",type:"feature",status:0},
-{id:"T10",name:"AI 拆解与估算",owner:1,h:12,w:[2,4],story:"US14,17",card:"M22",type:"feature",status:0},
-{id:"T11",name:"AI 进度预测与排期",owner:2,h:12,w:[4,5],story:"US18,19",card:"M22",type:"feature",status:0},
-{id:"T12",name:"AI 质量分析",owner:3,h:12,w:[4,5],story:"US22",card:"M23",type:"feature",status:0},
-{id:"T13",name:"AI 风险/效率/闭环",owner:0,h:12,w:[5,6],story:"US16,20,23,24",card:"M23",type:"feature",status:0},
-{id:"T14",name:"类图关联与影响传播",owner:3,h:12,w:[4,5],story:"US21",card:"M21",type:"feature",status:0},
-{id:"T15",name:"完整回归与部署演示",owner:2,h:12,w:[6,6],story:"全量回归",card:null,type:"management",status:0},
-{id:"T16",name:"Scrum 管理与证据",owner:0,h:8,w:[1,6],story:"持续管理",card:null,type:"management",status:1}
+{id:"T01",name:"启动会、基线、六项材料初稿",owner:0,h:12,w:[1,1],story:"US01,US03,US04",dependsOn:"",status:0,progress:0,blocked:false},
+{id:"T02",name:"共享数据、接口、AI 接入约定；UML 及排期小样",owner:2,h:12,w:[1,1],story:"US10,US13,US18",dependsOn:"T01",status:0,progress:0,blocked:false},
+{id:"T03",name:"项目、成员、自定义权限 / US01、US02",owner:0,h:16,w:[1,2],story:"US01,US02",dependsOn:"T02",status:1,progress:50,blocked:false},
+{id:"T04",name:"故事、地图、任务、基础看板 / US03-US06",owner:1,h:16,w:[1,2],story:"US03,US04,US05,US06",dependsOn:"T02,T03",status:1,progress:50,blocked:false},
+{id:"T05",name:"基础报表、历史记录、Sprint 1 验证 / US07",owner:3,h:12,w:[2,2],story:"US07",dependsOn:"T03,T04",status:0,progress:0,blocked:false},
+{id:"T06",name:"实时进度、需求池、成员 Bandwidth / US25-US27",owner:1,h:12,w:[2,2],story:"US25,US26,US27",dependsOn:"T03,T04",status:0,progress:0,blocked:false},
+{id:"T07",name:"甘特图与成员任务图 / US10、US11",owner:2,h:12,w:[2,2],story:"US10,US11,US27",dependsOn:"T02,T04,T06",status:0,progress:0,blocked:false},
+{id:"T08",name:"UML 自动生成与交互编辑、AI 项目规划画布 MVP / US13",owner:3,h:20,w:[3,4],story:"US13,US10,US11,US04",dependsOn:"T04,T06,T07",status:0,progress:0,blocked:false},
+{id:"T09",name:"权限扩展、四视图联动、成员贡献活动图 / US08、US12、US28",owner:0,h:8,w:[3,4],story:"US08,US12,US28",dependsOn:"T06,T07,T08",status:0,progress:0,blocked:false},
+{id:"T10",name:"会议智能体 MVP：录音、知情同意、可编辑转写、会议总结",owner:1,h:16,w:[3,4],story:"US29,US30",dependsOn:"T04,T06,T09",status:0,progress:0,blocked:false},
+{id:"T11",name:"会议分析、需求/人员/任务调整建议与 AI 建议审核中心",owner:0,h:16,w:[4,4],story:"US31,US32,US33",dependsOn:"T09,T10",status:0,progress:0,blocked:false},
+{id:"T12",name:"AI 需求拆解、故事修订与来源追溯、进度预测、智能排期",owner:2,h:12,w:[4,5],story:"US14,US17,US18,US19",dependsOn:"T05,T07",status:0,progress:0,blocked:false},
+{id:"T13",name:"AI 代码/文档/测试质量分析、风险预警、效率优化、AI 闭环",owner:0,h:12,w:[5,6],story:"US16,US20,US22,US23,US24",dependsOn:"T09,T10,T11,T12",status:0,progress:0,blocked:false},
+{id:"T14",name:"GitHub 绑定、任务提交智能体、成员状态汇总、项目协调建议",owner:3,h:12,w:[5,6],story:"US34,US35,US36,US37",dependsOn:"T03,T04,T09,T13",status:0,progress:0,blocked:false},
+{id:"T15",name:"完整回归、联调修正、部署与演示准备",owner:2,h:12,w:[6,6],story:"US08,US12,US13,US24",dependsOn:"T11,T12,T13,T14",status:0,progress:0,blocked:false},
+{id:"T16",name:"Scrum 评审 / 复盘 / 轮值交接 / 记录归档",owner:0,h:8,w:[1,6],story:"US07,US24,US37",dependsOn:"",status:0,progress:0,blocked:false}
 ];
+const TASK_CARD_LINKS={T03:'US01',T04:'US03',T05:'US07',T06:'US25',T07:'US10',T08:'US13',T09:'US08',T10:'US29',T11:'US31',T12:'US14',T13:'US16',T14:'US34'};
+TASKS.forEach(task=>Object.assign(task,{eh:task.h,card:TASK_CARD_LINKS[task.id]||null,type:['T01','T02','T15','T16'].includes(task.id)?'management':'feature'}));
 
-const MEMBERS=[
-{id:0,name:"成员 1",role:"DRI · 产品与范围",tag:"权限 / 公共服务 / 风险闭环",accent:"o0"},
-{id:1,name:"成员 2",role:"产品故事 · AI 协调",tag:"故事看板 / 趋势 / AI 拆解",accent:"o1"},
-{id:2,name:"成员 3",role:"技术与架构",tag:"数据接口 / 甘特 / AI 排期",accent:"o2"},
-{id:3,name:"成员 4",role:"质量与风险",tag:"UML / 质量分析 / 验收",accent:"o3"}
+let MEMBERS=[
+{id:0,name:"李锐铭",role:"产品与范围 · 总协调",tag:"权限 / 公共服务 / 风险闭环",capacity:60,accent:"o0"},
+{id:1,name:"高思晗",role:"需求与 AI 协调",tag:"故事管理 / 会议智能体 / AI 审核",capacity:48,accent:"o1"},
+{id:2,name:"孙秋实",role:"技术与进度管理",tag:"数据接口 / WBS / 甘特 / 智能排期",capacity:60,accent:"o2"},
+{id:3,name:"罗子涵",role:"质量与风险",tag:"UML / 质量分析 / 方案评审",capacity:54,accent:"o3"}
 ];
 
 const MILESTONES=[
 {id:"M1",week:1,name:"需求与规划基线",desc:"六项实验材料完整；≥3 切片；≥2 AI 角色记录"},
-{id:"M2",week:2,name:"Sprint 1 评审",desc:"US01–07 通过：可创建项目/配角色/组织需求"},
-{id:"M3",week:4,name:"中期评审",desc:"四视图联动，用例/时序自动生成可演示"},
-{id:"M4",week:6,name:"成果展演",desc:"US01–US24 需求全量回归，六项 AI + 跨视图同步演示"}
+{id:"M2",week:2,name:"第一次 Sprint 评审",desc:"Sprint 1 基础数据与管理闭环验收"},
+{id:"M3",week:4,name:"中期评审",desc:"会议智能体、审核中心与四视图协同演示"},
+{id:"M4",week:6,name:"成果展演",desc:"GitHub 智能体、能力画像与 AI 闭环验收"}
 ];
 
 const SPRINTS=[
 {name:"Sprint 1",tag:"行走骨架",cls:"s1"},
-{name:"Sprint 2",tag:"深化协作",cls:"s2"},
-{name:"Sprint 3",tag:"交付收口",cls:"s3"}
+{name:"Sprint 2",tag:"会议闭环与视图协同",cls:"s2"},
+{name:"Sprint 3",tag:"GitHub 分析与 AI 闭环",cls:"s3"}
+];
+
+const MAP_SPRINTS=[
+  {number:1,name:"Sprint 1",tag:"基础数据与管理闭环",cls:"s1",matches:s=>s.sprint===1},
+  {number:2,name:"Sprint 2",tag:"四视图协同与会议智能体",cls:"s2",matches:s=>s.sprint===2},
+  {number:3,name:"Sprint 3",tag:"GitHub 智能体与 AI 闭环",cls:"s3",matches:s=>s.sprint===3},
+  {number:4,name:"Sprint 4+",tag:"后续路线",cls:"s4",matches:s=>s.sprint>=4}
 ];
 
 const AIS=[
@@ -837,18 +967,63 @@ const $$=s=>document.querySelectorAll(s);
 const statuses=['待办','进行中','已完成'];
 const activities=['进入与组织项目','梳理需求','安排与执行','观察与协同','复盘改进'];
 const key='aiguanli-pixel-stories-v1';
-let stories=structuredClone(SEED),storageOK=true,boardView='board',editing=null,timer,log=[];
+let stories=structuredClone(SEED),storageOK=true,boardView='map',editing=null,timer,log=[];
+let selectedMemberId=null,memberTaskFilter='all';
 
 try{
   const saved=JSON.parse(localStorage.getItem(key));
-  if(Array.isArray(saved)&&saved.length&&saved.every(x=>typeof x.id==='string'&&typeof x.title==='string'&&typeof x.description==='string'&&typeof x.acceptance==='string'&&['Must','Should','Could'].includes(x.priority)&&[0,1,2].includes(x.status)&&[1,2,3].includes(x.sprint)&&[null,0,1,2,3].includes(x.owner)&&[1,2,3,4,5].includes(x.activity)))stories=saved;
+  if(Array.isArray(saved)&&saved.length&&saved.every(x=>typeof x.id==='string'&&typeof x.title==='string'&&typeof x.description==='string'&&typeof x.acceptance==='string'&&['Must','Should','Could'].includes(x.priority)&&[0,1,2].includes(x.status)&&Number.isInteger(x.sprint)&&x.sprint>=1&&[0,1,2,3].includes(x.owner)&&[1,2,3,4,5].includes(x.activity)))stories=saved;
 }catch{storageOK=false;}
 
 /* ==================== 工具 ==================== */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function notify(s){const t=$('#toast');t.textContent=s;t.classList.add('show');clearTimeout(timer);timer=setTimeout(()=>t.classList.remove('show'),3000);}
 function persist(){try{localStorage.setItem(key,JSON.stringify(stories));storageOK=true;}catch{storageOK=false;}$('#savehint').textContent=storageOK?'已保存在本机 · 拖动更新状态 / 点击编辑':'浏览器未允许保存 · 数据仅在本次打开期间保留';}
-
+/* Shared read-only selectors keep the four views on one calculation path. */
+function getMember(memberId){return MEMBERS.find(m=>m.id===memberId)||null;}
+function getMemberTasks(memberId){return tasks.filter(t=>t.owner===memberId);}
+function getCapacityHours(memberId){return Math.max(0,Number(getMember(memberId)?.capacity)||0);}
+function getAllocatedHours(memberId){return getMemberTasks(memberId).reduce((sum,t)=>sum+Math.max(0,Number(t.h)||0),0);}
+function getUtilization(memberId){const capacity=getCapacityHours(memberId);return capacity?getAllocatedHours(memberId)/capacity:0;}
+function getTotalCapacityStatus(utilization){
+  if(utilization>1)return {key:'over',label:'\u8d85\u8f7d'};
+  if(utilization>=.8)return {key:'busy',label:'\u504f\u5fd9'};
+  if(utilization>=.6)return {key:'normal',label:'\u6b63\u5e38'};
+  return {key:'low',label:'\u5145\u8db3'};
+}
+function getMemberWeeklyLoad(memberId){
+  const out=Array(6).fill(0);
+  getMemberTasks(memberId).forEach(task=>taskWeeklyHours(task).forEach((hours,index)=>{out[index]+=hours;}));
+  return out;
+}
+function storyProgress(list=stories){
+  const total=list.length,done=list.filter(s=>s.status===2).length,doing=list.filter(s=>s.status===1).length;
+  return {total,done,doing,todo:total-done-doing,percent:total?Math.round(done/total*100):0};
+}
+function taskStoryIds(task){return taskRefs(task.story).map(id=>id.toUpperCase());}
+function storiesForTask(task){return taskStoryIds(task).map(id=>stories.find(s=>s.id===id)).filter(Boolean);}
+function checkConsistency(){
+  const warnings=[],errors=[],storyIds=new Set(),taskIds=new Set();
+  stories.forEach(s=>{if(storyIds.has(s.id))errors.push(`Story ID \u91cd\u590d\uff1a${s.id}`);storyIds.add(s.id);});
+  tasks.forEach(t=>{
+    if(taskIds.has(t.id))errors.push(`Task ID \u91cd\u590d\uff1a${t.id}`);taskIds.add(t.id);
+    if(!getMember(t.owner))errors.push(`${t.id} \u8d1f\u8d23\u4eba\u4e0d\u5b58\u5728\uff1aP${t.owner+1}`);
+    if(!Number.isFinite(Number(t.h))||Number(t.h)<0)errors.push(`${t.id} \u5de5\u65f6\u65e0\u6548\uff1a${t.h}`);
+    if(t.w[0]<1||t.w[1]>6||t.w[0]>t.w[1])errors.push(`${t.id} \u5468\u6b21\u8d85\u51fa W1-W6\uff1aW${t.w[0]}-${t.w[1]}`);
+    const missing=taskStoryIds(t).filter(id=>!storyIds.has(id));
+    if(missing.length)errors.push(`${t.id} \u5173\u8054 Story \u4e0d\u5b58\u5728\uff1a${missing.join('\u3001')}`);
+    const linked=storiesForTask(t);
+    const taskSprintSet=new Set(taskSprints(t));
+    const storySprints=[...new Set(linked.map(s=>s.sprint))];
+    if(storySprints.some(sprint=>!taskSprintSet.has(sprint)))warnings.push(`${t.id} \u7684\u6267\u884c Sprint \u4e0e\u5173\u8054 Story Sprint \u4e0d\u5b8c\u5168\u4e00\u81f4`);
+  });
+  MEMBERS.forEach(m=>{if(getCapacityHours(m.id)<=0)errors.push(`\u6210\u5458 ${m.name} \u5bb9\u91cf\u65e0\u6548`);});
+  const legacy=[...storyIds].filter(id=>/^M\d+$/.test(id));
+  if(legacy.length)warnings.push(`\u53d1\u73b0\u65e7\u7248 Story \u7f16\u53f7\uff1a${legacy.join('\u3001')}`);
+  const result={warnings,errors};
+  if(warnings.length||errors.length)console.warn('[AIGuanli consistency]',result);
+  return result;
+}
 /* ==================== 视图切换 ==================== */
 const VIEW_NAMES={overview:'项目总览',pool:'需求池',board:'用户故事看板',gantt:'甘特图',members:'成员任务图',uml:'UML 图',ai:'AI 助手',review:'AI 审核中心'};
 let curView='overview';
@@ -871,27 +1046,8 @@ function go(v){
 $$('.navitem').forEach(n=>n.addEventListener('click',()=>go(n.dataset.view)));
 
 /* ==================== 总览 ==================== */
-/* 血缘进度:有子任务的卡按预估工时加权,无子任务的卡按状态折算(待办0/进行中0.5/完成1) */
-function subTasksOf(cardId){return tasks.filter(t=>t.card===cardId&&t.type==='feature');}
-function cardPct(s){
-  const subs=subTasksOf(s.id);
-  if(!subs.length)return s.status===2?1:(s.status===1?0.5:0);
-  const total=subs.reduce((a,t)=>a+(t.eh||t.h),0);
-  const done=subs.filter(t=>t.status===2).reduce((a,t)=>a+(t.eh||t.h),0);
-  return total?done/total:0;
-}
-function groupPct(list){
-  if(!list.length)return 0;
-  let doneW=0,totalW=0;
-  list.forEach(s=>{
-    const subs=subTasksOf(s.id);
-    if(subs.length){totalW+=subs.reduce((a,t)=>a+(t.eh||t.h),0);doneW+=subs.filter(t=>t.status===2).reduce((a,t)=>a+(t.eh||t.h),0);}
-    else{totalW+=1;doneW+=s.status===2?1:(s.status===1?0.5:0);}
-  });
-  return totalW?Math.round(doneW/totalW*100):0;
-}
 function renderOverview(){
-  const pct=groupPct(stories);
+  const progress=storyProgress();const done=progress.done,pct=progress.percent;
   $('#ov-total').textContent=String(stories.length).padStart(2,'0');
   $('#ov-tasks').textContent=tasks.length;
   $('#ov-percent').textContent=pct+'%';
@@ -899,8 +1055,8 @@ function renderOverview(){
   $('#sprint-grid').innerHTML=SPRINTS.map((sp,i)=>{
     const list=stories.filter(s=>s.sprint===i+1);
     const d=list.filter(s=>s.status===2).length;
-    const p=groupPct(list);
-    return `<div class="sprint ${sp.cls}"><div class="top"><h3>${sp.name}</h3><span class="pct">${p}%</span></div><div class="tagline">${sp.tag} · ${list.length} 个故事</div><div class="bar"><i style="width:${p}%"></i></div><div class="meta">完成 ${d} / ${list.length} · 工时加权 ${p}% · ${['W1–W2','W3–W4','W5–W6'][i]}</div></div>`;
+    const p=Math.round(d/list.length*100);
+    return `<div class="sprint ${sp.cls}"><div class="top"><h3>${sp.name}</h3><span class="pct">${p}%</span></div><div class="tagline">${sp.tag} · ${list.length} 个故事</div><div class="bar"><i style="width:${p}%"></i></div><div class="meta">完成 ${d} / ${list.length} · ${['W1–W2','W3–W4','W5–W6'][i]}</div></div>`;
   }).join('');
   $('#mile-grid').innerHTML=MILESTONES.map(m=>`<div class="milecard ${m.week<=2?'done':''}"><span class="wk">W${m.week}</span><span class="mid">${m.id}</span><h4>${m.name}</h4><p>${m.desc}</p></div>`).join('');
   renderRealtime();
@@ -909,12 +1065,12 @@ function renderOverview(){
 /* ==================== 看板 ==================== */
 function selected(){
   const q=$('#search').value.trim().toLowerCase();
-  return stories.filter(s=>($('#sprint').value==='all'||s.sprint===+$('#sprint').value)&&($('#owner').value==='all'||s.owner===+$('#owner').value)&&(!q||[s.id,s.title,s.description,s.acceptance,(s.owner==null?'未分配':'成员'+(s.owner+1)),activities[s.activity-1]].join(' ').toLowerCase().includes(q)));
+  const sprintFilter=$('#sprint').value;
+  return stories.filter(s=>(sprintFilter==='all'||(sprintFilter==='4plus'?s.sprint>=4:s.sprint===+sprintFilter))&&($('#owner').value==='all'||s.owner===+$('#owner').value)&&(!q||[s.id,s.title,s.description,s.acceptance,MEMBERS[s.owner]?.name||'',activities[s.activity-1]].join(' ').toLowerCase().includes(q)));
 }
 function card(s,map=false){
-  const subs=subTasksOf(s.id),sp=subs.length?Math.round(cardPct(s)*100):null;
-  const badge=sp===null?'':`<span class="subprog${sp>=100?' full':''}" title="子任务工时加权进度 ${sp}%${subs.length?` · ${subs.filter(t=>t.status===2).length}/${subs.length} 条完成`:''}">▣ ${subs.filter(t=>t.status===2).length}/${subs.length} · ${sp}%</span>`;
-  return `<button type="button" class="card" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span><span class="owner">${badge}<span class="avatar a${s.owner}">${s.owner==null?'—':'P'+(s.owner+1)}</span><span>${s.owner==null?'未分配':'成员 '+(s.owner+1)}</span></span></div></button>`;
+  const owner=s.owner==null?'<span class="owner">未分配</span>':`<span class="owner"><span class="avatar a${s.owner}">P${s.owner+1}</span><span>${esc(MEMBERS[s.owner]?.name||'未分配')}</span></span>`;
+  return `<button type="button" class="card${map?' mapcard':''}" draggable="${!map}" data-id="${esc(s.id)}" title="验收：${esc(s.acceptance)}" aria-label="编辑 ${esc(s.id)} ${esc(s.title)}"><div class="cardtop"><span class="id">${esc(s.id)}</span><span class="tag ${s.priority}">${s.priority}</span></div><h3>${esc(s.title)}</h3><p class="carddesc">${esc(s.description)}</p>${map?`<p class="mapstatus">${statuses[s.status]} · Sprint ${s.sprint}</p>`:''}<div class="cardfoot"><span>A${s.activity} · ${activities[s.activity-1]}</span>${owner}</div></button>`;
 }
 function render(){
   const data=selected(),done=data.filter(s=>s.status===2).length,pct=data.length?Math.round(done/data.length*100):0;
@@ -923,28 +1079,49 @@ function render(){
   $('#percent').textContent=pct+'%';
   $('#progressfill').style.width=pct+'%';
   $('#progressdesc').textContent=`${done} / ${data.length} 个故事已完成`;
-  $('#hintcount').textContent=`已同步 ${stories.length} 条故事（${stories[0]?stories[0].id:'M01'}–${stories[stories.length-1]?stories[stories.length-1].id:''}）`;
+  $('#hintcount').textContent=`已同步 ${stories.length} 条真实故事`;
   $('#board').innerHTML=statuses.map((name,i)=>{
     const list=data.filter(s=>s.status===i);
     return `<section class="column" data-status="${i}" aria-label="${name}"><div class="colhead"><span>${['□','▣','■'][i]} ${name}</span><span class="count">${list.length}</span></div><div class="colnote">${['准备好后，就开始吧','专注当前，逐一推进','每一步完成，都算数'][i]}</div><div class="cards">${list.map(s=>card(s)).join('')||'<div class="empty">此列暂无故事</div>'}</div><button class="addcol" data-new="${i}">＋ 添加故事</button></section>`;
   }).join('');
-  $('#map').innerHTML='<div class="maphead">发布切片</div>'+activities.map((a,i)=>`<div class="maphead"><span class="mono small">A${i+1}</span><br>${a}</div>`).join('')+[1,2,3].filter(n=>$('#sprint').value==='all'||+$('#sprint').value===n).map(n=>`<div class="sprinthead">SPRINT ${n}<br><span class="small">${SPRINTS[n-1].tag}</span></div>`+activities.map((_,i)=>`<div class="mapcell">${data.filter(s=>s.sprint===n&&s.activity===i+1).map(s=>card(s,true)).join('')||'<span class="small">—</span>'}</div>`).join('')).join('');
+  const sprintFilter=$('#sprint').value;
+  const visibleMapSprints=MAP_SPRINTS.filter(sp=>sprintFilter==='all'||(sprintFilter==='4plus'?sp.number===4:sp.number===+sprintFilter));
+  $('#map').innerHTML='<div class="maphead"><span class="map-code">ROADMAP</span><strong>发布切片</strong></div>'+activities.map((a,i)=>`<div class="maphead"><span class="map-code">A${i+1}</span><strong>${a}</strong></div>`).join('')+visibleMapSprints.map(sp=>`<div class="sprinthead ${sp.cls}">${sp.name}<br><span class="small">${sp.tag}</span></div>`+activities.map((_,i)=>`<div class="mapcell ${sp.cls}">${data.filter(s=>sp.matches(s)&&s.activity===i+1).map(s=>card(s,true)).join('')||'<span class="small">暂无故事</span>'}</div>`).join('')).join('');
   if(!data.length)$('#map').innerHTML+='<div class="empty" style="grid-column:1/-1">没有匹配的故事，试试调整筛选条件。</div>';
 }
 function openEditor(id=null,status=0){
   if(isViewer()){viewerDeny('新建或编辑故事');return;}
   editing=id;
-  const s=id?stories.find(x=>x.id===id):{title:'',description:'',acceptance:'',priority:'Must',status,owner:$('#owner').value==='all'?null:+$('#owner').value,sprint:$('#sprint').value==='all'?1:+$('#sprint').value,activity:2};
+  const s=id?stories.find(x=>x.id===id):{title:'',description:'',acceptance:'',priority:'Must',status,owner:$('#owner').value==='all'?0:+$('#owner').value,sprint:$('#sprint').value==='all'?1:+$('#sprint').value,activity:2};
   if(!s)return;
   $('#del').style.display=id?'':'none';
   $('#editheading').textContent=id?'编辑用户故事':'新建用户故事';
   $('#editid').textContent=id?`${id} · 修改会同步到看板与故事地图`:'保存后将生成唯一故事编号';
-  for(const k of ['title','description','acceptance','priority','status','owner','sprint','activity'])$('#form').elements[k].value=s[k]??'';
+  for(const k of ['title','description','acceptance','priority','status','owner','sprint','activity'])$('#form').elements[k].value=s[k];
   $('#editor').showModal();
 }
 $('#new').onclick=()=>openEditor();
 $('#close').onclick=$('#cancel').onclick=()=>$('#editor').close();
+$('#del').onclick=()=>{
+  if(!editing)return;
+  const t=stories.find(x=>x.id===editing);
+  if(!confirm('确认删除 '+editing+'（'+(t?t.title:'')+'）？此操作不可撤销。'))return;
+  stories=stories.filter(x=>x.id!==editing);
+  addlog('del',editing,t?t.title:'');
+  persist();render();renderOverview();$('#editor').close();notify(editing+' 已删除');
+};
 $('#editor').addEventListener('click',e=>{if(e.target===$('#editor')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
+$('#form').onsubmit=e=>{
+  e.preventDefault();
+  const f=new FormData(e.target),s={id:editing||'M'+String(Math.max(20,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
+  for(const k of ['title','description','acceptance','priority'])s[k]=f.get(k).trim();
+  for(const k of ['status','owner','sprint','activity'])s[k]=+f.get(k);
+  if(!s.title||!s.description||!s.acceptance){notify('请填写标题、用户故事和验收条件');return;}
+  if(editing){const old=stories.find(x=>x.id===editing);stories[stories.findIndex(x=>x.id===editing)]=s;addlog('edit',s.id,s.title+(old&&old.status!==s.status?' · '+statuses[s.status]:''));}
+  else{stories.push(s);addlog('create',s.id,s.title);}
+  persist();render();renderOverview();$('#editor').close();
+  notify(`${s.id} 已${editing?'更新':'创建'}${selected().some(x=>x.id===s.id)?'':'（当前筛选范围外）'}${storageOK?'':' · 暂未保存到本机'}`);
+};
 for(const id of ['search','sprint','owner'])$('#'+id).addEventListener(id==='search'?'input':'change',render);
 function setBoardView(v){
   boardView=v;
@@ -975,8 +1152,7 @@ document.addEventListener('drop',e=>{
     const newStatus=+c.dataset.status;
     if(apiMode){
       api('/api/stories/'+id,{method:'PATCH',body:JSON.stringify({status:newStatus})})
-        .then(async()=>{await loadAll();renderAll();notify(id+' → '+statuses[newStatus]+' · 已同步到服务器');})
-        .catch(err=>notify(err.message));
+        .then(()=>loadAll()).catch(err=>notify(err.message));
     }else{
       s.status=newStatus;addlog('move',s.id,s.title+' → '+statuses[s.status]);persist();render();renderOverview();notify(`${s.id} → ${statuses[s.status]}${storageOK?'':' · 暂未保存到本机'}`);
     }
@@ -986,8 +1162,14 @@ function dl(name,blob){const a=document.createElement('a');a.href=URL.createObje
 $('#expjson').onclick=()=>{dl('爱管理-用户故事-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify(stories,null,2)],{type:'application/json'}));notify('已导出 JSON 备份');};
 $('#expcsv').onclick=()=>{
   const head=['ID','标题','用户故事','MoSCoW','Sprint','骨干活动','负责人','状态','验收条件'];
-  const rows=stories.map(s=>[s.id,s.title,s.description,s.priority,'S'+s.sprint,'A'+s.activity+' '+activities[s.activity-1],(s.owner==null?'未分配':'成员'+(s.owner+1)),statuses[s.status],s.acceptance].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
+  const rows=stories.map(s=>[s.id,s.title,s.description,s.priority,'S'+s.sprint,'A'+s.activity+' '+activities[s.activity-1],'成员'+(s.owner+1),statuses[s.status],s.acceptance].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
   dl('爱管理-用户故事.csv',new Blob(['\ufeff'+head.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));notify('已导出 CSV（可用 Excel 打开）');
+};
+$('#reset').onclick=()=>{
+  if(!confirm('确定恢复为演示数据？当前所有修改将丢失。'))return;
+  stories=structuredClone(SEED);log=[];
+  try{localStorage.setItem(key,JSON.stringify(stories));localStorage.setItem(logkey,'[]');}catch{}
+  renderLog();persist();renderAll();notify('已恢复演示数据（US01–US37）');
 };
 
 /* 变更记录 */
@@ -996,95 +1178,226 @@ try{const sl=JSON.parse(localStorage.getItem(logkey));if(Array.isArray(sl))log=s
 function addlog(type,id,detail){log.push({t:new Date().toLocaleTimeString('zh-CN',{hour12:false}),type,id,detail:detail||''});if(log.length>50)log=log.slice(-50);try{localStorage.setItem(logkey,JSON.stringify(log));}catch{}renderLog();}
 function renderLog(){const el=document.getElementById('logbody');if(!el)return;el.innerHTML=log.length?log.slice().reverse().map(l=>`<div class="logrow"><time>${esc(l.t)}</time><b class="t-${l.type}">${esc(l.id)}</b><span>${esc(l.detail)}</span></div>`).join(''):'<div class="empty">暂无变更记录（操作后自动记录）</div>';}
 
-/* ==================== 甘特图(父子血缘层级) ==================== */
+/* ==================== 甘特图 ==================== */
+let selectedGanttTaskId=null;
+function taskRefs(value){return String(value||'').split(',').map(x=>x.trim()).filter(Boolean);}
+function derivedTaskSprints(start,end){return [...new Set(Array.from({length:end-start+1},(_,i)=>Math.floor((start+i-1)/2)+1))];}
+function taskSprints(task){return Array.isArray(task.sprints)&&task.sprints.length?task.sprints:derivedTaskSprints(task.w[0],task.w[1]);}
+function taskSprintText(task){return taskSprints(task).map(s=>'S'+s).join(' / ');}
+function taskName(id){const task=tasks.find(x=>x.id===id);return task?`${id} ${task.name}`:id;}
+
 function renderGantt(){
   const sprintLabel=['','S1','S1','S2','S2','S3','S3'];
-  const sprintOf=w=>Math.ceil(w/2);  // 周所属 Sprint:S1=W1-2 S2=W3-4 S3=W5-6
-  const head=`<div class="gantt-head"><div class="taskh">任务 / 责任人</div>${[1,2,3,4,5,6].map(w=>`<div class="wk">W${w}<small>${sprintLabel[w]}</small></div>`).join('')}</div>`;
-  const grid=()=>[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
-  const barHtml=(t,extra='')=>{
+  const selected=tasks.find(t=>t.id===selectedGanttTaskId);
+  const selectedDeps=new Set(selected?taskRefs(selected.dependsOn):[]);
+  const selectedDependents=new Set(selected?tasks.filter(t=>taskRefs(t.dependsOn).includes(selected.id)).map(t=>t.id):[]);
+  const sprintHead=`<div class="gantt-head gantt-sprint"><div class="taskh">执行任务 / 关联 Story</div><div class="sprinth s1">Sprint 1 · 基础闭环</div><div class="sprinth s2">Sprint 2 · 会议与协同</div><div class="sprinth s3">Sprint 3 · GitHub 与 AI</div></div>`;
+  const weekHead=`<div class="gantt-head"><div class="taskh">计划窗口（W1–W6）</div>${[1,2,3,4,5,6].map(w=>`<div class="wk">W${w}<small>${sprintLabel[w]}</small></div>`).join('')}</div>`;
+  const rows=tasks.map(t=>{
+    const cells=[1,2,3,4,5,6].map(()=>`<div class="gcell"></div>`).join('');
     const span=t.w[1]-t.w[0]+1;
-    const cross=sprintOf(t.w[0])!==sprintOf(t.w[1]);  // 跨 Sprint:正常排期现象,仅工具提示说明
-    const st=t.status===2?' task-done':(t.status===3?' mgmt':'');
-    return `<div class="gbar o${t.owner}${st}${extra}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${t.id} ${t.name} · ${t.eh||t.h}h · 成员${t.owner+1} · ${['待办','进行中','已完成','已取消'][t.status||0]}${cross?' · 跨迭代实施(横跨两个 Sprint)':''}">${t.id}</div>`;
-  };
-  /* 开发任务按看板卡分组:父行(卡+加权进度,起止=子任务周并集) + 子行(缩进+竖线) */
-  const groups={};
-  tasks.filter(t=>t.type!=='management'&&t.card).forEach(t=>{(groups[t.card]??=[]).push(t);});
-  const mgmts=tasks.filter(t=>t.type==='management');
-  const orphans=tasks.filter(t=>t.type!=='management'&&!t.card);  // 解绑/未挂卡的开发任务
-  const rows=Object.entries(groups).map(([cardId,subs])=>{
-    const s=stories.find(x=>x.id===cardId);
-    const w0=Math.min(...subs.map(t=>t.w[0])),w1=Math.max(...subs.map(t=>t.w[1]));
-    const pct=Math.round(cardPct(s||{status:0,id:cardId})*100);
-    const eh=subs.reduce((a,t)=>a+(t.eh||t.h),0);
-    const pbar=`<div class="gbar parent" style="left:${((w0-1)/6*100).toFixed(2)}%;width:${((w1-w0+1)/6*100).toFixed(2)}%" title="看板卡 ${cardId} · ${s?s.title:''} · ${subs.length} 条子任务 · ${eh}h · 工时加权进度 ${pct}%"><i class="pfill" style="width:${pct}%"></i><span style="position:relative;z-index:1">${cardId} · ${pct}%</span></div>`;
-    const prow=`<div class="grow parent"><div class="tname"><b>${cardId} ${s?esc(s.title):''}</b><small>父卡 · ${subs.length} 子任务 · ${eh}h · 加权 ${pct}%</small></div><div class="gtrack">${pbar}<div class="ggrid">${grid()}</div></div></div>`;
-    const crows=subs.map(t=>`<div class="grow child"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 成员${t.owner+1} · ${t.eh||t.h}h${t.story?' · '+t.story:''}${t.status===2?' · ✓完成':(t.status===1?' · ▶进行中':'')}</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('');
-    return prow+crows;
-  }).join('')
-  /* 管理类任务:灰色虚线,不挂卡 */
-  +mgmts.map(t=>`<div class="grow mgmt"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 管理 · ${t.eh||t.h}h</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join('')
-  /* 独立任务:解绑/未挂卡的开发任务在此可见(删卡级联后不再隐形) */
-  +(orphans.length?`<div class="grow mgmt"><div class="tname"><b>独立任务</b><small>已解绑/未挂卡的开发任务 · ${orphans.length} 条</small></div><div class="gtrack"><div class="ggrid">${grid()}</div></div></div>`+orphans.map(t=>`<div class="grow child"><div class="tname"><b>${esc(t.name)}</b><small>${t.id} · 成员${t.owner+1} · ${t.eh||t.h}h · ${['待办','进行中','已完成','已取消'][t.status||0]}</small></div><div class="gtrack">${barHtml(t)}<div class="ggrid">${grid()}</div></div></div>`).join(''):'');
-  const miles=`<div class="mile-row"><div class="tname" style="border-right:2px solid var(--line);padding:8px 10px;font-weight:bold;display:flex;align-items:center">◆ 里程碑</div><div class="mile-track">${MILESTONES.map(m=>`<span class="mlabel" style="left:${((m.week-0.5)/6*100).toFixed(2)}%">${m.id} ${m.name}</span>`).join('')}</div></div>`;
-  $('#gantt').innerHTML=head+rows+miles;
-  $('#gantt-legend').innerHTML=MEMBERS.map(m=>`<span class="chip"><span class="sw" style="background:var(--${['green','orange','blue','pink'][m.id]})"></span>${m.name} · ${m.role}</span>`).join('')
-    +`<span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span><span class="chip" style="margin-left:auto"><span class="sw" style="background:var(--yellow)"></span>◆ 里程碑</span>`;
+    const relation=t.id===selectedGanttTaskId?'selected':(selectedDeps.has(t.id)?'predecessor':(selectedDependents.has(t.id)?'dependent':''));
+    const bar=`<button type="button" class="gbar o${t.owner} ${relation}" data-gantt-task="${esc(t.id)}" style="left:${((t.w[0]-1)/6*100).toFixed(2)}%;width:${(span/6*100).toFixed(2)}%" title="${esc(t.id)} ${esc(t.name)} · ${t.h}h · 成员${t.owner+1} · ${taskSprintText(t)}">${esc(t.id)}</button>`;
+    return `<div class="grow ${t.type==='management'?'mgmt':'child'} ${t.id===selectedGanttTaskId?'selected':''}"><div class="tname"><b title="${esc(t.name)}">${esc(t.name)}</b><div class="taskmeta"><span class="taskid">${esc(t.id)}</span><span class="ownerref">· ${esc(MEMBERS[t.owner]?.name||'未分配')}</span><span>· ${t.h}h</span><span>· ${taskSprintText(t)}</span><span class="storyref" title="${esc(t.story||'未关联 Story')}">· ${esc(t.story||'未关联 Story')}</span><span>· ${esc(t.card||'管理任务')}</span></div></div><div class="gtrack">${bar}<div class="ggrid">${cells}</div></div></div>`;
+  }).join('');
+  const miles=`<div class="mile-row"><div class="mile-title">◆ 项目里程碑</div><div class="mile-track">${MILESTONES.map(m=>`<div class="milestone" title="${esc(m.desc)}" style="left:${((m.week-0.5)/6*100).toFixed(2)}%"><span class="diamond"></span><span>${esc(m.id)} ${esc(m.name)}</span></div>`).join('')}</div></div>`;
+  $('#gantt').innerHTML=sprintHead+weekHead+rows+miles;
+  $('#gantt').onclick=e=>{const bar=e.target.closest('[data-gantt-task]');if(!bar)return;selectedGanttTaskId=bar.dataset.ganttTask;renderGantt();};
+  $('#gantt-legend').innerHTML=MEMBERS.map(m=>`<span class="chip"><span class="sw" style="background:var(--${['green','orange','blue','pink'][m.id]})"></span>P${m.id+1} ${m.name}</span>`).join('')+`<span class="chip"><span class="diamond-key"></span>菱形 = 里程碑</span><span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span><span class="chip note">任务条 = 计划起止时间范围（不按工时比例）</span><span class="chip note">点击任务条查看前置 / 后续任务</span>`;
+  renderGanttDetail();
 }
 
+function renderGanttDetail(){
+  const panel=$('#gantt-detail');
+  const task=tasks.find(t=>t.id===selectedGanttTaskId);
+  if(!task){panel.className='gantt-detail empty';panel.textContent='点击任务条可查看关联故事、前置任务与后续任务；任务条表示计划起止时间范围，不按工时比例绘制。';return;}
+  const predecessors=taskRefs(task.dependsOn);
+  const dependents=tasks.filter(t=>taskRefs(t.dependsOn).includes(task.id)).map(t=>t.id);
+  const linkedStories=taskRefs(task.story);
+  const storySprintText=linkedStories.map(id=>{const story=stories.find(s=>s.id===id);return story?`${id} · S${story.sprint}`:id;}).join('、')||'未关联';
+  panel.className='gantt-detail';
+  panel.innerHTML=`<div class="detail-head"><span class="id">${esc(task.id)}</span><h3>${esc(task.name)}</h3><button type="button" class="primary" onclick="openTaskEditor('${esc(task.id)}')">编辑任务</button></div><div class="detail-grid"><div><b>负责人 / 工时</b><span>${esc(MEMBERS[task.owner]?.name||'未分配')} · ${task.h}h</span></div><div><b>执行排期 / Sprint</b><span>W${task.w[0]}–W${task.w[1]} · ${taskSprintText(task)}</span></div><div><b>看板血缘 / 类型</b><span>${esc(task.card||'不挂卡')} · ${esc(task.type||'feature')}</span></div><div><b>关联 Story</b><span>${esc(linkedStories.join('、')||'未关联')}</span></div><div><b>Story 所属 Sprint</b><span>${esc(storySprintText)}</span></div><div><b>前置任务</b><span>${esc(predecessors.map(taskName).join('；')||'无')}</span></div><div><b>后续任务</b><span>${esc(dependents.map(taskName).join('；')||'无')}</span></div></div>`;
+}
+
+let editingTaskId=null;
+function openTaskEditor(id){
+  if(isViewer()){viewerDeny('编辑任务');return;}
+  const task=tasks.find(t=>t.id===id);if(!task)return;
+  editingTaskId=id;
+  const form=$('#task-form');
+  $('#task-editid').textContent=`${task.id} · 任务排期属于执行层，关联 Story：${task.story||'未设置'}`;
+  form.elements.name.value=task.name;form.elements.owner.value=task.owner;form.elements.hours.value=task.h;form.elements.weekStart.value=task.w[0];form.elements.weekEnd.value=task.w[1];form.elements.storyRef.value=task.story||'';form.elements.dependsOn.value=task.dependsOn||'';
+  $('#task-editor').showModal();
+}
+function normalizeTaskRefs(value,prefix){
+  const refs=taskRefs(value).map(id=>id.toUpperCase());
+  const pattern=prefix==='US'?/^US\d+$|^M\d+$/:new RegExp(`^${prefix}\\d+$`);
+  if(refs.length!==new Set(refs).size||refs.some(id=>!pattern.test(id)))throw new Error(`请使用 ${prefix} 编号并以逗号分隔`);
+  return refs.join(',');
+}
+$('#task-close').onclick=$('#task-cancel').onclick=()=>$('#task-editor').close();
+$('#task-form').onsubmit=async function(e){
+  e.preventDefault();if(!editingTaskId)return;
+  if(isViewer()){viewerDeny('保存任务');return;}
+  try{
+    const form=e.currentTarget;
+    const weekStart=+form.weekStart.value,weekEnd=+form.weekEnd.value;
+    if(weekStart>weekEnd)throw new Error('开始周不能晚于结束周');
+    const storyRef=normalizeTaskRefs(form.storyRef.value,'US');
+    const dependsOn=normalizeTaskRefs(form.dependsOn.value,'T');
+    if(taskRefs(dependsOn).includes(editingTaskId))throw new Error('任务不能依赖自身');
+    const missingStories=taskRefs(storyRef).filter(id=>!stories.some(s=>s.id===id));
+    const missingTasks=taskRefs(dependsOn).filter(id=>!tasks.some(t=>t.id===id));
+    if(missingStories.length)throw new Error('关联故事不存在：'+missingStories.join('、'));
+    if(missingTasks.length)throw new Error('前置任务不存在：'+missingTasks.join('、'));
+    const payload={name:form.elements.name.value.trim(),owner_id:+form.elements.owner.value+1,hours:+form.elements.hours.value,week_start:weekStart,week_end:weekEnd,story_ref:storyRef,depends_on:dependsOn};
+    if(apiMode){await api('/api/tasks/'+editingTaskId,{method:'PATCH',body:JSON.stringify(payload)});await loadAll();renderAll();}
+    else{const task=tasks.find(t=>t.id===editingTaskId);Object.assign(task,{name:payload.name,owner:payload.owner_id-1,h:payload.hours,w:[weekStart,weekEnd],story:storyRef,dependsOn,sprints:derivedTaskSprints(weekStart,weekEnd)});renderAll();}
+    $('#task-editor').close();notify('任务已更新'+(apiMode?' · 已同步到服务器':' · 离线演示数据'));
+  }catch(err){notify(err.message);}
+};
+
 /* ==================== 成员任务 ==================== */
-function loadByOwner(){
-  const map=[0,1,2,3].map(()=>[0,0,0,0,0,0]);
-  tasks.forEach(t=>{for(let w=t.w[0];w<=t.w[1];w++){map[t.owner][w-1]+=Math.round(t.h/(t.w[1]-t.w[0]+1));}});
-  return map;
+function taskWeeklyHours(task){
+  const out=Array(6).fill(0),start=Math.max(1,task.w[0]),end=Math.min(6,task.w[1]),count=Math.max(1,end-start+1);
+  const base=Math.floor(task.h/count);let remainder=task.h-base*count;
+  for(let w=start;w<=end;w++)out[w-1]=base+(remainder-- > 0?1:0);
+  return out;
 }
+function loadByOwner(){return MEMBERS.map(m=>getMemberWeeklyLoad(m.id));}
+function loadStatus(allocated,capacity){return getTotalCapacityStatus(capacity?allocated/capacity:0);}
+function taskStatusKey(task){
+  if(task.status===3)return 'cancelled';
+  if(task.blocked)return 'blocked';
+  if(task.status===2||task.progress>=100)return 'done';
+  if(task.status===1||task.progress>0)return 'doing';
+  return 'todo';
+}
+function taskStatusText(task){return ({todo:'待办',doing:'进行中',done:'已完成',blocked:'阻塞',cancelled:'已取消'})[taskStatusKey(task)]||'待办';}
 function renderMembers(){
-  const load=loadByOwner();
-  const total=tasks.reduce((a,t)=>a+t.h,0);
+  const load=loadByOwner(),total=tasks.reduce((a,t)=>a+Math.max(0,Number(t.h)||0),0);
   $('#member-grid').innerHTML=MEMBERS.map(m=>{
-    const mine=tasks.filter(t=>t.owner===m.id);
-    const myH=mine.reduce((a,t)=>a+t.h,0);
-    const pct=Math.round(myH/total*100);
-    const myStories=stories.filter(s=>s.owner===m.id);
-    const lv=myH>=56?'hot':(myH>=40?'mid':'ok');
-    const lvTxt=myH>=56?'过载':(myH>=40?'偏忙':'正常');
-    return `<div class="mcard"><div class="head"><span class="avatar a${m.id}">P${m.id+1}</span><div><h3>${m.name}</h3><div class="role">${m.role}</div></div><span class="loadflag ${lv}" style="margin-left:auto">${lvTxt}</span></div><div class="tagline" style="font-size:12px;color:var(--muted);margin-bottom:12px">${m.tag}</div><div class="statline"><span>任务 <b>${mine.length}</b></span><span>工时 <b>${myH}h</b></span><span>占比 <b>${pct}%</b></span><span>故事 <b>${myStories.length}</b></span></div><div class="track"><i style="width:${pct}%;background:var(--${['green','orange','blue','pink'][m.id]})"></i></div></div>`;
+    const mine=getMemberTasks(m.id),myH=getAllocatedHours(m.id),pct=total?Math.round(myH/total*100):0;
+    const myStories=stories.filter(s=>s.owner===m.id),state=getTotalCapacityStatus(getUtilization(m.id));
+    return `<div class="mcard clickable ${selectedMemberId===m.id?'selected':''}" data-member="${m.id}" tabindex="0" role="button" aria-label="查看 ${esc(m.name)} 的任务明细"><div class="head"><span class="avatar a${m.id}">P${m.id+1}</span><div><h3>${esc(m.name)}</h3><div class="role">${esc(m.role)}</div></div><span class="loadflag ${state.key}" style="margin-left:auto">${state.label}</span></div><div class="tagline" style="font-size:12px;color:var(--muted);margin-bottom:12px">${esc(m.tag)}</div><div class="statline"><span>任务 <b>${mine.length}</b></span><span>工时 <b>${myH}h</b></span><span>占比 <b>${pct}%</b></span><span>故事 <b>${myStories.length}</b></span></div><div class="track"><i style="width:${Math.min(pct,100)}%;background:var(--${['green','orange','blue','pink'][m.id]})"></i></div></div>`;
   }).join('');
-  $('#heat').innerHTML=`<div class="heat-head"><div>成员 \\ 周</div>${[1,2,3,4,5,6].map(w=>`<div>W${w}</div>`).join('')}</div>`+MEMBERS.map((m,i)=>`<div class="heat-row"><div class="heat-name"><span class="avatar a${m.id}">P${m.id+1}</span>${m.name}</div>${load[i].map(h=>{const lv=h>=16?3:h>=10?2:h>=4?1:0;return `<div class="heat-cell"><span class="hrs hl${lv}">${h||'·'}</span></div>`;}).join('')}</div>`).join('');
+  $('#heat').innerHTML=`<div class="heat-head"><div>成员 \\ 周</div>${[1,2,3,4,5,6].map(w=>`<div>W${w}</div>`).join('')}</div>`+MEMBERS.map((m,i)=>`<div class="heat-row"><div class="heat-name"><span class="avatar a${m.id}">P${m.id+1}</span>${esc(m.name)}</div>${load[i].map((h,w)=>{const weeklyCapacity=getCapacityHours(m.id)/6,ratio=weeklyCapacity?h/weeklyCapacity:0,lv=ratio>1?3:(ratio>=.8?2:(ratio>=.6?1:0)),label=['低负载','正常','偏忙','超载'][lv];const related=tasks.filter(t=>t.owner===m.id&&t.w[0]<=w+1&&t.w[1]>=w+1).map(t=>t.id).join('、')||'无';return `<div class="heat-cell" title="${esc(m.name)} · W${w+1}\n计划工时：${h}h\n负载等级：${label}\n关联任务：${related}"><span class="hrs hl${lv}">${h}</span></div>`;}).join('')}</div>`).join('');
+  renderMemberDetail();
 }
+function renderMemberDetail(){
+  const target=MEMBERS.find(m=>m.id===selectedMemberId);
+  if(!target){$('#member-detail').innerHTML='<div class="empty">点击成员卡片查看任务明细。</div>';return;}
+  const mine=tasks.filter(t=>t.owner===target.id),filtered=memberTaskFilter==='all'?mine:mine.filter(t=>taskStatusKey(t)===memberTaskFilter);
+  const filters=[['all','全部'],['todo','待办'],['doing','进行中'],['done','已完成'],['blocked','阻塞']];
+  $('#drawer-title').textContent=`P${target.id+1} ${target.name} · 任务明细`;
+  const unfinished=mine.filter(t=>taskStatusKey(t)!=='done').length;
+  $('#member-detail').innerHTML=`<div class="member-detail-head"><div><b>${esc(target.role)}</b><span class="small"> · 总任务 ${mine.length} · 未完成 ${unfinished} · 容量 ${target.capacity||60}h</span></div><div class="member-filter">${filters.map(([key,label])=>`<button type="button" class="${memberTaskFilter===key?'active':''}" data-member-filter="${key}">${label}</button>`).join('')}</div></div><div class="task-list">${filtered.map(t=>{const refs=(t.story||'').split(',').filter(Boolean).join('、')||'无';return `<div class="task-item"><span class="task-key">${esc(t.id)}</span><div class="task-summary"><b title="${esc(t.name)}">${esc(t.name)}</b><div class="task-meta">${esc(refs)} · Sprint ${t.sprints?t.sprints.join('/'):'—'} · W${t.w[0]}–W${t.w[1]} · ${t.h}h · 进度 ${t.progress||0}%</div></div><span class="task-state ${taskStatusKey(t)}">${taskStatusText(t)}</span></div>`;}).join('')||'<div class="empty">该筛选条件下暂无任务。</div>'}</div>`;
+}
+document.addEventListener('click',e=>{
+  const member=e.target.closest('[data-member]');
+  if(member){selectedMemberId=+member.dataset.member;memberTaskFilter='all';renderMembers();$('#member-drawer').hidden=false;return;}
+  const filter=e.target.closest('[data-member-filter]');
+  if(filter){memberTaskFilter=filter.dataset.memberFilter;renderMemberDetail();}
+  if(e.target.closest('[data-drawer-close]'))$('#member-drawer').hidden=true;
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#member-drawer').hidden=true;});
 
 /* ==================== UML ==================== */
 function renderUML(){
-  const actors=[{n:"管理员",y:30},{n:"项目负责人",y:130},{n:"团队成员",y:230},{n:"普通用户",y:330}];
-  const ucs=[
-    {t:"登录 / 退出",x:250,y:40,c:""},
-    {t:"管理项目与成员",x:250,y:105,c:""},
-    {t:"配置角色与权限",x:250,y:170,c:""},
-    {t:"维护需求故事",x:470,y:80,c:""},
-    {t:"安排任务与排期",x:470,y:150,c:""},
-    {t:"更新看板状态",x:470,y:220,c:""},
-    {t:"查看报表",x:690,y:120,c:"dim"},
-    {t:"生成 UML 图",x:250,y:300,c:"warn"},
-    {t:"AI 辅助分析",x:470,y:310,c:"ai"}
+  const storyTitle=(id,fallback)=>stories.find(s=>s.id===id)?.title||fallback;
+  const actors=[
+    {id:'admin',name:'管理员',x:72,y:125,side:'left'},
+    {id:'dri',name:'项目负责人 / DRI',x:72,y:405,side:'left'},
+    {id:'member',name:'团队成员',x:1105,y:210,side:'right'},
+    {id:'viewer',name:'普通用户 / 数据查看者',x:1105,y:525,side:'right'}
   ];
-  const links=[
-    {a:0,u:0},{a:0,u:1},{a:0,u:2},{a:1,u:3},{a:1,u:4},{a:2,u:5},{a:3,u:6},{a:1,u:7},{a:2,u:8}
+  const usecases=[
+    {id:'login',name:storyTitle('US01','登录 / 退出'),ref:'US01',x:470,y:82,type:'core'},
+    {id:'project',name:storyTitle('US01','管理项目与成员'),ref:'US01',x:285,y:125,type:'core'},
+    {id:'permission',name:storyTitle('US02','配置角色与数据权限'),ref:'US02 / US08 / US16',x:285,y:210,type:'core'},
+    {id:'stories',name:storyTitle('US03','维护需求故事与需求池'),ref:'US03 / US26',x:345,y:315,type:'core'},
+    {id:'storymap',name:storyTitle('US04','查看用户故事地图'),ref:'US04',x:345,y:405,type:'core'},
+    {id:'planning',name:storyTitle('US05','安排任务与排期'),ref:'US05 / US10',x:345,y:495,type:'core'},
+    {id:'gantt',name:storyTitle('US10','查看甘特图与成员负载'),ref:'US10 / US11 / US27',x:590,y:560,type:'observe'},
+    {id:'update',name:storyTitle('US06','更新任务与看板状态'),ref:'US06 / US12',x:865,y:125,type:'core'},
+    {id:'membermap',name:storyTitle('US11','查看成员任务与协作状态'),ref:'US11 / US12 / US28',x:865,y:215,type:'observe'},
+    {id:'progress',name:storyTitle('US07','查看实时进度与基础报表'),ref:'US07 / US25',x:865,y:505,type:'observe'},
+    {id:'meeting',name:storyTitle('US30','AI 会议分析'),ref:'US29-US32',x:590,y:205,type:'ai'},
+    {id:'review',name:storyTitle('US33','审核 AI 建议'),ref:'US17 / US33',x:590,y:295,type:'ai'},
+    {id:'aiPlan',name:storyTitle('US18','AI 需求拆解与智能排期'),ref:'US14 / US18',x:590,y:385,type:'ai'},
+    {id:'risk',name:storyTitle('US20','AI 风险预警'),ref:'US19 / US20 / US24',x:590,y:475,type:'ai'},
+    {id:'github',name:storyTitle('US35','GitHub / 任务提交分析'),ref:'US22 / US34-US36',x:865,y:335,type:'github'}
   ];
-  const act=actors.map((a,i)=>`<div class="actor" style="top:${a.y}px"><div class="fig"></div><span>${a.n}</span></div>`).join('');
-  const ucc=ucs.map((u,i)=>`<div class="uc ${u.c}" style="left:${u.x}px;top:${u.y}px">${u.t}</div>`).join('');
-  const lines=links.map(l=>{
-    const a=actors[l.a],u=ucs[l.u];
-    const x1=130,y1=a.y+20,x2=u.x,y2=u.y+20;
-    const len=Math.sqrt((x2-x1)**2+(y2-y1)**2),ang=Math.atan2(y2-y1,x2-x1);
-    return `<div class="line" style="left:${x1}px;top:${y1}px;width:${len}px;transform:rotate(${ang}rad)"></div>`;
-  }).join('');
-  $('#uc').innerHTML=`<div class="sysbound"><span class="sysname">爱管理系统</span></div>`+act+ucc+lines;
+  const relations={
+    admin:['login','project','permission','github'],
+    dri:['login','stories','storymap','planning','gantt','progress','meeting','review','aiPlan','risk','github'],
+    member:['login','update','membermap','progress','meeting','github'],
+    viewer:['login','progress']
+  };
+  const actorById=Object.fromEntries(actors.map(a=>[a.id,a]));
+  const usecaseById=Object.fromEntries(usecases.map(u=>[u.id,u]));
+  const ellipsePoint=(a,u)=>{
+    const dx=a.x-u.x,dy=a.y-u.y,scale=1/Math.sqrt((dx*dx)/(91*91)+(dy*dy)/(31*31));
+    return {x:u.x+dx*scale,y:u.y+dy*scale};
+  };
+  const associationSvg=Object.entries(relations).flatMap(([actorId,ids])=>ids.map((id,index)=>{
+    const a=actorById[actorId],u=usecaseById[id],end=ellipsePoint(a,u);
+    const startX=a.x+(a.side==='left'?26:-26),startY=a.y-14+index*4;
+    return `<line class="association ${actorId}" data-actor="${actorId}" data-usecase="${id}" x1="${startX}" y1="${startY}" x2="${end.x.toFixed(1)}" y2="${end.y.toFixed(1)}"/>`;
+  })).join('');
+  const actorSvg=actors.map(a=>`<g data-uml-actor="${a.id}" transform="translate(${a.x} ${a.y-44})"><circle class="actor-head" cx="0" cy="0" r="10"/><path class="actor-stroke" d="M0 10 V42 M-20 22 H20 M0 42 L-17 67 M0 42 L17 67"/><circle class="actor-key ${a.id}" cx="-30" cy="80" r="5"/><text class="actor-name" x="0" y="86">${esc(a.name)}</text></g>`).join('');
+  const usecaseSvg=usecases.map(u=>`<g data-usecase="${u.id}"><ellipse class="usecase ${u.type}" cx="${u.x}" cy="${u.y}" rx="91" ry="31"/><text class="usecase-label" x="${u.x}" y="${u.y-3}"><tspan x="${u.x}">${esc(u.name)}</tspan><tspan class="story-ref" x="${u.x}" dy="15">${esc(u.ref)}</tspan></text></g>`).join('');
+  const legend=[['admin','管理员'],['dri','项目负责人 / DRI'],['member','团队成员'],['viewer','普通用户 / 数据查看者']];
+  const legendSvg=legend.map((item,index)=>{const x=236+index*230;return `<line class="legend-line association ${item[0]}" x1="${x}" y1="655" x2="${x+30}" y2="655"/><text class="legend-label" x="${x+39}" y="659">${esc(item[1])}</text>`;}).join('');
+  $('#uc').innerHTML=`<svg class="uml-svg usecase-svg" viewBox="0 0 1200 680" role="img" aria-label="爱管理系统用例图"><rect class="system-boundary" x="175" y="28" width="850" height="594"/><rect class="system-title-bg" x="195" y="17" width="114" height="22"/><text class="system-title" x="203" y="33">爱管理系统</text>${associationSvg}${usecaseSvg}${actorSvg}<rect class="legend-bg" x="165" y="636" width="870" height="34"/><text class="legend-title" x="180" y="659">连线图例</text>${legendSvg}</svg>`;
 
-  const seqLanes=["用户","爱管理","权限服务","项目库"];
-  $('#seq').innerHTML=`<div class="seq-lifelines">${seqLanes.map(l=>`<div class="ll"><div class="box">${l}</div><div class="dash"></div></div>`).join('')}</div><div class="seq-msgs">${[
-    ["登录请求","0,1"],["校验会话与权限","1,2"],["创建项目 + 添加成员","1,3"],["返回成员列表","3,1"],["显示项目空间","1,0"]
-  ].map((m,i)=>{const [f,t]=m[1].split(',');const dir=+f<+t?'':' r';return `<div class="seq-msg"><span class="lbl">${i+1}. ${m[0]}</span><span class="arrow${dir}"></span></div>`;}).join('')}</div>`;
+  const participants=[
+    {id:'user',name:'用户',x:130,actor:true},
+    {id:'frontend',name:'爱管理前端',x:370},
+    {id:'backend',name:'FastAPI 后端',x:625},
+    {id:'auth',name:'认证 / 权限模块',x:895},
+    {id:'db',name:'数据库',x:1160}
+  ];
+  const messages=[
+    ['user','frontend','提交登录信息','','request'],
+    ['frontend','backend','登录请求','POST /api/auth/login','request'],
+    ['backend','db','按用户名查询用户','','request'],
+    ['db','backend','返回用户记录','','return'],
+    ['backend','auth','校验密码并生成 Token','','request'],
+    ['auth','backend','返回 Token','','return'],
+    ['backend','frontend','返回 Token 与用户信息','','return'],
+    ['frontend','backend','GET 工作台数据','/stories  /tasks  /pool  /stories/logs  /auth/users','request'],
+    ['backend','auth','校验 Bearer Token','','request'],
+    ['auth','backend','返回当前用户','','return'],
+    ['backend','db','查询故事、任务、需求池和成员','','request'],
+    ['db','backend','返回项目数据','','return'],
+    ['backend','frontend','返回各接口 JSON 数据','','return'],
+    ['frontend','user','渲染看板、甘特图与成员视图','','return']
+  ];
+  const seqById=Object.fromEntries(participants.map(p=>[p.id,p]));
+  const top=116,bottom=1025,rowStart=210,rowGap=58;
+  const definitions=`<defs><marker id="seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--ink)"/></marker><marker id="seq-open-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="var(--ink)" stroke-width="1.5"/></marker></defs>`;
+  const participantSvg=participants.map(p=>`<g data-seq-participant="${p.id}">${p.actor?`<circle class="actor-head" cx="${p.x}" cy="55" r="8"/><path class="actor-stroke" d="M${p.x} 63 V83 M${p.x-14} 71 H${p.x+14} M${p.x} 83 L${p.x-11} 100 M${p.x} 83 L${p.x+11} 100"/>`:''}<rect class="participant" x="${p.x-76}" y="${top}" width="152" height="42"/><text class="participant-label" x="${p.x}" y="${top+26}">${esc(p.name)}</text><line class="lifeline" x1="${p.x}" y1="${top+42}" x2="${p.x}" y2="${bottom}"/></g>`).join('');
+  const activations=[
+    {id:'frontend',from:0,to:13},{id:'backend',from:1,to:6},{id:'db',from:2,to:3},{id:'auth',from:4,to:5},
+    {id:'backend',from:7,to:12},{id:'auth',from:8,to:9},{id:'db',from:10,to:11}
+  ];
+  const activationEdge=(participantId,messageIndex,direction)=>{
+    const p=seqById[participantId];
+    const active=activations.find(a=>a.id===participantId&&messageIndex>=a.from&&messageIndex<=a.to);
+    if(!active)return p.x;
+    return p.x+(direction==='right'?5:-5);
+  };
+  const activationSvg=activations.map(a=>{const p=seqById[a.id],y=rowStart+a.from*rowGap-8,h=(a.to-a.from)*rowGap+18;return `<rect class="activation" x="${p.x-5}" y="${y}" width="10" height="${h}"/>`;}).join('');
+  const messageSvg=messages.map((m,i)=>{
+    const [from,to,label,detail,type]=m,a=seqById[from],b=seqById[to],y=rowStart+i*rowGap,mid=(a.x+b.x)/2;
+    const direction=b.x>a.x?'right':'left';
+    const startX=activationEdge(from,i,direction),endX=activationEdge(to,i,direction==='right'?'left':'right');
+    const labelY=detail?y-25:y-11;
+    const labelX=(startX+endX)/2;
+    return `<g data-seq-message="${i+1}" data-from="${from}" data-to="${to}" data-start-x="${startX}" data-end-x="${endX}"><text class="message-label" x="${labelX}" y="${labelY}"><tspan x="${labelX}">${i+1}. ${esc(label)}</tspan>${detail?`<tspan class="message-detail" x="${labelX}" dy="13">${esc(detail)}</tspan>`:''}</text><line class="message ${type==='return'?'return':''}" x1="${startX}" y1="${y}" x2="${endX}" y2="${y}"/></g>`;
+  }).join('');
+  $('#seq').innerHTML=`<svg class="uml-svg sequence-svg" viewBox="0 0 1290 1050" role="img" aria-label="登录并加载项目工作台时序图">${definitions}<rect class="sequence-frame" x="20" y="10" width="1250" height="1025"/><text class="sequence-caption" x="38" y="34">sd 登录并加载项目工作台</text>${participantSvg}${activationSvg}${messageSvg}</svg>`;
 }
 
 /* ==================== AI 助手 ==================== */
@@ -1137,9 +1450,8 @@ function persistPool(){try{localStorage.setItem(poolKey,JSON.stringify(pool));}c
 function renderPool(){
   $('#pool-list').innerHTML=pool.map(p=>`<div class="pool-item"><span class="picon">◈</span><div class="pbody"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3>${esc(p.title)}</h3><span class="tag ${p.priority}">${p.priority}</span><span class="mono small">${p.id}</span></div><p class="pdesc">${esc(p.desc)}</p><div class="pmeta"><span>来源 · ${esc(p.source)}</span><span>创建 · ${p.created}</span></div></div><div class="pacts"><button class="primary" data-promote="${p.id}">移入看板</button><button class="danger" data-drop="${p.id}">移除</button></div></div>`).join('')||'<div class="empty">需求池为空</div>';
 }
-// Assigned by meeting-improvements.js before bootstrap.
 let promotePool;
-let dropPool;  // 定义见「后端接入」节:在线走 API、离线改本地
+let dropPool;
 
 /* ==================== AI 建议审核中心 ==================== */
 const SUGGESTION_SEED=[
@@ -1167,6 +1479,7 @@ function renderReview(){
   renderDecisionLog();
 }
 function decideSug(id,act){
+  if(isViewer()){viewerDeny('审核 AI 建议');return;}
   const s=suggestions.find(x=>x.id===id);if(!s)return;
   const reason=prompt('决策理由（留空则记为已确认）：');
   s.status=act;
@@ -1192,17 +1505,12 @@ function seeded(s){let x=s>>>0;return()=>{x=(x*1664525+1013904223)>>>0;return x/
 function makeContrib(){
   const out=[];
   for(let m=0;m<4;m++){
-    const rnd=seeded(1000+m*77),weeks=[];
-    for(let w=0;w<12;w++){
-      const days=[],idle=0.5-(w/11)*0.32;
-      for(let d=0;d<7;d++){
-        const v=rnd();let lv=0;
-        if(v>idle){lv=v>idle+(1-idle)*0.75?4:v>idle+(1-idle)*0.5?3:v>idle+(1-idle)*0.25?2:1;}
-        days.push(lv);
-      }
-      weeks.push(days);
+    const rnd=seeded(1000+m*77),days=Array.from({length:7},()=>Array(6).fill(0));
+    for(let d=0;d<7;d++)for(let w=0;w<6;w++){
+      const v=rnd(),threshold=.42-(w/5)*.12;
+      days[d][w]=v>threshold?(v>threshold+.42?4:v>threshold+.28?3:v>threshold+.14?2:1):0;
     }
-    out.push(weeks);
+    out.push(days);
   }
   return out;
 }
@@ -1210,19 +1518,18 @@ const CONTRIB=makeContrib();
 function renderBandwidth(){
   const load=loadByOwner();
   $('#bandwidth').innerHTML=MEMBERS.map((m,i)=>{
-    const alloc=load[i].reduce((a,b)=>a+b,0);
-    const cap=BANDWIDTH[i].reduce((a,b)=>a+b,0);
-    const pct=Math.round(alloc/cap*100),over=alloc>cap;
-    return `<div class="mcard"><div class="head"><span class="avatar a${m.id}">P${m.id+1}</span><div><h3>${m.name}</h3><div class="role">可用容量 ${cap}h / 6周 · 已分配 ${alloc}h</div></div><span class="loadflag ${over?'hot':'ok'}" style="margin-left:auto">${over?'超载':'充足'}</span></div><div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" style="width:${Math.min(pct,100)}%"></i><i class="cap" style="left:100%"></i></div><span class="mono small">${pct}%</span></div></div>`;
+    const alloc=load[i].reduce((a,b)=>a+b,0),cap=m.capacity||60,state=loadStatus(alloc,cap);
+    const pct=Math.round(alloc/cap*100);
+    return `<div class="mcard"><div class="head"><span class="avatar a${m.id}">P${m.id+1}</span><div><h3>${esc(m.name)}</h3><div class="role">容量 ${cap}h · 已分配 ${alloc}h · 剩余 ${cap-alloc}h</div></div><span class="loadflag ${state.key}" style="margin-left:auto">${state.label}</span></div><div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used ${state.key}" style="width:${Math.min(pct,100)}%"></i><i class="cap" style="left:100%"></i></div><span class="mono small">${pct}%</span></div></div>`;
   }).join('');
 }
 function renderContrib(){
   $('#contrib').innerHTML=MEMBERS.map((m,i)=>{
-    const flat=CONTRIB[i].flat();
-    const cells=flat.map((v,d)=>`<div class="c-cell c${v}" title="成员${m.id+1} · 第${Math.floor(d/7)+1}周 周${d%7+1} · 活跃度 ${v}"></div>`).join('');
-    const total=flat.reduce((a,b)=>a+b,0);
-    return `<div class="contrib"><div class="chead"><span class="avatar a${m.id}">P${m.id+1}</span>${m.name}<span class="small mono" style="margin-left:auto">近 12 周 · 活动强度 ${total}</span></div><div class="contrib-grid">${cells}</div></div>`;
-  }).join('')+`<div class="c-legend"><span>少</span><span class="sw c0"></span><span class="sw c1"></span><span class="sw c2"></span><span class="sw c3"></span><span class="sw c4"></span><span>多</span><span style="margin-left:10px">样例数据（非真实 GitHub 事件）</span></div>`;
+    const matrix=CONTRIB[i],flat=matrix.flat(),total=flat.reduce((a,b)=>a+b,0),activeDays=flat.filter(v=>v>0).length;
+    const headers=['W1','W2','W3','W4','W5','W6'].map((w,index)=>`<span class="week-label" style="grid-column:${index+2};grid-row:1">${w}</span>`).join('');
+    const cells=matrix.map((row,d)=>`<span class="day-label" style="grid-column:1;grid-row:${d+2}">${['一','二','三','四','五','六','日'][d]}</span>${row.map((v,w)=>`<span class="c-cell c${v}" style="grid-column:${w+2};grid-row:${d+2}" title="${esc(m.name)} · W${w+1} · 周${['一','二','三','四','五','六','日'][d]}\n样例活动：${v}\n非真实 GitHub 数据"></span>`).join('')}`).join('');
+    return `<div class="contrib"><div class="chead"><span class="avatar a${m.id}">P${m.id+1}</span>${esc(m.name)}<span class="small mono" style="margin-left:auto">样例活动 ${total} · 活跃天数 ${activeDays}</span></div><div class="small" style="margin-bottom:8px;color:var(--muted)">${esc(m.role)}</div><div class="contrib-grid"><span class="grid-corner"></span>${headers}${cells}</div></div>`;
+  }).join('')+`<div class="contrib-note"><span>每格 = 该成员某一天的开发活动</span><span>无活动</span><span class="sw c0"></span><span>少</span><span class="sw c1"></span><span>一般</span><span class="sw c2"></span><span>较多</span><span class="sw c3"></span><span>活跃</span><span class="sw c4"></span><span>样例数据 · 非真实 GitHub 事件</span></div>`;
 }
 
 /* ==================== 会议智能体 / 任务提交智能体 ==================== */
@@ -1231,6 +1538,7 @@ function renderMeeting(){
   const tl=document.getElementById('meeting-transcript');
   tl.innerHTML=[["00:12","成员1","好，Sprint 2 的重点大家都清楚吗？"],["00:31","成员2","建议把 AI 拆解往后放，先做会议闭环。"],["00:52","成员3","成员任务图先做负载热力图，绿格子后置。"],["01:20","成员4","录音前要有知情同意，这个验收要写清楚。"]].map(l=>`<div class="tl"><b>${l[0]}</b><span class="spk">${l[1]}</span><span>${esc(l[2])}</span></div>`).join('');
   $('#meeting-gen').onclick=()=>{
+    if(isViewer()){viewerDeny('生成会议建议');return;}
     suggestions.unshift({id:'SG0'+(suggestions.length+1),agent:'会议智能体',kind:'meeting',time:new Date().toLocaleTimeString('zh-CN',{hour12:false}),evidence:'会议决议 #3 / 转写 00:52',affected:'成员任务图 · 需求池',change:[{t:'新增需求：贡献绿格子（US28）进入需求池',d:false}],note:'会议智能体根据转写生成，未经审核不改动正式数据。',status:'pending'});
     try{localStorage.setItem(sugKey,JSON.stringify(suggestions));}catch{}
     notify('已生成建议，前往「AI 审核中心」处理');
@@ -1241,6 +1549,7 @@ function renderSubmitAgent(){
   const commits=[["a363255","成员1","部署爱管理像素风团队工作台网站","T15"],["7c2d73c","成员2","初始化仓库与 README","T01"],["f0e1d2c","成员4","UML 用例图渲染修复","T08"],["b3a4f5e","成员4","时序图消息箭头优化","T08"],["c9d8e7f","成员1","看板拖拽状态持久化","T04"]];
   $('#commits').innerHTML=commits.map(c=>`<div class="commit-row"><span class="sha">${c[0].slice(0,7)}</span><span class="msg">${esc(c[2])}</span><span class="tag2">${c[3]}</span><span class="small" style="flex:0 0 auto">${c[1]}</span></div>`).join('');
   $('#submit-gen').onclick=()=>{
+    if(isViewer()){viewerDeny('生成协调建议');return;}
     suggestions.unshift({id:'SG0'+(suggestions.length+1),agent:'任务提交智能体',kind:'submit',time:new Date().toLocaleTimeString('zh-CN',{hour12:false}),evidence:'成员3 近 3 天无 commit 且 T07 未关闭',affected:'T07 · 成员3',change:[{t:'建议确认阻塞或重新分配',d:false}],note:'项目层面的协调建议，人员调整仍需人工确认。',status:'pending'});
     try{localStorage.setItem(sugKey,JSON.stringify(suggestions));}catch{}
     notify('已生成协调建议，前往「AI 审核中心」处理');
@@ -1255,7 +1564,6 @@ document.addEventListener('click',e=>{
 });
 $('#pool-add').onclick=()=>{if(isViewer()){viewerDeny('新增需求');return;}$('#pool-form').style.display='block';};
 $('#pool-cancel').onclick=()=>{$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';};
-
 /* ==================== 后端接入(在线走 API / 离线回退演示) ==================== */
 const API_BASE='http://127.0.0.1:8000';
 const TOKEN_KEY='aiguanli_token';
@@ -1275,7 +1583,6 @@ async function api(path,opts={}){
 }
 
 function roleName(r){return ({admin:'管理员',owner:'负责人',member:'成员',viewer:'查看者'})[r]||r;}
-/* 只读角色(viewer)写操作拦截:仅在线且角色为 viewer 时生效,不影响其他用户 */
 function isViewer(){return apiMode&&currentUser&&currentUser.role==='viewer';}
 function viewerDeny(action){notify('只读角色（查看者）不能'+(action||'执行写操作')+'，如需修改请联系管理员');}
 function updateChip(){
@@ -1295,11 +1602,15 @@ function updateChip(){
 function mapStory(s){return {id:s.id,title:s.title,description:s.description,acceptance:s.acceptance,priority:s.priority,sprint:s.sprint,activity:s.activity,status:s.status,owner:(s.owner_id==null?null:s.owner_id-1)};}
 
 async function loadAll(){
-  const [st,tk,pl,lg]=await Promise.all([
-    api('/api/stories'),api('/api/tasks'),api('/api/pool'),api('/api/stories/logs')
+  const [st,tk,pl,lg,users]=await Promise.all([
+    api('/api/stories'),api('/api/tasks'),api('/api/pool'),api('/api/stories/logs'),api('/api/auth/users')
   ]);
   stories=st.map(mapStory);
-  tasks=tk.map(t=>({id:t.id,name:t.name,owner:t.owner_id-1,h:t.hours,eh:t.estimated_hours!=null?t.estimated_hours:t.hours,w:[t.week_start,t.week_end],story:t.story_ref,card:t.kanban_card_id||null,type:t.task_type||'feature',status:t.status!=null?t.status:0}));
+  tasks=tk.map(t=>({id:t.id,name:t.name,owner:t.owner_id-1,h:t.hours,eh:t.estimated_hours??t.hours,w:[t.week_start,t.week_end],story:t.story_ref||'',card:t.kanban_card_id||null,type:t.task_type||'feature',dependsOn:t.depends_on||'',status:t.status??0,progress:t.progress??0,blocked:Boolean(t.blocked),sprints:t.sprints||derivedTaskSprints(t.week_start,t.week_end)}));
+  if(Array.isArray(users)&&users.length){
+    const byId=new Map(users.map(u=>[u.id,u]));
+    MEMBERS.forEach(m=>{const u=byId.get(m.id+1);if(u){m.name=u.display_name||u.username;m.role=`${roleName(u.role)} · ${m.role.split(' · ').slice(-1)[0]}`;m.capacity=u.capacity_hours||m.capacity;}});
+  }
   pool=pl.map(p=>({id:p.id,title:p.title,desc:p.description,source:p.source,created:'—',priority:p.priority}));
   log=lg.map(l=>({t:(l.created_at||'').slice(11,19),type:l.log_type,id:l.story_id,detail:l.detail})).slice(-50);
   $('#savehint').textContent='已连接后端 · 数据实时同步到服务器';
@@ -1308,10 +1619,10 @@ async function loadAll(){
 
 function renderAll(){
   renderOverview();render();renderLog();renderPool();renderReview();
-  if(curView==='gantt')renderGantt();
-  if(curView==='members'){renderMembers();renderBandwidth();renderContrib();}
+  renderGantt();renderMembers();renderBandwidth();renderContrib();
   if(curView==='uml')renderUML();
   if(curView==='ai')renderAI();
+  checkConsistency();
 }
 
 function restoreLocal(){
@@ -1322,7 +1633,7 @@ function restoreLocal(){
 }
 
 function openLogin(){$('#login').showModal();renderAccounts();}
-const ACCOUNTS=['成员1','成员2','成员3','成员4','成员5'];
+const ACCOUNTS=['李锐铭','高思晗','孙秋实','罗子涵','成员1','成员2','成员3','成员4','成员5'];
 function renderAccounts(){$('#login-accounts').innerHTML=ACCOUNTS.map(n=>`<button type="button" class="acct" data-acct="${n}">${n}</button>`).join('');}
 document.addEventListener('click',e=>{const a=e.target.closest('[data-acct]');if(a){$('#login-user').value=a.dataset.acct;$('#login-pass').value='123456';}});
 
@@ -1344,27 +1655,10 @@ $('#mode-chip').onclick=()=>{if(!apiMode)bootstrap();};
 /* 覆盖写操作:在线走 API,离线沿用本地 */
 $('#form').onsubmit=async function(e){
   e.preventDefault();
+  if(isViewer()){viewerDeny('保存故事');return;}
   const f=new FormData(e.target);
-  const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:f.get('owner')===''?null:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
+  const payload={title:f.get('title').trim(),description:f.get('description').trim(),acceptance:f.get('acceptance').trim(),priority:f.get('priority'),status:+f.get('status'),owner_id:+f.get('owner')+1,sprint:+f.get('sprint'),activity:+f.get('activity')};
   if(!payload.title||!payload.description||!payload.acceptance){notify('请填写标题、用户故事和验收条件');return;}
-  /* 跨 Sprint 变更:默认仅挪动未完成子任务到新时间轴,已完成子任务保留原记录(防误伤历史) */
-  if(editing){
-    const old=stories.find(x=>x.id===editing);
-    if(old&&old.sprint!==payload.sprint){
-      const subs=subTasksOf(editing),undone=subs.filter(t=>t.status!==2);
-      if(subs.length){
-        const ok=confirm(`该卡 Sprint 由 S${old.sprint} 变更为 S${payload.sprint}。\n默认仅挪动 ${undone.length} 条未完成子任务到新时间轴,${subs.length-undone.length} 条已完成子任务将保留原记录。确认?`);
-        if(ok){
-          const shift=(payload.sprint-old.sprint)*2;
-          for(const t of undone){
-            const ws=Math.min(Math.max(t.w[0]+shift,1),6),we=Math.min(Math.max(t.w[1]+shift,ws),6);
-            t.w=[ws,we];
-            if(apiMode){try{await api('/api/tasks/'+t.id,{method:'PATCH',body:JSON.stringify({week_start:ws,week_end:we})});}catch(err){notify('子任务 '+t.id+' 挪动失败:'+err.message);}}
-          }
-        }
-      }
-    }
-  }
   if(apiMode){
     try{
       if(editing){await api('/api/stories/'+editing,{method:'PATCH',body:JSON.stringify(payload)});}
@@ -1373,70 +1667,49 @@ $('#form').onsubmit=async function(e){
       notify((editing?'已更新':'已创建')+' · 已同步到服务器');
     }catch(err){notify(err.message);}
   }else{
-    const s={id:editing||'M'+String(Math.max(23,...stories.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0')};
+    const s={id:editing||'US'+String(Math.max(37,...stories.map(x=>+x.id.slice(2)||+x.id.slice(1)||0))+1).padStart(2,'0')};
     for(const k of ['title','description','acceptance','priority'])s[k]=payload[k];
     for(const k of ['status','sprint','activity'])s[k]=payload[k];
-    s.owner=f.get('owner')===''?null:+f.get('owner');
+    s.owner=+f.get('owner');
     if(editing){const old=stories.find(x=>x.id===editing);stories[stories.findIndex(x=>x.id===editing)]=s;addlog('edit',s.id,s.title+(old&&old.status!==s.status?' · '+statuses[s.status]:''));}
     else{stories.push(s);addlog('create',s.id,s.title);}
     persist();render();renderOverview();$('#editor').close();
     notify(`${s.id} 已${editing?'更新':'创建'}${selected().some(x=>x.id===s.id)?'':'（当前筛选范围外）'}`);
   }
 };
-/* 关卡三选一:未完成子任务 → 取消(真废弃)/保留跟踪/转独立任务(进下个Sprint) */
-function openUndoneChoice(cardId,undoneCount){
-  return new Promise(resolve=>{
-    const d=$('#undone-choice');
-    $('#undone-text').textContent=`看板卡 ${cardId} 下有 ${undoneCount} 条未完成子任务,请选择处理方式:`;
-    const done=()=>{d.removeEventListener('close',onClose);resolve(null);};
-    const onClose=()=>done();
-    d.addEventListener('close',onClose);
-    for(const btn of d.querySelectorAll('[data-undone]')){
-      btn.onclick=()=>{
-        d.removeEventListener('close',onClose);
-        const v=btn.dataset.undone;d.close();resolve(v);
-      };
-    }
-    d.showModal();
-  });
-}
 $('#del').onclick=async function(){
   if(!editing)return;
+  if(isViewer()){viewerDeny('删除故事');return;}
   const t=stories.find(x=>x.id===editing);
-  if(!t)return;
-  const subs=subTasksOf(editing),undone=subs.filter(x=>x.status!==2&&x.status!==3);
-  let strategy='keep';
-  if(undone.length){
-    if(!confirm('确认删除 '+editing+'（'+t.title+'）？该卡含未完成子任务,需选择级联策略。'))return;
-    const choice=await openUndoneChoice(editing,undone.length);
-    if(!choice){notify('已取消删除');return;}
-    strategy=choice;
-  }else{
-    if(!confirm('确认删除 '+editing+'（'+t.title+'）？此操作不可撤销。'))return;
-  }
+  if(!confirm('确认删除 '+editing+'（'+(t?t.title:'')+'）？此操作不可撤销。'))return;
+  const linked=tasks.filter(task=>task.card===editing&&task.status!==2&&task.status!==3);
+  const undone=linked.length?await openUndoneChoice(editing,linked.length):'keep';
+  if(!undone)return;
   if(apiMode){
-    try{
-      await api('/api/stories/'+editing+'?undone='+strategy,{method:'DELETE'});
-      $('#editor').close();await loadAll();renderAll();
-      notify(editing+' 已删除 · 子任务级联:'+({cancel:'标记已取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
-    }catch(err){notify(err.message);}
+    try{await api('/api/stories/'+editing+'?undone='+undone,{method:'DELETE'});$('#editor').close();await loadAll();renderAll();notify(editing+' 已删除');}
+    catch(err){notify(err.message);}
   }else{
-    /* 离线等效级联:全部子任务解绑(与在线库 FK ON DELETE SET NULL 一致),避免幽灵父行 */
-    for(const x of subs){
-      if(strategy==='cancel'&&x.status!==2&&x.status!==3)x.status=3;
-      x.card=null;
-      if(strategy==='detach'&&x.status!==2&&x.status!==3)x.w=[Math.min(x.w[0]+2,6),Math.min(x.w[1]+2,6)];
-    }
-    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t.title+' · 子任务级联:'+strategy+'('+undone.length+' 条未完成)');
-    persist();render();renderOverview();$('#editor').close();
-    notify(editing+' 已删除 · 子任务已解绑:'+({cancel:'未完成标取消',keep:'保留跟踪',detach:'转独立任务'})[strategy]);
+    linked.forEach(task=>{task.card=null;if(undone==='cancel')task.status=3;if(undone==='detach'){task.w=[Math.min(task.w[0]+2,6),Math.min(task.w[1]+2,6)];task.sprints=derivedTaskSprints(task.w[0],task.w[1]);}});
+    stories=stories.filter(x=>x.id!==editing);addlog('del',editing,t?t.title:'');persist();render();renderOverview();$('#editor').close();notify(editing+' 已删除');
   }
 };
+function openUndoneChoice(cardId,undoneCount){
+  return new Promise(resolve=>{
+    const dialog=$('#undone-choice');
+    $('#undone-text').textContent=`${cardId} 下有 ${undoneCount} 条未完成任务，请选择处理方式：`;
+    const finish=value=>{dialog.removeEventListener('close',closed);resolve(value);};
+    const closed=()=>finish(null);
+    dialog.addEventListener('close',closed,{once:true});
+    dialog.querySelectorAll('[data-undone]').forEach(button=>{button.onclick=()=>{dialog.removeEventListener('close',closed);const value=button.dataset.undone;dialog.close();resolve(value);};});
+    dialog.querySelector('[data-undone-close]').onclick=()=>dialog.close();
+    dialog.showModal();
+  });
+}
 $('#reset').onclick=async function(){
   if(apiMode){if(!confirm('在线模式下将重新拉取服务器数据(不会重置服务器)。继续？'))return;try{await loadAll();renderAll();notify('已重新拉取服务器数据');}catch(e){notify(e.message);}return;}
   if(!confirm('确定恢复为演示数据？当前所有修改将丢失。'))return;
   stories=structuredClone(SEED);log=[];try{localStorage.setItem(key,JSON.stringify(stories));localStorage.setItem(logkey,'[]');}catch(e){}
-  renderLog();persist();render();renderOverview();notify('已恢复演示数据（M01–M23）');
+  renderLog();persist();renderAll();notify('已恢复演示数据（US01–US37）');
 };
 $('#pool-save').onclick=async function(){
   if(isViewer()){viewerDeny('保存需求');return;}
@@ -1452,6 +1725,16 @@ $('#pool-save').onclick=async function(){
     pool.unshift({id:'R'+String(Math.max(4,...pool.map(x=>+x.id.slice(1)||0))+1).padStart(2,'0'),title,desc:desc||'（待补充描述）',source:'手动新增 · 成员1',created:(new Date().getMonth()+1).toString().padStart(2,'0')+'-'+new Date().getDate().toString().padStart(2,'0'),priority:pri});
     persistPool();renderPool();$('#pool-form').style.display='none';$('#pool-title').value='';$('#pool-desc').value='';notify('已保存到需求池');
   }
+};
+promotePool=async function(id){
+  if(isViewer()){viewerDeny('移入看板');return;}
+  if(apiMode){try{await api('/api/pool/'+id+'/promote',{method:'POST',body:JSON.stringify({sprint:1,activity:2})});await loadAll();renderAll();notify('已移入看板');}catch(err){notify(err.message);}return;}
+  const p=pool.find(x=>x.id===id);if(!p)return;
+  const newId='US'+String(Math.max(37,...stories.map(x=>+x.id.slice(2)||+x.id.slice(1)||0))+1).padStart(2,'0');
+  stories.push({id:newId,activity:2,sprint:1,title:p.title,description:p.desc,priority:p.priority,acceptance:'来源：'+p.source+'（待补充验收条件）',owner:0,status:0});
+  pool=pool.filter(x=>x.id!==id);
+  persistPool();persist();renderAll();
+  notify(`${newId} 已移入看板（Sprint 1 · A2 梳理需求）`);
 };
 dropPool=async function(id){
   if(isViewer()){viewerDeny('移除需求');return;}
@@ -1479,10 +1762,7 @@ async function bootstrap(){
     if(!storageOK)$('#savehint').textContent='浏览器未允许保存 · 数据仅在本次打开期间保留';
   }
 }
+bootstrap();
 </script>
-<script src="meeting-review.js"></script>
-<script src="meeting-agent.js"></script>
-<script src="meeting-improvements.js"></script>
-<script>bootstrap();</script>
 </body>
 </html>

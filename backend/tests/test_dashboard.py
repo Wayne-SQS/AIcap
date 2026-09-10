@@ -10,4 +10,4 @@ def test_dashboard_matches_stories(client, member1_token):
     assert d["total"] == total
     assert d["done"] >= 0
     assert isinstance(d["percent"], int)
-    assert len(d["by_sprint"]) == 3
+    assert len(d["by_sprint"]) == 4

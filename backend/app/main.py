@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from .database import Base, SessionLocal, engine
 from .routers import auth, dashboard, pool, stories, tasks, meetings, agent
@@ -14,6 +14,33 @@ from .meeting_agent.jobs import Worker
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    task_columns = {column["name"] for column in inspect(engine).get_columns("tasks")}
+    if "depends_on" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN depends_on VARCHAR(100) NULL"))
+    if "kanban_card_id" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN kanban_card_id VARCHAR(10) NULL"))
+    if "estimated_hours" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN estimated_hours INTEGER NOT NULL DEFAULT 0"))
+            connection.execute(text("UPDATE tasks SET estimated_hours = hours WHERE estimated_hours = 0"))
+    if "task_type" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN task_type VARCHAR(10) NOT NULL DEFAULT 'feature'"))
+    if "status" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN status INTEGER NOT NULL DEFAULT 0"))
+    if "progress" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0"))
+    if "blocked" not in task_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0"))
+    user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    if "capacity_hours" not in user_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN capacity_hours INTEGER NOT NULL DEFAULT 60"))
     db = SessionLocal()
     try:
         seed_all(db)

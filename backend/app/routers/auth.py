@@ -10,6 +10,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/login", response_model=schemas.TokenOut)
 def login(body: schemas.LoginIn, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == body.username).first()
+    if user is None:
+        aliases = {
+            "李锐铭": "成员1", "高思晗": "成员2", "孙秋实": "成员3", "罗子涵": "成员4",
+            "成员1": "李锐铭", "成员2": "高思晗", "成员3": "孙秋实", "成员4": "罗子涵",
+        }
+        legacy_username = aliases.get(body.username)
+        if legacy_username:
+            user = db.query(models.User).filter(models.User.username == legacy_username).first()
     if user is None or not security.verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = security.create_token(user.id)
