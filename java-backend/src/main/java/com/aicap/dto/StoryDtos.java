@@ -24,7 +24,7 @@ public final class StoryDtos {
                           String acceptance,
                           @Pattern(regexp = "^(Must|Should|Could)$", message = "priority 必须是 Must/Should/Could")
                           String priority,
-                          @NotNull @Min(1) @Max(3) Integer sprint,
+                          @NotNull @Min(1) @Max(4) Integer sprint,
                           @NotNull @Min(1) @Max(5) Integer activity,
                           @NotNull @Min(0) @Max(2) Integer status,
                           @JsonProperty("owner_id") Integer ownerId) {
@@ -45,7 +45,7 @@ public final class StoryDtos {
                              String acceptance,
                              @Pattern(regexp = "^(Must|Should|Could)$", message = "priority 必须是 Must/Should/Could")
                              String priority,
-                             @Min(1) @Max(3) Integer sprint,
+                             @Min(1) @Max(4) Integer sprint,
                              @Min(1) @Max(5) Integer activity,
                              @Min(0) @Max(2) Integer status,
                              @JsonProperty("owner_id") Integer ownerId) {

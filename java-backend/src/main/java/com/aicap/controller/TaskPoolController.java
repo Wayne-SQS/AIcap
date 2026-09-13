@@ -30,9 +30,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 任务 + 需求池接口(对齐 FastAPI routers/tasks.py + pool.py)。
@@ -44,7 +51,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class TaskPoolController {
 
-    private static final Pattern M_ID = Pattern.compile("^M(\\d+)$");
+    private static final Pattern US_ID = Pattern.compile("^US(\\d+)$");
     private static final Pattern R_ID = Pattern.compile("^R(\\d+)$");
 
     private final TaskMapper taskMapper;
@@ -55,13 +62,14 @@ public class TaskPoolController {
 
     // ---------- 工具 ----------
 
+    /** 新看板卡 ID:沿用 US 命名空间(对齐 FastAPI pool.py 的 _next_story_id:US38 起) */
     private String nextStoryId() {
         int max = 0;
         for (Story s : storyMapper.selectList(null)) {
-            Matcher m = M_ID.matcher(s.getId());
+            Matcher m = US_ID.matcher(s.getId());
             if (m.matches()) max = Math.max(max, Integer.parseInt(m.group(1)));
         }
-        return String.format("M%02d", max + 1);
+        return String.format("US%02d", max + 1);
     }
 
     private String nextPoolId() {
@@ -84,6 +92,121 @@ public class TaskPoolController {
         storyLogMapper.insert(log);
     }
 
+    /**
+     * 关联编号解析(对齐 FastAPI tasks.py `_parse_refs`):
+     * 空值→空表;按逗号切分、去空白、转大写;先查重、再校验 `<前缀>xx` 格式。
+     */
+    private List<String> parseRefs(String value, String prefix) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> refs = new ArrayList<>();
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                refs.add(trimmed.toUpperCase(Locale.ROOT));
+            }
+        }
+        if (new HashSet<>(refs).size() != refs.size()) {
+            throw ApiException.badRequest("关联编号不能重复");
+        }
+        Pattern pattern = Pattern.compile(prefix + "\\d+");
+        for (String ref : refs) {
+            if (!pattern.matcher(ref).matches()) {
+                throw ApiException.badRequest("关联编号必须使用 " + prefix + "xx 格式，并以逗号分隔");
+            }
+        }
+        return refs;
+    }
+
+    /** 依赖环检测(对齐 FastAPI tasks.py `_has_dependency_cycle`):以 taskId 为终点做可达性 DFS */
+    private boolean hasDependencyCycle(String taskId, List<String> dependencies) {
+        Map<String, List<String>> dependencyMap = new HashMap<>();
+        for (Task t : taskMapper.selectList(null)) {
+            dependencyMap.put(t.getId(), parseRefs(t.getDependsOn(), "T"));
+        }
+        dependencyMap.put(taskId, dependencies);
+        return dependencies.stream()
+                .anyMatch(dep -> reaches(dep, taskId, dependencyMap, new HashSet<>()));
+    }
+
+    private boolean reaches(String current, String target,
+                            Map<String, List<String>> dependencyMap, Set<String> visited) {
+        if (current.equals(target)) {
+            return true;
+        }
+        if (!visited.add(current)) {
+            return false;
+        }
+        for (String next : dependencyMap.getOrDefault(current, List.of())) {
+            if (reaches(next, target, dependencyMap, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ---------- 字段级校验(对齐 pydantic TaskPatch 约束,先于业务校验) ----------
+
+    private NullableField<Integer> intField(JsonNode body, String name, int min, int max) {
+        JsonNode v = body.get(name);
+        if (v == null || v.isNull()) {
+            return NullableField.absent();
+        }
+        if (!v.isIntegralNumber()) {
+            throw ApiException.unprocessable("字段 " + name + ": 必须为整数");
+        }
+        int n = v.asInt();
+        if (n < min || n > max) {
+            throw ApiException.unprocessable("字段 " + name + ": 必须在 " + min + ".." + max + " 之间");
+        }
+        return NullableField.of(n);
+    }
+
+    private NullableField<String> textField(JsonNode body, String name, Integer maxLen, boolean nonEmpty) {
+        JsonNode v = body.get(name);
+        if (v == null || v.isNull()) {
+            return NullableField.absent();
+        }
+        if (!v.isTextual()) {
+            throw ApiException.unprocessable("字段 " + name + ": 必须为字符串");
+        }
+        String s = v.asText();
+        if (nonEmpty && s.isEmpty()) {
+            throw ApiException.unprocessable("字段 " + name + ": 不能为空");
+        }
+        if (maxLen != null && s.length() > maxLen) {
+            throw ApiException.unprocessable("字段 " + name + ": 长度不能超过 " + maxLen);
+        }
+        return NullableField.of(s);
+    }
+
+    /** 布尔字段:接受 true/false,兼容 pydantic 宽松模式下的 0/1 */
+    private NullableField<Boolean> boolField(JsonNode body, String name) {
+        JsonNode v = body.get(name);
+        if (v == null || v.isNull()) {
+            return NullableField.absent();
+        }
+        if (v.isBoolean()) {
+            return NullableField.of(v.asBoolean());
+        }
+        if (v.isIntegralNumber() && (v.asInt() == 0 || v.asInt() == 1)) {
+            return NullableField.of(v.asInt() == 1);
+        }
+        throw ApiException.unprocessable("字段 " + name + ": 必须为布尔值");
+    }
+
+    /** 区分"未提供"与"提供了值"的小包装(null 视为未提供,与 FastAPI 的 Optional 语义一致) */
+    private record NullableField<T>(boolean present, T value) {
+        static <T> NullableField<T> absent() {
+            return new NullableField<>(false, null);
+        }
+
+        static <T> NullableField<T> of(T value) {
+            return new NullableField<>(true, value);
+        }
+    }
+
     // ---------- tasks ----------
 
     @GetMapping("/tasks")
@@ -93,8 +216,12 @@ public class TaskPoolController {
     }
 
     /**
-     * PATCH /api/tasks/{id}:status/kanban_card_id/week_start/week_end。
-     * 接收 JsonNode 区分"未提供"与"显式 null"(kanban_card_id=null 解绑)。
+     * PATCH /api/tasks/{id}:看板/甘特/成员/需求四视图共用的任务记录更新
+     * (对齐 FastAPI routers/tasks.py patch_task)。
+     *
+     * <p>校验顺序与 FastAPI 一致:字段级(422)→ 负责人存在 → 看板卡存在 → 周序
+     * → story_ref(USxx)→ depends_on(Txx、自依赖、存在性、依赖环)→ status/progress 联动。
+     * 接收 JsonNode 以区分"未提供"与"显式 null"(kanban_card_id=null 即解绑)。
      */
     @PatchMapping("/tasks/{taskId}")
     @Transactional
@@ -105,45 +232,137 @@ public class TaskPoolController {
         if (task == null) {
             throw ApiException.notFound("任务不存在");
         }
-        boolean changed = false;
 
-        if (body.hasNonNull("status")) {
-            int s = body.get("status").asInt();
-            if (s < 0 || s > 3) throw ApiException.unprocessable("status 必须在 0..3");
-            task.setStatus(s);
+        // ---- 1) 字段级约束(对应 pydantic TaskPatch) ----
+        NullableField<String> name = textField(body, "name", 200, true);
+        NullableField<Integer> ownerId = intField(body, "owner_id", Integer.MIN_VALUE, Integer.MAX_VALUE);
+        NullableField<Integer> hours = intField(body, "hours", 0, 999);
+        NullableField<Integer> weekStart = intField(body, "week_start", 1, 6);
+        NullableField<Integer> weekEnd = intField(body, "week_end", 1, 6);
+        NullableField<String> storyRef = textField(body, "story_ref", 100, false);
+        NullableField<Integer> estimatedHours = intField(body, "estimated_hours", 0, 999);
+        NullableField<String> taskType = textField(body, "task_type", null, false);
+        if (taskType.present() && !"feature".equals(taskType.value()) && !"management".equals(taskType.value())) {
+            throw ApiException.unprocessable("字段 task_type: 仅支持 feature/management");
+        }
+        NullableField<String> dependsOn = textField(body, "depends_on", 100, false);
+        NullableField<Integer> status = intField(body, "status", 0, 3);
+        NullableField<Integer> progress = intField(body, "progress", 0, 100);
+        NullableField<Boolean> blocked = boolField(body, "blocked");
+        boolean hasKanban = body.has("kanban_card_id");
+
+        // ---- 2) 业务校验 ----
+        if (ownerId.present() && userMapper.selectById(ownerId.value()) == null) {
+            throw ApiException.badRequest("负责人不存在");
+        }
+
+        String kanban = null;
+        if (hasKanban && !body.get("kanban_card_id").isNull()) {
+            kanban = body.get("kanban_card_id").asText();
+            if (storyMapper.selectById(kanban) == null) {
+                throw ApiException.badRequest("所属看板卡不存在");
+            }
+        }
+
+        int ws = weekStart.present() ? weekStart.value() : task.getWeekStart();
+        int we = weekEnd.present() ? weekEnd.value() : task.getWeekEnd();
+        if (ws > we) {
+            throw ApiException.badRequest("开始周不能晚于结束周");
+        }
+
+        String normalizedStoryRef = null;
+        if (body.has("story_ref")) {
+            List<String> refs = parseRefs(storyRef.value(), "US");
+            Set<String> storyIds = storyMapper.selectList(null).stream()
+                    .map(Story::getId).collect(Collectors.toSet());
+            List<String> missing = refs.stream().filter(r -> !storyIds.contains(r)).toList();
+            if (!missing.isEmpty()) {
+                throw ApiException.badRequest("关联故事不存在：" + String.join(", ", missing));
+            }
+            normalizedStoryRef = String.join(",", refs);
+        }
+
+        String normalizedDependsOn = null;
+        if (body.has("depends_on")) {
+            List<String> deps = parseRefs(dependsOn.value(), "T");
+            if (deps.contains(taskId)) {
+                throw ApiException.badRequest("任务不能依赖自身");
+            }
+            Set<String> taskIds = taskMapper.selectList(null).stream()
+                    .map(Task::getId).collect(Collectors.toSet());
+            List<String> missing = deps.stream().filter(r -> !taskIds.contains(r)).toList();
+            if (!missing.isEmpty()) {
+                throw ApiException.badRequest("前置任务不存在：" + String.join(", ", missing));
+            }
+            if (hasDependencyCycle(taskId, deps)) {
+                throw ApiException.badRequest("任务依赖不能形成循环");
+            }
+            normalizedDependsOn = String.join(",", deps);
+        }
+
+        // ---- 3) status/progress 联动(单给其一时推导另一个;status=3 保留原进度) ----
+        Integer finalStatus = status.present() ? status.value() : null;
+        Integer finalProgress = progress.present() ? progress.value() : null;
+        if (finalStatus != null && finalProgress == null) {
+            finalProgress = switch (finalStatus) {
+                case 0 -> 0;
+                case 1 -> 50;
+                case 2 -> 100;
+                default -> task.getProgress() == null ? 0 : task.getProgress();
+            };
+        } else if (finalProgress != null && finalStatus == null) {
+            finalStatus = finalProgress >= 100 ? 2 : (finalProgress > 0 ? 1 : 0);
+        }
+
+        // ---- 4) 落库 ----
+        boolean changed = false;
+        if (name.present()) {
+            task.setName(name.value());
             changed = true;
         }
-        if (body.has("kanban_card_id")) {
-            JsonNode v = body.get("kanban_card_id");
-            if (v.isNull()) {
-                task.setKanbanCardId(null);
-            } else {
-                String cardId = v.asText();
-                if (storyMapper.selectById(cardId) == null) {
-                    throw ApiException.badRequest("所属看板卡不存在");
-                }
-                task.setKanbanCardId(cardId);
-            }
+        if (ownerId.present()) {
+            task.setOwnerId(ownerId.value());
             changed = true;
         }
-        if (body.has("week_start") || body.has("week_end")) {
-            int ws = task.getWeekStart();
-            int we = task.getWeekEnd();
-            if (body.hasNonNull("week_start")) {
-                ws = body.get("week_start").asInt();
-                if (ws < 1 || ws > 6) throw ApiException.unprocessable("week_start 必须在 1..6");
-            }
-            if (body.hasNonNull("week_end")) {
-                we = body.get("week_end").asInt();
-                if (we < 1 || we > 6) throw ApiException.unprocessable("week_end 必须在 1..6");
-            }
-            if (we < ws) {
-                throw ApiException.badRequest("结束周不能早于开始周");
-            }
+        if (hours.present()) {
+            task.setHours(hours.value());
+            changed = true;
+        }
+        if (weekStart.present() || weekEnd.present()) {
             task.setWeekStart(ws);
             task.setWeekEnd(we);
             changed = true;
         }
+        if (body.has("story_ref")) {
+            task.setStoryRef(normalizedStoryRef);
+            changed = true;
+        }
+        if (hasKanban) {
+            task.setKanbanCardId(kanban);
+            changed = true;
+        }
+        if (estimatedHours.present()) {
+            task.setEstimatedHours(estimatedHours.value());
+            changed = true;
+        }
+        if (taskType.present()) {
+            task.setTaskType(taskType.value());
+            changed = true;
+        }
+        if (body.has("depends_on")) {
+            task.setDependsOn(normalizedDependsOn);
+            changed = true;
+        }
+        if (finalStatus != null) {
+            task.setStatus(finalStatus);
+            task.setProgress(finalProgress);
+            changed = true;
+        }
+        if (blocked.present()) {
+            task.setBlocked(Boolean.TRUE.equals(blocked.value()) ? 1 : 0);
+            changed = true;
+        }
+
         if (!changed) {
             return TaskDtos.toOut(task);
         }

@@ -17,7 +17,8 @@ public final class AuthDtos {
     /** 用户输出(不含 password_hash;对齐 UserOut) */
     public record UserOut(Integer id, String username,
                           @JsonProperty("display_name") String displayName,
-                          String role, String color) {
+                          String role, String color,
+                          @JsonProperty("capacity_hours") Integer capacityHours) {
     }
 
     /** 登录响应(对齐 TokenOut) */
@@ -27,6 +28,7 @@ public final class AuthDtos {
     }
 
     public static UserOut toUserOut(com.aicap.entity.User u) {
-        return new UserOut(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole(), u.getColor());
+        return new UserOut(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole(), u.getColor(),
+                u.getCapacityHours() == null ? 60 : u.getCapacityHours());
     }
 }

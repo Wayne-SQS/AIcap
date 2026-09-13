@@ -9,6 +9,11 @@ spring:
     username: ${DB_USER:aiguanli}
     password: ${DB_PASSWORD:aiguanli-2026}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      # 建表自举:全部 CREATE TABLE IF NOT EXISTS,幂等;全新空库无需先跑 FastAPI
+      mode: always
+      schema-locations: classpath:db/schema.sql
   jackson:
     time-zone: Asia/Shanghai
     # 对齐 FastAPI:字段恒输出(含 null),不裁剪
@@ -28,6 +33,7 @@ aicap:
     secret: ${JWT_SECRET:aicap-dev-secret-change-me-please-use-env-0123456789}
     algorithm: HS256
     expire-minutes: ${JWT_EXPIRE_MINUTES:720}
+  seed-on-start: ${AICAP_SEED_ON_START:true}
   llm:
     api-key: ${AICAP_LLM_API_KEY:}
     base-url: ${AICAP_LLM_BASE_URL:https://api.deepseek.com}

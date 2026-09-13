@@ -27,7 +27,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,7 +40,8 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class StoryController {
 
-    private static final Pattern M_ID = Pattern.compile("^M(\\d+)$");
+    /** 新故事 ID:US 命名空间(对齐 FastAPI stories.py `_next_story_id`:从 US38 起) */
+    private static final Pattern US_ID = Pattern.compile("^US(\\d+)$");
 
     private final StoryMapper storyMapper;
     private final StoryLogMapper storyLogMapper;
@@ -53,12 +53,12 @@ public class StoryController {
     private String nextStoryId() {
         int max = 0;
         for (Story s : storyMapper.selectList(null)) {
-            Matcher m = M_ID.matcher(s.getId());
+            Matcher m = US_ID.matcher(s.getId());
             if (m.matches()) {
                 max = Math.max(max, Integer.parseInt(m.group(1)));
             }
         }
-        return String.format("M%02d", max + 1);
+        return String.format("US%02d", max + 1);
     }
 
     @Transactional

@@ -16,9 +16,11 @@ import com.aicap.mapper.SuggestionMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -163,8 +165,10 @@ public class MeetingService {
         return r;
     }
 
-    /** 审核:原子认领 pending→目标;approve/modify 落 pool + payload */
-    @Transactional
+    /** 审核:原子认领 pending→目标;approve/modify 落 pool + payload
+     *  READ_COMMITTED:认领失败后同事务内重读须见到并发胜者已提交的最新状态
+     *  (对齐 FastAPI 版 rollback 后新事务重读的语义;RR 快照会把同结论并发误判为 409) */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public SuggestionOutHolder review(String suggestionId, MeetingDtos.ReviewIn in, User user) {
         // 决策⇔载荷一致性(对齐 FastAPI ReviewIn model_validator):modify_and_approve 必须带 changes,其余不得带
         boolean isModify = "modify_and_approve".equals(in.decision());
@@ -176,25 +180,24 @@ public class MeetingService {
         if (suggestion == null) throw ApiException.notFound("会议建议不存在");
 
         String targetStatus = "reject".equals(in.decision()) ? "rejected" : "approved";
-        String currentStatus = suggestion.getStatus();
 
-        if (!"pending".equals(currentStatus)) {
+        if (!"pending".equals(suggestion.getStatus())) {
             // 已审核:同结论幂等返回;异结论 409
-            if (!targetStatus.equals(currentStatus)) {
-                throw ApiException.conflict("建议已审核，不能改变审核结论");
-            }
-            MeetingApprovalPayload prev = payloadMapper.selectById(suggestionId);
-            Map<String, Object> applied = prev != null ? readJsonMap(prev.getChangesJson()) : readJsonMap(suggestion.getChangeJson());
-            Map<String, Object> requested = in.changes() != null ? readJsonMap(writeJson(in.changes())) : readJsonMap(suggestion.getChangeJson());
-            if ("approved".equals(targetStatus) && !applied.equals(requested)) {
-                throw ApiException.conflict("建议已采纳，不能覆盖已执行的内容");
-            }
-            return new SuggestionOutHolder(suggestion, record);
+            return reviewedOutcome(suggestion, record, targetStatus, in);
         }
 
-        // 原子认领:乐观锁语义(当前仅单 worker;用条件更新模拟 claim)
+        // 原子认领:UPDATE suggestions SET status=? WHERE id=? AND status='pending'
+        // 受影响 0 行 = 已被并发审核,重读最新状态后走同一套已审核裁决(幂等返回/409)
+        int claimed = suggestionMapper.update(null, new UpdateWrapper<Suggestion>()
+                .set("status", targetStatus)
+                .eq("id", suggestionId)
+                .eq("status", "pending"));
+        if (claimed == 0) {
+            suggestion = suggestionMapper.selectById(suggestionId);
+            record = getRecordBySuggestionId(suggestionId);
+            return reviewedOutcome(suggestion, record, targetStatus, in);
+        }
         suggestion.setStatus(targetStatus);
-        suggestionMapper.updateById(suggestion);
 
         record.setReviewedBy(user.getId());
         record.setReviewedAt(LocalDateTime.now());
@@ -231,6 +234,21 @@ public class MeetingService {
             record.setExecutionStatus("not_needed");
         }
         recordMapper.updateById(record);
+        return new SuggestionOutHolder(suggestion, record);
+    }
+
+    /** 已审核裁决(预检与并发认领失败共用):同结论幂等返回;异结论 409;approved 且 changes 不同 → 409 */
+    private SuggestionOutHolder reviewedOutcome(Suggestion suggestion, MeetingSuggestionRecord record,
+                                                String targetStatus, MeetingDtos.ReviewIn in) {
+        if (!targetStatus.equals(suggestion.getStatus())) {
+            throw ApiException.conflict("建议已审核，不能改变审核结论");
+        }
+        MeetingApprovalPayload prev = payloadMapper.selectById(suggestion.getId());
+        Map<String, Object> applied = prev != null ? readJsonMap(prev.getChangesJson()) : readJsonMap(suggestion.getChangeJson());
+        Map<String, Object> requested = in.changes() != null ? readJsonMap(writeJson(in.changes())) : readJsonMap(suggestion.getChangeJson());
+        if ("approved".equals(targetStatus) && !applied.equals(requested)) {
+            throw ApiException.conflict("建议已采纳，不能覆盖已执行的内容");
+        }
         return new SuggestionOutHolder(suggestion, record);
     }
 

@@ -76,12 +76,6 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
-        <!-- HTTP 客户端(AI Agent 调 DeepSeek) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
-
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

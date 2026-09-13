@@ -39,8 +39,8 @@ public final class PoolDtos {
     public record DeleteOut(Boolean ok) {
     }
 
-    /** POST /api/pool/{id}/promote 请求体(PoolPromoteIn;sprint 必填 1..3,owner_id 可空,activity 1..5) */
-    public record PoolPromoteIn(@NotNull @Min(1) @Max(3) Integer sprint,
+    /** POST /api/pool/{id}/promote 请求体(PoolPromoteIn;sprint 必填 1..4,owner_id 可空,activity 1..5) */
+    public record PoolPromoteIn(@NotNull @Min(1) @Max(4) Integer sprint,
                                 @JsonProperty("owner_id") Integer ownerId,
                                 @NotNull @Min(1) @Max(5) Integer activity) {
         public PoolPromoteIn {

@@ -32,7 +32,7 @@ public class DashboardController {
         int percent = total > 0 ? (int) Math.round(done * 100.0 / total) : 0;
 
         List<Map<String, Object>> bySprint = new ArrayList<>();
-        for (int sp = 1; sp <= 3; sp++) {
+        for (int sp = 1; sp <= 4; sp++) {
             long t = storyMapper.selectCount(new QueryWrapper<Story>().eq("sprint", sp));
             long d = storyMapper.selectCount(new QueryWrapper<Story>().eq("sprint", sp).eq("status", 2));
             bySprint.add(Map.of(
