@@ -62,9 +62,9 @@ def test_users_list_requires_token_and_returns_roles(client):
     ).json()["access_token"]))
     assert r.status_code == 200
     data = r.json()
-    assert len(data) == 4
+    assert len(data) == 5
     roles = {u["role"] for u in data}
-    assert {"admin", "owner", "member"} <= roles
+    assert {"admin", "owner", "member", "viewer"} <= roles
     assert all({"id", "username", "display_name", "role", "color"} <= set(u) for u in data)
 
 
@@ -78,7 +78,7 @@ def test_story_create_full_and_defaults(client, member1_token):
     }, headers=h)
     assert full.status_code == 200
     b = full.json()
-    assert re.match(r"^M\d{2,}$", b["id"])
+    assert re.match(r"^US\d{2,}$", b["id"])
     assert b["priority"] == "Must" and b["sprint"] == 2 and b["activity"] == 3 and b["owner_id"] == 2
 
     mini = client.post("/api/stories", json={"title": "仅标题故事"}, headers=h)
@@ -161,15 +161,15 @@ def test_story_delete_404_and_roles(client, member1_token, member3_token):
     assert client.get(f"/api/stories", headers=h3).status_code == 200  # 成员可读
     assert client.delete(f"/api/stories/{sid}", headers=h1).status_code == 200  # admin 可删
     assert client.delete(f"/api/stories/{sid}", headers=h1).status_code == 404  # 再删 404
-    assert client.delete("/api/stories/M40404", headers=h1).status_code == 404
+    assert client.delete("/api/stories/US40404", headers=h1).status_code == 404
 
 
 def test_story_id_auto_increment(client, member1_token):
-    """STORY-10 新故事 ID 按现有最大值递增(Mxx 格式)。"""
+    """STORY-10 新故事 ID 按现有最大值递增(USxx 格式)。"""
     h = auth(member1_token)
     all_ids = [s["id"] for s in client.get("/api/stories", headers=h).json()]
-    nums = [int(m.group(1)) for i in all_ids if (m := re.match(r"^M(\d+)$", i or ""))]
-    expect = f"M{((max(nums) if nums else 0) + 1):02d}"
+    nums = [int(m.group(1)) for i in all_ids if (m := re.match(r"^US(\d+)$", i or ""))]
+    expect = f"US{((max(nums) if nums else 0) + 1):02d}"
     got = client.post("/api/stories", json={"title": "自增ID验证"}, headers=h).json()["id"]
     assert got == expect
 
@@ -238,8 +238,37 @@ def test_tasks_list_and_requires_token(client, member1_token):
     data = client.get("/api/tasks", headers=auth(member1_token)).json()
     assert isinstance(data, list)
     for t in data:
-        assert {"id", "name", "owner_id", "hours", "week_start", "week_end", "story_ref"} <= set(t)
+        assert {"id", "name", "owner_id", "hours", "week_start", "week_end", "story_ref", "depends_on", "sprints"} <= set(t)
         assert re.match(r"^T\d+$", t["id"])
+
+
+def test_task_patch_validates_relations_and_updates_schedule(client, member1_token):
+    """TASK-02 任务更新复用 Story/Task 真实关联，并校验前置依赖。"""
+    h = auth(member1_token)
+    db = client.app.dependency_overrides[get_db].__closure__[0].cell_contents() if False else None
+    # Use API-created stories and direct test DB task setup through the imported model/session fixture behavior.
+    from app.database import get_db
+    session_factory = client.app.dependency_overrides[get_db]
+    session_generator = session_factory()
+    session = next(session_generator)
+    try:
+        session.add(models.Story(id="US88", title="关联任务测试", description="", acceptance="", owner_id=1))
+        session.add(models.Task(id="T88", name="前置任务", owner_id=1, hours=4, week_start=1, week_end=1, story_ref="US88", depends_on=""))
+        session.add(models.Task(id="T89", name="待更新任务", owner_id=2, hours=4, week_start=2, week_end=2, story_ref="US88", depends_on="T88"))
+        session.commit()
+    finally:
+        session_generator.close()
+
+    updated = client.patch("/api/tasks/T89", json={
+        "owner_id": 3, "week_start": 3, "week_end": 4, "story_ref": "US88", "depends_on": "T88",
+    }, headers=h)
+    assert updated.status_code == 200
+    assert updated.json()["owner_id"] == 3
+    assert updated.json()["sprints"] == [2]
+
+    assert client.patch("/api/tasks/T89", json={"week_start": 5, "week_end": 4}, headers=h).status_code == 400
+    assert client.patch("/api/tasks/T89", json={"story_ref": "US404"}, headers=h).status_code == 400
+    assert client.patch("/api/tasks/T88", json={"depends_on": "T89"}, headers=h).status_code == 400
 
 
 # ------------------------------------------------------------- DASHBOARD ----
@@ -259,10 +288,10 @@ def test_dashboard_consistency(client, member1_token):
     assert d["total"] == total == d["done"] + d["doing"] + d["todo"]
     assert d["done"] == done and d["doing"] == doing and d["todo"] == todo
     assert d["percent"] == (round(done / total * 100) if total else 0)
-    assert len(d["by_sprint"]) == 3
+    assert len(d["by_sprint"]) == 4
     for sp in d["by_sprint"]:
         assert set(sp) == {"sprint", "total", "done", "percent"}
-        assert sp["sprint"] in (1, 2, 3)
+        assert sp["sprint"] in (1, 2, 3, 4)
     sprint_total = sum(sp["total"] for sp in d["by_sprint"])
     assert sprint_total == total  # 阶段1数据约定 sprint ∈ 1..3
 

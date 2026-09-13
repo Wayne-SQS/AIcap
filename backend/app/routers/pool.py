@@ -55,10 +55,10 @@ def promote_pool(pool_id: str, body: schemas.PoolPromoteIn, db: Session = Depend
     def _next_story_id():
         nums = []
         for (sid,) in db.query(models.Story.id).all():
-            m = re.match(r"^M(\d+)$", sid or "")
+            m = re.match(r"^US(\d+)$", sid or "")
             if m:
                 nums.append(int(m.group(1)))
-        return f"M{((max(nums) if nums else 0) + 1):02d}"
+        return f"US{((max(nums) if nums else 0) + 1):02d}"
 
     if body.owner_id is not None and db.get(models.User, body.owner_id) is None:
         raise HTTPException(422, "所选负责人不存在")

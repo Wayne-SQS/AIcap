@@ -19,7 +19,7 @@ def dashboard(db: Session = Depends(get_db), _=Depends(security.get_current_user
     todo = count_of(0)
     percent = round(done / total * 100) if total else 0
     by_sprint = []
-    for sp in (1, 2, 3):
+    for sp in (1, 2, 3, 4):
         t = db.query(func.count(models.Story.id)).filter(models.Story.sprint == sp).scalar() or 0
         d = db.query(func.count(models.Story.id)).filter(models.Story.sprint == sp,
                                                          models.Story.status == 2).scalar() or 0

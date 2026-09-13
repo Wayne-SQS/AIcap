@@ -50,8 +50,13 @@ def test_promotion_requires_sprint_validates_owner_and_preserves_unassigned(clie
     h = headers(member1_token)
     pid = client.post('/api/pool', headers=h, json={'title':'排期测试'}).json()['id']
     path = '/api/pool/' + pid + '/promote'
-    for body in ({}, {'sprint':0}, {'sprint':4}, {'sprint':2,'owner_id':999999}):
+    for body in ({}, {'sprint':0}, {'sprint':2,'owner_id':999999}):
         assert client.post(path, headers=h, json=body).status_code == 422
+    promoted = client.post(path, headers=h, json={'sprint':4})
+    assert promoted.status_code == 200
+    assert promoted.json()['sprint'] == 4
+    pid = client.post('/api/pool', headers=h, json={'title':'继续验证未分配'}).json()['id']
+    path = '/api/pool/' + pid + '/promote'
     assert any(p['id'] == pid for p in client.get('/api/pool', headers=h).json())
     story = client.post(path, headers=h, json={'sprint':3,'activity':4}).json()
     assert (story['sprint'],story['activity'],story['owner_id'],story['status']) == (3,4,None,0)

@@ -17,6 +17,7 @@ class UserOut(BaseModel):
     display_name: str
     role: str
     color: str
+    capacity_hours: int
 
 
 class TokenOut(BaseModel):
@@ -30,7 +31,7 @@ class StoryIn(BaseModel):
     description: str = ""
     acceptance: str = ""
     priority: Literal["Must", "Should", "Could"] = "Must"
-    sprint: int = Field(default=1, ge=1, le=3)
+    sprint: int = Field(default=1, ge=1, le=4)
     activity: int = Field(default=2, ge=1, le=5)
     status: int = Field(default=0, ge=0, le=2)
     owner_id: Optional[int] = None
@@ -41,7 +42,7 @@ class StoryPatch(BaseModel):
     description: Optional[str] = None
     acceptance: Optional[str] = None
     priority: Optional[Literal["Must", "Should", "Could"]] = None
-    sprint: Optional[int] = Field(default=None, ge=1, le=3)
+    sprint: Optional[int] = Field(default=None, ge=1, le=4)
     activity: Optional[int] = Field(default=None, ge=1, le=5)
     status: Optional[int] = Field(default=None, ge=0, le=2)
     owner_id: Optional[int] = None
@@ -91,15 +92,27 @@ class TaskOut(BaseModel):
     kanban_card_id: Optional[str] = None
     estimated_hours: int = 0
     task_type: str = "feature"
-    status: int = 0
+    depends_on: Optional[str]
+    status: int
+    progress: int
+    blocked: bool
+    sprints: list[int]
 
 
 class TaskPatch(BaseModel):
-    """任务局部更新:状态/所属卡/时间轴(用于关卡级联与跨 Sprint 挪动)。"""
-    status: Optional[int] = Field(default=None, ge=0, le=3)
-    kanban_card_id: Optional[str] = None  # 传 null 解绑(脱离看板卡)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    owner_id: Optional[int] = None
+    hours: Optional[int] = Field(default=None, ge=0, le=999)
     week_start: Optional[int] = Field(default=None, ge=1, le=6)
     week_end: Optional[int] = Field(default=None, ge=1, le=6)
+    story_ref: Optional[str] = Field(default=None, max_length=100)
+    kanban_card_id: Optional[str] = None
+    estimated_hours: Optional[int] = Field(default=None, ge=0, le=999)
+    task_type: Optional[Literal["feature", "management"]] = None
+    depends_on: Optional[str] = Field(default=None, max_length=100)
+    status: Optional[int] = Field(default=None, ge=0, le=3)
+    progress: Optional[int] = Field(default=None, ge=0, le=100)
+    blocked: Optional[bool] = None
 
 
 class LogOut(BaseModel):
@@ -123,6 +136,6 @@ class DashboardOut(BaseModel):
 
 class PoolPromoteIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    sprint: int = Field(ge=1, le=3)
+    sprint: int = Field(ge=1, le=4)
     owner_id: int | None = Field(default=None, ge=1)
     activity: int = Field(default=2, ge=1, le=5)
