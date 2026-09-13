@@ -18,7 +18,7 @@
 |---|---|
 | `package.json` | `aicap-qa` 独立测试工程;`@playwright/test` 锁定 `1.63.0`;scripts:`test` / `test:headed` / `report` |
 | `playwright.config.js` | baseURL `http://localhost:5173`、系统 Edge(`channel: msedge`)、headless、虚拟麦克风;`testDir: '.'` + `testMatch` 只收集新套件;产物写在 `qa/test-results` 与 `qa/report` |
-| `vue-baseline-e2e.spec.js` | 现行基线端到端回归套件:**32 条** `[FE-XXX-NN]` 用例,按 9 个模块 `test.describe` 分组 |
+| `vue-baseline-e2e.spec.js` | 现行基线端到端回归套件:**35 条** `[FE-XXX-NN]` 用例,按 9 个模块 `test.describe` 分组 |
 
 用例编号是稳定契约:`[FE-XXX-NN]` 与 `qa/测试用例设计_当前基线_v3.md`(用例设计:步骤/预期/实测)、
 `qa/测试执行记录_当前基线_v3.md`(执行记录)中的编号**一一对应**,可双向追溯;批量编排入口见 `qa/run-all.ps1`。
@@ -47,7 +47,7 @@ npm test           # = npx playwright test
 npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
 ```
 
-用例清单(32 条):
+用例清单(35 条):
 
 | 模块 | 编号 | 覆盖要点 |
 |---|---|---|
@@ -86,8 +86,9 @@ npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
 | 4 | 只读角色的「新增/编辑」按钮未禁用,仅点击后弹 toast | ✅ 已修复:统一 `disabled + title="只读账号无写权限"`(保持可见),故事卡同时不可拖拽;`guard()` 仍作兜底 | `FE-AUTH-03` |
 | 5 | 变更记录面板标称与实际不符(实际最旧在前;在线仍标「本机」) | ✅ 已修复:store 取**最新 50 条**并翻成旧→新,面板渲染最新在前;标题随在线/离线变化(连带修好总览「最近更新」取到最旧一条的问题) | `FE-BRD-06` |
 | 6 | 验收套件 `recorder-profile.spec.js` 每轮留一条「录音验收会议」 | ✅ 已修复:用例结束调用删除接口自清理 | `VRF-07` |
-| 7 | 开发库需求池非空(2 条历史冒烟残留 `A000000007/A000000008`) | ⏳ 未处理:「池为空」空态仍用 `page.route` 拦截 `[]` 验证(`FE-POOL-01`);建议清理后回归真实空态断言 | — |
-| 8 | 内联脚本硬编码 `window.__AICAP_API_BASE__`,覆盖 E2E 注入 | ⏳ 未处理:离线用例改用 `Object.defineProperty` 钉死基址(`FE-OFF-01`) | — |
+| 7 | 9 个既有契约测试类的 worker 开关写成 `aicap.agent-worker-enabled`(真实前缀是 `aicap.llm.`),该键**从未绑定**,测试上下文里 Agent worker 实为开启状态 | ✅ 已修复:9 个类统一改为 `aicap.llm.agent-worker-enabled=false`;`AgentContractTest` 显式写 `true`,保证只有该上下文消费队列 | 全量 126 绿 + Agent 套件 14 绿 |
+| 8 | 开发库需求池非空(2 条历史冒烟残留 `A000000007/A000000008`) | ⏸ **保留不动**(2026-09-13 确认口径):它们是「审核→建池」链路的真实凭证,演示时能看到端到端结果;故「池为空」空态仍用 `page.route` 拦截 `[]` 验证(`FE-POOL-01`),不回退真实空态断言 | — |
+| 9 | 内联脚本硬编码 `window.__AICAP_API_BASE__`,覆盖 E2E 注入 | ⏳ 未处理:离线用例改用 `Object.defineProperty` 钉死基址(`FE-OFF-01`) | — |
 
 ## 结构(含归档)
 
@@ -165,7 +166,7 @@ node <repo>\qa\meeting-review-e2e.spec.js  # 会议审核(需先起 agent_provid
 
 ## E2E 双模式(legacy / vue)(⚠️ 已归档:仅适用于上述旧 spec)
 
-自 Vue3 化改造(`frontend/`,分支 `feat/vue-frontend`)起,全部 5 个 E2E spec 同时支持两种页面形态,由环境变量切换:
+自 Vue3 化改造(`frontend/`;该分支已整合进 `main` 并删除)起,全部 5 个 E2E spec 同时支持两种页面形态,由环境变量切换:
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

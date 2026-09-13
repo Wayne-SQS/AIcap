@@ -9,7 +9,23 @@
 
 ## 测试交付物
 
-前后端功能测试用例设计、执行记录与缺陷清单位于 [`qa/`](qa/)(测试用例设计 → 执行记录 → 缺陷清单 → 汇总报告)。测试入口见 `qa/README.md`。
+前后端功能测试的用例设计、执行记录与报告位于 [`qa/`](qa/),**当前基线为 v3**(基于 `main`:Vue3 前端 + `java-backend`):
+
+| 文档 | 内容 |
+|---|---|
+| [`qa/测试用例设计_当前基线_v3.md`](qa/测试用例设计_当前基线_v3.md) | **168 条**用例设计(后端契约 126 / 前端 E2E 35 / 浏览器验收 7),含优先级与未覆盖缺口登记 |
+| [`qa/测试执行记录_当前基线_v3.md`](qa/测试执行记录_当前基线_v3.md) | 逐条执行实况、并发 flake 分析与复跑结论 |
+| [`qa/测试报告_当前基线_v3.md`](qa/测试报告_当前基线_v3.md) | 缺陷清单(9 条:7 条已修复 + 2 条环境项)与逐条修复验证表 |
+
+一键跑全套(需 MySQL 3307、后端 8080、Vite 5173 已启动;脚本会强制指向 JDK 23):
+
+```powershell
+& .\qa\run-all.ps1                 # 126 + 35 + 7 = 168 条
+& .\qa\run-all.ps1 -SkipBackend    # 只跑前端两套
+& .\qa\run-all.ps1 -SkipE2E        # 只跑后端契约
+```
+
+更早的 legacy 基线(旧 `index.html` + FastAPI 后端)测试文档仍在 `qa/` 内,已标注「旧基线」仅作归档;运行前置与目录说明见 `qa/README.md`。
 
 ## 仓库结构
 
@@ -20,7 +36,11 @@
 | `backend/` | 历史归档:FastAPI 后端 + SQLAlchemy + 测试(参考实现);其 `docker-compose.yml` 仍是启动 MySQL 8.0 的现行方式(库 `AIcap`,端口 3307) |
 | `legacy/` | 历史归档:Vue 改造前的旧版单文件前端 |
 | `docs/superpowers/` | 设计规格与实施计划 |
-| `qa/` | 前后端测试用例、执行记录、缺陷清单与回归 |
+| `qa/` | 前后端测试用例、执行记录与报告(当前基线 v3) |
+
+## 仓库分支
+
+远端只保留 **`main`** 一条分支。此前的 `feat/javaweb-backend`、`feat/vue-frontend`、`feat/meeting-agent`、`feat/meeting-review-mvp` 均已整合进 `main` 并删除 —— 它们的每个提交都能在 `main` 历史中找到,不需要再从这些分支取代码。后续新功能按需开临时分支,合并后即删,保持远端只有 `main`。
 
 ## 本地运行(快速)
 
@@ -32,7 +52,8 @@ cd frontend && npm install && npm run dev   # 后端不可用时自动回退离�
 cd backend && docker compose up -d          # 起 MySQL(3307,compose 文件在 backend/)
 cd java-backend && mvn spring-boot:run      # 起后端,默认 8080(或 mvn package 后 java -jar target/aicap-java-backend.jar)
 cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
-# 登录:李锐铭 / 高思晗 / 孙秋实 / 罗子涵 / 成员5,密码 123456(旧别名「成员1-5」同样可登录)
+# 登录:李锐铭 / 高思晗 / 孙秋实 / 罗子涵 / 成员5,密码 123456
+# 别名:成员1–成员4 与真名双向互通;成员5 的显示名「只读查看者」也可直接登录
 ```
 
 ## 功能视图
@@ -73,6 +94,14 @@ cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
 - 落盘：`java-backend/data/audio`（`AICAP_AUDIO_DIR` 可覆盖，已 gitignore），元数据在 `meeting_audio`
 - 为什么不用 ffmpeg：浏览器 `MediaRecorder` 原生只出 webm/opus 或 mp4/aac，不出 mp3；引入 `lamejs`(MIT) 在客户端转码，服务端无需安装 ffmpeg
 
+## 会议删除
+
+`DELETE /api/meetings/{meetingId}`（admin/owner，即 reviewer 角色）：在**事务内手工反序级联**清理 事件 → 运行记录 → 音频元数据 → 审批载荷 → 建议及其审核记录 → 会议本体；音频**磁盘文件在事务提交后** best-effort 删除。响应回传 `deleted` / `audio_deleted` / `suggestions_deleted` / `runs_deleted` 计数。
+
+- 刻意保留的边界：**已审批落库的需求池条目是独立产物,不随会议删除**（契约用例 `MEET-06` 专门断言）,需另行删除
+- 前端入口：「AI 助手 → 会议智能体」内二次确认;member/viewer 禁用并给出角色原因（后端同样返回 403）
+- 契约用例：`MEET-06`（级联成功）/ `MEET-07`（不存在 → 404）/ `MEET-08`（越权 → 403）
+
 ## 静态原型新版内容移植(mcc 提交 `9b14ec5`)
 
 队友 mcc 在静态单文件原型上新提交了一版「四类视图完善+一体化」(`legacy/index.html`,现在就是仓库里那份),本轮把其中的**内容与样式**移植进 Vue,但**交互全部按 Vue 重写**(她的原实现是内联 `onclick` + 全局事件委托、编辑后不刷新其它视图),并按「不牺牲既有能力」的原则处理冲突:
@@ -90,7 +119,7 @@ cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
 
 验收:`cd frontend && npm run e2e:verify`(系统 Edge,无需下载 Playwright 浏览器)。新增 `frontend/e2e-verify/mcc-port.spec.js` 覆盖上述移植项(基线/看板血缘/甘特详情与任务编辑往返/成员抽屉/UML/离线旧缓存回落)。
 
-## 会议建议审核 MVP（本分支新增）
+## 会议建议审核 MVP
 
 已接通会议转写保存、待审建议提交、管理员/负责人采纳或拒绝、采纳后新增需求池及服务器审核记录。包含提交幂等和重复批准保护；在线页面明确标记手动录入，**保留手动入口，自动分析需配置服务端模型密钥**。
 
@@ -103,9 +132,9 @@ cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
 - 后端:现行为 JavaWeb 版 `java-backend/`(Spring Boot 3.5 + MyBatis-Plus,默认 8080):登录(JWT)、故事/需求池/任务/仪表盘 REST API、变更日志、成员列表;FastAPI 版(124 项 pytest 全绿)已归档至 `backend/` 作参考实现
 - 会议 AI Agent(真实调用 DeepSeek:只读工具循环 + 证据校验 + 待审建议)、成员差异化画像、会议录音(浏览器转 MP3)
 - 静态原型新版内容移植(US01–US37 基线 / 甘特任务编辑 / 成员任务抽屉 / UML 真实 SVG / 开发活动图),见上一节
-- Java 契约测试 108 项全绿(`cd java-backend && mvn test`);前端浏览器验收 `cd frontend && npm run e2e:verify`(7 项:基线与看板血缘、甘特详情与任务编辑往返、成员抽屉、UML、离线回落、成员画像、录音全链路;用系统 Edge + 虚拟麦克风)
+- 后端契约测试 **126 项**全绿(`cd java-backend && mvn test`);前端浏览器验收 `cd frontend && npm run e2e:verify`(**7 项**:基线与看板血缘、甘特详情与任务编辑往返、成员抽屉、UML、离线回落、成员画像、录音全链路;系统 Edge + 虚拟麦克风);QA 基线 E2E `qa/`(**35 项**:`npx playwright test`)
 - MySQL 8.0(Docker,库 `AIcap`);前端后端在线走 API、离线自动回退演示数据
-- QA:82 条用例设计与执行、4 项缺陷已修复并复核关闭(见 `qa/`)
+- QA:**168 条**用例(后端 126 / 前端 35 / 验收 7)一键编排全绿(`& .\qa\run-all.ps1`,exit 0);9 条缺陷中 7 条已修复并回归,余 2 条为环境项(见 `qa/测试报告_当前基线_v3.md`)
 
 **数据说明**:每人本地运行各自一套数据库(互不互通但完全可用);如需共享数据,由一人当"服务器"运行后端,其余人把前端 API 地址指向其局域网 IP(默认 8080,可用 `VITE_API_BASE` 环境变量或 `frontend/src/api/client.js` 默认值设置)。
 
@@ -117,13 +146,13 @@ cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
 
 ## 默认账号(演示)
 
-李锐铭(admin)/高思晗(owner)/孙秋实、罗子涵(member)/成员5(只读查看者,display_name「只读查看者」),密码均为 `123456`。旧别名「成员1-5」由后端做双向映射,仍可登录。
+李锐铭(admin)/高思晗(owner)/孙秋实、罗子涵(member)/成员5(只读查看者,display_name「只读查看者」),密码均为 `123456`。登录别名由后端映射:`成员1`–`成员4` 与真名**双向**互通;`成员5` 本身即该用户的 username,其显示名「只读查看者」也已支持直接登录。
 
 ## 技术栈
 
 - 前端:Vue3 + Vite(`frontend/`);后端可用时走 REST API + JWT,否则回退 localStorage 演示
 - 后端:Java 23 + Spring Boot 3.5 + MyBatis-Plus(`java-backend/`,默认 8080);MySQL 8.0(Docker,3307);FastAPI 旧版归档于 `backend/`
-- 测试:Playwright E2E(`qa/`,legacy/vue 双模式);后端 pytest 套件随 FastAPI 版归档
+- 测试:后端 JUnit 契约测试(`java-backend/`,`mvn test`,**126 项**)+ Playwright E2E(`qa/`,**35 项**,系统 Edge)+ 浏览器验收(`frontend/e2e-verify`,**7 项**),由 `qa/run-all.ps1` 一键编排;FastAPI 旧版的 pytest 套件随 `backend/` 归档
 
 ## 会议交互修复（2026-09-07）
 
