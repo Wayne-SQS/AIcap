@@ -138,4 +138,21 @@ public class ProfileAgentController {
         Roles.any();
         return service.snapshotTrend(userId);
     }
+
+    /** 提交画像纠正(本人或 admin/owner;文档 4.7 允许成员纠正错误信息) */
+    @PostMapping("/corrections")
+    public Map<String, Object> addCorrection(@RequestParam Integer userId,
+                                             @RequestParam String field,
+                                             @RequestParam String correctedValue,
+                                             @RequestParam(required = false) String reason) {
+        User actor = Roles.writer();
+        return service.addCorrection(userId, field, correctedValue, reason, actor);
+    }
+
+    /** 画像纠正历史(最新在前) */
+    @GetMapping("/corrections")
+    public List<Map<String, Object>> corrections(@RequestParam(required = false) Integer userId) {
+        Roles.any();
+        return service.corrections(userId);
+    }
 }

@@ -275,3 +275,18 @@ CREATE TABLE IF NOT EXISTS `profile_agent_runs` (
   KEY `ix_profile_agent_runs_status` (`status`),
   CONSTRAINT `profile_agent_runs_ibfk_1` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 成员对 AI 画像的纠正(文档 4.7:允许成员纠正错误信息;纠正永久保留并展示在画像旁)
+CREATE TABLE IF NOT EXISTS `profile_corrections` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '被纠正的画像所属成员(本人提交)',
+  `field` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '纠正的画像字段,如 good_at/recommended_task_types',
+  `corrected_value` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '成员确认的正确描述',
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '纠正理由(可选)',
+  `created_by` int NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_profile_corrections_user` (`user_id`,`created_at`),
+  CONSTRAINT `profile_corrections_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `profile_corrections_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

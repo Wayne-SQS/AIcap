@@ -7,6 +7,7 @@ import com.aicap.entity.DifficultyAssessment;
 import com.aicap.entity.MemberProfile;
 import com.aicap.entity.ProfileAgentRun;
 import com.aicap.entity.MeetingSuggestionRecord;
+import com.aicap.entity.ProfileCorrection;
 import com.aicap.entity.ProfileSnapshot;
 import com.aicap.entity.Suggestion;
 import com.aicap.entity.Task;
@@ -16,6 +17,7 @@ import com.aicap.mapper.DifficultyAssessmentMapper;
 import com.aicap.mapper.MeetingSuggestionRecordMapper;
 import com.aicap.mapper.MemberProfileMapper;
 import com.aicap.mapper.ProfileAgentRunMapper;
+import com.aicap.mapper.ProfileCorrectionMapper;
 import com.aicap.mapper.ProfileSnapshotMapper;
 import com.aicap.mapper.SuggestionMapper;
 import com.aicap.mapper.TaskMapper;
@@ -57,6 +59,7 @@ public class ProfileAgentService {
     private final DifficultyAssessmentMapper difficultyMapper;
     private final ProfileSnapshotMapper snapshotMapper;
     private final ProfileAgentRunMapper runMapper;
+    private final ProfileCorrectionMapper correctionMapper;
     private final SuggestionMapper suggestionMapper;
     private final MeetingSuggestionRecordMapper meetingSuggestionRecordMapper;
     private final TaskMapper taskMapper;
@@ -435,6 +438,24 @@ public class ProfileAgentService {
         List<Task> myTasks = tasks.stream()
                 .filter(t -> u.getId().equals(t.getOwnerId()))
                 .toList();
+        // 协作贡献(文档 4.4):参与他人任务的 Review 次数与对象
+        Map<String, Integer> reviewOthersByTask = new LinkedHashMap<>();
+        for (ActivityRecord r : acts) {
+            if (!"review".equals(r.getActivityType())) continue;
+            if (r.getTaskId() == null || r.getTaskId().isBlank()) continue;
+            Task t = tasks.stream().filter(x -> x.getId().equals(r.getTaskId())).findFirst().orElse(null);
+            if (t != null && !u.getId().equals(t.getOwnerId())) {
+                reviewOthersByTask.merge(r.getTaskId(), 1, Integer::sum);
+            }
+        }
+        String collaboration;
+        if (reviewOthersByTask.isEmpty()) {
+            collaboration = "范围内未参与他人任务的 Review(仅统计关联到任务的 review 活动)";
+        } else {
+            collaboration = "参与 " + reviewOthersByTask.size() + " 个他人任务的 Review 共 " +
+                    reviewOthersByTask.values().stream().mapToInt(Integer::intValue).sum() + " 次(" +
+                    String.join("、", reviewOthersByTask.keySet()) + ")";
+        }
         List<Map<String, Object>> taskFacts = new ArrayList<>();
         int doneCount = 0, highDifficultyCount = 0, assignedHours = 0;
         List<String> possiblyLate = new ArrayList<>();   // 计划结束周已过但仍未完成
@@ -515,6 +536,7 @@ public class ProfileAgentService {
         objective.put("unlinked_activities", unlinkedCommits);
         objective.put("review_participation", reviewCount);
         objective.put("bugfix_count", bugfixCount);
+        objective.put("collaboration_review", collaboration);   // 文档 4.4 协作贡献
         objective.put("rework_flags", reworkFlags);
         objective.put("possibly_late_tasks", possiblyLate);
         objective.put("similar_repeated_commits", similarRepeats);
@@ -836,6 +858,59 @@ public class ProfileAgentService {
             trends.add(row);
         }
         return trends;
+    }
+
+    // ---------- 成员纠正机制(文档 4.7:允许成员纠正错误信息) ----------
+
+    /** 提交画像纠正:本人纠正自己的画像,或 admin/owner 代为纠正 */
+    public Map<String, Object> addCorrection(Integer profileUserId, String field, String correctedValue,
+                                             String reason, User actor) {
+        if (!profileUserId.equals(actor.getId()) && !"admin".equals(actor.getRole()) && !"owner".equals(actor.getRole())) {
+            throw ApiException.forbidden("只能纠正自己的画像");
+        }
+        List<String> allowed = List.of("good_at", "recommended_task_types", "difficulty_capacity", "summary", "other");
+        if (!allowed.contains(field)) {
+            throw ApiException.unprocessable("field 必须是 " + allowed + " 之一");
+        }
+        if (correctedValue == null || correctedValue.isBlank()) {
+            throw ApiException.badRequest("corrected_value 不能为空");
+        }
+        ProfileCorrection c = new ProfileCorrection();
+        c.setUserId(profileUserId);
+        c.setField(field);
+        c.setCorrectedValue(correctedValue.trim());
+        c.setReason(reason == null ? "" : reason.trim());
+        c.setCreatedBy(actor.getId());
+        c.setCreatedAt(LocalDateTime.now());
+        correctionMapper.insert(c);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("correction_id", c.getId());
+        out.put("user_id", profileUserId);
+        out.put("field", field);
+        out.put("corrected_value", c.getCorrectedValue());
+        out.put("reason", c.getReason());
+        out.put("created_at", c.getCreatedAt().format(TS));
+        return out;
+    }
+
+    /** 某成员画像的纠正历史(最新在前);memberAnalysis 输出旁一并展示 */
+    public List<Map<String, Object>> corrections(Integer userId) {
+        QueryWrapper<ProfileCorrection> qw = new QueryWrapper<>();
+        if (userId != null) qw.eq("user_id", userId);
+        qw.orderByDesc("id").last("LIMIT 50");
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (ProfileCorrection c : correctionMapper.selectList(qw)) {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("correction_id", c.getId());
+            o.put("user_id", c.getUserId());
+            o.put("field", c.getField());
+            o.put("corrected_value", c.getCorrectedValue());
+            o.put("reason", c.getReason());
+            o.put("created_by", c.getCreatedBy());
+            o.put("created_at", c.getCreatedAt() == null ? null : c.getCreatedAt().format(TS));
+            out.add(o);
+        }
+        return out;
     }
 
     // ---------- 统一审核中心接入(文档第 5 章) ----------

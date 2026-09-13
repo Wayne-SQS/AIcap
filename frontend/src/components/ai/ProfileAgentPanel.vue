@@ -50,6 +50,22 @@ function fmtRange() {
   return `${rangeStart.value} ~ ${rangeEnd.value}`
 }
 
+/* 快捷周期(文档 4.9:本周/本月/自定义) */
+function setPreset(kind) {
+  const t = new Date()
+  if (kind === 'thisWeek') {
+    const day = (t.getDay() + 6) % 7   // 周一为一周开始
+    const mon = new Date(t); mon.setDate(t.getDate() - day)
+    rangeStart.value = iso(mon); rangeEnd.value = iso(t)
+  } else if (kind === 'thisMonth') {
+    rangeStart.value = iso(new Date(t.getFullYear(), t.getMonth(), 1)); rangeEnd.value = iso(t)
+  } else if (kind === 'last30') {
+    const s = new Date(t); s.setDate(t.getDate() - 29)
+    rangeStart.value = iso(s); rangeEnd.value = iso(t)
+  }
+  loadAnalysis()
+}
+
 async function loadAnalysis() {
   loading.value = true
   errorMsg.value = ''
@@ -152,6 +168,28 @@ const anomalyItems = m => {
 }
 const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', milestone_risk: '🟣 里程碑延期风险' }
 
+/* 画像纠正(文档 4.7:允许成员纠正错误信息) */
+const corrOpen = ref(false)
+const corrText = ref('')
+const corrHistory = ref([])
+async function toggleCorrections() {
+  corrOpen.value = !corrOpen.value
+  if (corrOpen.value && currentMember.value) {
+    try { corrHistory.value = await profileAgentApi.corrections(currentMember.value.user_id) } catch { /* 空态 */ }
+  }
+}
+async function submitCorrection() {
+  if (!corrText.value.trim() || !currentMember.value) { notify('请先填写纠正内容'); return }
+  try {
+    await profileAgentApi.addCorrection(currentMember.value.user_id, 'good_at', corrText.value.trim())
+    corrText.value = ''
+    notify('纠正已提交,将随画像一并展示')
+    corrHistory.value = await profileAgentApi.corrections(currentMember.value.user_id)
+  } catch (e) {
+    notify(e.message || '提交失败')
+  }
+}
+
 const LEVEL_TEXT = { low: '低', medium: '中', high: '高', extreme: '极高' }
 const LEVEL_COLOR = { low: '#4caf50', medium: '#ffc107', high: '#ff9800', extreme: '#f44336' }
 const TYPE_TEXT = { commit: 'Commit', pr: 'PR', review: 'Review', bugfix: '缺陷修复', task_done: '任务完成', note: '状态更新' }
@@ -166,8 +204,11 @@ loadAnalysis()
       每条结论带证据;区分<b>客观事实</b>与 <b>AI 推断</b>;不把提交次数等同于工作量或质量。
     </p>
 
-    <!-- 时间范围 + 操作(文档 4.9) -->
+    <!-- 时间范围 + 操作(文档 4.9):快捷周期 + 自定义起止 -->
     <div class="pa-toolbar">
+      <button class="ghost" @click="setPreset('thisWeek')">本周</button>
+      <button class="ghost" @click="setPreset('thisMonth')">本月</button>
+      <button class="ghost" @click="setPreset('last30')">近 30 天</button>
       <label>开始 <input v-model="rangeStart" type="date"></label>
       <label>结束 <input v-model="rangeEnd" type="date"></label>
       <button class="ghost" :disabled="loading" @click="loadAnalysis">查询</button>
@@ -223,6 +264,21 @@ loadAnalysis()
           <ul>
             <li v-for="(inf, i) in currentMember.ai_inference" :key="i">{{ inf }}</li>
           </ul>
+          <div style="margin-top:10px">
+            <button class="ghost" @click="toggleCorrections">{{ corrOpen ? '收起' : '纠错' }}画像纠正</button>
+            <div v-if="corrOpen" style="margin-top:8px">
+              <div style="display:flex;gap:6px">
+                <input v-model="corrText" placeholder="对「擅长方向」的纠正,如:我主要做的是测试而非前端" style="flex:1">
+                <button class="primary" @click="submitCorrection">提交纠正</button>
+              </div>
+              <div v-if="corrHistory.length" style="margin-top:6px">
+                <div v-for="c in corrHistory" :key="c.correction_id" class="small pa-corr">
+                  ✓ {{ c.corrected_value }} <span style="opacity:.7">({{ c.created_at }})</span>
+                </div>
+              </div>
+              <p v-else class="small" style="margin:4px 0 0">暂无纠正记录。画像会随数据更新;若与实际不符,成员有权在此纠正。</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -345,6 +401,7 @@ loadAnalysis()
 .pa-cell.sel { outline: 2px solid #1b5e20; }
 .pa-day-acts { margin-top: 8px; max-height: 200px; overflow: auto; }
 .pa-anomaly { margin-bottom: 8px; }
+.pa-corr { padding: 3px 0; border-bottom: 1px dashed rgba(0,0,0,.12); }
 .pa-compare-body { display: grid; gap: 10px; margin-top: 8px; }
 .pa-compare-row { border: 1px dashed rgba(0,0,0,.25); padding: 8px 10px; }
 </style>

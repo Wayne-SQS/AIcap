@@ -39,5 +39,10 @@ export const profileAgentApi = {
   },
   /** 时间范围对比(本期 vs 上期) */
   compare: (prevStart, prevEnd, start, end) =>
-    api(`/api/profile-agent/analysis/compare?prevStart=${prevStart}&prevEnd=${prevEnd}&start=${start}&end=${end}`)
+    api(`/api/profile-agent/analysis/compare?prevStart=${prevStart}&prevEnd=${prevEnd}&start=${start}&end=${end}`),
+  /** 提交画像纠正(本人或 admin/owner) */
+  addCorrection: (userId, field, correctedValue, reason = '') =>
+    api(`/api/profile-agent/corrections?userId=${userId}&field=${encodeURIComponent(field)}&correctedValue=${encodeURIComponent(correctedValue)}&reason=${encodeURIComponent(reason)}`, { method: 'POST' }),
+  /** 画像纠正历史 */
+  corrections: (userId = null) => api('/api/profile-agent/corrections' + (userId != null ? `?userId=${userId}` : ''))
 }
