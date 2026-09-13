@@ -18,6 +18,7 @@
 -- 顺带把挂卡任务的 kanban_card_id 置空;契约测试因此不依赖"临时卡仍挂在任务上"。
 -- ============================================================
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE meeting_audio;
 TRUNCATE TABLE meeting_agent_events;
 TRUNCATE TABLE meeting_agent_runs;
 TRUNCATE TABLE meeting_approval_payloads;
@@ -28,5 +29,6 @@ TRUNCATE TABLE story_logs;
 TRUNCATE TABLE tasks;
 TRUNCATE TABLE pool_items;
 TRUNCATE TABLE stories;
+TRUNCATE TABLE member_profiles;
 TRUNCATE TABLE users;
 SET FOREIGN_KEY_CHECKS = 1;

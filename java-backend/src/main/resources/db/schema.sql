@@ -5,6 +5,8 @@
 -- 依赖顺序:users → stories → tasks → pool_items → suggestions → meetings
 --           → meeting_suggestion_records → meeting_approval_payloads
 --           → meeting_agent_runs → meeting_agent_events → story_logs
+--           → member_profiles(成员画像,1:1 users)
+--           → meeting_audio(会议录音/上传的 mp3 元数据,文件落盘)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS `users` (
@@ -163,4 +165,44 @@ CREATE TABLE IF NOT EXISTS `story_logs` (
   `user_id` int DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 成员画像(1:1 users):技术栈 / 工作能力 / 熟悉的开发流程领域,均存 JSON 数组文本
+-- 元素形如 {"name":"Java","level":5}(level 1..5,1=了解 5=精通)
+CREATE TABLE IF NOT EXISTS `member_profiles` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `title` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '岗位/画像标题',
+  `tech_stack` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON 数组:熟悉的技术栈',
+  `capabilities` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON 数组:工作能力',
+  `process_domains` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON 数组:熟悉的开发流程领域',
+  `summary` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '画像摘要',
+  `years_experience` int NOT NULL DEFAULT '0' COMMENT '项目经验年限',
+  `updated_by` int DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_member_profiles_user` (`user_id`),
+  KEY `member_profiles_updated_by` (`updated_by`),
+  CONSTRAINT `member_profiles_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `member_profiles_ibfk_2` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 会议音频:网页麦克风录音(客户端编码为 mp3)或本地上传的 mp3;字节落盘,本表存元数据
+CREATE TABLE IF NOT EXISTS `meeting_audio` (
+  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `meeting_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content_type` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `byte_size` int NOT NULL,
+  `duration_ms` int DEFAULT NULL COMMENT '录音时长(毫秒,前端上报)',
+  `sha256` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `storage_path` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '相对音频根目录的落盘路径',
+  `source` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'recorder=网页录音 / upload=本地文件',
+  `uploaded_by` int NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_meeting_audio_meeting_id` (`meeting_id`),
+  KEY `ix_meeting_audio_uploaded_by` (`uploaded_by`),
+  CONSTRAINT `meeting_audio_ibfk_1` FOREIGN KEY (`meeting_id`) REFERENCES `meetings` (`id`),
+  CONSTRAINT `meeting_audio_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

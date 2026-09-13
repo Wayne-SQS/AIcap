@@ -1,12 +1,15 @@
 package com.aicap.config;
 
+import com.aicap.entity.MemberProfile;
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
+import com.aicap.mapper.MemberProfileMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.PasswordUtil;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +31,7 @@ import java.util.regex.Pattern;
  * - 用户:按 id 顺序比对现有 5 行并补齐展示名/角色/颜色/容量;缺行则补插
  * - 故事:基线为 US01–US37;若检测到旧的 M01–M23 演示基线,整批替换(仅此一种情况)
  * - 任务:16 条;已存在的旧签名行升级为当前值(名称/负责人/工时/排期/关联/类型/依赖/状态/进度/阻塞)
+ * - 画像:5 名成员的技术栈/工作能力/开发流程领域画像(各不相同);已有画像不覆盖
  * 全新空库的建表由 resources/db/schema.sql 完成,存量库补列由 {@link SchemaUpgrader} 完成。
  */
 @Slf4j
@@ -38,7 +42,9 @@ public class DataSeeder implements ApplicationRunner {
     private final UserMapper userMapper;
     private final StoryMapper storyMapper;
     private final TaskMapper taskMapper;
+    private final MemberProfileMapper profileMapper;
     private final PasswordUtil passwordUtil;
+    private final ObjectMapper objectMapper;
 
     @Value("${aicap.seed-on-start:true}")
     private boolean seedOnStart;
@@ -166,6 +172,7 @@ public class DataSeeder implements ApplicationRunner {
         boolean migrated = migrateLegacyStorySeed();
         seedStories();
         seedTasks(migrated);
+        seedProfiles();
     }
 
     // ---------- 用户 ----------
@@ -378,5 +385,112 @@ public class DataSeeder implements ApplicationRunner {
         task.setStatus(row.status());
         task.setProgress(row.progress());
         task.setBlocked(row.blocked());
+    }
+
+    // ---------- 成员画像 ----------
+
+    /** 画像单项(level 1=了解 … 5=精通) */
+    private record Skill(String name, int level) {
+    }
+
+    /** 成员画像模板:技术栈 / 工作能力 / 熟悉的开发流程领域三个维度互不相同 */
+    private record ProfileTemplate(String title, int yearsExperience, String summary,
+                                   List<Skill> techStack, List<Skill> capabilities,
+                                   List<Skill> processDomains) {
+    }
+
+    /**
+     * 5 名成员画像模板,顺序与 USERS(按 id 顺序)一一对应:
+     * 产品与范围 DRI / 故事与 AI 协作 / 技术与架构 / 质量与风险 / 只读查看者。
+     * 画像必须能体现"各人熟悉的技术栈、工作能力与开发流程领域不一样",用于分工与排期依据。
+     */
+    private static final List<ProfileTemplate> PROFILES = List.of(
+            new ProfileTemplate("项目负责人 · 产品与范围", 8,
+                    "把控范围基线与验收口径，负责干系人沟通与风险闭环；技术实现不是主战场。",
+                    List.of(new Skill("需求工程", 5), new Skill("原型与线框（Axure/墨刀）", 4),
+                            new Skill("看板与项目管理工具（Jira/Teambition）", 5), new Skill("SQL 查询", 3),
+                            new Skill("Markdown 文档", 4)),
+                    List.of(new Skill("范围与优先级决策", 5), new Skill("验收标准制定", 5),
+                            new Skill("干系人沟通", 5), new Skill("风险识别与闭环", 4),
+                            new Skill("会议主持与复盘", 4)),
+                    List.of(new Skill("需求与规划", 5), new Skill("迭代评审与复盘", 5),
+                            new Skill("变更与范围控制", 4), new Skill("验收与回归", 3))),
+            new ProfileTemplate("产品负责人 · 故事与 AI 协作", 5,
+                    "把会议与 PRD 转成用户故事与验收条件，负责与 AI 智能体协作调优提示并核对结果依据。",
+                    List.of(new Skill("用户故事与验收条件", 5), new Skill("Vue3 前端", 3),
+                            new Skill("JavaScript / ESM", 4), new Skill("Prompt 与工具调用设计", 4),
+                            new Skill("Markdown 与文档化", 5), new Skill("Excel 数据核对", 4)),
+                    List.of(new Skill("需求拆解与建模", 5), new Skill("需求追溯与证据核对", 4),
+                            new Skill("AI 结果校验与提示迭代", 4), new Skill("跨角色协调", 4)),
+                    List.of(new Skill("需求与规划", 4), new Skill("敏捷迭代", 5),
+                            new Skill("验收与回归", 3), new Skill("设计与架构", 2))),
+            new ProfileTemplate("技术负责人 · 架构与后端", 9,
+                    "负责数据模型、接口契约与后端实现，主导技术选型、集成联调与性能排查。",
+                    List.of(new Skill("Java 23 / Spring Boot", 5), new Skill("MyBatis-Plus", 5),
+                            new Skill("MySQL 8 与索引优化", 5), new Skill("REST 与接口契约", 5),
+                            new Skill("Docker", 4), new Skill("UML 建模", 4), new Skill("Git", 5)),
+                    List.of(new Skill("架构与模块划分", 5), new Skill("数据建模与 SQL 调优", 5),
+                            new Skill("接口设计与契约治理", 5), new Skill("性能与故障排查", 4),
+                            new Skill("技术方案评审", 4)),
+                    List.of(new Skill("设计与架构", 5), new Skill("编码与集成", 5),
+                            new Skill("部署与运维", 4), new Skill("测试与质量", 3))),
+            new ProfileTemplate("质量负责人 · 测试与风险", 6,
+                    "负责测试设计、缺陷定位与质量度量，输出可复跑的回归证据与风险预警。",
+                    List.of(new Skill("Playwright / E2E", 5), new Skill("Pytest", 5), new Skill("JUnit", 4),
+                            new Skill("SQL 数据校验", 4), new Skill("接口压测", 3), new Skill("Git", 4),
+                            new Skill("缺陷跟踪", 5)),
+                    List.of(new Skill("测试用例设计", 5), new Skill("缺陷复现与定位", 5),
+                            new Skill("契约与回归验证", 5), new Skill("质量度量与报告", 4),
+                            new Skill("风险预警", 4)),
+                    List.of(new Skill("测试与质量", 5), new Skill("验收与回归", 5),
+                            new Skill("变更影响分析", 4), new Skill("需求与规划", 3))),
+            new ProfileTemplate("干系人 · 只读查看", 3,
+                    "关注整体进度与里程碑达标情况，不参与写入；数据核对以报表口径为准。",
+                    List.of(new Skill("浏览器与报表查看", 4), new Skill("Excel 数据核对", 4),
+                            new Skill("进度与里程碑阅读", 3)),
+                    List.of(new Skill("进度与里程碑核对", 3), new Skill("报表数据比对", 3),
+                            new Skill("结果反馈", 3)),
+                    List.of(new Skill("需求与规划", 2), new Skill("验收与回归", 2),
+                            new Skill("迭代评审与复盘", 2))));
+
+    /** 按 id 顺序把画像模板补到还没有画像的成员上;已有画像(含人工修改)一律不覆盖 */
+    private void seedProfiles() {
+        List<User> users = userMapper.selectList(null);
+        users.sort((a, b) -> Integer.compare(a.getId(), b.getId()));
+        if (users.isEmpty()) return;
+        Set<Integer> hasProfile = new HashSet<>();
+        for (MemberProfile p : profileMapper.selectList(null)) {
+            hasProfile.add(p.getUserId());
+        }
+        int created = 0;
+        int aligned = Math.min(users.size(), PROFILES.size());
+        for (int i = 0; i < aligned; i++) {
+            User user = users.get(i);
+            if (hasProfile.contains(user.getId())) continue;
+            ProfileTemplate t = PROFILES.get(i);
+            MemberProfile p = new MemberProfile();
+            p.setUserId(user.getId());
+            p.setTitle(t.title());
+            p.setTechStack(writeSkills(t.techStack()));
+            p.setCapabilities(writeSkills(t.capabilities()));
+            p.setProcessDomains(writeSkills(t.processDomains()));
+            p.setSummary(t.summary());
+            p.setYearsExperience(t.yearsExperience());
+            p.setUpdatedBy(user.getId());
+            p.setUpdatedAt(LocalDateTime.now());
+            profileMapper.insert(p);
+            created++;
+        }
+        if (created > 0) {
+            log.info("已播种 {} 份成员画像(技术栈/工作能力/开发流程领域,各成员互不相同)", created);
+        }
+    }
+
+    private String writeSkills(List<Skill> skills) {
+        try {
+            return objectMapper.writeValueAsString(skills);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

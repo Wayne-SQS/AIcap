@@ -17,6 +17,11 @@ spring:
   jackson:
     time-zone: Asia/Shanghai
     # 对齐 FastAPI:字段恒输出(含 null),不裁剪
+  servlet:
+    multipart:
+      # 会议录音/上传 mp3:单文件 25MB、整请求 30MB
+      max-file-size: ${AICAP_AUDIO_MAX_BYTES:25MB}
+      max-request-size: 30MB
 
 mybatis-plus:
   configuration:
@@ -34,6 +39,10 @@ aicap:
     algorithm: HS256
     expire-minutes: ${JWT_EXPIRE_MINUTES:720}
   seed-on-start: ${AICAP_SEED_ON_START:true}
+  audio:
+    # 会议录音/上传 mp3 的落盘根目录(相对 java-backend 工作目录);元数据入库
+    dir: ${AICAP_AUDIO_DIR:./data/audio}
+    max-bytes: ${AICAP_AUDIO_MAX_BYTES_BYTES:26214400}
   llm:
     api-key: ${AICAP_LLM_API_KEY:}
     base-url: ${AICAP_LLM_BASE_URL:https://api.deepseek.com}

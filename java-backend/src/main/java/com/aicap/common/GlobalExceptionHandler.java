@@ -56,6 +56,20 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.METHOD_NOT_ALLOWED, "请求方法不支持: " + e.getMethod());
     }
 
+    /** multipart 超限 → 413(音频上传上限,与 service 内的大小校验语义一致) */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, String>> handleUploadTooLarge(
+            org.springframework.web.multipart.MaxUploadSizeExceededException e) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, "上传文件超过服务端大小上限");
+    }
+
+    /** multipart 缺少 file 部件 → 422(而非 500) */
+    @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+    public ResponseEntity<Map<String, String>> handleMissingPart(
+            org.springframework.web.multipart.support.MissingServletRequestPartException e) {
+        return error(HttpStatus.UNPROCESSABLE_ENTITY, "缺少上传部件: " + e.getRequestPartName());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleOther(Exception e) {
         return error(HttpStatus.INTERNAL_SERVER_ERROR,

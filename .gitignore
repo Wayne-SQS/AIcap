@@ -17,3 +17,12 @@ __pycache__/
 backend/.venv/
 .pytest_cache/
 *.sqlite3
+# 从交付用 docx 抽取的纯文本，可再生，仅本地查阅
+qa/_docx_dump/
+
+# 会议录音/上传的音频字节(元数据入库;文件只在本地留存)
+java-backend/data/
+
+# 前端验证脚本产物
+frontend/test-results/
+frontend/playwright-report/
