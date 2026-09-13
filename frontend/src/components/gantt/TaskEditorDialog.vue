@@ -3,7 +3,7 @@ import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
-import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { tasksApi } from '@/api/tasks'
 import { derivedTaskSprints } from '@/data/seed'
 
@@ -120,7 +120,7 @@ defineExpose({ open })
         <p class="small" style="margin:0">Story 属于需求层；任务日期和负责人属于执行层。调整任务排期不会自动改写 Story Sprint。</p>
         <div class="actions">
           <button type="button" id="task-cancel" @click="close">取消</button>
-          <button type="submit" class="primary">保存任务</button>
+          <button type="submit" class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">保存任务</button>
         </div>
       </div>
     </form>

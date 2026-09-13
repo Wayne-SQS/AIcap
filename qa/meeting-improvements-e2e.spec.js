@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const {flavorHtml, isVue, defaultPageUrl} = require('./e2e-helpers');
 const root = path.resolve(__dirname,'..');
-const base = 'http://127.0.0.1:8001';
+const base = process.env.AICAP_QA_URL || 'http://127.0.0.1:8001';
 const html = flavorHtml(base);
 /* legacy 沿用 8091 独立静态源(与 ui-e2e 的 8090 隔离),旧版页面在 /legacy/;vue 走 dist 静态源(默认 8092) */
 const pageUrl = process.env.AICAP_UI_URL || (isVue() ? defaultPageUrl() : 'http://127.0.0.1:8091/legacy/index.html');

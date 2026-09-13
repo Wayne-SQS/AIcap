@@ -3,7 +3,7 @@ import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
-import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
 import { activities } from '@/constants'
@@ -17,6 +17,8 @@ const { guard } = usePermissionGuard()
 
 const showForm = ref(false)
 const form = reactive({ title: '', desc: '', pri: 'Could' })
+/* 只读账号(viewer)的新增/移入/移除入口保持可见但禁用,title 说明原因 */
+const viewerTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
 
 /* 移入看板工作流弹窗(对齐 workflowDialog + 安排需求表单) */
 const promoteEl = ref(null)
@@ -134,7 +136,7 @@ async function submitPromote() {
         <h1>需求池</h1>
         <p>会议中临时出现、尚未确定 Sprint 或负责人的需求先放这里，不丢失、不提前承诺。</p>
       </div>
-      <button class="primary" id="pool-add" @click="startAdd">＋ 新增需求</button>
+      <button class="primary" id="pool-add" :disabled="session.isViewer" :title="viewerTitle" @click="startAdd">＋ 新增需求</button>
     </div>
     <p class="pool-note">需求池条目允许 Sprint / 负责人为空；细化后可「移入看板」成为正式用户故事，并保留来源与历史。需求池不计入已承诺 Sprint 完成率。</p>
     <div class="pool-form" id="pool-form" v-show="showForm">
@@ -142,7 +144,7 @@ async function submitPromote() {
       <textarea id="pool-desc" v-model="form.desc" placeholder="描述 / 来源（如：会议 2026-09-06 · 成员2 提出）"></textarea>
       <div class="row">
         <select id="pool-pri" v-model="form.pri"><option>Must</option><option>Should</option><option>Could</option></select>
-        <button class="primary" id="pool-save" @click="save">保存到需求池</button>
+        <button class="primary" id="pool-save" :disabled="session.isViewer" :title="viewerTitle" @click="save">保存到需求池</button>
         <button id="pool-cancel" @click="cancelForm">取消</button>
       </div>
     </div>
@@ -157,8 +159,8 @@ async function submitPromote() {
           <div class="pmeta"><span>来源 · {{ p.source }}</span><span>创建 · {{ p.created }}</span></div>
         </div>
         <div class="pacts">
-          <button class="primary" :data-promote="p.id" @click="openPromote(p.id)">移入看板</button>
-          <button class="danger" :data-drop="p.id" @click="dropPool(p.id)">移除</button>
+          <button class="primary" :data-promote="p.id" :disabled="session.isViewer" :title="viewerTitle" @click="openPromote(p.id)">移入看板</button>
+          <button class="danger" :data-drop="p.id" :disabled="session.isViewer" :title="viewerTitle" @click="dropPool(p.id)">移除</button>
         </div>
       </div>
       <div v-if="!project.pool.length" class="empty">需求池为空</div>

@@ -82,6 +82,7 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   await page.locator('#meeting-save-form textarea[name=transcript]').fill('本次会议用于验收网页麦克风录音与 mp3 提交。')
   await page.locator('#meeting-save-form button[type=submit]').click()
   await expect(page.locator('#meeting-select')).toHaveValue(/.+/, { timeout: 20000 })
+  const meetingId = await page.locator('#meeting-select').inputValue()
 
   const recorder = page.locator('#meeting-recorder')
   await expect(recorder).toBeVisible()
@@ -125,4 +126,13 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   await rows.first().getByRole('button', { name: '删除' }).click()
   await expect(recorder.locator('.audio-row')).toHaveCount(0, { timeout: 30000 })
   console.log('[recorder] delete ok')
+
+  // 清理本次验收用的会议:后端 DELETE /api/meetings/{id}(admin 可用),
+  // 否则每跑一轮就在开发库留一条「录音验收会议」垃圾数据
+  const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
+  const gone = await page.request.delete(`http://127.0.0.1:8080/api/meetings/${meetingId}`, {
+    headers: { Authorization: 'Bearer ' + token }
+  })
+  expect([200, 404], '验收会议应被删除清理,实际 ' + gone.status()).toContain(gone.status())
+  console.log('[recorder] meeting cleaned up: ' + meetingId)
 })

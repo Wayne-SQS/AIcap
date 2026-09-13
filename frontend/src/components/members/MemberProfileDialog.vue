@@ -1,14 +1,20 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, watch, computed } from 'vue'
 import { membersApi } from '@/api/members'
+import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 
-/* 成员画像编辑:技术栈 / 工作能力 / 熟悉的开发流程领域,三个维度均可用「名称 + 熟练度(1..5)」维护 */
+/* 成员画像编辑:技术栈 / 工作能力 / 熟悉的开发流程领域,三个维度均可用「名称 + 熟练度(1..5)」维护
+   只读账号(viewer)按页面权限本不该打开本弹窗,这里仍把保存/添加/删除按钮禁用作为兜底 */
 const props = defineProps({
   profile: { type: Object, required: true }
 })
 const emit = defineEmits(['close', 'saved'])
+const session = useSessionStore()
 const { notify } = useToast()
+const isViewer = computed(() => session.isViewer)
+const viewerTitle = computed(() => (isViewer.value ? READONLY_TITLE : ''))
 
 const LEVELS = [1, 2, 3, 4, 5]
 const LEVEL_TXT = { 1: '了解', 2: '基本', 3: '熟练', 4: '擅长', 5: '精通' }
@@ -108,7 +114,7 @@ function normalize(rows) {
           <div class="dim-head">
             <b>{{ dim.label }}</b>
             <span class="small">{{ dim.hint }}</span>
-            <button class="add" @click="addRow(dim.key)">＋ 添加</button>
+            <button class="add" :disabled="isViewer" :title="viewerTitle" @click="addRow(dim.key)">＋ 添加</button>
           </div>
           <p v-if="!form[dim.key].length" class="small">暂无条目，可点「添加」补充。</p>
           <div v-for="(row, i) in form[dim.key]" :key="dim.key + i" class="skill-row">
@@ -116,7 +122,7 @@ function normalize(rows) {
             <select v-model.number="row.level">
               <option v-for="lv in LEVELS" :key="lv" :value="lv">{{ lv }} · {{ LEVEL_TXT[lv] }}</option>
             </select>
-            <button class="del" @click="removeRow(dim.key, i)">删除</button>
+            <button class="del" :disabled="isViewer" :title="viewerTitle" @click="removeRow(dim.key, i)">删除</button>
           </div>
         </div>
 
@@ -125,7 +131,7 @@ function normalize(rows) {
 
       <div class="dfoot">
         <button @click="emit('close')">取消</button>
-        <button class="primary" id="profile-save" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存画像' }}</button>
+        <button class="primary" id="profile-save" :disabled="saving || isViewer" :title="viewerTitle" @click="save">{{ saving ? '保存中…' : '保存画像' }}</button>
       </div>
     </div>
   </div>

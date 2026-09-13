@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
-import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
 import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
 import BoardSummary from '@/components/board/BoardSummary.vue'
@@ -115,7 +115,7 @@ async function resetDemo() {
         <h1>用户故事看板</h1>
         <p>把每一个想法，推进到完成。</p>
       </div>
-      <button class="primary" id="new" @click="openEditor()">＋ 新建故事</button>
+      <button class="primary" id="new" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor()">＋ 新建故事</button>
     </div>
 
     <BoardSummary :data="data" :total-stories="project.stories.length" />
@@ -139,7 +139,7 @@ async function resetDemo() {
             </template>
             <div v-if="!data.filter(s => s.status === i).length" class="empty">此列暂无故事</div>
           </div>
-          <button class="addcol" :data-new="i" @click="openEditor(null, i)">＋ 添加故事</button>
+          <button class="addcol" :data-new="i" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor(null, i)">＋ 添加故事</button>
         </section>
       </div>
     </div>

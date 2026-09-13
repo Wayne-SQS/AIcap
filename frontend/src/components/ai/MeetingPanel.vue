@@ -1,8 +1,8 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
 import { useToast } from '@/composables/useToast'
-import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useReviewStore } from '@/stores/review'
 import { SUG_KEY } from '@/constants'
 import AgentRunPanel from './AgentRunPanel.vue'
@@ -13,12 +13,41 @@ import RecorderPanel from './RecorderPanel.vue'
 const meeting = useMeetingStore()
 const review = useReviewStore()
 const { notify } = useToast()
-const { guard } = usePermissionGuard()
+const { session, guard } = usePermissionGuard()
 
 const saveForm = reactive({ title: '', transcript: '' })
 const saving = ref(false)
+const deleting = ref(false)
 const proposal = reactive({ title: '', description: '', evidence: '', priority: 'Could', note: '' })
 const proposing = ref(false)
+
+/* 删除会议:仅 admin/owner(mayReview 口径);viewer/member 按钮禁用并说明原因,guard 兜底 */
+const mayDeleteMeeting = computed(() => meeting.mayReview)
+const deleteTitle = computed(() => {
+  if (!meeting.selectedMeeting) return '请先选择一个已保存会议'
+  if (mayDeleteMeeting.value) return '删除当前会议'
+  return session.isViewer ? READONLY_TITLE : '仅管理员或负责人可删除会议'
+})
+const readonlyTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
+
+async function deleteMeeting() {
+  const target = meeting.selectedMeeting
+  if (!target) { notify('请先选择一个已保存会议'); return }
+  if (guard('删除会议')) return
+  if (!mayDeleteMeeting.value) { notify('仅管理员或负责人可以删除会议'); return }
+  const ok = confirm(
+    '确认删除会议「' + target.title + '」？此操作不可恢复：\n' +
+    '同时会删除该会议的录音与历史建议记录，已审核通过产生的需求池条目不受影响。'
+  )
+  if (!ok) return
+  deleting.value = true
+  try {
+    const result = await meeting.removeMeeting(target.id)
+    notify(`会议已删除 · 录音 ${result?.audio_deleted ?? 0} 条 · 历史建议 ${result?.suggestions_deleted ?? 0} 条`)
+  } catch (err) {
+    notify('删除失败：' + err.message)
+  } finally { deleting.value = false }
+}
 
 const transcriptDemo = [
   ['00:12', '李锐铭', '好，Sprint 2 的重点大家都清楚吗？'],
@@ -99,7 +128,7 @@ function genDemoSuggestion() {
     <form id="meeting-save-form" @submit.prevent="saveMeeting">
       <label class="field">会议标题<input name="title" v-model="saveForm.title" required maxlength="200"></label>
       <label class="field">会议转写<textarea name="transcript" v-model="saveForm.transcript" required maxlength="16000" rows="5"></textarea></label>
-      <button class="primary" type="submit" :disabled="!meeting.maySubmit || saving">保存会议</button>
+      <button class="primary" type="submit" :disabled="!meeting.maySubmit || saving" :title="readonlyTitle">保存会议</button>
     </form>
     <div class="h-sec">已保存会议</div>
     <select id="meeting-select" aria-label="已保存会议" :value="meeting.selected" @change="meeting.select($event.target.value)">
@@ -107,6 +136,12 @@ function genDemoSuggestion() {
       <option v-for="m in meeting.meetings" :key="m.id" :value="m.id">{{ m.title }}</option>
     </select>
     <button type="button" id="meeting-refresh" @click="refresh">刷新会议与建议</button>
+    <button
+      type="button" id="meeting-delete" class="danger"
+      :disabled="!meeting.selectedMeeting || !mayDeleteMeeting || deleting"
+      :title="deleteTitle"
+      @click="deleteMeeting"
+    >{{ deleting ? '删除中…' : '删除当前会议' }}</button>
     <pre id="saved-transcript" style="white-space:pre-wrap;max-height:240px;overflow:auto">{{ meeting.selectedMeeting?.transcript || '暂无会议，请先保存。' }}</pre>
     <AgentRunPanel />
     <RecorderPanel />
@@ -117,7 +152,7 @@ function genDemoSuggestion() {
       <label class="field">会议证据（复制原文中的连续片段）<textarea name="evidence" v-model="proposal.evidence" required maxlength="5000" rows="2"></textarea></label>
       <label class="field">优先级（录入人选择，默认 Could）<select name="priority" v-model="proposal.priority"><option>Could</option><option>Should</option><option>Must</option></select></label>
       <label class="field">建议说明<input name="note" v-model="proposal.note" maxlength="2000"></label>
-      <button class="primary" type="submit" :disabled="!meeting.selectedMeeting || !meeting.maySubmit || proposing">提交待审建议</button>
+      <button class="primary" type="submit" :disabled="!meeting.selectedMeeting || !meeting.maySubmit || proposing" :title="readonlyTitle">提交待审建议</button>
       <p class="small">负责人或管理员批准后才会创建需求；拒绝不改变项目数据。</p>
     </form>
   </div>

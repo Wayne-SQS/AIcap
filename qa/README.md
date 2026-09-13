@@ -2,21 +2,114 @@
 
 测试人员工作产物与执行入口。
 
-## 结构
+---
+
+## 现行基线前端 E2E(Java Spring Boot 后端 + Vue3 前端)—— 当前有效入口
+
+> `qa/` 下的 5 个旧 spec(`ui-e2e.spec.js`、`kanban-gantt-e2e.spec.js`、`meeting-review-e2e.spec.js`、
+> `meeting-improvements-e2e.spec.js`、`meeting-agent-e2e.spec.js`)与 `e2e-helpers.js` 针对**已归档**的
+> `legacy/index.html`(旧 M01–M23 编号基线)与 FastAPI 后端(8001/8090/8092);最新提交已把数据基线整体换成
+> US01–US37,legacy 页面里不存在 `M02`/`subprog`/`gbar.parent` 等锚点,**它们已整体失效**。
+> 这些文件按要求保留归档、不删除,但新套件完全不依赖它们(config 里用 `testMatch` 把它们排除在收集范围外)。
+
+自包含 Playwright 工程(自带 `qa/package.json` 与 `qa/node_modules`,与 `frontend/` 的依赖互不干扰):
 
 | 文件 | 说明 |
 |---|---|
+| `package.json` | `aicap-qa` 独立测试工程;`@playwright/test` 锁定 `1.63.0`;scripts:`test` / `test:headed` / `report` |
+| `playwright.config.js` | baseURL `http://localhost:5173`、系统 Edge(`channel: msedge`)、headless、虚拟麦克风;`testDir: '.'` + `testMatch` 只收集新套件;产物写在 `qa/test-results` 与 `qa/report` |
+| `vue-baseline-e2e.spec.js` | 现行基线端到端回归套件:**32 条** `[FE-XXX-NN]` 用例,按 9 个模块 `test.describe` 分组 |
+
+用例编号是稳定契约:`[FE-XXX-NN]` 与 `qa/测试用例设计_当前基线_v3.md`(用例设计:步骤/预期/实测)、
+`qa/测试执行记录_当前基线_v3.md`(执行记录)中的编号**一一对应**,可双向追溯;批量编排入口见 `qa/run-all.ps1`。
+
+前置(套件直连真实服务,不 mock 后端):
+
+```powershell
+# 1) 后端:java-backend(Spring Boot 3.5.3)→ http://localhost:8080(连开发库 AIcap)
+#    修改后端源码后必须重新打包并重启:& mvn -o -B package -DskipTests → java -jar target\aicap-java-backend.jar
+#    (Windows 下 jar 被运行中的实例占用会导致打包失败;启动前需注入 backend/.env 的 JWT_SECRET / AICAP_LLM_*)
+# 2) 前端:frontend Vite dev server → http://localhost:5173
+cd frontend; npm run dev
+```
+
+> ⚠️ **独占约束**:本套件假设**独占开发库 `AIcap` 与这两个服务**。用例里有基于精确条数的断言
+> (看板卡片数、成员任务数、日志行数),因此**不要与他人手工操作或另一个 E2E 进程并发执行**,
+> 否则会出现"数据被别人改了"的偶发红灯(实测发生过一次:并发跑第二个 Playwright 进程时
+> `FE-BRD-05`/`FE-GNT-04` 失败,单独复跑与随后连续 3 轮 35/35 全绿)。
+
+执行:
+
+```powershell
+cd qa
+npm install        # 仅首次;浏览器不用下载,套件用系统 Edge
+npm test           # = npx playwright test
+npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
+```
+
+用例清单(32 条):
+
+| 模块 | 编号 | 覆盖要点 |
+|---|---|---|
+| `FE-AUTH` | 01–04 | 登录成功身份/错误密码被拒/只读查看者权限(viewer 前端拦截 + 后端 403)/退出登录 |
+| `FE-OVW` | 01–02 | 概览统计口径(37 故事 / 16 任务 / 5 成员)、完成度百分比与看板口径 |
+| `FE-POOL` | 01–04 | 列表与接口一致 + 空态、新增→移除清理、提升为故事(US38+)→删除清理、必填校验 |
+| `FE-BRD` | 01–06 | 默认故事地图(4 切片含 Sprint 4+)、血缘徽章 `▣ x/y · %`、新建→删除、编辑 Sprint/负责人往返、负责人筛选、点卡详情 + 变更日志 |
+| `FE-GNT` | 01–05 | 父卡行/子任务行 + `data-gantt-task`、任务详情(前置/后续高亮)、编辑任务往返(8h→9h→8h)、父卡故事详情、选中态互斥 |
+| `FE-MBR` | 01–04 | 成员卡/容量/负载档位/负载图例、任务抽屉(列表+统计+筛选)、抽屉三种关闭方式、成员画像编辑往返 |
+| `FE-UML` | 01–03 | 用例图(4 参与者/15 用例/27 连线)、用例明细面板、时序图「Spring Boot 后端」且无 FastAPI |
+| `FE-AI` | 01–06 | 创建会议→落库→选中→**删除自清理**;`agent/config` 状态文案与按钮可用性;本地 mp3 上传→列表→删除;会议删除入口的权限门控(admin 可用 / member 禁用 / viewer 禁用) |
+| `FE-OFF` | 01 | 离线演示:API 指向死端口 + 旧 M 编号缓存 → 仍渲染 US01–US37 |
+
+写操作与数据安全:
+
+- 所有造数**唯一命名**(`QA-*` + 随机后缀),用例内自清理,`finally` 兜底;绝不删除/修改种子
+  US01–US37、T01–T16、5 个用户、5 条成员画像。
+- 「改一项再改回」类用例(`FE-BRD-04` 编辑故事、`FE-GNT-03` 改任务工时、`FE-MBR-04` 改画像)
+  都在结束时**逐字段回读校验还原**。
+- 期望值优先从后端真实接口取(故事/任务/用户/画像/日志/会议数量),不写死数字,基线漂移时不会误报。
+- 不真录音(录音链路由 `frontend/e2e-verify/recorder-profile.spec.js` 覆盖);音频用例用 Node 生成的
+  最小合法 mp3(ID3v2 头 + MPEG1 Layer III 静音帧)走 `setInputFiles` 上传。
+- **造数即清理(已闭环)**:前端现在有会议删除入口,后端也提供了 `DELETE /api/meetings/{id}`(admin/owner),
+  因此 `FE-AI-01` 已改回**真删除自清理**(建会议 → 落库 → 选中 → 删除 → 断言 404/列表清空/建议队列清空);
+  验收套件 `frontend/e2e-verify/recorder-profile.spec.js` 同样在结束时删除自己创建的「录音验收会议」。
+  **两个套件跑完都不再累积数据**(实测:连跑后开发库会议总数不变)。
+  若历史上留有残余,可人工清理:`DELETE FROM meetings WHERE title LIKE 'QA-AI-%'` 或按标题前缀「录音验收会议」删。
+
+### 缺陷与修复状态(本轮发现 9 条,7 条已修复并回归)
+
+| # | 现象 | 状态 / 修法 | 回归锚点 |
+|---|---|---|---|
+| 1 | 错误密码的提示丢失后端原因(显示「登录失败：未登录」) | ✅ 已修复:`api/client.js` 的 401 先取 `detail`;`/api/auth/login` 不再走全局会话过期处理 | `FE-AUTH-02` |
+| 2 | 只读查看者无法用真名「只读查看者」登录(401) | ✅ 已修复:`AuthController.LOGIN_ALIASES` 补第 9 对映射 | `AUTH-10`、`FE-AUTH-03` |
+| 3 | 会议创建后无法删除,套件每轮累积垃圾数据 | ✅ 已修复:后端新增 `DELETE /api/meetings/{id}`(admin/owner,级联清理 runs/events/audio+落盘文件/建议记录,保留已审批的池条目)+ 前端 `#meeting-delete` 入口 + 两套件自清理 | `MEET-06/07/08`、`FE-AI-01/04/05/06`、`VRF-07` |
+| 4 | 只读角色的「新增/编辑」按钮未禁用,仅点击后弹 toast | ✅ 已修复:统一 `disabled + title="只读账号无写权限"`(保持可见),故事卡同时不可拖拽;`guard()` 仍作兜底 | `FE-AUTH-03` |
+| 5 | 变更记录面板标称与实际不符(实际最旧在前;在线仍标「本机」) | ✅ 已修复:store 取**最新 50 条**并翻成旧→新,面板渲染最新在前;标题随在线/离线变化(连带修好总览「最近更新」取到最旧一条的问题) | `FE-BRD-06` |
+| 6 | 验收套件 `recorder-profile.spec.js` 每轮留一条「录音验收会议」 | ✅ 已修复:用例结束调用删除接口自清理 | `VRF-07` |
+| 7 | 开发库需求池非空(2 条历史冒烟残留 `A000000007/A000000008`) | ⏳ 未处理:「池为空」空态仍用 `page.route` 拦截 `[]` 验证(`FE-POOL-01`);建议清理后回归真实空态断言 | — |
+| 8 | 内联脚本硬编码 `window.__AICAP_API_BASE__`,覆盖 E2E 注入 | ⏳ 未处理:离线用例改用 `Object.defineProperty` 钉死基址(`FE-OFF-01`) | — |
+
+## 结构(含归档)
+
+| 文件 | 说明 |
+|---|---|
+| `package.json` | **现行**:`aicap-qa` 独立 Playwright 测试工程(见上节) |
+| `playwright.config.js` | **现行**:现行基线 E2E 配置(msedge/headless/虚拟麦克风,产物在 qa/ 内) |
+| `vue-baseline-e2e.spec.js` | **现行**:35 条 `[FE-XXX-NN]` 现行基线回归用例 |
+| `run-all.ps1` | **现行**:一体化编排(后端契约 JUnit 126 → 前端 E2E 35 → 前端验收 e2e:verify 7) |
+| `测试用例设计_当前基线_v3.md` | **现行**:当前基线用例设计 168 条(契约层 126 + 前端 `[FE-XXX-NN]` 35 + 验收层 7 + 缺口与缺陷) |
+| `测试执行记录_当前基线_v3.md` | **现行**:当前基线执行记录 |
 | `测试用例设计_前后端_v1.md` | 前后端全部测试用例设计(编号/优先级/步骤/预期/实测) |
 | `测试用例设计_前后端_v2.md` | v2 用例设计:看板↔甘特血缘重构 + 会议智能体审核工作流(含复测修订) |
-| `ui-e2e.spec.js` | 前端 UI E2E(Playwright):离线演示模式 FE 套件 + 在线联调 OE 套件 + 清理 |
-| `kanban-gantt-e2e.spec.js` | 血缘 E2E:FE-KGN 离线套件(徽章/加权/甘特层级/三选一/跨 Sprint 挪动) + OE-KGN 在线可逆套件 |
-| `meeting-review-e2e.spec.js` | 会议审核工作流 E2E |
-| `meeting-improvements-e2e.spec.js` | 会议改进项 E2E(修改后采纳/Sprint 必选/owner 可空) |
-| `meeting-agent-e2e.spec.js` | 会议 Agent E2E(fixture 供应商/失败重试/证据伪造拒绝) |
-| `e2e-helpers.js` | E2E 双模式公共助手:按 `AICAP_UI_FLAVOR` 读 legacy/vue 页面并注入 API_BASE(见下「E2E 双模式」) |
-| `agent_provider_fixture.py` | 本地 LLM fixture 供应商(端口 9009,会议 Agent E2E 依赖) |
-| `reset_qa_db.py` | 重置 QA 库 `AIcap_qa` 到干净播种状态(重复执行 E2E 前使用) |
-| `verify_migration.py` | 血缘迁移校验(只读,固化 v2 用例 DB-01~04;对 dev 库或 `--qa` QA 库执行) |
+| `ui-e2e.spec.js` | ⚠️**已失效(归档)**:针对 legacy/index.html + FastAPI(8090) |
+| `kanban-gantt-e2e.spec.js` | ⚠️**已失效(归档)**:M01–M23 编号基线的血缘 E2E |
+| `meeting-review-e2e.spec.js` | ⚠️**已失效(归档)** |
+| `meeting-improvements-e2e.spec.js` | ⚠️**已失效(归档)** |
+| `meeting-agent-e2e.spec.js` | ⚠️**已失效(归档)**:依赖 FastAPI 后端 + 本地 fixture 供应商 |
+| `e2e-helpers.js` | ⚠️**已失效(归档)**:旧 spec 的双模式(legacy/vue)公共助手 |
+| `agent_provider_fixture.py` | 本地 LLM fixture 供应商(端口 9009,旧会议 Agent E2E 依赖) |
+| `reset_qa_db.py` | 重置 QA 库 `AIcap_qa` 到干净播种状态(旧 FastAPI 流水线) |
+| `verify_migration.py` | 血缘迁移校验(只读,对 dev 库或 `--qa` QA 库执行) |
 | `测试执行记录_后端.md` | 后端 pytest 扩展套件执行输出摘要与映射 |
 
 ## 后端自动化执行
@@ -31,7 +124,10 @@ D:\aiguanli-venv\Scripts\python.exe -m pytest tests -q
 
 扩展套件为 `backend/tests/test_qa_extended.py` 与 `backend/tests/test_kanban_gantt.py`(血缘:PATCH /tasks、删卡三选一级联、FK SET NULL、seed 映射),与既有 `conftest.py` 共用独立测试库 `AIcap_test`。
 
-## 前端 E2E 执行
+## 前端 E2E 执行(⚠️ 已归档:FastAPI 后端 + legacy/index.html 的旧流水线,勿再使用)
+
+> 本节描述的是**改造前**的 FastAPI(8001/8090/8092)流水线。当前基线请直接看本文最上方
+> 「现行基线前端 E2E」一节(`cd qa && npm test`,只需 8080 + 5173)。
 
 ```powershell
 # 0) 运行前置(重要):
@@ -67,7 +163,7 @@ node <repo>\qa\kanban-gantt-e2e.spec.js    # 血缘 FE-KGN+OE-KGN(36 用例,在�
 node <repo>\qa\meeting-review-e2e.spec.js  # 会议审核(需先起 agent_provider_fixture 的场合见各 spec 头注释)
 ```
 
-## E2E 双模式(legacy / vue)
+## E2E 双模式(legacy / vue)(⚠️ 已归档:仅适用于上述旧 spec)
 
 自 Vue3 化改造(`frontend/`,分支 `feat/vue-frontend`)起,全部 5 个 E2E spec 同时支持两种页面形态,由环境变量切换:
 

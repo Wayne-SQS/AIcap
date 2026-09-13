@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MILESTONES } from '@/data/seed'
 import GanttRow from '@/components/gantt/GanttRow.vue'
 import TaskEditorDialog from '@/components/gantt/TaskEditorDialog.vue'
@@ -12,8 +14,11 @@ import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
      可点击任务条(选中高亮 + 前置/后续任务高亮)、任务详情面板、任务编辑弹窗(真实 PATCH /api/tasks/{id})
    - 交互按 Vue 重写:选中状态由 selection 持有,父条=故事卡(编辑走故事弹窗),子条=任务(编辑走任务弹窗) */
 const project = useProjectStore()
+const session = useSessionStore()
 const sprintLabel = ['', 'S1', 'S1', 'S2', 'S2', 'S3', 'S3']
 const sprintOf = w => Math.ceil(w / 2)
+/* 只读账号(viewer)的编辑入口保持可见但禁用,title 说明原因 */
+const viewerTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
 
 const selection = ref(null)          // { type:'task'|'story', id }
 const taskEditorRef = ref(null)
@@ -198,7 +203,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
           <span class="id">{{ selectedTask.id }}</span>
           <h3>{{ selectedTask.name }}</h3>
           <div class="actions">
-            <button type="button" class="primary" @click="taskEditorRef?.open(selectedTask.id)">编辑任务</button>
+            <button type="button" class="primary" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.open(selectedTask.id)">编辑任务</button>
             <button v-if="selectedTask.card" type="button" @click="selectStory(selectedTask.card)">查看父卡 {{ selectedTask.card }}</button>
           </div>
         </div>
@@ -220,7 +225,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
           <span class="id">{{ selectedStory.id }}</span>
           <h3>{{ selectedStory.title }}</h3>
           <div class="actions">
-            <button type="button" class="primary" @click="storyEditorRef?.open(selectedStory.id)">编辑故事</button>
+            <button type="button" class="primary" :disabled="session.isViewer" :title="viewerTitle" @click="storyEditorRef?.open(selectedStory.id)">编辑故事</button>
           </div>
         </div>
         <div class="detail-grid">

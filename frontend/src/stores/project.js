@@ -239,7 +239,9 @@ export const useProjectStore = defineStore('project', {
       this.tasks = tk.map(this.mapTask)
       this.mergeMembers(users)
       this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
-      this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(-50)
+      /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
+         与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
+      this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
       this.serverSync = true
       this.savehint = '已连接后端 · 数据实时同步到服务器'
       this.checkConsistency()

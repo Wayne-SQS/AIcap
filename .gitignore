@@ -1,6 +1,12 @@
 # 本地课程/归档材料，不上传到公开仓库
 归档_其他材料/
 爱管理_像素风用户故事看板.html
+项目规划方案(3).docx
+爱管理_三大AI智能体功能设计.md
+.trae/
+
+# 本地留存的过程记录，仅本地查阅
+qa/测试执行记录_后端_mcc整合.md
 
 # 系统文件
 .DS_Store
@@ -26,3 +32,9 @@ java-backend/data/
 # 前端验证脚本产物
 frontend/test-results/
 frontend/playwright-report/
+
+# QA E2E 测试工程(qa/)的依赖与运行产物:由 qa/package.json 可再生
+qa/node_modules/
+qa/report/
+qa/test-results/
+qa/playwright-report/

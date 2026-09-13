@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { membersApi } from '@/api/members'
 import { useToast } from '@/composables/useToast'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import MemberProfileDialog from '@/components/members/MemberProfileDialog.vue'
 import MemberTaskDrawer from '@/components/members/MemberTaskDrawer.vue'
 import { ROLE_TXT } from '@/data/seed'
@@ -144,7 +145,11 @@ const contribs = computed(() => {
           <b>{{ p.display_name }}</b>
           <span class="badge">{{ ROLE_TXT[p.role] || p.role }}</span>
           <span class="small" v-if="p.years_experience">{{ p.years_experience }} 年经验</span>
-          <button v-if="canEdit(p)" class="edit" @click="editing = p">编辑画像</button>
+          <button
+            v-if="canEdit(p) || session.isViewer" class="edit"
+            :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''"
+            @click="editing = p"
+          >编辑画像</button>
         </div>
         <div class="ptitle" v-if="p.title">{{ p.title }}</div>
         <p class="small psum" v-if="p.summary">{{ p.summary }}</p>

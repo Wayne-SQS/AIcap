@@ -15,7 +15,7 @@ const REPO = path.resolve(__dirname, '..');
 const FLAVOR = process.env.AICAP_UI_FLAVOR || 'legacy';
 
 const LEGACY_ANCHOR = "const API_BASE='http://127.0.0.1:8000';";
-const VUE_ANCHOR = "window.__AICAP_API_BASE__='http://127.0.0.1:8000';";
+const VUE_ANCHOR = "window.__AICAP_API_BASE__='http://127.0.0.1:8080';";
 
 function flavor() { return FLAVOR; }
 function isVue() { return FLAVOR === 'vue'; }

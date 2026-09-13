@@ -2,13 +2,18 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { audioApi } from '@/api/audio'
 import { useMeetingStore } from '@/stores/meeting'
+import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 
 /* 爱管理自带录音:麦克风 → MediaRecorder → 客户端 lamejs 编码为真 .mp3 → 提交到会议
    说明:浏览器 MediaRecorder 原生只出 webm/opus 或 mp4/aac,不出 mp3;
    因此录音结束后在浏览器内解码为 PCM 并用 lamejs 编码成 mp3(服务端不需要 ffmpeg)。 */
 const meeting = useMeetingStore()
+const session = useSessionStore()
 const { notify } = useToast()
+/* 只读账号(viewer):录音/提交入口已是 disabled(per maySubmit),补一句原因说明 */
+const readonlyTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
 
 const recording = ref(false)
 const elapsedMs = ref(0)
@@ -241,11 +246,11 @@ onUnmounted(() => {
     </p>
 
     <div class="rec-actions">
-      <button v-if="!recording" class="primary" id="rec-start" :disabled="!meetingId || busy || !maySubmit" @click="start">
+      <button v-if="!recording" class="primary" id="rec-start" :disabled="!meetingId || busy || !maySubmit" :title="readonlyTitle" @click="start">
         ● 开始录音
       </button>
       <button v-else class="danger" id="rec-stop" @click="stop">■ 停止录音（{{ fmtMs(elapsedMs) }}）</button>
-      <label class="file-pick">
+      <label class="file-pick" :title="readonlyTitle">
         <input type="file" accept=".mp3,audio/mpeg" :disabled="!meetingId || busy || !maySubmit" @change="submitFile">
         <span>选择本地 .mp3 提交</span>
       </label>
@@ -261,7 +266,7 @@ onUnmounted(() => {
       <div class="clip-head">待提交录音 · {{ fmtMs(clip.ms) }} · {{ fmtSize(clip.bytes) }}（已编码 MP3）</div>
       <audio :src="clip.url" controls preload="metadata"></audio>
       <div class="clip-actions">
-        <button class="primary" id="rec-submit" :disabled="busy || !maySubmit" @click="submitClip">提交到会议</button>
+        <button class="primary" id="rec-submit" :disabled="busy || !maySubmit" :title="readonlyTitle" @click="submitClip">提交到会议</button>
         <a :href="clip.url" download="录音.mp3" class="btn-link">下载 mp3</a>
         <button @click="clearClip">丢弃</button>
       </div>

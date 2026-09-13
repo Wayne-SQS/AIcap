@@ -2,11 +2,14 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { SPRINTS, MILESTONES } from '@/data/seed'
 
 /* 对齐旧版 renderOverview(L893-907) + renderRealtime(L1181-1186) + 视图结构 L447-485 */
 const router = useRouter()
 const project = useProjectStore()
+const session = useSessionStore()
 const go = v => router.push({ name: v })
 
 const ovTotal = computed(() => String(project.stories.length).padStart(2, '0'))
@@ -33,7 +36,7 @@ const sprintCards = computed(() => SPRINTS.map((sp, i) => {
         <h1>爱管理</h1>
         <p>支持软件团队管理需求、安排任务、四视图联动与六项 AI 能力的协作平台。</p>
       </div>
-      <button class="primary" @click="go('board')">＋ 新建用户故事</button>
+      <button class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="go('board')">＋ 新建用户故事</button>
     </div>
 
     <div class="stats">

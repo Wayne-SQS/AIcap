@@ -58,6 +58,18 @@ export const useMeetingStore = defineStore('meeting', {
       this.meetings.unshift(meeting)
       return meeting
     },
+    /* 删除会议(仅 admin/owner 由页面按钮把关,后端仍会 403 兜底):
+       成功后再改本地态,失败(403/404/网络)保持列表与选中不变;
+       删除后重新拉取列表并把选中复位为空,转写区与分析面板回到「未选择会议」 */
+    async removeMeeting(id) {
+      const result = await meetingsApi.remove(id)
+      this.selected = ''
+      this.agentRun = null
+      this.agentError = ''
+      await this.loadAll()
+      this.select('')   // loadAll 会自动补选第一条,这里显式复位保持空态
+      return result
+    },
     /* 手动录入待审建议:同一指纹复用 client_request_id,防网络重试导致重复入库 */
     async submitProposal(form) {
       const body = {

@@ -20,14 +20,26 @@ export function setAuthToken(token) {
 let unauthorizedHandler = null
 export function setUnauthorizedHandler(fn) { unauthorizedHandler = fn }
 
+/** 登录接口:它的 401 是「凭据错误」而不是「会话过期」,不能走全局过期处理 */
+function isLoginPath(path) {
+  return String(path).split('?')[0].replace(/\/+$/, '') === '/api/auth/login'
+}
+
 export async function api(path, opts = {}) {
   const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {})
   const token = getAuthToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
   const res = await fetch(apiBase() + path, Object.assign({}, opts, { headers }))
   if (res.status === 401) {
-    if (unauthorizedHandler) unauthorizedHandler()
-    throw new Error('未登录')
+    /* 先解析响应体拿后端真实原因(登录失败时是「用户名或密码错误」),解析不到才退回「未登录」 */
+    let msg = '未登录'
+    try {
+      const j = await res.json()
+      if (typeof j.detail === 'string' && j.detail.trim()) msg = j.detail
+    } catch (e) { /* 非 JSON 响应:保持默认文案 */ }
+    /* 登录接口的 401 只提示原因,不触发「登录已过期」的全局处理 */
+    if (!isLoginPath(path) && unauthorizedHandler) unauthorizedHandler()
+    throw new Error(msg)
   }
   if (!res.ok) {
     let msg = '请求失败 (' + res.status + ')'

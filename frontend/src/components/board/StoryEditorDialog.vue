@@ -3,7 +3,7 @@ import { ref, reactive, nextTick } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
-import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { statuses } from '@/constants'
@@ -188,9 +188,9 @@ defineExpose({ open })
         </select></label>
         <label class="field">验收条件<textarea name="acceptance" v-model="form.acceptance" required></textarea></label>
         <div class="actions">
-          <button v-if="editing" type="button" id="del" class="danger" style="margin-right:auto" @click="onDelete">删除故事</button>
+          <button v-if="editing" type="button" id="del" class="danger" style="margin-right:auto" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="onDelete">删除故事</button>
           <button type="button" id="cancel" @click="close">取消</button>
-          <button type="submit" class="primary">保存故事</button>
+          <button type="submit" class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">保存故事</button>
         </div>
       </div>
     </form>
