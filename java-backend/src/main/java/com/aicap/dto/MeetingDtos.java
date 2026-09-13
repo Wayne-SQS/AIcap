@@ -27,6 +27,18 @@ public final class MeetingDtos {
                              @JsonProperty("created_at") LocalDateTime createdAt) {
     }
 
+    /**
+     * DELETE /api/meetings/{id} 响应(风格对齐 PoolDtos.DeleteOut:200 + JSON body,不用 204)。
+     * 除 {@code deleted} 外回报级联清理计数,便于前端提示与契约断言:
+     * {@code audio_deleted}=实际删除的落盘音频文件数(best-effort,盘上已缺失的文件不计入),
+     * {@code suggestions_deleted}=删除的建议数,{@code runs_deleted}=删除的 Agent 分析任务数。
+     */
+    public record DeleteOut(String id, boolean deleted,
+                            @JsonProperty("audio_deleted") int audioDeleted,
+                            @JsonProperty("suggestions_deleted") int suggestionsDeleted,
+                            @JsonProperty("runs_deleted") int runsDeleted) {
+    }
+
     /** 需求池变更载荷(PoolChanges;FastAPI extra=forbid → 未知字段拒绝) */
     public record PoolChanges(@NotBlank @Size(max = 200) String title,
                               @Size(max = 10000) String description,

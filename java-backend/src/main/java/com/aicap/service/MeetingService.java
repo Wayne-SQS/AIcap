@@ -3,12 +3,18 @@ package com.aicap.service;
 import com.aicap.common.ApiException;
 import com.aicap.dto.MeetingDtos;
 import com.aicap.entity.Meeting;
+import com.aicap.entity.MeetingAgentEvent;
+import com.aicap.entity.MeetingAgentRun;
 import com.aicap.entity.MeetingApprovalPayload;
+import com.aicap.entity.MeetingAudio;
 import com.aicap.entity.MeetingSuggestionRecord;
 import com.aicap.entity.PoolItem;
 import com.aicap.entity.Suggestion;
 import com.aicap.entity.User;
+import com.aicap.mapper.MeetingAgentEventMapper;
+import com.aicap.mapper.MeetingAgentRunMapper;
 import com.aicap.mapper.MeetingApprovalPayloadMapper;
+import com.aicap.mapper.MeetingAudioMapper;
 import com.aicap.mapper.MeetingMapper;
 import com.aicap.mapper.MeetingSuggestionRecordMapper;
 import com.aicap.mapper.PoolItemMapper;
@@ -48,6 +54,9 @@ public class MeetingService {
     private final MeetingSuggestionRecordMapper recordMapper;
     private final MeetingApprovalPayloadMapper payloadMapper;
     private final PoolItemMapper poolItemMapper;
+    private final MeetingAgentRunMapper runMapper;
+    private final MeetingAgentEventMapper eventMapper;
+    private final MeetingAudioMapper audioMapper;
     private final ObjectMapper objectMapper;
 
     // ---------- meetings ----------
@@ -72,6 +81,72 @@ public class MeetingService {
         Meeting m = meetingMapper.selectById(meetingId);
         if (m == null) throw ApiException.notFound("会议不存在");
         return m;
+    }
+
+    /**
+     * 删除会议并级联清理其全部从属数据(FE-D03)。
+     * <p>schema 里这些外键都没有 ON DELETE CASCADE,因此必须手工按依赖反序清理,否则直接删会议会报外键错误:
+     * <ol>
+     *   <li>{@code meeting_agent_events}(按该会议 runs 的 run_id)</li>
+     *   <li>{@code meeting_agent_runs}(meeting_id)</li>
+     *   <li>{@code meeting_audio} 元数据(meeting_id);磁盘文件不在本事务内删,调用方在事务提交后处理</li>
+     *   <li>{@code meeting_approval_payloads}(suggestion_id)</li>
+     *   <li>{@code meeting_suggestion_records}(meeting_id)及其 {@code suggestions}(suggestion_id)</li>
+     *   <li>{@code meetings} 本体</li>
+     * </ol>
+     * <b>不删</b>已审核通过时落库的 {@code pool_items}:需求池条目是独立产物,审批通过后就不该随会议消失。
+     * <p>整个方法在 {@link Transactional} 内:要么全部成功,要么全部回滚(不会出现"会议删了、建议还在"的中间态)。
+     * 返回本次涉及的音频相对落盘路径,交给调用方在事务提交后再删文件——避免"事务回滚但文件已删"。
+     *
+     * @return 音频落盘相对路径 + 本次删除的建议数/分析任务数(供响应体回报)
+     */
+    @Transactional
+    public MeetingDeletion deleteMeeting(String meetingId) {
+        Meeting meeting = meetingMapper.selectById(meetingId);
+        if (meeting == null) throw ApiException.notFound("会议不存在");
+
+        // 1) Agent 事件 → 分析任务(meeting_agent_events.run_id → meeting_agent_runs.id)
+        List<MeetingAgentRun> runs = runMapper.selectList(
+                new QueryWrapper<MeetingAgentRun>().eq("meeting_id", meetingId));
+        List<String> runIds = runs.stream().map(MeetingAgentRun::getId).toList();
+        if (!runIds.isEmpty()) {
+            eventMapper.delete(new QueryWrapper<MeetingAgentEvent>().in("run_id", runIds));
+        }
+        runMapper.delete(new QueryWrapper<MeetingAgentRun>().eq("meeting_id", meetingId));
+
+        // 2) 音频元数据(字节落盘文件由调用方在事务提交后删,此处只收集路径)
+        List<MeetingAudio> audios = audioMapper.selectList(
+                new QueryWrapper<MeetingAudio>().eq("meeting_id", meetingId));
+        List<String> audioPaths = audios.stream()
+                .map(MeetingAudio::getStoragePath)
+                .filter(p -> p != null && !p.isBlank())
+                .toList();
+        audioMapper.delete(new QueryWrapper<MeetingAudio>().eq("meeting_id", meetingId));
+
+        // 3) 审核载荷 → 建议记录 → 建议(meeting_approval_payloads / meeting_suggestion_records → suggestions)
+        List<MeetingSuggestionRecord> records = recordMapper.selectList(
+                new QueryWrapper<MeetingSuggestionRecord>().eq("meeting_id", meetingId));
+        List<String> suggestionIds = records.stream()
+                .map(MeetingSuggestionRecord::getSuggestionId)
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (!suggestionIds.isEmpty()) {
+            payloadMapper.delete(new QueryWrapper<MeetingApprovalPayload>().in("suggestion_id", suggestionIds));
+        }
+        recordMapper.delete(new QueryWrapper<MeetingSuggestionRecord>().eq("meeting_id", meetingId));
+        if (!suggestionIds.isEmpty()) {
+            suggestionMapper.delete(new QueryWrapper<Suggestion>().in("id", suggestionIds));
+        }
+
+        // 4) 会议本体
+        meetingMapper.deleteById(meetingId);
+
+        return new MeetingDeletion(audioPaths, suggestionIds.size(), runIds.size());
+    }
+
+    /** 会议删除结果:音频相对落盘路径(待事务提交后删盘)+ 级联删除的建议数/分析任务数 */
+    public record MeetingDeletion(List<String> audioStoragePaths, int suggestionsDeleted, int runsDeleted) {
     }
 
     // ---------- suggestions ----------

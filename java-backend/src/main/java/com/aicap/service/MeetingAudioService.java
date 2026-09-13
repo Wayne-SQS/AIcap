@@ -22,6 +22,7 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -163,6 +164,36 @@ public class MeetingAudioService {
     }
 
     public record LoadedAudio(MeetingAudio meta, byte[] bytes) {
+    }
+
+    /**
+     * 删除一批已落盘音频文件(删除会议级联清理用)。
+     * <p>best-effort:单个文件删除失败只记日志、不抛异常,绝不影响调用方接口的成功语义;
+     * 路径解析复用本类的 {@link #resolveInsideRoot}(同一份 {@code aicap.audio.dir} 与 {@code ../} 越权拦截逻辑)。
+     * <p><b>时序要求</b>:必须在删除会议的事务<b>提交之后</b>调用(见 MeetingController#deleteMeeting),
+     * 否则事务回滚时会留下"数据库里会议还在、盘上文件已删"的不一致。
+     *
+     * @param storagePaths 相对音频根目录的落盘路径(取自 meeting_audio.storage_path)
+     * @return 实际删除掉的文件数(不存在或删除失败的路径不计入)
+     */
+    public int deleteStoredFiles(Collection<String> storagePaths) {
+        if (storagePaths == null || storagePaths.isEmpty()) {
+            return 0;
+        }
+        int deleted = 0;
+        for (String relative : storagePaths) {
+            if (relative == null || relative.isBlank()) {
+                continue;
+            }
+            try {
+                if (Files.deleteIfExists(resolveInsideRoot(relative))) {
+                    deleted++;
+                }
+            } catch (Exception e) {
+                log.warn("会议音频文件删除失败 path={} err={}", relative, e.toString());
+            }
+        }
+        return deleted;
     }
 
     // ---------- 内部 ----------

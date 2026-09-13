@@ -25,12 +25,18 @@ import java.util.Map;
 public class AuthController {
 
     /**
-     * 真名 ↔ "成员N" 双向登录别名(对齐 FastAPI auth.py):
-     * 新库用户名为真名,存量库沿用 成员1..成员4;两种叫法都能登录到同一账号。
+     * 真名 ↔ "成员N" 登录别名(对齐 FastAPI auth.py):覆盖全部 5 个种子用户。
+     * <p>成员1..成员4 在库中的 username 是<b>真名</b>(李锐铭/高思晗/孙秋实/罗子涵),
+     * 因此这 4 组是双向映射,两种叫法都能登录到同一账号。
+     * <p>第 5 个用户(只读查看者 viewer)的 username 本身就是 {@code 成员5}、display_name 是
+     * {@code 只读查看者}:它直接用 username 就能登录,故只需补一个方向
+     * {@code 只读查看者 → 成员5}(FE-D02:此前缺这条别名,真名登录返回 401)。
+     * <p>共 9 对键值,未超过 {@link Map#of} 的 10 对上限。
      */
     private static final Map<String, String> LOGIN_ALIASES = Map.of(
             "李锐铭", "成员1", "高思晗", "成员2", "孙秋实", "成员3", "罗子涵", "成员4",
-            "成员1", "李锐铭", "成员2", "高思晗", "成员3", "孙秋实", "成员4", "罗子涵");
+            "成员1", "李锐铭", "成员2", "高思晗", "成员3", "孙秋实", "成员4", "罗子涵",
+            "只读查看者", "成员5");
 
     private final UserMapper userMapper;
     private final JwtUtil jwtUtil;

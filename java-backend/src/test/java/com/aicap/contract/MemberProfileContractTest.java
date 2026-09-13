@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/aicap_java_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false",
         "spring.datasource.username=aiguanli",
         "spring.datasource.password=aiguanli-2026",
-        "aicap.agent-worker-enabled=false",
+        "aicap.llm.agent-worker-enabled=false",
         "spring.sql.init.data-locations=classpath:db/reset_test_data.sql"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

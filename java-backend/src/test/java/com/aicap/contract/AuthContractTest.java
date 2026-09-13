@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 认证契约:
  * - POST /api/auth/login 成功 → 200 且含 access_token + user{role:admin,capacity_hours};
  * - 登录双向别名:真名(李锐铭…)↔ 存量名(成员1…)都能登录到同一账号;
+ *   第 5 个用户额外支持"显示名(只读查看者)→ 成员5"单向别名(FE-D02);
  * - 错密码 → 401 {"detail":"用户名或密码错误"};未知用户 → 401;
  * - GET /api/auth/me 带 Bearer → 200;
  * - 无 token 访问受保护接口 → 401 {"detail":...};
@@ -25,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/aicap_java_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false",
         "spring.datasource.username=aiguanli",
         "spring.datasource.password=aiguanli-2026",
-        "aicap.agent-worker-enabled=false",
+        "aicap.llm.agent-worker-enabled=false",
         "spring.sql.init.data-locations=classpath:db/reset_test_data.sql"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -36,6 +37,9 @@ class AuthContractTest extends ContractTestSupport {
             USER_ADMIN, USER_OWNER, USER_MEMBER, USER_MEMBER2, USER_VIEWER);
     private static final List<Integer> SEEDED_CAPACITY = List.of(60, 48, 60, 54, 60);
     private static final List<String> SEEDED_ROLES = List.of("admin", "owner", "member", "member", "viewer");
+
+    /** 第 5 个用户(成员5 / viewer)的展示名:登录时也应能作为别名使用(FE-D02) */
+    private static final String VIEWER_DISPLAY_NAME = "只读查看者";
 
     private JsonNode userByName(JsonNode array, String username) {
         for (JsonNode u : array) {
@@ -109,6 +113,43 @@ class AuthContractTest extends ContractTestSupport {
                     byAlias.json().path("user").path("id").asInt(-1),
                     aliases.get(i) + " 与 " + realNames.get(i) + " 必须是同一账号: " + byAlias.body());
         }
+    }
+
+    /**
+     * FE-D02:第 5 个用户(username=成员5/display_name=只读查看者)此前没有真名别名,
+     * 用"只读查看者"登录返回 401。要求:两种叫法都能登录到同一 viewer 账号。
+     */
+    @Test
+    void login_viewerDisplayNameAlias_mapsToMember5() {
+        // ① 显示名登录 ② 用户名登录 → 都 200 且同一 user.id / role / display_name
+        ApiResponse byDisplayName = login(VIEWER_DISPLAY_NAME, PASSWORD);
+        assertEquals(200, byDisplayName.status(),
+                "显示名 " + VIEWER_DISPLAY_NAME + " 登录应 200: " + byDisplayName.body());
+        ApiResponse byUsername = login(USER_VIEWER, PASSWORD);
+        assertEquals(200, byUsername.status(), "用户名 " + USER_VIEWER + " 登录应 200: " + byUsername.body());
+
+        assertEquals(byUsername.json().path("user").path("id").asInt(-1),
+                byDisplayName.json().path("user").path("id").asInt(-1),
+                "显示名与用户名必须指向同一用户 id: " + byDisplayName.body());
+        for (ApiResponse r : List.of(byDisplayName, byUsername)) {
+            JsonNode u = r.json().path("user");
+            assertEquals("viewer", u.path("role").asText(), r.body());
+            assertEquals(VIEWER_DISPLAY_NAME, u.path("display_name").asText(), r.body());
+            assertEquals(USER_VIEWER, u.path("username").asText(), r.body());
+        }
+
+        // 显示名登录拿到的 token 同样是该账号的可用凭证
+        String t = byDisplayName.json().path("access_token").asText();
+        assertTrue(!t.isEmpty(), "显示名登录应返回 access_token: " + byDisplayName.body());
+        ApiResponse me = get("/api/auth/me", t);
+        assertEquals(200, me.status(), me.body());
+        assertEquals(USER_VIEWER, me.json().path("username").asText(), me.body());
+
+        // ③ 密码错误时两种叫法都必须 401(别名不得放宽口令校验)
+        assertEquals(401, login(VIEWER_DISPLAY_NAME, "wrong-pass").status(),
+                "显示名 + 错密码必须 401");
+        assertEquals(401, login(USER_VIEWER, "wrong-pass").status(),
+                "用户名 + 错密码必须 401");
     }
 
     @Test
