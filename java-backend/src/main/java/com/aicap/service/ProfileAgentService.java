@@ -25,6 +25,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -119,7 +120,9 @@ public class ProfileAgentService {
                 r.getHappenedAt() == null ? null : r.getHappenedAt().format(TS));
     }
 
-    /** 批量导入活动事实(文档 4.2:提交/Review 等活动批量接入;source=import) */
+    /** 批量导入活动事实(文档 4.2:提交/Review 等活动批量接入;source=import)。
+     *  事务性:任一条校验失败则整体回滚,避免中途失败导致部分入库、数据不完整。 */
+    @Transactional
     public List<ProfileAgentDtos.ActivityOut> importActivities(List<ProfileAgentDtos.ActivityIn> items, User actor) {
         if (items == null || items.isEmpty()) throw ApiException.badRequest("导入列表不能为空");
         if (items.size() > 200) throw ApiException.unprocessable("单次最多导入 200 条");
@@ -435,6 +438,7 @@ public class ProfileAgentService {
         List<Map<String, Object>> taskFacts = new ArrayList<>();
         int doneCount = 0, highDifficultyCount = 0, assignedHours = 0;
         List<String> possiblyLate = new ArrayList<>();   // 计划结束周已过但仍未完成
+        int projWeek = currentProjectWeek();   // week_end 是项目相对周(1..6),不能用 ISO 日历周比较
         for (Task t : myTasks) {
             Map<String, Object> tf = new LinkedHashMap<>();
             tf.put("task_id", t.getId());
@@ -443,8 +447,8 @@ public class ProfileAgentService {
             tf.put("hours", t.getHours());
             assignedHours += t.getHours() == null ? 0 : t.getHours();
             if (t.getStatus() != null && t.getStatus() == 2) doneCount++;
-            if (t.getStatus() != null && (t.getStatus() == 0 || t.getStatus() == 1)
-                    && t.getWeekEnd() != null && t.getWeekEnd() < LocalDate.now().get(java.time.temporal.WeekFields.ISO.weekOfYear())) {
+            if (projWeek > 0 && t.getStatus() != null && (t.getStatus() == 0 || t.getStatus() == 1)
+                    && t.getWeekEnd() != null && t.getWeekEnd() < projWeek) {
                 possiblyLate.add(t.getId());
             }
             ProfileAgentDtos.DifficultyOut d = diffByTask.get(t.getId());
@@ -594,6 +598,20 @@ public class ProfileAgentService {
         return rec;
     }
 
+    /**
+     * 当前「项目相对周」:tasks.week_start/week_end 是项目第 N 周(1..6),不能用 ISO 日历周直接比较。
+     * 锚点 = 最早一条活动记录所在周的周一(记为项目第 1 周);无任何活动数据时返回 -1(数据不足,跳过周次类检查)。
+     */
+    private int currentProjectWeek() {
+        ActivityRecord first = activityMapper.selectOne(new QueryWrapper<ActivityRecord>()
+                .orderByAsc("happened_at").last("LIMIT 1"));
+        if (first == null || first.getHappenedAt() == null) return -1;
+        LocalDate anchor = first.getHappenedAt().toLocalDate()
+                .with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        long weeks = java.time.temporal.ChronoUnit.WEEKS.between(anchor, LocalDate.now());
+        return (int) weeks + 1;
+    }
+
     /** 文档 4.8:团队级风险分析 */
     private List<Map<String, Object>> teamAnalysis(List<User> users, List<Task> tasks,
                                                    Map<String, ProfileAgentDtos.DifficultyOut> diffByTask) {
@@ -680,19 +698,21 @@ public class ProfileAgentService {
                         "suggested_action", "安排其他成员对该任务进行 Review,并补测关键路径"));
             }
         }
-        // 本周应结束未完成(文档 4.8:延期是否影响里程碑)
-        int currentWeek = LocalDate.now().get(java.time.temporal.WeekFields.ISO.weekOfYear());
-        for (Task t : tasks) {
-            if (t.getOwnerId() == null || t.getStatus() == null || t.getStatus() >= 2) continue;
-            if (t.getWeekEnd() == null || t.getWeekEnd() > currentWeek) continue;
-            risks.add(Map.of(
-                    "kind", "milestone_risk",
-                    "task_id", t.getId(),
-                    "task_name", t.getName(),
-                    "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
-                    "evidence", "任务计划在第 " + t.getWeekEnd() + " 周结束(当前第 " + currentWeek + " 周),仍未完成",
-                    "inference", "临近/超过计划截止周仍未完成,可能影响 Sprint 与里程碑交付",
-                    "suggested_action", "确认阻塞原因并调整排期;评估是否拆分任务或增加人手"));
+        // 本周应结束未完成(文档 4.8:延期是否影响里程碑);week_end 是项目相对周,需换算后比较
+        int currentWeek = currentProjectWeek();
+        if (currentWeek > 0) {
+            for (Task t : tasks) {
+                if (t.getOwnerId() == null || t.getStatus() == null || t.getStatus() >= 2) continue;
+                if (t.getWeekEnd() == null || t.getWeekEnd() > currentWeek) continue;
+                risks.add(Map.of(
+                        "kind", "milestone_risk",
+                        "task_id", t.getId(),
+                        "task_name", t.getName(),
+                        "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
+                        "evidence", "任务计划在项目第 " + t.getWeekEnd() + " 周结束(当前项目第 " + currentWeek + " 周),仍未完成",
+                        "inference", "临近/超过计划截止周仍未完成,可能影响 Sprint 与里程碑交付",
+                        "suggested_action", "确认阻塞原因并调整排期;评估是否拆分任务或增加人手"));
+            }
         }
         return risks;
     }
@@ -831,19 +851,30 @@ public class ProfileAgentService {
         List<Map<String, Object>> risks = (List<Map<String, Object>>) result.get("team_risks");
         List<String> ids = new ArrayList<>();
         String range = start + " ~ " + end;
+        // 去重:同一周期+类型+影响对象已有 pending 建议时跳过,防止重复送审刷出大量重复项
+        java.util.Set<String> existingKeys = new java.util.HashSet<>();
+        for (Suggestion s : suggestionMapper.selectList(new QueryWrapper<Suggestion>()
+                .eq("kind", "profile").eq("status", "pending"))) {
+            existingKeys.add(s.getEvidence() + "|" + s.getAffected());
+        }
         for (Map<String, Object> risk : risks) {
             String kind = String.valueOf(risk.getOrDefault("kind", ""));
             String member = String.valueOf(risk.getOrDefault("member", ""));
             String evidence = String.valueOf(risk.getOrDefault("evidence", ""));
             String inference = String.valueOf(risk.getOrDefault("inference", ""));
             String action = String.valueOf(risk.getOrDefault("suggested_action", ""));
+            String affected = kind.equals("stalled") ? "任务 " + risk.get("task_id") : "成员 " + member;
+            String evidenceFull = "[" + range + "] " + evidence;
+            if (!existingKeys.add(evidenceFull + "|" + affected)) {
+                continue;   // 已有同内容 pending 建议
+            }
 
             Suggestion s = new Suggestion();
             s.setId("SP" + UUID.randomUUID().toString().replace("-", "").substring(0, 8));
             s.setAgent("画像智能体");
             s.setKind("profile");
-            s.setEvidence("[" + range + "] " + evidence);
-            s.setAffected(kind.equals("stalled") ? "任务 " + risk.get("task_id") : "成员 " + member);
+            s.setEvidence(evidenceFull);
+            s.setAffected(affected);
             s.setNote(inference + " → 建议行动: " + action);
             Map<String, Object> changes = new LinkedHashMap<>();
             changes.put("title", "协调行动(" + range + "): " + kindText(kind) + " - " + member);

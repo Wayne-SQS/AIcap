@@ -31,6 +31,7 @@ const difficultyTab = ref(false)
 const difficulties = ref([])
 const heatmapRows = ref([])
 const selectedDay = ref(null)
+const selectedDayActs = ref([])
 const compareOpen = ref(false)
 const compareLoading = ref(false)
 const compareResult = ref(null)
@@ -43,7 +44,7 @@ const currentMember = computed(() =>
   members.value.find(m => m.user_id === activeMember.value) || members.value[0] || null)
 
 const HEAT_COLORS = ['#e8e8e8', '#c8e6c9', '#81c784', '#4caf50', '#1b5e20']
-const heatLevel = total => (total >= 4 ? 4 : total >= 2 ? 3 : total >= 1 ? 2 : total > 0 ? 2 : 0)
+const heatLevel = total => (total >= 4 ? 4 : total >= 2 ? 3 : total >= 1 ? 2 : 0)
 
 function fmtRange() {
   return `${rangeStart.value} ~ ${rangeEnd.value}`
@@ -103,14 +104,16 @@ async function loadHeatmap() {
 async function pickDay(date) {
   selectedDay.value = date
   const row = heatmapRows.value.find(r => r.date === date)
-  if (!row || !row.total) { notify('该日无活动记录'); return }
+  if (!row || !row.total) {
+    selectedDayActs.value = []
+    notify('该日无活动记录')
+    return
+  }
   try {
-    const acts = await profileAgentApi.activities({ start: date, end: date })
-    window.__aicapDayActs = acts
-    const counts = Object.entries(row.counts || {}).filter(([, v]) => v > 0)
-    const lines = counts.map(([k, v]) => `${TYPE_TEXT[k] || k} × ${v}`).join('、')
-    notify(`${date} 活动: ${lines}(共 ${acts.length} 条,详见控制台)`)
-  } catch { /* ignore */ }
+    selectedDayActs.value = await profileAgentApi.activities({ start: date, end: date })
+  } catch {
+    selectedDayActs.value = []
+  }
 }
 
 function toggleCompare() {
@@ -227,6 +230,7 @@ loadAnalysis()
       <div class="h-sec" style="margin-top:12px">贡献活动热力图(绿格子 = 活动分布,不代表工作质量)</div>
       <div class="pa-heatmap">
         <div v-for="row in heatmapRows" :key="row.date" class="pa-cell"
+             :class="{ sel: selectedDay === row.date }"
              :style="{ background: HEAT_COLORS[heatLevel(row.total)] }"
              :title="row.date + ' 共 ' + row.total + ' 条活动'" @click="pickDay(row.date)">
         </div>
@@ -235,6 +239,13 @@ loadAnalysis()
         颜色深浅 = 当日活动数量(Commit/PR/Review/缺陷修复/任务完成/状态更新);点击某天查看当天具体活动。
         绿格子展示的是<b>活动分布</b>,不等于工作质量。
       </p>
+      <div v-if="selectedDay && selectedDayActs.length" class="sum-card pa-day-acts">
+        <h4>{{ selectedDay }} 的具体活动({{ selectedDayActs.length }} 条)</h4>
+        <div v-for="a in selectedDayActs" :key="a.activity_id" class="pa-item">
+          [{{ TYPE_TEXT[a.activity_type] || a.activity_type }}] {{ a.title }}
+          <span v-if="a.module" class="small">({{ a.module }})</span>
+        </div>
+      </div>
 
       <!-- 任务难度(4.5) -->
       <div class="h-sec" style="margin-top:12px">
@@ -331,6 +342,8 @@ loadAnalysis()
 .pa-heatmap { display: grid; grid-template-columns: repeat(14, minmax(10px, 1fr)); gap: 3px; margin: 6px 0 2px; }
 .pa-cell { aspect-ratio: 1; border-radius: 2px; cursor: pointer; transition: transform .12s; }
 .pa-cell:hover { transform: scale(1.25); outline: 1px solid #333; }
+.pa-cell.sel { outline: 2px solid #1b5e20; }
+.pa-day-acts { margin-top: 8px; max-height: 200px; overflow: auto; }
 .pa-anomaly { margin-bottom: 8px; }
 .pa-compare-body { display: grid; gap: 10px; margin-top: 8px; }
 .pa-compare-row { border: 1px dashed rgba(0,0,0,.25); padding: 8px 10px; }
