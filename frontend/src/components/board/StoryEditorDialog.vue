@@ -24,15 +24,25 @@ const undoneRef = ref(null)
 const editing = ref(null)
 const form = reactive({ title: '', description: '', acceptance: '', priority: 'Must', status: '0', owner: '', sprint: '1', activity: '2' })
 
+/** 离线新建编号:US01–US37 基线之后顺延;同时兼容存量旧编号(M01–M23) */
+function nextStoryId() {
+  const max = project.stories.reduce((acc, x) => {
+    const n = +String(x.id).slice(2) || +String(x.id).slice(1) || 0
+    return Math.max(acc, n)
+  }, 37)
+  return 'US' + String(max + 1).padStart(2, '0')
+}
+
 function open(id = null, status = 0, filters = {}) {
   if (guard('新建或编辑故事')) return
   editing.value = id
+  const allOrFuture = !filters.sprint || filters.sprint === 'all' || filters.sprint === '4plus'
   const s = id
     ? project.stories.find(x => x.id === id)
     : {
         title: '', description: '', acceptance: '', priority: 'Must', status,
         owner: filters.owner === 'all' ? null : +filters.owner,
-        sprint: filters.sprint === 'all' ? 1 : +filters.sprint,
+        sprint: allOrFuture ? 1 : +filters.sprint,
         activity: 2
       }
   if (!s) return
@@ -51,6 +61,7 @@ function onDialogClick(e) {
 }
 
 async function submit() {
+  if (guard('保存故事')) return
   const payload = {
     title: form.title.trim(), description: form.description.trim(), acceptance: form.acceptance.trim(),
     priority: form.priority, status: +form.status,
@@ -90,7 +101,7 @@ async function submit() {
       notify((editing.value ? '已更新' : '已创建') + ' · 已同步到服务器')
     } catch (err) { notify(err.message) }
   } else {
-    const s = { id: editing.value || 'M' + String(Math.max(23, ...project.stories.map(x => +x.id.slice(1) || 0)) + 1).padStart(2, '0') }
+    const s = { id: editing.value || nextStoryId() }
     for (const k of ['title', 'description', 'acceptance', 'priority']) s[k] = payload[k]
     for (const k of ['status', 'sprint', 'activity']) s[k] = payload[k]
     s.owner = form.owner === '' ? null : +form.owner
@@ -110,6 +121,7 @@ async function submit() {
 
 async function onDelete() {
   if (!editing.value) return
+  if (guard('删除故事')) return
   const t = project.stories.find(x => x.id === editing.value)
   if (!t) return
   const subs = project.subTasksOf(editing.value)
@@ -164,8 +176,8 @@ defineExpose({ open })
           <label class="field">MoSCoW 优先级<select name="priority" v-model="form.priority"><option>Must</option><option>Should</option><option>Could</option></select></label>
         </div>
         <div class="formrow">
-          <label class="field">负责人<select name="owner" v-model="form.owner"><option value="">未分配</option><option value="0">成员 1</option><option value="1">成员 2</option><option value="2">成员 3</option><option value="3">成员 4</option></select></label>
-          <label class="field">迭代<select name="sprint" v-model="form.sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option></select></label>
+          <label class="field">负责人<select name="owner" v-model="form.owner"><option value="">未分配</option><option v-for="m in project.members" :key="m.id" :value="String(m.id)">{{ m.name }}</option></select></label>
+          <label class="field">迭代<select name="sprint" v-model="form.sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option><option value="4">Sprint 4+ · 后续路线</option></select></label>
         </div>
         <label class="field">骨干活动<select name="activity" v-model="form.activity">
           <option value="1">A1 进入与组织项目</option>

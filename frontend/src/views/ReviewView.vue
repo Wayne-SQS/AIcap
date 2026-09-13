@@ -5,6 +5,7 @@ import { useReviewStore } from '@/stores/review'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
 import { useToast } from '@/composables/useToast'
+import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import ReviewEditDialog from '@/components/review/ReviewEditDialog.vue'
 
 /* AI 建议审核中心:离线=本地演示建议(decideSug);在线=服务器建议三键审核
@@ -15,6 +16,7 @@ const meeting = useMeetingStore()
 const project = useProjectStore()
 const router = useRouter()
 const { notify } = useToast()
+const { guard } = usePermissionGuard()
 const editRef = ref(null)
 
 const statusMap = { pending: '待审核', approved: '已采纳', rejected: '已拒绝', modified: '已修改' }
@@ -33,8 +35,9 @@ async function refresh() {
   catch (err) { notify('刷新失败：' + err.message) }
 }
 
-/* 离线演示:三键决策 + prompt 理由 */
+/* 离线演示:三键决策 + prompt 理由(只读角色拦截,对齐 legacy 新版 decideSug 的 isViewer) */
 function decide(id, act) {
+  if (guard('审核 AI 建议')) return
   const reason = prompt('决策理由（留空则记为已确认）：')
   if (reason === null) return
   const actTxt = review.decide(id, act, reason)
@@ -44,6 +47,7 @@ function decide(id, act) {
 /* 在线:采纳/拒绝(prompt 理由,取消则不审核) */
 async function serverDecide(id, decision) {
   if (meeting.busy.includes(id)) return
+  if (guard('审核 AI 建议')) return
   const reason = prompt('审核理由（可留空；取消则不审核）：')
   if (reason === null) return
   meeting.busy.push(id)
@@ -60,6 +64,7 @@ async function serverDecide(id, decision) {
 /* 在线:修改后采纳(弹窗表单) */
 async function serverEdit(id) {
   if (meeting.busy.includes(id)) return
+  if (guard('修改并采纳 AI 建议')) return
   const s = meeting.suggestions.find(x => x.id === id)
   if (!s) return
   const values = await editRef.value.open(s)

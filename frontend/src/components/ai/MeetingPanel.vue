@@ -2,15 +2,18 @@
 import { reactive, ref } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
 import { useToast } from '@/composables/useToast'
+import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { useReviewStore } from '@/stores/review'
 import { SUG_KEY } from '@/constants'
 import AgentRunPanel from './AgentRunPanel.vue'
+import RecorderPanel from './RecorderPanel.vue'
 
 /* 会议智能体面板:离线=演示转写+生成建议;在线=保存会议/选择/手动录入待审建议
-   对齐旧版 renderMeeting(L1229-1237) + meeting-review.js renderMeeting(L21-86) */
+   对齐旧版 renderMeeting + meeting-review.js */
 const meeting = useMeetingStore()
 const review = useReviewStore()
 const { notify } = useToast()
+const { guard } = usePermissionGuard()
 
 const saveForm = reactive({ title: '', transcript: '' })
 const saving = ref(false)
@@ -18,10 +21,10 @@ const proposal = reactive({ title: '', description: '', evidence: '', priority: 
 const proposing = ref(false)
 
 const transcriptDemo = [
-  ['00:12', '成员1', '好，Sprint 2 的重点大家都清楚吗？'],
-  ['00:31', '成员2', '建议把 AI 拆解往后放，先做会议闭环。'],
-  ['00:52', '成员3', '成员任务图先做负载热力图，绿格子后置。'],
-  ['01:20', '成员4', '录音前要有知情同意，这个验收要写清楚。']
+  ['00:12', '李锐铭', '好，Sprint 2 的重点大家都清楚吗？'],
+  ['00:31', '高思晗', '建议把 AI 拆解往后放，先做会议闭环。'],
+  ['00:52', '孙秋实', '成员任务图先做负载热力图，活动图后置。'],
+  ['01:20', '罗子涵', '录音前要有知情同意，这个验收要写清楚。']
 ]
 
 async function refresh() {
@@ -56,13 +59,14 @@ async function submitProposal() {
   finally { proposing.value = false }
 }
 
-/* 离线演示:从会议生成建议送审(对齐旧版 #meeting-gen) */
+/* 离线演示:从会议生成建议送审(对齐旧版 #meeting-gen,含只读角色拦截) */
 function genDemoSuggestion() {
+  if (guard('生成会议建议')) return
   review.suggestions.unshift({
     id: 'SG0' + (review.suggestions.length + 1), agent: '会议智能体', kind: 'meeting',
     time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
     evidence: '会议决议 #3 / 转写 00:52', affected: '成员任务图 · 需求池',
-    change: [{ t: '新增需求：贡献绿格子（US28）进入需求池', d: false }],
+    change: [{ t: '新增需求：成员开发活动图（US28）进入需求池', d: false }],
     note: '会议智能体根据转写生成，未经审核不改动正式数据。', status: 'pending'
   })
   try { localStorage.setItem(SUG_KEY, JSON.stringify(review.suggestions)) } catch { /* ignore */ }
@@ -83,7 +87,7 @@ function genDemoSuggestion() {
     <div class="sum-grid">
       <div class="sum-card"><h4>📌 会议摘要</h4><ul><li>确认 Sprint 2 聚焦「会议闭环 + 审核中心」</li><li>AI PRD 拆解降级为 Should</li><li>成员任务图先做负载热力图</li></ul></div>
       <div class="sum-card"><h4>✅ 决议</h4><ul><li>#3 会议闭环优先于六项能力</li><li>#4 需求池承接未确认需求</li></ul></div>
-      <div class="sum-card"><h4>🚩 行动项</h4><ul><li>成员2 整理会议转写（W3）</li><li>成员3 验证录音接口（W3）</li><li>成员4 复核隐私同意机制</li></ul></div>
+      <div class="sum-card"><h4>🚩 行动项</h4><ul><li>高思晗 整理会议转写（W3）</li><li>孙秋实 验证录音接口（W3）</li><li>罗子涵 复核隐私同意机制</li></ul></div>
       <div class="sum-card"><h4>❓ 遗留问题</h4><ul><li>是否要求说话人分离？待确认</li><li>录音用浏览器还是平台接入？</li></ul></div>
     </div>
     <button class="primary" id="meeting-gen" @click="genDemoSuggestion">＋ 从会议生成需求/排期建议 → 送审</button>
@@ -105,6 +109,7 @@ function genDemoSuggestion() {
     <button type="button" id="meeting-refresh" @click="refresh">刷新会议与建议</button>
     <pre id="saved-transcript" style="white-space:pre-wrap;max-height:240px;overflow:auto">{{ meeting.selectedMeeting?.transcript || '暂无会议，请先保存。' }}</pre>
     <AgentRunPanel />
+    <RecorderPanel />
     <form id="meeting-proposal-form" @submit.prevent="submitProposal">
       <div class="h-sec">手动录入待审建议 · 仅新增需求池条目</div>
       <label class="field">需求标题<input name="title" v-model="proposal.title" required maxlength="200"></label>

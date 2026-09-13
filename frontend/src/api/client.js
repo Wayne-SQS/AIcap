@@ -1,10 +1,10 @@
 /* fetch 封装:行为 1:1 对齐旧版 index.html api()(L1266-1274)
    baseURL 三级解析:window.__AICAP_API_BASE__(E2E 字符串替换锚点) > VITE_API_BASE > 默认
-   未来切换 Spring Boot 后端只需替换锚点值或环境变量,本文件零改动 */
+   默认指向现行 Spring Boot 后端(java-backend/,8080);FastAPI 版(8000)已归档至 backend/ */
 import { TOKEN_KEY } from '@/constants'
 
 export function apiBase() {
-  return window.__AICAP_API_BASE__ || import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+  return window.__AICAP_API_BASE__ || import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
 }
 
 export function getAuthToken() {

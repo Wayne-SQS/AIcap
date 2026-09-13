@@ -6,7 +6,6 @@ import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
 import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
-import { SEED } from '@/data/seed'
 import BoardSummary from '@/components/board/BoardSummary.vue'
 import BoardToolbar from '@/components/board/BoardToolbar.vue'
 import StoryCard from '@/components/board/StoryCard.vue'
@@ -14,26 +13,27 @@ import StoryMapGrid from '@/components/board/StoryMapGrid.vue'
 import ChangeLogPanel from '@/components/board/ChangeLogPanel.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
 
-/* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()(L910-913)/
-   render()(L919-933)/拖拽换状态(L964-984)/导出 dl(L985-991)/恢复演示(L1435-1440) */
+/* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
+   本次移植 legacy 新版:默认进入「故事地图」、Sprint 4+ 筛选、负责人显示真实姓名 */
 const project = useProjectStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
-const boardView = ref('board')
+const boardView = ref('map')
 const search = ref('')
-const sprint = ref('1')
+const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
 
-/* 当前筛选范围:搜索/迭代/负责人 三条件合并(对齐旧版 selected) */
+/* 当前筛选范围:搜索/迭代/负责人 三条件合并;Sprint 4+ 收纳 sprint>=4 的后续路线 */
 const data = computed(() => {
   const q = search.value.trim().toLowerCase()
+  const sp = sprint.value
   return project.stories.filter(s =>
-    (sprint.value === 'all' || s.sprint === +sprint.value) &&
+    (sp === 'all' || (sp === '4plus' ? s.sprint >= 4 : s.sprint === +sp)) &&
     (owner.value === 'all' || s.owner === +owner.value) &&
-    (!q || [s.id, s.title, s.description, s.acceptance, (s.owner == null ? '未分配' : '成员' + (s.owner + 1)), activities[s.activity - 1]].join(' ').toLowerCase().includes(q))
+    (!q || [s.id, s.title, s.description, s.acceptance, project.memberName(s.owner), activities[s.activity - 1]].join(' ').toLowerCase().includes(q))
   )
 })
 const inScope = id => data.value.some(s => s.id === id)
@@ -85,7 +85,7 @@ function exportCsv() {
   const head = ['ID', '标题', '用户故事', 'MoSCoW', 'Sprint', '骨干活动', '负责人', '状态', '验收条件']
   const rows = project.stories.map(s =>
     [s.id, s.title, s.description, s.priority, 'S' + s.sprint, 'A' + s.activity + ' ' + activities[s.activity - 1],
-     (s.owner == null ? '未分配' : '成员' + (s.owner + 1)), statuses[s.status], s.acceptance]
+     (s.owner == null ? '未分配' : project.memberName(s.owner)), statuses[s.status], s.acceptance]
       .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
   dl('爱管理-用户故事.csv', new Blob(['\ufeff' + head.join(',') + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }))
   notify('已导出 CSV（可用 Excel 打开）')
@@ -97,14 +97,13 @@ async function resetDemo() {
     return
   }
   if (!confirm('确定恢复为演示数据？当前所有修改将丢失。')) return
-  project.stories = structuredClone(SEED)
-  project.log = []
+  project.restoreLocal()
   try {
     localStorage.setItem(STORIES_KEY, JSON.stringify(project.stories))
     localStorage.setItem(LOG_KEY, '[]')
   } catch { /* ignore */ }
   project.persist()
-  notify('已恢复演示数据（M01–M23）')
+  notify('已恢复演示数据（US01–US37）')
 }
 </script>
 
@@ -151,7 +150,7 @@ async function resetDemo() {
     <div class="footer">
       <span>■ Must 必须做　■ Should 应该做　■ Could 可以做</span>
       <span id="savehint">{{ project.savehint }}</span>
-      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条故事（{{ project.stories[0] ? project.stories[0].id : 'M01' }}–{{ project.stories[project.stories.length - 1] ? project.stories[project.stories.length - 1].id : '' }}）</span>
+      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事（US01–US37 基线）</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="expjson" @click="exportJson">导出 JSON</button>
         <button id="expcsv" @click="exportCsv">导出 CSV</button>

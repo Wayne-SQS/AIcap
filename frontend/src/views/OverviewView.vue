@@ -39,8 +39,8 @@ const sprintCards = computed(() => SPRINTS.map((sp, i) => {
     <div class="stats">
       <div class="stat"><label>故事总数</label><strong id="ov-total">{{ ovTotal }}</strong><span class="small">个用户故事</span></div>
       <div class="stat"><label>规划任务</label><strong id="ov-tasks">{{ ovTasks }}</strong><span class="small">个开发任务</span></div>
-      <div class="stat"><label>团队成员</label><strong>04</strong><span class="small">人 · DRI 轮值</span></div>
-      <div class="stat"><label>迭代周期</label><strong>06</strong><span class="small">周 · 3 个 Sprint</span></div>
+      <div class="stat"><label>团队成员</label><strong>{{ String(project.members.length).padStart(2, '0') }}</strong><span class="small">人 · 含只读查看者</span></div>
+      <div class="stat"><label>迭代周期</label><strong>06</strong><span class="small">周 · 3 个 Sprint + 后续路线</span></div>
     </div>
 
     <div class="h-sec">实时进度 · 看板</div>

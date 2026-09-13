@@ -49,7 +49,7 @@ async function save() {
     const d = new Date()
     project.pool.unshift({
       id: 'R' + String(Math.max(4, ...project.pool.map(x => +x.id.slice(1) || 0)) + 1).padStart(2, '0'),
-      title, desc: desc || '（待补充描述）', source: '手动新增 · 成员1',
+      title, desc: desc || '（待补充描述）', source: '手动新增 · ' + (session.currentUser?.display_name || '离线'),
       created: String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
       priority: form.pri
     })
@@ -81,7 +81,9 @@ async function openPromote(id) {
   promoteForm.owner_id = ''
   promoteForm.activity = 2
   try {
-    members.value = session.apiMode ? await authApi.users() : [1, 2, 3, 4].map(i => ({ id: i, display_name: '成员 ' + i }))
+    members.value = session.apiMode
+      ? await authApi.users()
+      : project.members.map(m => ({ id: m.id + 1, display_name: m.name }))
   } catch (err) { notify('无法加载负责人：' + err.message); return }
   nextTick(() => { promoteEl.value?.showModal() })
 }

@@ -49,7 +49,7 @@ function onClosed() {
         <div class="login-accounts" id="login-accounts">
           <button v-for="n in ACCOUNTS" :key="n" type="button" class="acct" :data-acct="n" @click="pickAccount(n)">{{ n }}</button>
         </div>
-        <label class="field">账号<input id="login-user" v-model="username" required placeholder="成员1"></label>
+        <label class="field">账号<input id="login-user" v-model="username" required placeholder="李锐铭"></label>
         <label class="field">密码<input id="login-pass" v-model="password" type="password" required></label>
         <div class="actions">
           <button type="button" id="login-offline" @click="session.goOffline()">离线演示模式</button>
