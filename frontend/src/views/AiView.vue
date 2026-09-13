@@ -4,6 +4,7 @@ import { useMeetingStore } from '@/stores/meeting'
 import { AIS } from '@/data/seed'
 import MeetingPanel from '@/components/ai/MeetingPanel.vue'
 import SubmitAgentPanel from '@/components/ai/SubmitAgentPanel.vue'
+import ProfileAgentPanel from '@/components/ai/ProfileAgentPanel.vue'
 import ChatBox from '@/components/ai/ChatBox.vue'
 
 /* AI 助手视图:结构对齐旧版 L596-631,逻辑对齐 renderAI(L1092-1103)
@@ -37,6 +38,11 @@ watch(() => meeting.online, v => {
     <div class="h-sec">任务提交智能体 · Commit Agent</div>
     <div id="submit-agent">
       <SubmitAgentPanel />
+    </div>
+
+    <div class="h-sec">画像智能体 · 任务提交与成员能力画像</div>
+    <div id="profile-agent">
+      <ProfileAgentPanel />
     </div>
 
     <div class="h-sec">对话演示</div>
