@@ -28,5 +28,16 @@ export const profileAgentApi = {
   submitRiskSuggestions: (start, end) =>
     api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}`, { method: 'POST' }),
   /** 画像快照 */
-  snapshots: (userId = null) => api('/api/profile-agent/snapshots' + (userId != null ? `?userId=${userId}` : ''))
+  snapshots: (userId = null) => api('/api/profile-agent/snapshots' + (userId != null ? `?userId=${userId}` : '')),
+  /** 画像快照趋势(变化原因) */
+  snapshotTrend: (userId = null) => api('/api/profile-agent/snapshots/trend' + (userId != null ? `?userId=${userId}` : '')),
+  /** 贡献绿格子热力图(按日聚合) */
+  heatmap: (start, end, userId = null) => {
+    let q = `start=${start}&end=${end}`
+    if (userId != null) q += `&userId=${userId}`
+    return api(`/api/profile-agent/heatmap?${q}`)
+  },
+  /** 时间范围对比(本期 vs 上期) */
+  compare: (prevStart, prevEnd, start, end) =>
+    api(`/api/profile-agent/analysis/compare?prevStart=${prevStart}&prevEnd=${prevEnd}&start=${start}&end=${end}`)
 }

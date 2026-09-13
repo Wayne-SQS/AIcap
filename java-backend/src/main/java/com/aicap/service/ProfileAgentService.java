@@ -119,6 +119,52 @@ public class ProfileAgentService {
                 r.getHappenedAt() == null ? null : r.getHappenedAt().format(TS));
     }
 
+    /** 批量导入活动事实(文档 4.2:提交/Review 等活动批量接入;source=import) */
+    public List<ProfileAgentDtos.ActivityOut> importActivities(List<ProfileAgentDtos.ActivityIn> items, User actor) {
+        if (items == null || items.isEmpty()) throw ApiException.badRequest("导入列表不能为空");
+        if (items.size() > 200) throw ApiException.unprocessable("单次最多导入 200 条");
+        List<ProfileAgentDtos.ActivityOut> out = new ArrayList<>();
+        for (ProfileAgentDtos.ActivityIn in : items) {
+            out.add(addActivity(in, actor));
+        }
+        return out;
+    }
+
+    /** 贡献活动热力图(文档 4.10):按日聚合活动类型计数,前端画绿格子 */
+    public List<Map<String, Object>> heatmap(Integer userId, LocalDate start, LocalDate end) {
+        List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
+                .eq(userId != null, "user_id", userId)
+                .ge("happened_at", start.atStartOfDay())
+                .le("happened_at", end.atTime(23, 59, 59))
+                .orderByAsc("happened_at"));
+        // 连续按天铺满区间,无活动日为 0
+        Map<LocalDate, Map<String, Integer>> byDay = new LinkedHashMap<>();
+        for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+            Map<String, Integer> zero = new LinkedHashMap<>();
+            for (String t : ACTIVITY_TYPES) zero.put(t, 0);
+            byDay.put(d, zero);
+        }
+        for (ActivityRecord r : acts) {
+            LocalDate d = r.getHappenedAt().toLocalDate();
+            Map<String, Integer> m = byDay.computeIfAbsent(d, k -> {
+                Map<String, Integer> z = new LinkedHashMap<>();
+                for (String t : ACTIVITY_TYPES) z.put(t, 0);
+                return z;
+            });
+            m.merge(r.getActivityType(), 1, Integer::sum);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        byDay.forEach((d, counts) -> {
+            int total = counts.values().stream().mapToInt(Integer::intValue).sum();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", d.toString());
+            row.put("total", total);
+            row.put("counts", counts);
+            out.add(row);
+        });
+        return out;
+    }
+
     // ---------- 难度评估 ----------
 
     /** AI 评估:依据任务工时/依赖/阻塞/进度等可量化因素,逐条给出依据。 */
@@ -250,6 +296,101 @@ public class ProfileAgentService {
         return result;
     }
 
+    /** 文档 4.9:时间范围对比分析(本期 vs 上期)。
+     *  输出每名成员两个周期的活动量/Review/缺陷修复/完成任务/难度承担对比,
+     *  以及预计工时(任务分配工时)与完成率;实际完成工时缺数据源时如实说明。 */
+    public Map<String, Object> comparePeriods(LocalDate prevStart, LocalDate prevEnd,
+                                              LocalDate curStart, LocalDate curEnd) {
+        List<User> users = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"));
+        List<Task> tasks = taskMapper.selectList(null);
+        Map<String, ProfileAgentDtos.DifficultyOut> diffByTask = new HashMap<>();
+        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(null, null)) {
+            diffByTask.put(d.taskId(), d);
+        }
+
+        List<Map<String, Object>> comparisons = new ArrayList<>();
+        for (User u : users) {
+            Map<String, Object> prev = periodStats(u, tasks, diffByTask, prevStart, prevEnd);
+            Map<String, Object> cur = periodStats(u, tasks, diffByTask, curStart, curEnd);
+
+            List<String> changes = new ArrayList<>();
+            diffStat(changes, "活动量", prev, cur, "total_activities");
+            diffStat(changes, "Review 参与", prev, cur, "review_count");
+            diffStat(changes, "缺陷修复", prev, cur, "bugfix_count");
+            diffStat(changes, "完成任务", prev, cur, "task_done_count");
+            diffStat(changes, "未关联活动", prev, cur, "unlinked_count");
+            diffStat(changes, "高难度任务承担", prev, cur, "high_difficulty_count");
+            if (changes.isEmpty()) changes.add("两个周期指标基本持平");
+
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("user_id", u.getId());
+            c.put("display_name", u.getDisplayName());
+            c.put("previous_period", prev);
+            c.put("current_period", cur);
+            c.put("changes", changes);
+            comparisons.add(c);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("previous_range", prevStart + " ~ " + prevEnd);
+        result.put("current_range", curStart + " ~ " + curEnd);
+        result.put("generated_at", LocalDateTime.now().format(TS));
+        result.put("comparisons", comparisons);
+        return result;
+    }
+
+    /** 单个周期的可量化指标(事实层,含完成率与预计工时口径说明) */
+    private Map<String, Object> periodStats(User u, List<Task> tasks,
+                                            Map<String, ProfileAgentDtos.DifficultyOut> diffByTask,
+                                            LocalDate start, LocalDate end) {
+        List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
+                .eq("user_id", u.getId())
+                .ge("happened_at", start.atStartOfDay())
+                .le("happened_at", end.atTime(23, 59, 59)));
+        int commits = 0, reviews = 0, bugfixes = 0, taskDone = 0, unlinked = 0;
+        for (ActivityRecord r : acts) {
+            switch (r.getActivityType()) {
+                case "commit" -> commits++;
+                case "review" -> reviews++;
+                case "bugfix" -> bugfixes++;
+                case "task_done" -> taskDone++;
+            }
+            if (r.getTaskId() == null || r.getTaskId().isBlank()) unlinked++;
+        }
+        List<Task> myTasks = tasks.stream().filter(t -> u.getId().equals(t.getOwnerId())).toList();
+        int highCount = 0, assignedHours = 0, doneNow = 0;
+        for (Task t : myTasks) {
+            assignedHours += t.getHours() == null ? 0 : t.getHours();
+            if (t.getStatus() != null && t.getStatus() == 2) doneNow++;
+            ProfileAgentDtos.DifficultyOut d = diffByTask.get(t.getId());
+            if (d != null && ("high".equals(d.level()) || "extreme".equals(d.level()))) highCount++;
+        }
+        int completionRate = myTasks.isEmpty() ? 0 : Math.round(doneNow * 100.0f / myTasks.size());
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("total_activities", acts.size());
+        stats.put("commit_count", commits);
+        stats.put("review_count", reviews);
+        stats.put("bugfix_count", bugfixes);
+        stats.put("task_done_count", taskDone);
+        stats.put("unlinked_count", unlinked);
+        stats.put("high_difficulty_count", highCount);
+        stats.put("assigned_hours", assignedHours);   // 预计工时(任务分配工时口径)
+        stats.put("completion_rate_percent", completionRate);   // 完成任务数/承担任务数
+        stats.put("actual_hours", "无实际工时数据源,暂无法对比(数据不足时如实说明)");
+        return stats;
+    }
+
+    /** 生成「X 由 A 变为 B」的变化描述 */
+    private void diffStat(List<String> changes, String label, Map<String, Object> prev,
+                          Map<String, Object> cur, String key) {
+        Object p = prev.get(key), c = cur.get(key);
+        if (p == null || c == null) return;
+        String ps = String.valueOf(p), cs = String.valueOf(c);
+        if (ps.equals(cs)) return;
+        changes.add(label + " " + ps + " → " + cs);
+    }
+
     private Map<String, Object> memberAnalysis(User u, List<Task> tasks,
                                                Map<String, ProfileAgentDtos.DifficultyOut> diffByTask,
                                                LocalDate start, LocalDate end) {
@@ -270,6 +411,8 @@ public class ProfileAgentService {
         List<String> workItems = new ArrayList<>();
         List<String> unlinkedCommits = new ArrayList<>();
         Map<String, Integer> moduleCount = new HashMap<>();
+        Map<String, Integer> bugfixByTask = new HashMap<>();   // 返工提示:同任务多次缺陷修复
+        Map<String, Integer> commitByTask = new HashMap<>();
         for (ActivityRecord r : acts) {
             typeCount.merge(r.getActivityType(), 1, Integer::sum);
             String item = "[" + r.getActivityType() + "] " + r.getTitle()
@@ -277,6 +420,9 @@ public class ProfileAgentService {
             workItems.add(item);
             if (r.getTaskId() == null || r.getTaskId().isBlank()) {
                 unlinkedCommits.add("[" + r.getActivityType() + "] " + r.getTitle());
+            } else {
+                if ("bugfix".equals(r.getActivityType())) bugfixByTask.merge(r.getTaskId(), 1, Integer::sum);
+                if ("commit".equals(r.getActivityType())) commitByTask.merge(r.getTaskId(), 1, Integer::sum);
             }
             if (r.getModule() != null && !r.getModule().isEmpty()) {
                 moduleCount.merge(r.getModule(), 1, Integer::sum);
@@ -287,7 +433,8 @@ public class ProfileAgentService {
                 .filter(t -> u.getId().equals(t.getOwnerId()))
                 .toList();
         List<Map<String, Object>> taskFacts = new ArrayList<>();
-        int doneCount = 0, highDifficultyCount = 0, assignedHours = 0, doneOnTime = 0, doneLate = 0;
+        int doneCount = 0, highDifficultyCount = 0, assignedHours = 0;
+        List<String> possiblyLate = new ArrayList<>();   // 计划结束周已过但仍未完成
         for (Task t : myTasks) {
             Map<String, Object> tf = new LinkedHashMap<>();
             tf.put("task_id", t.getId());
@@ -296,6 +443,10 @@ public class ProfileAgentService {
             tf.put("hours", t.getHours());
             assignedHours += t.getHours() == null ? 0 : t.getHours();
             if (t.getStatus() != null && t.getStatus() == 2) doneCount++;
+            if (t.getStatus() != null && (t.getStatus() == 0 || t.getStatus() == 1)
+                    && t.getWeekEnd() != null && t.getWeekEnd() < LocalDate.now().get(java.time.temporal.WeekFields.ISO.weekOfYear())) {
+                possiblyLate.add(t.getId());
+            }
             ProfileAgentDtos.DifficultyOut d = diffByTask.get(t.getId());
             if (d != null) {
                 tf.put("difficulty", d.level());
@@ -304,17 +455,68 @@ public class ProfileAgentService {
             taskFacts.add(tf);
         }
 
+        // 返工提示:同一任务反复出现缺陷修复活动
+        List<String> reworkFlags = bugfixByTask.entrySet().stream()
+                .filter(e -> e.getValue() >= 2)
+                .map(e -> "任务 " + e.getKey() + " 在范围内有 " + e.getValue() + " 次缺陷修复活动,可能属于同一问题反复修改")
+                .toList();
+        // 按时交付:已完成任务在范围内有关联活动即视为有交付证据(实际完成日期缺省时如实说明)
+        int reviewCount = typeCount.getOrDefault("review", 0);
+        int bugfixCount = typeCount.getOrDefault("bugfix", 0);
+
+        // --- 提交异常模式扩展(文档 4.6) ---
+        // 1) 多次提交修改相似内容:同标题未关联活动重复出现 ≥2 次
+        List<String> similarRepeats = new ArrayList<>();
+        Map<String, Integer> titleCount = new HashMap<>();
+        for (ActivityRecord r : acts) {
+            if (r.getTaskId() == null || r.getTaskId().isBlank()) {
+                titleCount.merge(r.getTitle() == null ? "" : r.getTitle(), 1, Integer::sum);
+            }
+        }
+        for (Map.Entry<String, Integer> e : titleCount.entrySet()) {
+            if (e.getValue() >= 2 && !e.getKey().isEmpty()) {
+                similarRepeats.add("近段时间有 " + e.getValue() + " 条未关联任务的提交标题均为「" + e.getKey() + "」,可能属于调试、返工或任务拆分问题");
+            }
+        }
+        // 2) 提交信息不清晰:标题过短(≤3 字)或为泛化占位词
+        List<String> vagueWords = List.of("修改", "更新", "调试", "修复", "fix", "update", "wip");
+        List<String> unclearMessages = new ArrayList<>();
+        for (ActivityRecord r : acts) {
+            String t = r.getTitle() == null ? "" : r.getTitle().trim();
+            if (t.length() <= 3 || vagueWords.contains(t.toLowerCase())) {
+                unclearMessages.add("[" + r.getActivityType() + "] " + (t.isEmpty() ? "(空标题)" : t));
+            }
+        }
+        // 3) 任务已完成但没有对应代码活动:范围内 status=2 的任务无任何关联活动记录
+        List<String> doneWithoutActivity = new ArrayList<>();
+        for (Task t : myTasks) {
+            if (t.getStatus() != null && t.getStatus() == 2) {
+                boolean hasAct = acts.stream().anyMatch(r -> t.getId().equals(r.getTaskId()));
+                if (!hasAct) {
+                    doneWithoutActivity.add(t.getId() + " " + t.getName());
+                }
+            }
+        }
+
         // 交付及时性:已关联活动与任务完成情况
-        m.put("objective", Map.of(
-                "period_activity_counts", typeCount,
-                "work_items", workItems,
-                "total_activities", acts.size(),
-                "tasks_owned", taskFacts,
-                "tasks_done", doneCount,
-                "high_difficulty_tasks", highDifficultyCount,
-                "assigned_hours", assignedHours,
-                "modules_touched", moduleCount.keySet().stream().toList(),
-                "unlinked_activities", unlinkedCommits));
+        Map<String, Object> objective = new LinkedHashMap<>();
+        objective.put("period_activity_counts", typeCount);
+        objective.put("work_items", workItems);
+        objective.put("total_activities", acts.size());
+        objective.put("tasks_owned", taskFacts);
+        objective.put("tasks_done", doneCount);
+        objective.put("high_difficulty_tasks", highDifficultyCount);
+        objective.put("assigned_hours", assignedHours);
+        objective.put("modules_touched", moduleCount.keySet().stream().toList());
+        objective.put("unlinked_activities", unlinkedCommits);
+        objective.put("review_participation", reviewCount);
+        objective.put("bugfix_count", bugfixCount);
+        objective.put("rework_flags", reworkFlags);
+        objective.put("possibly_late_tasks", possiblyLate);
+        objective.put("similar_repeated_commits", similarRepeats);
+        objective.put("unclear_commit_messages", unclearMessages);
+        objective.put("done_tasks_without_activity", doneWithoutActivity);
+        m.put("objective", objective);
 
         // --- AI 推断层(带依据,明确标注为推断) ---
         List<String> inference = new ArrayList<>();
@@ -327,6 +529,17 @@ public class ProfileAgentService {
         }
         if (!unlinkedCommits.isEmpty()) {
             inference.add("有 " + unlinkedCommits.size() + " 条活动未关联明确任务,可能属于调试、返工或任务拆分问题,建议项目经理进一步确认(文档 4.6 提交异常模式)");
+        }
+        reworkFlags.forEach(inference::add);
+        similarRepeats.forEach(inference::add);
+        if (!unclearMessages.isEmpty()) {
+            inference.add("有 " + unclearMessages.size() + " 条提交信息不清晰(标题过短或为泛化占位词),建议规范提交信息(依据:标题长度/内容检测)");
+        }
+        if (!doneWithoutActivity.isEmpty()) {
+            inference.add("任务 " + String.join("、", doneWithoutActivity) + " 已标记完成但范围内无对应代码活动,状态与代码活动可能不一致,建议确认(文档 4.6)");
+        }
+        if (!possiblyLate.isEmpty()) {
+            inference.add("任务 " + String.join("、", possiblyLate) + " 计划结束周已过但仍未完成,存在延期风险(依据:tasks 的 week_end 与当前周对比)");
         }
         if (acts.isEmpty() && doneCount == 0) {
             inference.add("该时间范围内暂无足够数据,无法确认实际完成内容,需要成员补充说明");
@@ -448,6 +661,39 @@ public class ProfileAgentService {
                         "suggested_action", "与负责人确认任务状态;若已阻塞,补充阻塞原因并调整排期"));
             }
         }
+        // 高难度任务缺 Review(文档 4.8:哪些任务缺少 Review)
+        for (Task t : tasks) {
+            if (t.getOwnerId() == null || t.getStatus() == null || t.getStatus() >= 2) continue;
+            ProfileAgentDtos.DifficultyOut d = diffByTask.get(t.getId());
+            if (d == null || !("high".equals(d.level()) || "extreme".equals(d.level()))) continue;
+            Long reviews = activityMapper.selectCount(new QueryWrapper<ActivityRecord>()
+                    .eq("task_id", t.getId()).eq("activity_type", "review"));
+            if (reviews == 0) {
+                risks.add(Map.of(
+                        "kind", "missing_review",
+                        "task_id", t.getId(),
+                        "task_name", t.getName(),
+                        "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
+                        "evidence", "任务为" + ("extreme".equals(d.level()) ? "极高" : "高") +
+                                "难度(" + d.score() + "分),且无任何 Review 活动记录",
+                        "inference", "高难度/核心任务缺少同行评审,质量问题可能在后期集中爆发",
+                        "suggested_action", "安排其他成员对该任务进行 Review,并补测关键路径"));
+            }
+        }
+        // 本周应结束未完成(文档 4.8:延期是否影响里程碑)
+        int currentWeek = LocalDate.now().get(java.time.temporal.WeekFields.ISO.weekOfYear());
+        for (Task t : tasks) {
+            if (t.getOwnerId() == null || t.getStatus() == null || t.getStatus() >= 2) continue;
+            if (t.getWeekEnd() == null || t.getWeekEnd() > currentWeek) continue;
+            risks.add(Map.of(
+                    "kind", "milestone_risk",
+                    "task_id", t.getId(),
+                    "task_name", t.getName(),
+                    "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
+                    "evidence", "任务计划在第 " + t.getWeekEnd() + " 周结束(当前第 " + currentWeek + " 周),仍未完成",
+                    "inference", "临近/超过计划截止周仍未完成,可能影响 Sprint 与里程碑交付",
+                    "suggested_action", "确认阻塞原因并调整排期;评估是否拆分任务或增加人手"));
+        }
         return risks;
     }
 
@@ -521,6 +767,55 @@ public class ProfileAgentService {
             out.add(o);
         }
         return out;
+    }
+
+    /** 文档 4.7:画像快照趋势——相邻快照对比,给出「画像变化原因」(能力趋势,随时间更新而非固定标签) */
+    public List<Map<String, Object>> snapshotTrend(Integer userId) {
+        List<ProfileSnapshot> snaps = snapshotMapper.selectList(new QueryWrapper<ProfileSnapshot>()
+                .eq(userId != null, "user_id", userId)
+                .orderByAsc("range_start", "id"));
+        Map<Integer, String> nameOf = new HashMap<>();
+        userMapper.selectList(null).forEach(u -> nameOf.put(u.getId(), u.getDisplayName()));
+
+        List<Map<String, Object>> trends = new ArrayList<>();
+        for (int i = 0; i < snaps.size(); i++) {
+            ProfileSnapshot s = snaps.get(i);
+            Map<String, Object> payload = readJsonMap(s.getPayloadJson());
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("user_id", s.getUserId());
+            row.put("display_name", nameOf.getOrDefault(s.getUserId(), "成员" + s.getUserId()));
+            row.put("range_start", s.getRangeStart().toString());
+            row.put("range_end", s.getRangeEnd().toString());
+            row.put("good_at", payload.getOrDefault("good_at", "暂无足够数据"));
+            row.put("risk_flags", payload.getOrDefault("risk_flags", "正常"));
+            row.put("load_percent", payload.getOrDefault("current_load_percent", 0));
+            // 与上一张快照对比变化原因
+            List<String> changes = new ArrayList<>();
+            if (i > 0) {
+                Map<String, Object> prev = readJsonMap(snaps.get(i - 1).getPayloadJson());
+                Object pg = prev.get("good_at"), cg = payload.get("good_at");
+                if (pg != null && cg != null && !String.valueOf(pg).equals(String.valueOf(cg))) {
+                    changes.add("擅长方向变化: 「" + pg + "」 → 「" + cg + "」(依据:各周期活动模块分布)");
+                }
+                Object pl = prev.get("current_load_percent"), cl = payload.get("current_load_percent");
+                if (pl instanceof Number pn && cl instanceof Number cn) {
+                    if (cn.intValue() - pn.intValue() >= 10) {
+                        changes.add("负载上升 " + (cn.intValue() - pn.intValue()) + " 个百分点(" + pn + "% → " + cn + "%),注意过载风险");
+                    } else if (pn.intValue() - cn.intValue() >= 10) {
+                        changes.add("负载回落 " + (pn.intValue() - cn.intValue()) + " 个百分点(" + pn + "% → " + cn + "%)");
+                    }
+                }
+                Object pr = prev.get("risk_flags"), cr = payload.get("risk_flags");
+                if (pr != null && cr != null && !String.valueOf(pr).equals(String.valueOf(cr))) {
+                    changes.add("风险状态变化: " + pr + " → " + cr);
+                }
+            } else {
+                changes.add("首张画像快照,尚无历史可对比(后续分析将形成趋势)");
+            }
+            row.put("changes", changes);
+            trends.add(row);
+        }
+        return trends;
     }
 
     // ---------- 统一审核中心接入(文档第 5 章) ----------

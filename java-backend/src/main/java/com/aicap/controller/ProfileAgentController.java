@@ -40,6 +40,24 @@ public class ProfileAgentController {
         return service.addActivity(in, actor);
     }
 
+    /** 批量导入活动事实(单次 ≤200 条;source=import) */
+    @PostMapping("/activities/import")
+    public List<ProfileAgentDtos.ActivityOut> importActivities(
+            @Valid @RequestBody List<ProfileAgentDtos.ActivityIn> items) {
+        User actor = Roles.writer();
+        return service.importActivities(items, actor);
+    }
+
+    /** 贡献活动热力图(按日聚合,前端画绿格子;文档 4.10) */
+    @GetMapping("/heatmap")
+    public List<Map<String, Object>> heatmap(
+            @RequestParam(required = false) Integer userId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        Roles.any();
+        return service.heatmap(userId, start, end);
+    }
+
     /** 活动列表(可按成员/时间范围过滤) */
     @GetMapping("/activities")
     public List<ProfileAgentDtos.ActivityOut> activities(
@@ -63,6 +81,16 @@ public class ProfileAgentController {
                                                              @Valid @RequestBody ProfileAgentDtos.DifficultyIn in) {
         Roles.reviewer();
         return service.overrideDifficulty(taskId, in);
+    }
+
+    /** 时间范围对比分析(本期 vs 上期,文档 4.9) */
+    @GetMapping("/analysis/compare")
+    public Map<String, Object> compare(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate prevStart,
+                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate prevEnd,
+                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        Roles.any();
+        return service.comparePeriods(prevStart, prevEnd, start, end);
     }
 
     /** 只读预览分析结果(不落运行记录;正式分析用 POST /analysis/run) */
@@ -102,5 +130,12 @@ public class ProfileAgentController {
     public List<Map<String, Object>> snapshots(@RequestParam(required = false) Integer userId) {
         Roles.any();
         return service.snapshots(userId);
+    }
+
+    /** 画像快照趋势(相邻快照对比,给出画像变化原因;文档 4.7) */
+    @GetMapping("/snapshots/trend")
+    public List<Map<String, Object>> snapshotTrend(@RequestParam(required = false) Integer userId) {
+        Roles.any();
+        return service.snapshotTrend(userId);
     }
 }

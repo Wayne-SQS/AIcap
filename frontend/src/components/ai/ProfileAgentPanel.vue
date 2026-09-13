@@ -29,11 +29,21 @@ const errorMsg = ref('')
 const activeMember = ref(null)
 const difficultyTab = ref(false)
 const difficulties = ref([])
+const heatmapRows = ref([])
+const selectedDay = ref(null)
+const compareOpen = ref(false)
+const compareLoading = ref(false)
+const compareResult = ref(null)
+const prevStart = ref('')
+const prevEnd = ref('')
 
 const members = computed(() => (result.value?.members || []))
 const risks = computed(() => (result.value?.team_risks || []))
 const currentMember = computed(() =>
   members.value.find(m => m.user_id === activeMember.value) || members.value[0] || null)
+
+const HEAT_COLORS = ['#e8e8e8', '#c8e6c9', '#81c784', '#4caf50', '#1b5e20']
+const heatLevel = total => (total >= 4 ? 4 : total >= 2 ? 3 : total >= 1 ? 2 : total > 0 ? 2 : 0)
 
 function fmtRange() {
   return `${rangeStart.value} ~ ${rangeEnd.value}`
@@ -44,6 +54,7 @@ async function loadAnalysis() {
   errorMsg.value = ''
   try {
     result.value = await profileAgentApi.analysis(rangeStart.value, rangeEnd.value)
+    loadHeatmap()
   } catch (e) {
     errorMsg.value = e.message || '分析请求失败'
     result.value = null
@@ -82,6 +93,61 @@ async function loadDifficulty() {
     try { difficulties.value = await profileAgentApi.difficulty() } catch { /* 空态 */ }
   }
 }
+
+async function loadHeatmap() {
+  try {
+    heatmapRows.value = await profileAgentApi.heatmap(rangeStart.value, rangeEnd.value)
+  } catch { /* 空态 */ }
+}
+
+async function pickDay(date) {
+  selectedDay.value = date
+  const row = heatmapRows.value.find(r => r.date === date)
+  if (!row || !row.total) { notify('该日无活动记录'); return }
+  try {
+    const acts = await profileAgentApi.activities({ start: date, end: date })
+    window.__aicapDayActs = acts
+    const counts = Object.entries(row.counts || {}).filter(([, v]) => v > 0)
+    const lines = counts.map(([k, v]) => `${TYPE_TEXT[k] || k} × ${v}`).join('、')
+    notify(`${date} 活动: ${lines}(共 ${acts.length} 条,详见控制台)`)
+  } catch { /* ignore */ }
+}
+
+function toggleCompare() {
+  compareOpen.value = !compareOpen.value
+  if (compareOpen.value && !prevStart.value) {
+    // 默认上期 = 当前周期向前平移相同长度
+    const len = Math.max(1, (new Date(rangeEnd.value) - new Date(rangeStart.value)) / 86400000 + 1)
+    const pe = new Date(rangeStart.value)
+    pe.setDate(pe.getDate() - 1)
+    const ps = new Date(pe)
+    ps.setDate(ps.getDate() - len + 1)
+    prevStart.value = iso(ps)
+    prevEnd.value = iso(pe)
+  }
+}
+
+async function loadCompare() {
+  if (!prevStart.value || !prevEnd.value) { notify('请先选择对比周期'); return }
+  compareLoading.value = true
+  try {
+    compareResult.value = await profileAgentApi.compare(prevStart.value, prevEnd.value, rangeStart.value, rangeEnd.value)
+  } catch (e) {
+    notify(e.message || '对比分析失败')
+  } finally {
+    compareLoading.value = false
+  }
+}
+
+const anomalyItems = m => {
+  const o = m.objective || {}
+  return [
+    ...(o.rework_flags || []),
+    ...(o.similar_repeated_commits || []),
+    ...(o.possibly_late_tasks || []).map(t => `任务 ${t} 计划结束周已过仍未完成(延期风险)`)
+  ]
+}
+const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', milestone_risk: '🟣 里程碑延期风险' }
 
 const LEVEL_TEXT = { low: '低', medium: '中', high: '高', extreme: '极高' }
 const LEVEL_COLOR = { low: '#4caf50', medium: '#ffc107', high: '#ff9800', extreme: '#f44336' }
@@ -157,6 +223,19 @@ loadAnalysis()
         </div>
       </div>
 
+      <!-- 贡献绿格子热力图(4.10):活动分布≠工作质量 -->
+      <div class="h-sec" style="margin-top:12px">贡献活动热力图(绿格子 = 活动分布,不代表工作质量)</div>
+      <div class="pa-heatmap">
+        <div v-for="row in heatmapRows" :key="row.date" class="pa-cell"
+             :style="{ background: HEAT_COLORS[heatLevel(row.total)] }"
+             :title="row.date + ' 共 ' + row.total + ' 条活动'" @click="pickDay(row.date)">
+        </div>
+      </div>
+      <p class="small" style="margin:4px 0 0">
+        颜色深浅 = 当日活动数量(Commit/PR/Review/缺陷修复/任务完成/状态更新);点击某天查看当天具体活动。
+        绿格子展示的是<b>活动分布</b>,不等于工作质量。
+      </p>
+
       <!-- 任务难度(4.5) -->
       <div class="h-sec" style="margin-top:12px">
         <button class="ghost" @click="loadDifficulty">{{ difficultyTab ? '收起' : '展开' }}任务难度分析</button>
@@ -169,12 +248,27 @@ loadAnalysis()
         </div>
       </div>
 
+      <!-- 提交异常模式(4.6) -->
+      <div class="h-sec" style="margin-top:12px">提交异常模式(证据化描述,不作个人评判)</div>
+      <div v-if="currentMember && anomalyItems(currentMember).length" class="sum-card pa-anomaly">
+        <ul>
+          <li v-for="(a, i) in anomalyItems(currentMember)" :key="i">⚠ {{ a }}</li>
+          <li v-if="(currentMember.objective.unclear_commit_messages || []).length" class="small" style="margin-top:6px">
+            另有 {{ currentMember.objective.unclear_commit_messages.length }} 条提交信息不清晰:{{ currentMember.objective.unclear_commit_messages.slice(0, 3).join(';') }}
+          </li>
+          <li v-if="(currentMember.objective.done_tasks_without_activity || []).length" class="small">
+            任务已标记完成但无代码活动:{{ currentMember.objective.done_tasks_without_activity.join(';') }}
+          </li>
+        </ul>
+      </div>
+      <p v-else-if="currentMember" class="pool-note">该成员在当前范围未发现提交异常模式。</p>
+
       <!-- 团队风险(4.8) -->
       <div class="h-sec" style="margin-top:12px">团队风险与协调建议</div>
       <div v-if="risks.length" class="pa-risks">
         <div v-for="(r, i) in risks" :key="i" class="sum-card pa-risk">
           <h4>
-            {{ r.kind === 'overload' ? '🔴 成员负载过高' : r.kind === 'single_point' ? '🟠 关键单点依赖' : '🟡 任务长期无进展' }}
+            {{ RISK_TEXT[r.kind] || '⚪ 项目风险' }}
             — {{ r.member || r.task_name }}
           </h4>
           <p class="small">证据: {{ r.evidence }}</p>
@@ -183,6 +277,41 @@ loadAnalysis()
         </div>
       </div>
       <p v-else class="pool-note">当前时间范围内未发现团队级风险。</p>
+
+      <!-- 时间范围对比(4.9):本期 vs 上期 -->
+      <div class="h-sec" style="margin-top:12px">
+        <button class="ghost" @click="toggleCompare">{{ compareOpen ? '收起' : '展开' }}时间范围对比分析(本期 vs 上期)</button>
+      </div>
+      <div v-if="compareOpen" class="pa-compare">
+        <div class="pa-toolbar">
+          <label>上期开始 <input v-model="prevStart" type="date"></label>
+          <label>上期结束 <input v-model="prevEnd" type="date"></label>
+          <button class="ghost" :disabled="compareLoading" @click="loadCompare">{{ compareLoading ? '对比中…' : '对比' }}</button>
+          <span class="small">当前期: {{ rangeStart }} ~ {{ rangeEnd }}</span>
+        </div>
+        <div v-if="compareResult" class="pa-compare-body">
+          <div class="small pa-meta">
+            上期 {{ compareResult.previous_range }} ↔ 本期 {{ compareResult.current_range }} · 生成于 {{ compareResult.generated_at }}
+          </div>
+          <div v-for="c in compareResult.comparisons" :key="c.user_id" class="pa-compare-row">
+            <b>{{ c.display_name }}</b>
+            <ul>
+              <li v-for="(ch, i) in c.changes" :key="i">{{ ch }}</li>
+            </ul>
+            <p class="small" style="opacity:.8">
+              上期: 活动 {{ c.previous_period.total_activities }} · Review {{ c.previous_period.review_count }} ·
+              完成任务 {{ c.previous_period.task_done_count }} · 完成率 {{ c.previous_period.completion_rate_percent }}% ·
+              预计工时 {{ c.previous_period.assigned_hours }}h
+            </p>
+            <p class="small" style="opacity:.8">
+              本期: 活动 {{ c.current_period.total_activities }} · Review {{ c.current_period.review_count }} ·
+              完成任务 {{ c.current_period.task_done_count }} · 完成率 {{ c.current_period.completion_rate_percent }}% ·
+              预计工时 {{ c.current_period.assigned_hours }}h
+            </p>
+            <p class="small" style="color:#888">{{ c.current_period.actual_hours }}</p>
+          </div>
+        </div>
+      </div>
     </div>
     <p v-else-if="loading" class="pool-note">分析中…</p>
   </div>
@@ -199,4 +328,10 @@ loadAnalysis()
 .pa-item { font-size: 12px; padding: 3px 0; border-bottom: 1px dashed rgba(0,0,0,.12); }
 .pa-diff-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed rgba(0,0,0,.12); }
 .pa-risks { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.pa-heatmap { display: grid; grid-template-columns: repeat(14, minmax(10px, 1fr)); gap: 3px; margin: 6px 0 2px; }
+.pa-cell { aspect-ratio: 1; border-radius: 2px; cursor: pointer; transition: transform .12s; }
+.pa-cell:hover { transform: scale(1.25); outline: 1px solid #333; }
+.pa-anomaly { margin-bottom: 8px; }
+.pa-compare-body { display: grid; gap: 10px; margin-top: 8px; }
+.pa-compare-row { border: 1px dashed rgba(0,0,0,.25); padding: 8px 10px; }
 </style>
