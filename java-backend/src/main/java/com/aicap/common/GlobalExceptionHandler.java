@@ -1,5 +1,6 @@
 package com.aicap.common;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +18,7 @@ import java.util.Map;
  * 统一异常出口:任何错误都返回 {"detail": "..."}。
  * 对齐 FastAPI:HTTPException(detail=...) 序列化为 {"detail": msg};校验失败返回 422。
  */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -70,9 +72,30 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.UNPROCESSABLE_ENTITY, "缺少上传部件: " + e.getRequestPartName());
     }
 
+    /** 主键冲突 → 409(编号分配竞态)。
+     *
+     *  <p>故事 / 需求池的编号来自「扫描当前最大号 +1」({@code com.aicap.service.IdAllocator}),
+     *  两个并发创建仍可能算出同一个号;{@code id} 是 varchar 主键,后者插入即冲突。
+     *  此前该冲突落到下面的兜底 {@code handleOther},客户端拿到的是
+     *  <b>500「服务器内部错误」</b> —— 既不知道原因、也无法安全重试。
+     *  这里显式映射为 409 + 可操作文案,与 IdAllocator 的「插入前复查 + 顺延」共同构成
+     *  「并发创建只会成功或明确 409,绝不出 500」这一保证(见 StoryContractTest 并发用例)。 */
+    @ExceptionHandler(org.springframework.dao.DuplicateKeyException.class)
+    public ResponseEntity<Map<String, String>> handleDuplicateKey(
+            org.springframework.dao.DuplicateKeyException e) {
+        log.warn("主键冲突,已返回 409(编号分配竞态): {}", e.getClass().getName());
+        return error(HttpStatus.CONFLICT, "编号已被占用（并发创建冲突），请重试");
+    }
+
+    /** 未预期的异常 → 500。
+     *
+     *  <p>**必须记日志 + 不回显内部消息**:原先直接把 {@code e.getMessage()} 当作 detail 返回,
+     *  而 JDBC/MyBatis 的约束冲突消息里带表名、列名、约束名甚至部分 SQL,等于把内部结构
+     *  泄露给客户端;同时该方法此前**没有任何日志**,导致客户端拿到堆栈文本、服务端却查不到
+     *  任何记录。与 AgentModelFixture 的 canary 断言(上游文案不得外泄)同一原则。 */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleOther(Exception e) {
-        return error(HttpStatus.INTERNAL_SERVER_ERROR,
-                e.getMessage() == null ? "服务器内部错误" : e.getMessage());
+        log.error("未处理异常,已返回 500: {}", e.getClass().getName(), e);
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误");
     }
 }

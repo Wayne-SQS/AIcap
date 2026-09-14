@@ -28,6 +28,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -58,6 +59,8 @@ public class MeetingService {
     private final MeetingAgentEventMapper eventMapper;
     private final MeetingAudioMapper audioMapper;
     private final ObjectMapper objectMapper;
+    /** 显式事务模板:用于同类自调用场景(见 submitSuggestionIdempotent) */
+    private final TransactionTemplate tx;
 
     // ---------- meetings ----------
 
@@ -207,13 +210,19 @@ public class MeetingService {
         return new SuggestionOutHolder(suggestion, record);
     }
 
-    /** 幂等提交重试(唯一键冲突 → 重新查询返回既有) */
+    /** 幂等提交重试(唯一键冲突 → 重新查询返回既有)
+     *
+     *  <p>每次重试必须跑在**独立事务**里:{@code stage} 上的 {@code @Transactional} 因同类自调用
+     *  不经过 Spring 代理而失效,若不显式开事务,suggestion 与 record 两次 insert 会各自提交 ——
+     *  唯一键 {@code uq_meeting_suggestion_request} 冲突时会留下「suggestion 已落库、record 未写」
+     *  的孤儿行:该行既不出现在 {@code GET /api/suggestions}(无 record 可关联),又会命中 Agent
+     *  「已有同名待审建议」的判定而被长期抑制,无人可审。 */
     public SuggestionOutHolder submitSuggestionIdempotent(MeetingDtos.SuggestionIn in, User user) {
         for (int i = 0; i < 3; i++) {
             try {
-                return stage(in, user);
+                return tx.execute(status -> stage(in, user));
             } catch (DuplicateKeyException e) {
-                // 唯一键冲突:重新走幂等查询路径
+                // 唯一键冲突:本轮写入已整体回滚,重新走幂等查询路径
                 MeetingSuggestionRecord existing = recordMapper.selectOne(new QueryWrapper<MeetingSuggestionRecord>()
                         .eq("meeting_id", in.meetingId())
                         .eq("submitted_by", user.getId())

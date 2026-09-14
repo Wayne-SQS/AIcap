@@ -57,10 +57,20 @@ public final class StoryDtos {
                            @JsonProperty("owner_id") Integer ownerId) {
     }
 
-    /** 日志输出(LogOut) */
+    /**
+     * 日志输出(LogOut)。
+     *
+     * <p>**createdAt 必须显式标 {@code @JsonProperty("created_at")}**:项目没有配置全局
+     * Jackson 命名策略({@code JacksonConfig} 只设 failOnUnknownProperties),record 组件名
+     * 默认按 Java 名原样序列化。此前该组件漏写注解,实际输出 {@code createdAt},而前端
+     * {@code stores/project.js} 读的是 {@code l.created_at} → undefined,导致在线模式下
+     * 变更记录面板的时间列与总览「最近更新」全为空白(离线走本机 toLocaleTimeString,不受影响)。
+     * 该断裂仅此一处:StoryLog 是全项目唯一没有注解的多词输出字段。
+     * 回归锚点:StoryContractTest#patchStory_statusChangeAndLogVisible、FE-BRD-06。
+     */
     public record LogOut(Integer id, @JsonProperty("story_id") String storyId,
                          @JsonProperty("log_type") String logType, String detail,
-                         java.time.LocalDateTime createdAt) {
+                         @JsonProperty("created_at") java.time.LocalDateTime createdAt) {
     }
 
     /** 删除响应 */

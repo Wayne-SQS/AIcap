@@ -15,6 +15,7 @@ import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
+import com.aicap.service.IdAllocator;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
@@ -37,7 +38,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -51,35 +51,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TaskPoolController {
 
-    private static final Pattern US_ID = Pattern.compile("^US(\\d+)$");
-    private static final Pattern R_ID = Pattern.compile("^R(\\d+)$");
-
     private final TaskMapper taskMapper;
     private final StoryMapper storyMapper;
     private final StoryLogMapper storyLogMapper;
     private final PoolItemMapper poolItemMapper;
     private final UserMapper userMapper;
+    /** 编号分配:本类原有的 nextStoryId()/nextPoolId() 与 StoryController 逐字重复,已集中 */
+    private final IdAllocator idAllocator;
 
     // ---------- 工具 ----------
-
-    /** 新看板卡 ID:沿用 US 命名空间(对齐 FastAPI pool.py 的 _next_story_id:US38 起) */
-    private String nextStoryId() {
-        int max = 0;
-        for (Story s : storyMapper.selectList(null)) {
-            Matcher m = US_ID.matcher(s.getId());
-            if (m.matches()) max = Math.max(max, Integer.parseInt(m.group(1)));
-        }
-        return String.format("US%02d", max + 1);
-    }
-
-    private String nextPoolId() {
-        int max = 0;
-        for (PoolItem p : poolItemMapper.selectList(null)) {
-            Matcher m = R_ID.matcher(p.getId());
-            if (m.matches()) max = Math.max(max, Integer.parseInt(m.group(1)));
-        }
-        return String.format("R%02d", max + 1);
-    }
 
     @Transactional
     void addLog(String storyId, String logType, String detail, Integer userId) {
@@ -383,7 +363,7 @@ public class TaskPoolController {
     public PoolDtos.PoolOut createPool(@Valid @RequestBody PoolDtos.PoolIn body) {
         Roles.writer();
         PoolItem item = new PoolItem();
-        item.setId(nextPoolId());
+        item.setId(idAllocator.nextPoolId());
         item.setTitle(body.title() == null ? "" : body.title());
         item.setDescription(body.description());
         item.setSource(body.source());
@@ -417,7 +397,7 @@ public class TaskPoolController {
         if (body.ownerId() != null && userMapper.selectById(body.ownerId()) == null) {
             throw ApiException.unprocessable("所选负责人不存在");
         }
-        String sid = nextStoryId();
+        String sid = idAllocator.nextStoryId();
         Story story = new Story();
         story.setId(sid);
         story.setTitle(item.getTitle());

@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test'
  * C. 甘特图:父卡血缘行保留 + 点击任务条详情(前置/后续高亮) + 任务编辑真实 PATCH 往返
  * D. 成员任务图:5 名真实成员、点卡片开抽屉(状态筛选/Esc 关闭)、负载图例、活动图 6 周×7 天、画像板块回归
  * E. 离线演示:新基线可用 + 旧基线(M01–M23)缓存自动落回种子
+ * F. 离线演示:需求池→看板 的编号分配(回归:曾恒生成 M21 造成撞号)
  */
 
 const ADMIN = '李锐铭'
@@ -262,4 +263,52 @@ test('离线演示:新基线 US01–US37 可用,旧基线缓存自动落回种�
   await expect(dialog.locator('input[name=storyRef]')).toHaveValue('US07,US24,US37')
   await dialog.locator('#task-cancel').click()
   console.log('[offline] 基线=' + count + ' 条,gantt 血缘行=12')
+})
+
+/**
+ * 回归:离线「需求池 → 移入看板」的编号分配。
+ *
+ * 原实现 `'M' + max(20, ...stories.map(x => +x.id.slice(1)))` 写于 M01–M23 基线时代;
+ * 基线迁到 US01–US37 后 `'US01'.slice(1)` 得到 `'S01'` → `+NaN` → max 恒为 20,
+ * 于是**每次移入都生成同一个 M21**:第二次即撞号,看板 key 重复、一致性自检常驻报错。
+ * 现由 store 的 nextStoryId() 统一分配(与后端 StoryController 的 US%02d 同口径)。
+ * 既有 35+7 条用例只覆盖**在线** promote,离线分支无覆盖,故在此补齐。
+ */
+test('离线演示:需求池移入看板分配 US38+ 唯一编号(回归:曾恒生成 M21 撞号)', async ({ page }) => {
+  await page.goto('/#/pool')
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await page.locator('#login-offline').click()
+  await expect(page.locator('#view-pool')).toBeVisible()
+
+  const poolIds = await page.locator('#pool-list button[data-promote]').evaluateAll(
+    els => els.slice(0, 2).map(el => el.getAttribute('data-promote'))
+  )
+  expect(poolIds.length, '离线需求池应至少有 2 条可移入条目').toBe(2)
+
+  async function promote(poolId) {
+    await page.locator(`#pool-list button[data-promote="${poolId}"]`).click()
+    const dialog = page.locator('#promote')
+    await expect(dialog).toBeVisible()
+    await dialog.locator('select[name=sprint]').selectOption('1')
+    await dialog.locator('select[name=activity]').selectOption('2')
+    await dialog.locator('button[type=submit]').click()
+    await expect(dialog).toBeHidden()
+  }
+
+  await promote(poolIds[0])
+  await promote(poolIds[1])
+
+  const ids = await page.evaluate(() => stories.map(s => s.id))
+  const created = ids.filter(id => {
+    const m = /^US(\d+)$/.exec(id)
+    return m && Number(m[1]) >= 38
+  })
+
+  expect(created.length, '两次移入应产生 2 条新故事').toBe(2)
+  expect(new Set(created).size, '两条新故事编号必须互不相同(回归:原先恒为 M21)').toBe(2)
+  expect(created, '新编号应落在 US38+ 命名空间').toEqual(['US38', 'US39'])
+  expect(ids.filter(id => /^M\d+$/.test(id)), '不应再出现旧基线 M 编号').toEqual([])
+  expect(ids.length, '37 条基线 + 2 条新故事').toBe(39)
+  console.log('[offline-promote] 新增编号=' + created.join(',') + ' 总数=' + ids.length)
 })

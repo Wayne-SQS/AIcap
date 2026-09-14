@@ -75,7 +75,7 @@ if ((-not $backendUp -or -not $frontendUp) -and -not $SkipE2E) {
 
 # ---- 1. backend contract tests (JUnit) --------------------------------
 if (-not $SkipBackend) {
-    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (126 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (127 cases) ===" -ForegroundColor Cyan
     # JAVA_HOME must point at JDK 23: the ambient environment may carry a JDK 8,
     # which makes surefire fork Java 8 and fail with
     # "class file version 67.0 ... only recognizes class file versions up to 52.0".
@@ -97,17 +97,17 @@ if (-not $SkipBackend) {
     $summary = ''
     $hit = $mvnOut | Select-String -Pattern 'Tests run:.*Failures:.*Errors:.*Skipped' | Select-Object -Last 1
     if ($hit) { $summary = $hit.Line.Trim() }
-    Add-Result 'backend-contract (JUnit, 126 cases)' ($mvnExit -eq 0) $summary
+    Add-Result 'backend-contract (JUnit, 127 cases)' ($mvnExit -eq 0) $summary
     Pop-Location
 }
 
 # ---- 2. frontend current-baseline E2E (Playwright) --------------------
 if (-not $SkipE2E) {
-    Write-Host "`n=== [2/3] frontend E2E: qa/vue-baseline-e2e.spec.js (35 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [2/3] frontend E2E: qa/vue-baseline-e2e.spec.js (37 cases) ===" -ForegroundColor Cyan
     Push-Location (Join-Path $repo 'qa')
     if (-not (Test-Path 'node_modules')) {
         Write-Warning 'qa/node_modules missing - run: cd qa; npm install'
-        Add-Result 'frontend-e2e (qa/, 35 cases)' $false 'qa/node_modules missing'
+        Add-Result 'frontend-e2e (qa/, 37 cases)' $false 'qa/node_modules missing'
     } else {
         $e2eOut = & npx playwright test 2>&1
         $e2eExit = $LASTEXITCODE
@@ -116,14 +116,14 @@ if (-not $SkipE2E) {
         $detail = 'see qa/report/index.html'
         $hit = $e2eOut | Select-String -Pattern '\d+ passed' | Select-Object -Last 1
         if ($hit) { $detail = $hit.Line.Trim() }
-        Add-Result 'frontend-e2e (qa/, 35 cases)' ($e2eExit -eq 0) $detail
+        Add-Result 'frontend-e2e (qa/, 37 cases)' ($e2eExit -eq 0) $detail
     }
     Pop-Location
 }
 
 # ---- 3. acceptance suite ---------------------------------------------
 if (-not $SkipAcceptance) {
-    Write-Host "`n=== [3/3] acceptance suite: frontend npm run e2e:verify (7 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [3/3] acceptance suite: frontend npm run e2e:verify (8 cases) ===" -ForegroundColor Cyan
     Push-Location (Join-Path $repo 'frontend')
     $accOut = & npm run e2e:verify 2>&1
     $accExit = $LASTEXITCODE
@@ -132,7 +132,7 @@ if (-not $SkipAcceptance) {
     $detail = 'frontend/test-results'
     $hit = $accOut | Select-String -Pattern '\d+ passed' | Select-Object -Last 1
     if ($hit) { $detail = $hit.Line.Trim() }
-    Add-Result 'acceptance (e2e-verify, 7 cases)' ($accExit -eq 0) $detail
+    Add-Result 'acceptance (e2e-verify, 8 cases)' ($accExit -eq 0) $detail
     Pop-Location
 }
 

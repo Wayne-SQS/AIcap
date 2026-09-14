@@ -70,7 +70,43 @@ function storyTitle(id, fallback) {
   return project.stories.find(s => s.id === id)?.title || fallback
 }
 
-const usecases = computed(() => USECASE_LAYOUT.map(u => ({ ...u, name: storyTitle(u.storyId, u.fallback) })))
+/** 故事编号区段压缩:连续 >=3 个压成 `US29-US32`,零散编号用 ' / ' 连接。
+ *  该函数能**逐字复现**本视图移植时手写的全部 14 条 ref 标注(已单独验算 14/14),
+ *  所以改成派生不改变任何现有显示,却消除了手写标注的漂移:故事被删除后,
+ *  幽灵编号会自动从节点标注上消失,而不是继续挂在椭圆上。 */
+function compactStoryRefs(ids) {
+  const nums = ids
+    .map(id => ({ id, n: Number(String(id).replace(/\D/g, '')) }))
+    .filter(x => Number.isInteger(x.n))
+    .sort((a, b) => a.n - b.n)
+  const out = []
+  for (let i = 0; i < nums.length;) {
+    let j = i
+    while (j + 1 < nums.length && nums[j + 1].n === nums[j].n + 1) j++
+    const run = j - i + 1
+    if (run >= 3) out.push(`${nums[i].id}-${nums[j].id}`)
+    else for (let k = i; k <= j; k++) out.push(nums[k].id)
+    i = j + 1
+  }
+  return out.join(' / ')
+}
+
+const usecases = computed(() => USECASE_LAYOUT.map(u => ({
+  ...u,
+  name: storyTitle(u.storyId, u.fallback),
+  /* ref 由 stories 派生;全部故事都不在基线里时才退回手写兜底 */
+  ref: compactStoryRefs(u.stories.filter(id => project.stories.some(s => s.id === id))) || u.ref
+})))
+
+/* 未被任何用例引用的故事:让「新增故事」在 UML 视图上可见。
+   用例的故事归属是需求设计决策、不能从数据推导,但「有故事没进用例图」这件事必须显式暴露,
+   否则新增 US38+ 时 UML 毫无反应(此前手写布局就是这个问题)。 */
+const mappedStoryIds = computed(() => new Set(USECASE_LAYOUT.flatMap(u => u.stories)))
+const unmappedStories = computed(() => project.stories.filter(s => !mappedStoryIds.value.has(s.id)))
+const unmappedText = computed(() => {
+  const ids = unmappedStories.value.map(s => s.id)
+  return ids.length > 15 ? ids.slice(0, 15).join('、') + ` 等 ${ids.length} 条` : ids.join('、')
+})
 const usecaseById = computed(() => Object.fromEntries(usecases.value.map(u => [u.id, u])))
 const actorById = Object.fromEntries(ACTORS.map(a => [a.id, a]))
 
@@ -194,13 +230,16 @@ const messages = MSG.map(([from, to, label, details, type], i) => {
       <div>
         <div class="eyebrow">UML DIAGRAMS / 设计视图</div>
         <h1>UML 图</h1>
-        <p>用例图 · 时序图（从 US01–US37 与执行任务数据自动生成）。</p>
+        <p>用例图（用例名跟随故事标题）· 时序图（按后端真实路由绘制）。</p>
       </div>
     </div>
 
     <p class="uml-note">
-      演示版：用例图按需求基线（{{ project.stories.length }} 条故事）自动生成 —— 用例名取自故事标题，关联连线按角色权限绘制；
-      时序图按 Spring Boot 3（Java 23）后端的真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL）。
+      演示版：用例图按需求基线（{{ project.stories.length }} 条故事）渲染 —— 用例名取自故事标题，节点上的 US 标注由故事编号派生，
+      两者都随故事数据变化自动更新（删掉故事，其编号会自动从标注上消失，不再留幽灵编号）。
+      但 15 个用例的布局、故事归属与角色关联由 <code>USECASE_LAYOUT</code> / <code>RELATIONS</code> 静态定义：新增或删除故事不会增减用例节点。
+      <span id="uml-unmapped">未被任何用例引用的故事 {{ unmappedStories.length }} 条<template v-if="unmappedText">（{{ unmappedText }}）</template></span>。
+      时序图不由数据生成，它按 Spring Boot 3（Java 23）后端的真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
       悬停可高亮关联，点击用例（或回车 / 空格）可展开对应故事明细；完整版支持交互编辑。
     </p>
 

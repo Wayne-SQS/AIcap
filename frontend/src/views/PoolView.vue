@@ -7,6 +7,7 @@ import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionG
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
 import { activities } from '@/constants'
+import { memberUserId, memberIndex } from '@/data/memberIdentity'
 
 /* 需求池:结构对齐旧版 L634-654,逻辑对齐 pool 保存(L1441-1455)/dropPool(L1456-1460)/
    promotePool 工作流弹窗(meeting-improvements.js L43-67):在线走 API、离线改本地 */
@@ -85,7 +86,7 @@ async function openPromote(id) {
   try {
     members.value = session.apiMode
       ? await authApi.users()
-      : project.members.map(m => ({ id: m.id + 1, display_name: m.name }))
+      : project.members.map(m => ({ id: memberUserId(m.id), display_name: m.name }))
   } catch (err) { notify('无法加载负责人：' + err.message); return }
   nextTick(() => { promoteEl.value?.showModal() })
 }
@@ -110,12 +111,15 @@ async function submitPromote() {
       await poolApi.promote(promoteForm.id, body)
       try { await project.loadAll() } catch (err) { notify('已移入看板，刷新失败：' + err.message) }
     } else {
-      const newId = 'M' + String(Math.max(20, ...project.stories.map(x => +x.id.slice(1) || 0)) + 1).padStart(2, '0')
+      /* 编号由 store 统一分配:与后端 StoryController.nextStoryId 同为 US%02d 口径。
+         修复:此处原为 'M' + (基于 slice(1) 取数) —— 故事基线从 M01 迁到 US01 后,
+         'US01'.slice(1) 得到 'S01' 使 max 恒为 20,每次移入都生成同一个 M21(撞号)。 */
+      const newId = project.nextStoryId()
       const p = project.pool.find(x => x.id === promoteForm.id)
       project.stories.push({
         id: newId, activity: body.activity, sprint: body.sprint, title: p.title, description: p.desc,
         priority: p.priority, acceptance: '来源：' + p.source + '（待补充验收条件）',
-        owner: body.owner_id == null ? null : body.owner_id - 1, status: 0
+        owner: memberIndex(body.owner_id), status: 0
       })
       project.pool = project.pool.filter(x => x.id !== promoteForm.id)
       project.persistPool()

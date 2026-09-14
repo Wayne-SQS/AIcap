@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { tasksApi } from '@/api/tasks'
 import { derivedTaskSprints } from '@/data/seed'
+import { memberUserId, memberIndex } from '@/data/memberIdentity'
 
 /* 任务编辑弹窗(移植 legacy 新版 #task-editor,交互按 Vue 重写)
    在线:PATCH /api/tasks/{id},字段与后端契约一致(name/owner_id/hours/week_start/week_end/story_ref/depends_on)
@@ -65,7 +66,7 @@ async function submit() {
 
     const payload = {
       name: form.name.trim(),
-      owner_id: +form.owner + 1,
+      owner_id: memberUserId(+form.owner),
       hours: +form.hours,
       week_start: weekStart,
       week_end: weekEnd,
@@ -79,7 +80,7 @@ async function submit() {
       const t = project.tasks.find(x => x.id === editingId.value)
       const keepEh = t.eh == null || t.eh === t.h
       Object.assign(t, {
-        name: payload.name, owner: payload.owner_id - 1, h: payload.hours,
+        name: payload.name, owner: memberIndex(payload.owner_id), h: payload.hours,
         w: [weekStart, weekEnd], story: storyRef, dependsOn,
         sprints: derivedTaskSprints(weekStart, weekEnd)
       })

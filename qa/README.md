@@ -18,7 +18,7 @@
 |---|---|
 | `package.json` | `aicap-qa` 独立测试工程;`@playwright/test` 锁定 `1.63.0`;scripts:`test` / `test:headed` / `report` |
 | `playwright.config.js` | baseURL `http://localhost:5173`、系统 Edge(`channel: msedge`)、headless、虚拟麦克风;`testDir: '.'` + `testMatch` 只收集新套件;产物写在 `qa/test-results` 与 `qa/report` |
-| `vue-baseline-e2e.spec.js` | 现行基线端到端回归套件:**35 条** `[FE-XXX-NN]` 用例,按 9 个模块 `test.describe` 分组 |
+| `vue-baseline-e2e.spec.js` | 现行基线端到端回归套件:**37 条** `[FE-XXX-NN]` 用例,按 9 个模块 `test.describe` 分组 |
 
 用例编号是稳定契约:`[FE-XXX-NN]` 与 `qa/测试用例设计_当前基线_v3.md`(用例设计:步骤/预期/实测)、
 `qa/测试执行记录_当前基线_v3.md`(执行记录)中的编号**一一对应**,可双向追溯;批量编排入口见 `qa/run-all.ps1`。
@@ -47,17 +47,17 @@ npm test           # = npx playwright test
 npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
 ```
 
-用例清单(35 条):
+用例清单(37 条):
 
 | 模块 | 编号 | 覆盖要点 |
 |---|---|---|
 | `FE-AUTH` | 01–04 | 登录成功身份/错误密码被拒/只读查看者权限(viewer 前端拦截 + 后端 403)/退出登录 |
-| `FE-OVW` | 01–02 | 概览统计口径(37 故事 / 16 任务 / 5 成员)、完成度百分比与看板口径 |
+| `FE-OVW` | 01–02 | 概览统计口径(37 故事 / 16 任务 / 5 成员)、Sprint 分片 4 片且求和自洽、真实 blocked 计数、完成度两套口径与 `/api/dashboard` 交叉校验 |
 | `FE-POOL` | 01–04 | 列表与接口一致 + 空态、新增→移除清理、提升为故事(US38+)→删除清理、必填校验 |
-| `FE-BRD` | 01–06 | 默认故事地图(4 切片含 Sprint 4+)、血缘徽章 `▣ x/y · %`、新建→删除、编辑 Sprint/负责人往返、负责人筛选、点卡详情 + 变更日志 |
+| `FE-BRD` | 01–07 | 默认故事地图(4 切片含 Sprint 4+)、血缘徽章 `▣ x/y · %`、新建→删除、编辑 Sprint/负责人往返、负责人筛选、点卡详情 + 变更日志(含 `<time>` 时间列非空)、**改负责人级联同步未完成子任务**(逐字段还原) |
 | `FE-GNT` | 01–05 | 父卡行/子任务行 + `data-gantt-task`、任务详情(前置/后续高亮)、编辑任务往返(8h→9h→8h)、父卡故事详情、选中态互斥 |
 | `FE-MBR` | 01–04 | 成员卡/容量/负载档位/负载图例、任务抽屉(列表+统计+筛选)、抽屉三种关闭方式、成员画像编辑往返 |
-| `FE-UML` | 01–03 | 用例图(4 参与者/15 用例/27 连线)、用例明细面板、时序图「Spring Boot 后端」且无 FastAPI |
+| `FE-UML` | 01–04 | 用例图(4 参与者/15 用例/27 连线)、用例明细面板、时序图「Spring Boot 后端」且无 FastAPI、**用例标注由故事数据派生**(无幽灵编号 + 新增故事立即反映到「未映射」) |
 | `FE-AI` | 01–06 | 创建会议→落库→选中→**删除自清理**;`agent/config` 状态文案与按钮可用性;本地 mp3 上传→列表→删除;会议删除入口的权限门控(admin 可用 / member 禁用 / viewer 禁用) |
 | `FE-OFF` | 01 | 离线演示:API 指向死端口 + 旧 M 编号缓存 → 仍渲染 US01–US37 |
 
@@ -88,7 +88,7 @@ npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
 | 6 | 验收套件 `recorder-profile.spec.js` 每轮留一条「录音验收会议」 | ✅ 已修复:用例结束调用删除接口自清理 | `VRF-07` |
 | 7 | 9 个既有契约测试类的 worker 开关写成 `aicap.agent-worker-enabled`(真实前缀是 `aicap.llm.`),该键**从未绑定**,测试上下文里 Agent worker 实为开启状态 | ✅ 已修复:9 个类统一改为 `aicap.llm.agent-worker-enabled=false`;`AgentContractTest` 显式写 `true`,保证只有该上下文消费队列 | 全量 126 绿 + Agent 套件 14 绿 |
 | 8 | 开发库需求池非空(2 条历史冒烟残留 `A000000007/A000000008`) | ⏸ **保留不动**(2026-09-13 确认口径):它们是「审核→建池」链路的真实凭证,演示时能看到端到端结果;故「池为空」空态仍用 `page.route` 拦截 `[]` 验证(`FE-POOL-01`),不回退真实空态断言 | — |
-| 9 | 内联脚本硬编码 `window.__AICAP_API_BASE__`,覆盖 E2E 注入 | ⏳ 未处理:离线用例改用 `Object.defineProperty` 钉死基址(`FE-OFF-01`) | — |
+| 9 | 内联脚本硬编码 `window.__AICAP_API_BASE__`,覆盖 E2E 注入 | ✅ **已修复**(ENV-D02):删除该内联脚本,基址解析统一交给 `client.js` 三级回退 —— 顺带修好「`VITE_API_BASE` 永远读不到」;`FE-OFF-01` 改回普通可写赋值 | `FE-OFF-01` |
 
 ## 结构(含归档)
 
@@ -96,9 +96,9 @@ npm run report     # 查看 HTML 报告(open: never,产物在 qa/report)
 |---|---|
 | `package.json` | **现行**:`aicap-qa` 独立 Playwright 测试工程(见上节) |
 | `playwright.config.js` | **现行**:现行基线 E2E 配置(msedge/headless/虚拟麦克风,产物在 qa/ 内) |
-| `vue-baseline-e2e.spec.js` | **现行**:35 条 `[FE-XXX-NN]` 现行基线回归用例 |
-| `run-all.ps1` | **现行**:一体化编排(后端契约 JUnit 126 → 前端 E2E 35 → 前端验收 e2e:verify 7) |
-| `测试用例设计_当前基线_v3.md` | **现行**:当前基线用例设计 168 条(契约层 126 + 前端 `[FE-XXX-NN]` 35 + 验收层 7 + 缺口与缺陷) |
+| `vue-baseline-e2e.spec.js` | **现行**:37 条 `[FE-XXX-NN]` 现行基线回归用例 |
+| `run-all.ps1` | **现行**:一体化编排(后端契约 JUnit 127 → 前端 E2E 37 → 前端验收 e2e:verify 8) |
+| `测试用例设计_当前基线_v3.md` | **现行**:当前基线用例设计 172 条(契约层 127 + 前端 `[FE-XXX-NN]` 37 + 验收层 8 + 缺口与缺陷) |
 | `测试执行记录_当前基线_v3.md` | **现行**:当前基线执行记录 |
 | `测试用例设计_前后端_v1.md` | 前后端全部测试用例设计(编号/优先级/步骤/预期/实测) |
 | `测试用例设计_前后端_v2.md` | v2 用例设计:看板↔甘特血缘重构 + 会议智能体审核工作流(含复测修订) |
@@ -186,7 +186,7 @@ $env:AICAP_UI_FLAVOR="vue"       # 缺省或置 legacy 即旧版单页
 node <repo>\qa\ui-e2e.spec.js
 ```
 
-- 注入方式与 legacy 一致:`e2e-helpers.js` 读取对应 HTML,把 API 锚点(legacy `const API_BASE='...'` / vue `window.__AICAP_API_BASE__='...'`)替换为 QA 后端后经 Playwright route 拦截下发,不修改源文件。
+- 注入方式:`e2e-helpers.js` 读取对应 HTML 后经 Playwright route 拦截下发,不修改源文件。legacy 模式仍是字符串替换 `const API_BASE='...'`;vue 模式改为**在 `</head>` 前注入** `window.__AICAP_API_BASE__='<apiBase>'` 脚本 —— 因为 ENV-D02 修复后 `frontend/index.html` 已不再含该锚点字符串,继续用替换会**静默失效**。
 - vue 为 SPA,首屏需加载模块脚本,等待超时自动放宽 2.5 倍(6s→15s);登录就绪信标统一改用常驻顶栏 `#mode-chip`(`已连接后端` 文案两版一致)。
 - 双模式基线(2026-09-08):legacy 与 vue 各 120 用例全通过(48 ui-e2e + 36 kanban-gantt + 12 meeting-review + 13 meeting-agent + 11 meeting-improvements)。
 
@@ -204,4 +204,4 @@ D:\aiguanli-venv\Scripts\python.exe <repo>\qa\verify_migration.py --qa   # QA �
 - `index.html` 内 `API_BASE` 固定 `127.0.0.1:8000`;E2E 通过改写内存 HTML 指向 8001,不修改源文件。
 - 页面经 `http://127.0.0.1:8090` 打开以提供 localStorage 源;离线用例将 API_BASE 指向无人监听端口(59999),触发前端自动回退。
 - 会议 Agent E2E 依赖:fixture 供应商(9009,uvicorn 启动见 2b)、QA 后端带 `NO_PROXY` 且 `AICAP_LLM_BASE_URL` 覆写为 `http://127.0.0.1:9009`(否则后端会按 `.env` 调用真实 DeepSeek,分析结果不可复现)。
-- vue 模式前提是 `frontend/dist` 为最新构建(`npm run build`);spec 读取 `dist/index.html` 中的 `window.__AICAP_API_BASE__` 锚点注入 QA 后端地址。
+- vue 模式前提是 `frontend/dist` 为最新构建(`npm run build`);spec 读取 `dist/index.html`,并向其中**注入** `window.__AICAP_API_BASE__` 脚本以指向 QA 后端地址(注入而非替换锚点,原因见上条)。

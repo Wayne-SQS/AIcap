@@ -8,6 +8,7 @@ import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import MemberProfileDialog from '@/components/members/MemberProfileDialog.vue'
 import MemberTaskDrawer from '@/components/members/MemberTaskDrawer.vue'
 import { ROLE_TXT } from '@/data/seed'
+import { memberLabel } from '@/data/memberIdentity'
 
 /* 成员任务图
    - 成员卡片 / 热力图 / Bandwidth / 开发活动图:5 名后端真实成员,容量取 users.capacity_hours
@@ -175,7 +176,7 @@ const contribs = computed(() => {
         @click="openDrawer(c.m.id)" @keydown.enter.prevent="openDrawer(c.m.id)" @keydown.space.prevent="openDrawer(c.m.id)"
       >
         <div class="head">
-          <span class="avatar" :class="'a' + c.m.id">P{{ c.m.id + 1 }}</span>
+          <span class="avatar" :class="'a' + c.m.id">{{ memberLabel(c.m.id) }}</span>
           <div><h3>{{ c.m.name }}</h3><div class="role">{{ project.memberRoleText(c.m.id) }}</div></div>
           <span class="loadflag" :class="c.state.key" style="margin-left:auto">{{ c.state.label }}</span>
         </div>
@@ -195,7 +196,7 @@ const contribs = computed(() => {
       <div class="heat" id="heat">
         <div class="heat-head"><div>成员 \ 周</div><div v-for="w in 6" :key="w">W{{ w }}</div></div>
         <div v-for="m in project.members" :key="m.id" class="heat-row">
-          <div class="heat-name"><span class="avatar" :class="'a' + m.id">P{{ m.id + 1 }}</span>{{ m.name }}</div>
+          <div class="heat-name"><span class="avatar" :class="'a' + m.id">{{ memberLabel(m.id) }}</span>{{ m.name }}</div>
           <div v-for="w in 6" :key="w" class="heat-cell" :title="heatCell(m, w - 1).title"><span class="hrs" :class="'hl' + heatCell(m, w - 1).lv">{{ heatCell(m, w - 1).hours }}</span></div>
         </div>
       </div>
@@ -205,7 +206,7 @@ const contribs = computed(() => {
     <div id="bandwidth">
       <div v-for="b in bandwidthCards" :key="b.m.id" class="mcard">
         <div class="head">
-          <span class="avatar" :class="'a' + b.m.id">P{{ b.m.id + 1 }}</span>
+          <span class="avatar" :class="'a' + b.m.id">{{ memberLabel(b.m.id) }}</span>
           <div><h3>{{ b.m.name }}</h3><div class="role">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
           <span class="loadflag" :class="b.state.key" style="margin-left:auto">{{ b.state.label }}</span>
         </div>
@@ -217,7 +218,7 @@ const contribs = computed(() => {
     <div class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">
-          <span class="avatar" :class="'a' + c.m.id">P{{ c.m.id + 1 }}</span>{{ c.m.name }}
+          <span class="avatar" :class="'a' + c.m.id">{{ memberLabel(c.m.id) }}</span>{{ c.m.name }}
           <span class="small mono" style="margin-left:auto">样例活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
         </div>
         <div class="small" style="margin-bottom:8px;color:var(--muted)">{{ project.memberRoleText(c.m.id) }}</div>

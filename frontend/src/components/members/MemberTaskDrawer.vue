@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { memberLabel } from '@/data/memberIdentity'
 
 /* 成员任务明细抽屉(移植 legacy 新版 #member-drawer,交互按 Vue 重写)
    关闭方式:关闭按钮 / 点击遮罩 / Esc;筛选状态在抽屉内部维护,不污染页面其它视图 */
@@ -33,7 +34,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
     <div class="drawer-backdrop" data-drawer-close @click="emit('close')"></div>
     <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
       <div class="drawer-head">
-        <h2 id="drawer-title">P{{ memberId + 1 }} {{ member?.name }} · 任务明细</h2>
+        <h2 id="drawer-title">{{ memberLabel(memberId) }} {{ member?.name }} · 任务明细</h2>
         <span class="small">任务执行视图</span>
         <button type="button" class="drawer-close" data-drawer-close aria-label="关闭成员任务明细" @click="emit('close')">×</button>
       </div>

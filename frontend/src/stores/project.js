@@ -5,6 +5,7 @@ import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
 import { STORIES_KEY, LOG_KEY, POOL_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
+import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
 
 /* 项目数据基座:stories/tasks/pool/log 四份数据 + members(真实成员)
 
@@ -183,17 +184,28 @@ export const useProjectStore = defineStore('project', {
       .map(id => s.stories.find(x => x.id === id.toUpperCase())).filter(Boolean)
   },
   actions: {
-    /* 契约映射层:后端字段 → 前端模型(owner_id-1 偏移是 Spring Boot 重写时唯一需复核点) */
+    /** 新建故事的编号分配:US 命名空间顺延,与后端 StoryController.nextStoryId 的 US%02d 口径一致
+     *  (契约:`qa/vue-baseline-e2e.spec.js` FE-POOL-03 断言新故事必须落在 US38+)。离线新建与
+     *  「需求池 → 移入看板」共用此入口,避免两处各写一遍编号规则而漂移。 */
+    nextStoryId() {
+      const max = this.stories.reduce((acc, x) => {
+        const m = /^[A-Za-z]+(\d+)$/.exec(String(x.id))
+        return m ? Math.max(acc, Number(m[1])) : acc
+      }, 37)  // 基线 US01–US37 之后从 US38 起
+      return 'US' + String(max + 1).padStart(2, '0')
+    },
+    /* 契约映射层:后端字段 → 前端模型。owner_id → 成员下标的换算统一走 memberIdentity
+       (偏移= id-1 是位置对齐,全部集中在那一处,并带连续性告警) */
     mapStory(s) {
       return {
         id: s.id, title: s.title, description: s.description, acceptance: s.acceptance,
         priority: s.priority, sprint: s.sprint, activity: s.activity, status: s.status,
-        owner: (s.owner_id == null ? null : s.owner_id - 1)
+        owner: memberIndex(s.owner_id)
       }
     },
     mapTask(t) {
       return {
-        id: t.id, name: t.name, owner: t.owner_id - 1, h: t.hours,
+        id: t.id, name: t.name, owner: memberIndex(t.owner_id), h: t.hours,
         eh: t.estimated_hours != null ? t.estimated_hours : t.hours,
         w: [t.week_start, t.week_end], story: t.story_ref || '',
         card: t.kanban_card_id || null, type: t.task_type || 'feature',
@@ -208,8 +220,14 @@ export const useProjectStore = defineStore('project', {
     mergeMembers(users) {
       if (!Array.isArray(users) || !users.length) return
       const byId = new Map(users.map(u => [u.id, u]))
+      /* 位置对齐的前提是 users.id 恰为 1..N 连续;不连续时 `id-1` 会出现空洞,
+         空洞处的成员会保留种子姓名(表现为「负责人姓名对不上」),这里明确告警而不是静默错配。 */
+      if (!isContiguousUserIds(users.map(u => u.id))) {
+        console.warn('[AICAP member-identity] users.id 非 1..N 连续,前端成员下标(= id-1)存在空洞,可能出现负责人姓名错配:',
+          users.map(u => u.id).sort((a, b) => a - b))
+      }
       this.members = this.members.map(m => {
-        const u = byId.get(m.id + 1)
+        const u = byId.get(memberUserId(m.id))
         if (!u) return m
         return {
           ...m,
@@ -220,7 +238,7 @@ export const useProjectStore = defineStore('project', {
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
       users.forEach(u => {
-        const idx = u.id - 1
+        const idx = memberIndex(u.id)
         if (!this.members.some(m => m.id === idx)) {
           this.members.push({
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
@@ -270,7 +288,8 @@ export const useProjectStore = defineStore('project', {
       if (this.log.length > 50) this.log = this.log.slice(-50)
       try { localStorage.setItem(LOG_KEY, JSON.stringify(this.log)) } catch { /* ignore */ }
     },
-    /** 一致性自检(只告警不改数):编号重复、负责人/工时/周次非法、关联 Story 缺失、Sprint 口径不一致、旧版 M 编号残留 */
+    /** 一致性自检(只告警不改数):编号重复、负责人/工时/周次非法、关联 Story 缺失、挂载看板卡不存在、
+     *  Sprint 口径不一致、子任务全完成但故事未标记完成、成员下标不连续、旧版 M 编号残留 */
     checkConsistency() {
       const warnings = [], errors = []
       const storyIds = new Set(), taskIds = new Set()
@@ -281,17 +300,37 @@ export const useProjectStore = defineStore('project', {
       this.tasks.forEach(t => {
         if (taskIds.has(t.id)) errors.push(`Task ID 重复：${t.id}`)
         taskIds.add(t.id)
-        if (!this.members.some(m => m.id === t.owner)) errors.push(`${t.id} 负责人不存在：P${t.owner + 1}`)
+        if (!this.members.some(m => m.id === t.owner)) errors.push(`${t.id} 负责人不存在：${memberLabel(t.owner)}`)
         if (!Number.isFinite(Number(t.h)) || Number(t.h) < 0) errors.push(`${t.id} 工时无效：${t.h}`)
         if (t.w[0] < 1 || t.w[1] > 6 || t.w[0] > t.w[1]) errors.push(`${t.id} 周次超出 W1-W6：W${t.w[0]}-W${t.w[1]}`)
         const missing = taskRefs(t.story).map(id => id.toUpperCase()).filter(id => !storyIds.has(id))
         if (missing.length) errors.push(`${t.id} 关联 Story 不存在：${missing.join('、')}`)
+        /* 孤儿挂卡:kanban_card_id 指向不存在的看板卡(删除故事的级联失效时会留下)。
+           与上面的 story_ref 检查是两回事:story_ref 是文本引用,kanban_card_id 是甘特父行的分组键,
+           悬挂时甘特会渲染出没有标题的父条。 */
+        if (t.card && !storyIds.has(t.card)) errors.push(`${t.id} 挂载的看板卡不存在：${t.card}`)
         const sprints = new Set(Array.isArray(t.sprints) && t.sprints.length ? t.sprints : derivedTaskSprints(t.w[0], t.w[1]))
         const storySprints = [...new Set(this.storiesForTask(t).map(s => s.sprint))]
         if (storySprints.some(sp => !sprints.has(sp))) {
           warnings.push(`${t.id} 的执行 Sprint 与关联 Story Sprint 不完全一致`)
         }
       })
+      /* 故事 ↔ 子任务状态一致性(仅告警,不改数):子任务已全部完成或取消,但故事自身仍未标记完成。
+         注意反向那条(故事已完成而子任务未完成)不在此处告警——基线种子 US01 本就如此,
+         加了会在每次数据变化时刷常驻噪音;而这一条在 US01–US37 + T01–T16 基线上命中数为 0。 */
+      this.stories.forEach(s => {
+        const subs = this.subTasksOf(s.id)
+        if (!subs.length || s.status === 2) return
+        if (subs.every(t => t.status === 2 || t.status === 3)) {
+          warnings.push(`${s.id} 的子任务已全部完成或取消,故事状态仍为「${['待办', '进行中', '已完成'][s.status] || s.status}」`)
+        }
+      })
+      /* 成员下标必须连续 0..N-1:后端 users.id 一旦断开(= id-1 出现空洞),
+         位置对齐就会把负责人与姓名错配,而视图上不会报错、只会显示错的人名 */
+      const memberIds = this.members.map(m => m.id).sort((a, b) => a - b)
+      if (memberIds.some((id, i) => id !== i)) {
+        errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
+      }
       this.members.forEach(m => { if ((Number(m.capacity) || 0) <= 0) errors.push(`成员 ${m.name} 容量无效`) })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)

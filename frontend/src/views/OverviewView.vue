@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
-import { SPRINTS, MILESTONES } from '@/data/seed'
+import { MAP_SPRINTS, MILESTONES } from '@/data/seed'
 
 /* 对齐旧版 renderOverview(L893-907) + renderRealtime(L1181-1186) + 视图结构 L447-485 */
 const router = useRouter()
@@ -17,14 +17,21 @@ const ovTasks = computed(() => project.tasks.length)
 const overallPct = computed(() => project.groupPct(project.stories))
 const doneCount = computed(() => project.stories.filter(s => s.status === 2).length)
 const doingCount = computed(() => project.stories.filter(s => s.status === 1).length)
+/** 完成比例:纯计数口径(与后端 /api/dashboard.percent 同口径) */
 const realtimePct = computed(() => project.stories.length ? Math.round(doneCount.value / project.stories.length * 100) : 0)
+/** 待关注/阻塞:取真实 blocked 标记数(此前是写死的 03,与库里的 0 不符) */
+const blockedCount = computed(() => project.tasks.filter(t => t.blocked).length)
 const lastUpdate = computed(() => project.log.length ? project.log[project.log.length - 1].t : '—')
 
-const sprintCards = computed(() => SPRINTS.map((sp, i) => {
-  const list = project.stories.filter(s => s.sprint === i + 1)
+/* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
+   后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
+   导致 Sprint 4+ 的故事(sprint>=4)不在任何卡片里 —— 卡片故事数之和 34 ≠ 故事总数 37,
+   而 FE-OVW-01 旧断言把「3 张卡」当成期望值钉住了该缺陷。 */
+const SPRINT_WEEKS = ['W1–W2', 'W3–W4', 'W5–W6', '后续路线']
+const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
+  const list = project.stories.filter(sp.matches)
   const d = list.filter(s => s.status === 2).length
-  const p = project.groupPct(list)
-  return { sp, list, d, p, weeks: ['W1–W2', 'W3–W4', 'W5–W6'][i] }
+  return { name: sp.name, tag: sp.tag, cls: sp.cls, list, d, p: project.groupPct(list), weeks: SPRINT_WEEKS[i] }
 }))
 </script>
 
@@ -51,16 +58,16 @@ const sprintCards = computed(() => SPRINTS.map((sp, i) => {
       <div class="stats">
         <div class="stat"><label>完成比例</label><strong>{{ realtimePct }}%</strong><span class="small">{{ doneCount }} / {{ project.stories.length }} 故事</span></div>
         <div class="stat"><label>进行中</label><strong>{{ String(doingCount).padStart(2, '0') }}</strong><span class="small">个故事</span></div>
-        <div class="stat"><label>待关注 / 阻塞</label><strong>03</strong><span class="small">个任务需确认</span></div>
+        <div class="stat"><label>待关注 / 阻塞</label><strong>{{ String(blockedCount).padStart(2, '0') }}</strong><span class="small">个任务需确认</span></div>
         <div class="stat"><label>最近更新</label><strong class="mono" style="font-size:20px">{{ lastUpdate }}</strong><span class="small">本机变更时间</span></div>
       </div>
     </div>
 
     <div class="h-sec">Sprint 进度 · 三阶段递进</div>
     <div class="sprint-grid" id="sprint-grid">
-      <div v-for="c in sprintCards" :key="c.sp.name" class="sprint" :class="c.sp.cls">
-        <div class="top"><h3>{{ c.sp.name }}</h3><span class="pct">{{ c.p }}%</span></div>
-        <div class="tagline">{{ c.sp.tag }} · {{ c.list.length }} 个故事</div>
+      <div v-for="c in sprintCards" :key="c.name" class="sprint" :class="c.cls">
+        <div class="top"><h3>{{ c.name }}</h3><span class="pct">{{ c.p }}%</span></div>
+        <div class="tagline">{{ c.tag }} · {{ c.list.length }} 个故事</div>
         <div class="bar"><i :style="{ width: c.p + '%' }"></i></div>
         <div class="meta">完成 {{ c.d }} / {{ c.list.length }} · 工时加权 {{ c.p }}% · {{ c.weeks }}</div>
       </div>

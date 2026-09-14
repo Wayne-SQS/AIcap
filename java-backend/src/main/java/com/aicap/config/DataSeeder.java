@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -33,6 +34,11 @@ import java.util.regex.Pattern;
  * - 任务:16 条;已存在的旧签名行升级为当前值(名称/负责人/工时/排期/关联/类型/依赖/状态/进度/阻塞)
  * - 画像:5 名成员的技术栈/工作能力/开发流程领域画像(各不相同);已有画像不覆盖
  * 全新空库的建表由 resources/db/schema.sql 完成,存量库补列由 {@link SchemaUpgrader} 完成。
+ *
+ * <p><b>整个播种必须在一个事务里</b>(见 {@link #run}):{@code migrateLegacyStorySeed} 会先解绑
+ * 旧任务的挂卡、再删除全部旧基线故事、最后插入新基线 —— 若中途失败而各自提交,会留下
+ * 「旧数据已删、新数据只插了一半」的库,且 {@code seedStories} 的「有行即跳过」守卫会让它
+ * 永远无法自愈(重启后仍然跳过)。包进事务后失败即整体回滚,下次启动重新完整执行。
  */
 @Slf4j
 @Component
@@ -163,6 +169,7 @@ public class DataSeeder implements ApplicationRunner {
     private static final Pattern LEGACY_STORY_ID = Pattern.compile("^M(\\d+)$");
 
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
         if (!seedOnStart) {
             log.info("数据播种已关闭(aicap.seed-on-start=false)");

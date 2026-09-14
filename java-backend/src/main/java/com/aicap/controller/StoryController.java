@@ -11,6 +11,7 @@ import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
+import com.aicap.service.IdAllocator;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,8 +29,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 用户故事/看板卡接口(对齐 FastAPI routers/stories.py)。
@@ -40,26 +39,14 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class StoryController {
 
-    /** 新故事 ID:US 命名空间(对齐 FastAPI stories.py `_next_story_id`:从 US38 起) */
-    private static final Pattern US_ID = Pattern.compile("^US(\\d+)$");
-
     private final StoryMapper storyMapper;
     private final StoryLogMapper storyLogMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
+    /** 编号分配:原为本类私有 nextStoryId(),与 TaskPoolController 的同名方法逐字重复,已集中 */
+    private final IdAllocator idAllocator;
 
     // ---------- 工具 ----------
-
-    private String nextStoryId() {
-        int max = 0;
-        for (Story s : storyMapper.selectList(null)) {
-            Matcher m = US_ID.matcher(s.getId());
-            if (m.matches()) {
-                max = Math.max(max, Integer.parseInt(m.group(1)));
-            }
-        }
-        return String.format("US%02d", max + 1);
-    }
 
     @Transactional
     void addLog(String storyId, String logType, String detail, Integer userId) {
@@ -120,7 +107,7 @@ public class StoryController {
     public StoryDtos.StoryOut create(@Valid @RequestBody StoryDtos.StoryIn body) {
         User user = Roles.writer();
         checkOwner(body.ownerId());
-        String sid = nextStoryId();
+        String sid = idAllocator.nextStoryId();
         Story story = new Story();
         story.setId(sid);
         story.setTitle(body.title().trim());

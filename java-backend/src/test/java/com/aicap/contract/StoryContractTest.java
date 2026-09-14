@@ -5,10 +5,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -118,8 +127,73 @@ class StoryContractTest extends ContractTestSupport {
                 }
             }
             assertTrue(foundMove, "PATCH 状态后应能看到 story_log(move): " + logs.body());
+            // 字段名契约:时间戳必须走 snake_case。此前 LogOut.createdAt 漏写 @JsonProperty,
+            // 项目又没配全局命名策略 → 实际输出 createdAt,前端读 l.created_at 得 undefined,
+            // 在线模式下变更记录面板时间列全空(离线走本机时间,掩盖了该缺陷)。
+            for (JsonNode l : logs.json()) {
+                assertTrue(l.has("created_at"), "日志必须输出 snake_case 的 created_at: " + l);
+                assertFalse(l.has("createdAt"), "日志不得泄漏 camelCase 的 createdAt: " + l);
+                assertTrue(l.path("created_at").asText().length() >= 19,
+                        "created_at 应为 ISO 本地日期时间(如 2026-09-14T15:32:47): " + l.path("created_at").asText());
+            }
         } finally {
             deleteStory(id);
+        }
+    }
+
+    /**
+     * 并发创建:只允许「全部成功且编号互不相同」或「明确 409」,**不得出现 500**。
+     *
+     * <p>编号来自「扫描当前最大号 +1」({@code com.aicap.service.IdAllocator}),并发下多个请求
+     * 可能算出同一个号;{@code stories.id} 是 varchar 主键,后者插入即冲突。修复前该冲突落到
+     * {@code GlobalExceptionHandler} 的兜底分支,客户端拿到 **500「服务器内部错误」**。
+     *
+     * <p>本用例钉住的**保证边界**(刻意不断言"全部成功" —— 那由「扫描最大值」这一分配方式
+     * 不提供,强断言会 flaky):<br>
+     * ① 任何响应都不得是 500;② 非成功响应只能是 409;③ 成功创建的编号互不相同。
+     *
+     * <p>彻底消除冲突需要把编号来源换成单调计数器(独立计数表 + 原子 UPDATE)或数据库序列,
+     * 属未做的架构改动,详见 {@code IdAllocator} 类尾注释。
+     */
+    @Test
+    void createStory_concurrently_never500_andIdsDistinct() throws Exception {
+        int workers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(workers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<ApiResponse>> futures = new ArrayList<>();
+        List<String> created = new ArrayList<>();
+        try {
+            for (int i = 0; i < workers; i++) {
+                String title = uniq("CT并发故事");
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return post("/api/stories", token(USER_ADMIN), json(map("title", title)));
+                }));
+            }
+            // 同时起跑,把「算出同一个号」的窗口放到最大
+            start.countDown();
+
+            int conflicts = 0;
+            for (Future<ApiResponse> f : futures) {
+                ApiResponse r = f.get(60, TimeUnit.SECONDS);
+                assertNotEquals(500, r.status(), "并发创建不得返回 500: " + r.body());
+                if (r.status() == 200) {
+                    created.add(r.json().path("id").asText());
+                } else {
+                    assertEquals(409, r.status(), "非 200 的响应只允许是 409(编号冲突): " + r.body());
+                    assertTrue(r.body().contains("detail"), "409 必须带可操作的 detail: " + r.body());
+                    conflicts++;
+                }
+            }
+            assertTrue(created.size() >= 1, "并发创建至少应有一条成功: created=" + created + " conflicts=" + conflicts);
+            assertEquals(created.size(), new HashSet<>(created).size(),
+                    "成功创建的编号必须互不相同(否则就是编号重复落库): " + created);
+        } finally {
+            pool.shutdownNow();
+            pool.awaitTermination(10, TimeUnit.SECONDS);
+            for (String id : created) {
+                deleteStory(id);
+            }
         }
     }
 

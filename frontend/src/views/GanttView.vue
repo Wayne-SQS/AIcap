@@ -4,6 +4,7 @@ import { useProjectStore, taskRefs } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MILESTONES } from '@/data/seed'
+import { memberLabel } from '@/data/memberIdentity'
 import GanttRow from '@/components/gantt/GanttRow.vue'
 import TaskEditorDialog from '@/components/gantt/TaskEditorDialog.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
@@ -182,7 +183,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
 
     <div class="legend" id="gantt-legend">
       <span v-for="m in project.members" :key="m.id" class="chip">
-        <span class="sw" :style="{ background: `var(--${m.accent || ['green', 'orange', 'blue', 'pink', 'gray'][m.id]})` }"></span>P{{ m.id + 1 }} {{ m.name }}
+        <span class="sw" :style="{ background: `var(--${m.accent || ['green', 'orange', 'blue', 'pink', 'gray'][m.id]})` }"></span>{{ memberLabel(m.id) }} {{ m.name }}
       </span>
       <span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span>
       <span class="chip"><span class="diamond-key"></span>菱形 = 里程碑</span>

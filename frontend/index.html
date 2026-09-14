@@ -7,7 +7,14 @@
 <title>爱管理 · 团队工作台</title>
 </head>
 <body>
-<script>window.__AICAP_API_BASE__='http://127.0.0.1:8080';</script>
+<!-- API 基址不在这里硬编码:解析统一由 src/api/client.js 的三级回退负责
+     (window.__AICAP_API_BASE__ > VITE_API_BASE > http://127.0.0.1:8080)。
+     此前这里有一行 `window.__AICAP_API_BASE__='http://127.0.0.1:8080'`,它有两个问题(ENV-D02):
+       1) 在 E2E 的 addInitScript 之后执行,会覆盖注入值 —— FE-OFF-01 不得不改用
+          Object.defineProperty 不可写属性来变通;
+       2) 让 .env.* 里的 VITE_API_BASE 永远读不到,部署时改环境变量无效。
+     去掉后两条都自然解决,且开发/生产的默认地址不变(.env.development 显式给出 8080,
+     .env.production 留空 → 回落到 client.js 的默认值)。 -->
 <div id="app"></div>
 <script type="module" src="/src/main.js"></script>
 </body>

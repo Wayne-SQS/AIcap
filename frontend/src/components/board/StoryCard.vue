@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { statuses, activities } from '@/constants'
+import { memberLabel } from '@/data/memberIdentity'
 
 /* 看板卡片:.card[data-id][draggable] + 子任务工时加权进度徽章 .subprog(血缘口径保留)
    map 模式:去拖拽 + 加 .mapcard 固定卡高 + 状态旁显示 Sprint(对齐 legacy 新版卡片)
@@ -46,7 +47,7 @@ const ownerName = computed(() => (props.story.owner == null ? '未分配' : proj
       <span>A{{ story.activity }} · {{ activities[story.activity - 1] }}</span>
       <span class="owner">
         <span v-if="sp !== null" class="subprog" :class="{ full: sp >= 100 }" :title="badgeTitle">▣ {{ subs.filter(t => t.status === 2).length }}/{{ subs.length }} · {{ sp }}%</span>
-        <span class="avatar" :class="'a' + (story.owner ?? 4)">{{ story.owner == null ? '—' : 'P' + (story.owner + 1) }}</span>
+        <span class="avatar" :class="'a' + (story.owner ?? 4)">{{ story.owner == null ? '—' : memberLabel(story.owner) }}</span>
         <span>{{ ownerName }}</span>
       </span>
     </div>

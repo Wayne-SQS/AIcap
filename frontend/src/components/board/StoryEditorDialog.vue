@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
@@ -7,6 +7,7 @@ import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionG
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { statuses } from '@/constants'
+import { memberUserId } from '@/data/memberIdentity'
 import UndoneChoiceDialog from './UndoneChoiceDialog.vue'
 
 /* 故事编辑弹窗:结构对齐旧版 L692-725,逻辑对齐 openEditor(L934-948)/
@@ -24,14 +25,17 @@ const undoneRef = ref(null)
 const editing = ref(null)
 const form = reactive({ title: '', description: '', acceptance: '', priority: 'Must', status: '0', owner: '', sprint: '1', activity: '2' })
 
-/** 离线新建编号:US01–US37 基线之后顺延;同时兼容存量旧编号(M01–M23) */
-function nextStoryId() {
-  const max = project.stories.reduce((acc, x) => {
-    const n = +String(x.id).slice(2) || +String(x.id).slice(1) || 0
-    return Math.max(acc, n)
-  }, 37)
-  return 'US' + String(max + 1).padStart(2, '0')
-}
+/* 删除故事的后端口径是 admin/owner(StoryController.delete → Roles.reviewer);
+   原先只判 viewer,导致 member 看到可点的「删除故事」、点击必然 403。
+   离线演示后端不可达,不参与判定,保持原有可删行为。 */
+const canDelete = computed(() => !session.apiMode || session.canReview)
+const deleteTitle = computed(() => {
+  if (canDelete.value) return ''
+  return session.isViewer ? READONLY_TITLE : '仅管理员/负责人可删除故事'
+})
+
+/* 离线新建编号由 store 统一分配(project.nextStoryId,与后端 US%02d 同口径);
+   原在此处的本地实现已上提到 store,与需求池「移入看板」共用一处,避免规则漂移 */
 
 function open(id = null, status = 0, filters = {}) {
   if (guard('新建或编辑故事')) return
@@ -65,7 +69,7 @@ async function submit() {
   const payload = {
     title: form.title.trim(), description: form.description.trim(), acceptance: form.acceptance.trim(),
     priority: form.priority, status: +form.status,
-    owner_id: form.owner === '' ? null : +form.owner + 1,
+    owner_id: memberUserId(form.owner === '' ? null : +form.owner),
     sprint: +form.sprint, activity: +form.activity
   }
   if (!payload.title || !payload.description || !payload.acceptance) { notify('请填写标题、用户故事和验收条件'); return }
@@ -92,6 +96,35 @@ async function submit() {
       }
     }
   }
+  /* 负责人变更:默认同步未完成子任务的负责人(与上方 Sprint 级联同口径)。
+     故事属需求层、任务负责人属执行层(TaskEditorDialog 已声明两者可不同,基线数据里 US25/US31/US34
+     三处的负责人本就不同),因此不静默改写:确认后同步,取消则仅改故事。
+     新负责人为「未分配」时不级联——tasks.owner_id 在后端是 NOT NULL,无法级联为空。 */
+  if (editing.value) {
+    const old = project.stories.find(x => x.id === editing.value)
+    const newOwner = form.owner === '' ? null : +form.owner
+    if (old && old.owner !== newOwner && newOwner !== null) {
+      const subs = project.subTasksOf(editing.value)
+      const undone = subs.filter(t => t.status !== 2 && t.status !== 3)
+      if (undone.length) {
+        const from = old.owner == null ? '未分配' : project.memberName(old.owner)
+        const ok = confirm(
+          `该卡负责人由「${from}」变更为「${project.memberName(newOwner)}」。\n` +
+          `默认同步 ${undone.length} 条未完成子任务的负责人；已完成/已取消的 ${subs.length - undone.length} 条保留原记录，不追溯历史。\n` +
+          `选择「取消」则仅修改故事本身，子任务负责人保持不变。确认同步？`
+        )
+        if (ok) {
+          for (const t of undone) {
+            t.owner = newOwner
+            if (session.apiMode) {
+              try { await tasksApi.patch(t.id, { owner_id: memberUserId(newOwner) }) }
+              catch (err) { notify('子任务 ' + t.id + ' 负责人同步失败:' + err.message) }
+            }
+          }
+        }
+      }
+    }
+  }
   if (session.apiMode) {
     try {
       if (editing.value) await storiesApi.patch(editing.value, payload)
@@ -101,7 +134,7 @@ async function submit() {
       notify((editing.value ? '已更新' : '已创建') + ' · 已同步到服务器')
     } catch (err) { notify(err.message) }
   } else {
-    const s = { id: editing.value || nextStoryId() }
+    const s = { id: editing.value || project.nextStoryId() }
     for (const k of ['title', 'description', 'acceptance', 'priority']) s[k] = payload[k]
     for (const k of ['status', 'sprint', 'activity']) s[k] = payload[k]
     s.owner = form.owner === '' ? null : +form.owner
@@ -122,6 +155,8 @@ async function submit() {
 async function onDelete() {
   if (!editing.value) return
   if (guard('删除故事')) return
+  /* 纵深防御:按钮已禁用,仍拦住程序化/键盘触发的越权删除(后端同样返回 403) */
+  if (!canDelete.value) { notify('仅管理员/负责人可删除故事'); return }
   const t = project.stories.find(x => x.id === editing.value)
   if (!t) return
   const subs = project.subTasksOf(editing.value)
@@ -188,7 +223,7 @@ defineExpose({ open })
         </select></label>
         <label class="field">验收条件<textarea name="acceptance" v-model="form.acceptance" required></textarea></label>
         <div class="actions">
-          <button v-if="editing" type="button" id="del" class="danger" style="margin-right:auto" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="onDelete">删除故事</button>
+          <button v-if="editing" type="button" id="del" class="danger" style="margin-right:auto" :disabled="!canDelete" :title="deleteTitle" @click="onDelete">删除故事</button>
           <button type="button" id="cancel" @click="close">取消</button>
           <button type="submit" class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">保存故事</button>
         </div>

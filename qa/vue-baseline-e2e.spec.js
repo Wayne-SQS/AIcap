@@ -293,12 +293,13 @@ test.describe('FE-AUTH 登录与会话', () => {
  * FE-OVW · 项目总览
  * ================================================================================== */
 test.describe('FE-OVW 项目总览', () => {
-  test('[FE-OVW-01] 概览统计卡与后端基线一致(故事 37 / 任务 16 / 成员 05)', async ({ page, request }) => {
+  test('[FE-OVW-01] 概览统计卡与后端基线一致(故事 37 / 任务 16 / 成员 05),Sprint 分片含 4+ 且求和自洽', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
-    const [stories, tasks, users] = await Promise.all([
+    const [stories, tasks, users, dash] = await Promise.all([
       apiGet(request, token, '/api/stories'),
       apiGet(request, token, '/api/tasks'),
-      apiGet(request, token, '/api/auth/users')
+      apiGet(request, token, '/api/auth/users'),
+      apiGet(request, token, '/api/dashboard')
     ])
     expect(stories.length, '故事基线应为 US01–US37 共 37 条').toBe(37)
     expect(tasks.length, '任务基线应为 T01–T16 共 16 条').toBe(16)
@@ -314,27 +315,56 @@ test.describe('FE-OVW 项目总览', () => {
     await expect(stats.filter({ hasText: '团队成员' }).locator('strong'))
       .toHaveText(String(users.length).padStart(2, '0'))
     await expect(stats.filter({ hasText: '团队成员' }).locator('span.small')).toHaveText('人 · 含只读查看者')
-    // Sprint 分片卡:3 个 Sprint,故事条数按基线分布
-    await expect(page.locator('#sprint-grid .sprint')).toHaveCount(3)
-    await expect(page.locator('#sprint-grid .sprint').first().locator('.tagline'))
-      .toContainText(`${stories.filter(s => s.sprint === 1).length} 个故事`)
+    // 待关注/阻塞:必须是真实 blocked 计数,不得是写死常量
+    await expect(stats.filter({ hasText: '待关注' }).locator('strong'))
+      .toHaveText(String(tasks.filter(t => t.blocked).length).padStart(2, '0'))
+
+    /* Sprint 分片:必须覆盖全部故事。此前用 SPRINTS(仅 3 片)按 sprint===i+1 过滤,
+       Sprint 4+ 的 3 条故事不进任何卡片 → 卡片故事数之和 34 ≠ 总数 37。
+       现统一到 MAP_SPRINTS 4 片,与故事地图切片、看板筛选下拉、后端 by_sprint 的 4 桶一致。 */
+    const cards = page.locator('#sprint-grid .sprint')
+    await expect(cards).toHaveCount(4)
+    await expect(cards.last().locator('h3')).toHaveText('Sprint 4+')
+    const cardCounts = await cards.locator('.tagline').evaluateAll(
+      els => els.map(e => Number(/·\s*(\d+)\s*个故事/.exec(e.textContent)[1])))
+    expect(cardCounts.reduce((a, b) => a + b, 0),
+      '各 Sprint 卡片故事数之和必须等于故事总数(不得漏掉 Sprint 4+)').toBe(stories.length)
+    // 每片的故事数与后端 by_sprint 的 total 逐桶对齐(1..4;第 4 桶在基线上等价于 sprint>=4)
+    const bucketTotal = i => dash.by_sprint.find(b => b.sprint === i + 1).total
+    expect(cardCounts.slice(0, 3)).toEqual([bucketTotal(0), bucketTotal(1), bucketTotal(2)])
+    expect(cardCounts[3],
+      'Sprint 4+ 卡片数应等于后端第 4 桶').toBe(bucketTotal(3))
   })
 
-  test('[FE-OVW-02] 完成比例与总完成度为 0–100 数字,且与状态/工时加权口径一致', async ({ page, request }) => {
+  test('[FE-OVW-02] 完成比例与总完成度为 0–100 数字,且与状态/工时加权口径一致,并与 /api/dashboard 交叉校验', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
-    const [stories, tasks] = await Promise.all([
+    const [stories, tasks, dash] = await Promise.all([
       apiGet(request, token, '/api/stories'),
-      apiGet(request, token, '/api/tasks')
+      apiGet(request, token, '/api/tasks'),
+      apiGet(request, token, '/api/dashboard')
     ])
     const done = stories.filter(s => s.status === 2).length
     const expectedRealtime = Math.round(done / stories.length * 100)
     const expectedWeighted = expectedWeightedPct(stories, tasks)
 
+    /* 交叉校验:同一页上有两套「完成度」口径,必须各自与权威来源对齐,不允许静默漂移 ——
+       ① 纯计数口径(完成比例) 必须等于后端 /api/dashboard 的 total/done/doing/percent;
+       ② 工时加权口径(总完成度 / Sprint 卡) 由 project.js groupPct 计算,后端没有对应端点,
+          只能按测试侧独立复算的 expectedWeightedPct 校验(见上方断言)。
+       此前两套口径都存在于前端、后端也有一个 /api/dashboard,但没有任何测试把它们钉在一起。 */
+    expect(dash.total, '后端 dashboard.total 应等于故事列表长度').toBe(stories.length)
+    expect(done, '后端 dashboard.done 应等于 status=2 的故事数').toBe(dash.done)
+    expect(dash.doing, '后端 dashboard.doing 应等于 status=1 的故事数')
+      .toBe(stories.filter(s => s.status === 1).length)
+    expect(expectedRealtime, '纯计数口径应与后端 dashboard.percent 一致').toBe(dash.percent)
+
     await loginAndOpen(page, '/#/overview', ADMIN)
 
     const realtime = page.locator('#realtime .stat').filter({ hasText: '完成比例' })
-    await expect(realtime.locator('strong')).toHaveText(`${expectedRealtime}%`)
-    await expect(realtime.locator('span.small')).toHaveText(`${done} / ${stories.length} 故事`)
+    await expect(realtime.locator('strong')).toHaveText(`${dash.percent}%`)
+    await expect(realtime.locator('span.small')).toHaveText(`${dash.done} / ${dash.total} 故事`)
+    await expect(page.locator('#realtime .stat').filter({ hasText: '进行中' }).locator('strong'))
+      .toHaveText(String(dash.doing).padStart(2, '0'))
 
     const overall = page.locator('#ov-percent')
     await expect(overall).toHaveText(`${expectedWeighted}%`)
@@ -771,8 +801,78 @@ test.describe('FE-BRD 用户故事看板', () => {
       await expect(rows.nth(1).locator('b')).toHaveText(logs[1].story_id)
       await expect(rows.last().locator('b')).toHaveText(logs[Math.min(logs.length, 50) - 1].story_id)
     }
+    // 时间列(FE-D06):store 从 created_at 取 HH:MM:SS 渲染 <time>。此前后端 LogOut.createdAt
+    // 漏写 @JsonProperty(项目无全局 snake_case 策略)→ 实际输出 createdAt,前端读 undefined
+    // → 在线模式下时间列全空、总览「最近更新」也空白;而旧断言只查 <b> 的文本与 class,
+    // 从不查 <time>,所以这条断裂长期无人发现。此处同时钉住「非空」与「与后端字段一致」。
+    const firstTime = await rows.first().locator('time').textContent()
+    expect(firstTime, '时间列不得为空(依赖 created_at 契约)').toMatch(/^\d{2}:\d{2}:\d{2}$/)
+    expect(firstTime).toBe(String(logs[0].created_at).slice(11, 19))
+    const allTimes = await page.locator('#logbody .logrow time').allTextContents()
+    expect(allTimes.every(t => /^\d{2}:\d{2}:\d{2}$/.test(t)), '每条日志都应渲染出时间').toBeTruthy()
+
     // 面板标题随模式变化:在线模式应声明数据来自服务器审计日志
     await expect(panel.locator('summary')).toContainText('服务器审计日志')
+  })
+
+  test('[FE-BRD-07] 改故事负责人级联同步未完成子任务(确认后落库,逐字段还原)', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const users = await apiGet(request, token, '/api/auth/users')
+    const liruiming = users.find(u => u.display_name === ADMIN)
+    const sunqiushi = users.find(u => u.display_name === MEMBER)
+
+    /* 夹具:US10 挂着 feature 子任务 T07(见 seed.js TASK_CARD_LINKS),两者负责人一致、任务未完成。
+       后端没有 POST /api/tasks,任务无法造数,只能借用基线故事+任务对,结束时逐字段还原。 */
+    const STORY = 'US10'
+    const TASK = 'T07'
+    const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+    const beforeTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+    expect(beforeTask.kanban_card_id, `夹具前提:${TASK} 必须挂在 ${STORY} 上`).toBe(STORY)
+    expect(beforeTask.task_type, '夹具前提:必须是 feature 子任务').toBe('feature')
+    expect(beforeTask.status, `夹具前提:${TASK} 未完成才会被级联`).not.toBe(2)
+    expect(beforeStory.owner_id, '夹具前提:基线上故事与子任务负责人一致').toBe(beforeTask.owner_id)
+
+    let restored = false
+    try {
+      await loginAndOpen(page, '/#/board', ADMIN)
+      await openBoardTab(page)
+      await searchBoard(page, STORY)
+
+      // 改负责人 → 接受同步确认 → 未完成子任务的负责人应跟着落库
+      const dialog = await openStoryEditor(page, STORY)
+      await dialog.locator('select[name=owner]').selectOption(String(liruiming.id - 1))
+      page.once('dialog', d => d.accept())
+      await dialog.locator('button[type=submit]').click()
+      await expect(dialog).toBeHidden()
+      await expect(page.locator('#toast')).toContainText('已更新 · 已同步到服务器')
+
+      const storyAfter = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const taskAfter = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(storyAfter.owner_id, '故事负责人应落库').toBe(liruiming.id)
+      expect(taskAfter.owner_id, '未完成子任务负责人应被级联同步(一体化:故事改动跟随到执行层)').toBe(liruiming.id)
+
+      // 刷新后改回原负责人 → 再次接受确认 → 故事与子任务逐字段还原
+      await page.reload()
+      await openBoardTab(page)
+      await searchBoard(page, STORY)
+      const reopened = await openStoryEditor(page, STORY)
+      await expect(reopened.locator('select[name=owner]')).toHaveValue(String(liruiming.id - 1))
+      await reopened.locator('select[name=owner]').selectOption(String(sunqiushi.id - 1))
+      page.once('dialog', d => d.accept())
+      await reopened.locator('button[type=submit]').click()
+      await expect(reopened).toBeHidden()
+
+      const storyBack = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const taskBack = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(storyBack.owner_id, `${STORY} 负责人应还原`).toBe(beforeStory.owner_id)
+      expect(taskBack.owner_id, `${TASK} 负责人应还原`).toBe(beforeTask.owner_id)
+      restored = true
+    } finally {
+      if (!restored) {
+        await apiSend(request, token, 'PATCH', `/api/stories/${STORY}`, { owner_id: beforeStory.owner_id })
+        await apiSend(request, token, 'PATCH', `/api/tasks/${TASK}`, { owner_id: beforeTask.owner_id })
+      }
+    }
   })
 })
 
@@ -1259,6 +1359,70 @@ test.describe('FE-UML UML 图', () => {
     expect(text).toContain('/api/stories')
     expect(text).toContain('US01-US37 共 37 条故事基线')
   })
+
+  test('[FE-UML-04] 用例标注由故事数据派生:无幽灵编号,新增故事立即反映到「未映射」', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const stories = await apiGet(request, token, '/api/stories')
+    const storyIds = new Set(stories.map(s => s.id))
+
+    await loginAndOpen(page, '/#/uml', ADMIN)
+
+    /* ① 节点上的 US 标注必须是**派生**的:每个编号都要真实存在。
+       此前 ref 是手写常量(如 'US02 / US08 / US16'),删掉故事后它会变成幽灵编号继续挂在椭圆上。 */
+    const refs = await page.locator('.usecase-svg .story-ref').allTextContents()
+    expect(refs.length, '15 个用例都应带 US 标注').toBe(15)
+    const labelled = new Set()
+    for (const raw of refs) {
+      for (const part of String(raw).split('/')) {
+        const range = /^(US\d+)\s*-\s*(US\d+)$/.exec(part.trim())
+        if (range) {
+          const a = Number(range[1].slice(2)), b = Number(range[2].slice(2))
+          for (let n = a; n <= b; n++) labelled.add('US' + String(n).padStart(2, '0'))
+        } else if (/^US\d+$/.test(part.trim())) {
+          labelled.add(part.trim())
+        }
+      }
+    }
+    expect(labelled.size, '应能从标注中解析出故事编号').toBeGreaterThan(0)
+    expect([...labelled].filter(id => !storyIds.has(id)),
+      '节点标注不得出现基线中不存在的故事编号(幽灵编号)').toEqual([])
+
+    /* ② 自洽:被标注的故事 ∪ 未映射的故事 == 全部故事(既不重复也不漏计) */
+    const readUnmapped = async () => {
+      await expect(page.locator('#uml-unmapped')).toBeVisible()
+      const t = await page.locator('#uml-unmapped').textContent()
+      return Number(/故事\s*(\d+)\s*条/.exec(t)[1])
+    }
+    const before = await readUnmapped()
+    expect(labelled.size + before, '标注数 + 未映射数 必须等于故事总数').toBe(stories.length)
+
+    /* ③ 跟随变化:新建一个故事后,UML 视图必须立刻反映(未映射 +1 且列出该编号)。
+       这是「用例图跟随故事变化」的可验证口径 —— 布局/归属是需求设计,但「有故事没进用例图」必须可见。 */
+    const title = uniq('QA-UML-UNMAPPED')
+    const created = await apiSend(request, token, 'POST', '/api/stories', {
+      title,
+      description: '作为测试工程师，我希望新建故事后 UML 视图立刻反映未映射编号，以便验证用例图跟随数据变化',
+      acceptance: '未映射计数 +1 且提示文本包含该编号；用例结束前删除',
+      priority: 'Could', sprint: 1, activity: 2, status: 0, owner_id: 1
+    })
+    expect(created.status, '造数:创建故事应成功').toBeLessThan(300)
+    const newId = created.body.id
+    let cleaned = false
+    try {
+      await page.reload()
+      await expect(page.locator('.usecase-svg')).toBeVisible()
+      expect(await readUnmapped(), '新增故事应使未映射计数 +1').toBe(before + 1)
+      await expect(page.locator('#uml-unmapped')).toContainText(newId)
+    } finally {
+      await cleanupStory(request, token, newId)
+      cleaned = true
+    }
+    expect(cleaned, '新增的故事必须被清理').toBeTruthy()
+    // 清理后回到基线口径
+    await page.reload()
+    await expect(page.locator('.usecase-svg')).toBeVisible()
+    expect(await readUnmapped(), '清理后未映射计数应回到基线').toBe(before)
+  })
 })
 
 /* ==================================================================================
@@ -1443,14 +1607,19 @@ test.describe('FE-OFF 离线演示模式', () => {
     const errors = []
     page.on('pageerror', e => errors.push(e.message))
 
-    // 把 API 基址指到无人监听的端口 + 预热一份旧基线(M01–M23)缓存
-    // 注意:frontend/index.html 里有一段内联脚本 `window.__AICAP_API_BASE__='http://127.0.0.1:8080'`,
-    // 它在 addInitScript 之后执行并会覆盖掉赋的值;因此这里定义成不可写属性,
-    // 让内联脚本的赋值在非严格模式下静默失效,等价于"API 基址指向死端口"。
+    /* 先钉住 ENV-D02 的修复前提:页面初始**不存在** window.__AICAP_API_BASE__。
+       此前 index.html 有一行内联脚本硬编码该全局,它有两个后果:在 addInitScript 之后执行
+       会覆盖注入值(FE-OFF-01 只能改用 Object.defineProperty 不可写属性变通),
+       且让 .env.* 的 VITE_API_BASE 永远读不到。现在该行已删除,由 client.js 三级回退解析。 */
+    await page.goto('/#/board')
+    expect(await page.evaluate(() => window.__AICAP_API_BASE__),
+      'index.html 不得再硬编码 __AICAP_API_BASE__(否则 VITE_API_BASE 永远失效)').toBeUndefined()
+
+    /* 把 API 基址指到无人监听的端口 + 预热一份旧基线(M01–M23)缓存。
+       修复后这里用**普通可写赋值**即可生效;若那行内联脚本回归,赋值会被覆盖、
+       baseUrl 变回 8080、健康检查成功 → 本用例随即失败,故它同时充当回归锚点。 */
     await page.addInitScript(() => {
-      Object.defineProperty(window, '__AICAP_API_BASE__', {
-        value: 'http://127.0.0.1:59999', writable: false, configurable: false, enumerable: true
-      })
+      window.__AICAP_API_BASE__ = 'http://127.0.0.1:59999'
     })
     await page.goto('/#/board')
     await page.evaluate(() => {
