@@ -54,7 +54,6 @@ import java.util.regex.Pattern;
 public class GitHubActivitySyncService {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubActivitySyncService.class);
-    private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_INSTANT;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Pattern TASK_PATTERN = Pattern.compile("\\bT\\d{2}\\b");
     private static final Pattern SCOPE_PATTERN = Pattern.compile("^\\s*[a-zA-Z]+(?:\\(([^)]+)\\))?:");
@@ -161,7 +160,7 @@ public class GitHubActivitySyncService {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         List<JsonNode> rows = getPages("/repos/{repo}/commits",
-                Map.of("since", iso(from), "until", iso(to)), "sha");
+                Map.of("since", sinceIso(from), "until", untilIso(to)), "sha");
         for (JsonNode c : rows) {
             String sha = c.path("sha").asText("");
             if (sha.isBlank()) continue;
@@ -172,6 +171,8 @@ public class GitHubActivitySyncService {
             String email = ca.path("author").path("email").asText("");
             String name = ca.path("author").path("name").asText("");
             LocalDateTime at = parseTime(ca.path("author").path("date").asText(""));
+            // 服务端二次过滤:不信任 API 边界(防御时区/边界误差),只保留本地日期范围内的提交
+            if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
             ActivityRecord r = baseRecord(login, email, name, at, members);
             r.setActivityType("commit");
             r.setTitle(truncate(title, 200));
@@ -181,7 +182,7 @@ public class GitHubActivitySyncService {
             r.setGithubEventId(sha);
             r.setTaskId(resolveTask(title + " " + message));
             if (r.getUserId() == null) {
-                warnings.add("commit " + sha.substring(0, 7) + " 作者无法映射到系统成员(" + login + "/" + email + "),已跳过");
+                warnings.add("commit " + truncate(sha, 7) + " 作者无法映射到系统成员(" + login + "/" + email + "),已跳过");
                 continue;
             }
             out.add(r);
@@ -268,7 +269,7 @@ public class GitHubActivitySyncService {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         List<JsonNode> rows = getPages("/repos/{repo}/issues",
-                Map.of("state", "all"), "number");
+                Map.of("state", "all", "since", sinceIso(from)), "number");
         for (JsonNode i : rows) {
             if (i.has("pull_request")) continue;   // GitHub issues 端点含 PR,跳过避免与 pulls 重复
             String created = i.path("created_at").asText("");
@@ -443,8 +444,17 @@ public class GitHubActivitySyncService {
 
     // ---------- 小工具 ----------
 
-    private String iso(LocalDate d) {
-        return d.atStartOfDay().atOffset(ZoneOffset.UTC).format(ISO);
+    /**
+     * GitHub 按 UTC 过滤 since/until。
+     * 必须按本地(+8)日界换算,否则同步"今天"会漏掉本地当天 08:00 后的提交:
+     * since = 起始日本地 00:00 → UTC;until = 结束日次日本地 00:00 → UTC(含结束日整天)。
+     */
+    private String sinceIso(LocalDate d) {
+        return d.atStartOfDay().atOffset(ZoneOffset.ofHours(8)).toInstant().toString();
+    }
+
+    private String untilIso(LocalDate d) {
+        return d.plusDays(1).atStartOfDay().atOffset(ZoneOffset.ofHours(8)).toInstant().toString();
     }
 
     private String qs(Map<String, String> q) {

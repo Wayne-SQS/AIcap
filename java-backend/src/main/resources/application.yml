@@ -69,5 +69,7 @@ github:
   user-mapping-json: ${GITHUB_USER_MAPPING:}
   # 定时自动同步间隔(小时),0=不自动
   auto-sync-hours: ${GITHUB_AUTO_SYNC_HOURS:0}
-  max-pages: 2
-  review-pr-limit: 10
+  # 单类事件最大拉取页数(每页100条);活跃仓库建议调大
+  max-pages: 5
+  # 单次同步拉取 Review 的 PR 数上限(每 PR 1 个请求)
+  review-pr-limit: 30

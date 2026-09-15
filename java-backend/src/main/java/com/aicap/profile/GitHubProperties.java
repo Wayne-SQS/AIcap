@@ -33,8 +33,8 @@ public class GitHubProperties {
     private String userMappingJson = "";
     /** 定时自动同步回溯窗口(小时);0=不自动 */
     private int autoSyncHours = 0;
-    /** 单次同步最大拉取页数(防超时/防限流,默认每类 2 页) */
-    private int maxPages = 2;
-    /** 单次同步拉取 PR 的 Reviews 上限(每个 PR 1 个请求,默认 10 个 PR) */
-    private int reviewPrLimit = 10;
+    /** 单次同步最大拉取页数(每类最多 maxPages×100 条;活跃仓库超出会截断,可在同步结果看到 pulled 数量核对) */
+    private int maxPages = 5;
+    /** 单次同步拉取 PR 的 Reviews 上限(每个 PR 1 个请求,默认 30 个 PR;超出范围的 review 留待下轮) */
+    private int reviewPrLimit = 30;
 }
