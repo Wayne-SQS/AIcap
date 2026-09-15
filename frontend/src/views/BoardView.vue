@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
 import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
+import { currentWeek, todayText } from '@/data/planCalendar'
 import BoardSummary from '@/components/board/BoardSummary.vue'
 import BoardToolbar from '@/components/board/BoardToolbar.vue'
 import StoryCard from '@/components/board/StoryCard.vue'
@@ -25,6 +26,25 @@ const search = ref('')
 const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
+
+/* 地图呈现层(纯展示,不落到任何数据):
+   density 详细/总览 —— 总览把 37 张 148px 卡压成 22px 小矩形,四个切片一屏看全;
+   skin    马甲图层 —— 默认「紧急程度」,地图最该先看到的就是风险分布;
+   sortBy  格内排序 —— 默认保持原次序(基线即 US01→US37),不重新发明顺序 */
+const density = ref('detail')
+const skin = ref('urgency')
+const sortBy = ref('origin')
+
+/* 「现在」锚点:全应用唯一定义在 data/planCalendar.js,这里只负责注入与展示 */
+const nowWeek = computed(() => currentWeek())
+const today = computed(() => todayText(nowWeek.value))
+
+/* 切换到总览时把地图滚进视野:总览的目的就是"一屏看全全局",
+   若还要用户自己往下滚,这个功能等于没达成目的 */
+function onDensity(v) {
+  density.value = v
+  if (v === 'compact') nextTick(() => document.getElementById('mappanel')?.scrollIntoView({ block: 'start' }))
+}
 
 /* 当前筛选范围:搜索/迭代/负责人 三条件合并;Sprint 4+ 收纳 sprint>=4 的后续路线 */
 const data = computed(() => {
@@ -119,7 +139,11 @@ async function resetDemo() {
     </div>
 
     <BoardSummary :data="data" :total-stories="project.stories.length" />
-    <BoardToolbar v-model:board-view="boardView" v-model:search="search" v-model:sprint="sprint" v-model:owner="owner" />
+    <BoardToolbar
+      v-model:board-view="boardView" v-model:search="search" v-model:sprint="sprint" v-model:owner="owner"
+      :density="density" @update:density="onDensity"
+      v-model:skin="skin" v-model:sort-by="sortBy" :today="today"
+    />
 
     <div id="boardpanel" role="tabpanel" aria-labelledby="boardtab" :hidden="boardView !== 'board'">
       <div class="board" id="board">
@@ -144,7 +168,11 @@ async function resetDemo() {
       </div>
     </div>
     <div id="mappanel" role="tabpanel" aria-labelledby="maptab" :hidden="boardView !== 'map'">
-      <StoryMapGrid :data="data" :sprint="sprint" @open="openEditor($event)" />
+      <StoryMapGrid
+        :data="data" :sprint="sprint" :density="density" :skin="skin"
+        :sort-by="sortBy" :now-week="nowWeek"
+        @open="openEditor($event)"
+      />
     </div>
 
     <div class="footer">

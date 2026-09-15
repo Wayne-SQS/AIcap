@@ -164,6 +164,46 @@ function expectedWeightedPct(stories, tasks) {
   return totalW ? Math.round(doneW / totalW * 100) : 0
 }
 
+/* ==================================================================================
+ * 故事地图「马甲」口径:在前端 data/planCalendar.js 之外独立复算一遍,
+ * 用后端真实数据推导期望分档,避免把 10/11/11/3/2 这类数字写死(基线漂移会误报)。
+ * ================================================================================== */
+
+/** QA 注入的「今天」(前端 window.__AICAP_TODAY__,与 __AICAP_API_BASE__ 同一注入约定)。
+ *  不注入的话这套断言会随真实日期漂移:9 月里「逾期 10」到 10 月就变成 20。 */
+const QA_TODAY = '2026-09-15'
+const QA_NOW_WEEK = 3
+
+/** 每 2 周一个 Sprint:W1–W2=S1、W3–W4=S2、W5–W6=S3(与 seed.js derivedTaskSprints 同式) */
+const SPRINT_END_WEEK = { 1: 2, 2: 4, 3: 6 }
+const URGENCY_GLYPH = { overdue: '!', due: '▲', soon: '·', later: '○', roadmap: '?', done: '✓' }
+
+/** 故事的截止周:优先取所挂子任务的最晚计划周,无子任务退回切片末周;Sprint 4+ 无排期 */
+function deadlineWeekOf(story, tasks) {
+  const subs = featureSubs(tasks, story.id)
+  if (subs.length) return Math.max(...subs.map(t => t.week_end))
+  return SPRINT_END_WEEK[story.sprint] ?? null
+}
+
+/** 紧急度档位:g = 截止周 − 当前周;<0 逾期、=0 本周到期、1–2 临近、≥3 宽松 */
+function urgencyKeyOf(story, tasks, nowWeek = QA_NOW_WEEK) {
+  if (story.status === 2) return 'done'
+  const d = deadlineWeekOf(story, tasks)
+  if (d == null) return 'roadmap'
+  const gap = d - nowWeek
+  if (gap < 0) return 'overdue'
+  if (gap === 0) return 'due'
+  if (gap <= 2) return 'soon'
+  return 'later'
+}
+
+/** 注入「今天」并把看板打开到故事地图(默认 admin 在线登录) */
+async function openMapWithToday(page, today = QA_TODAY, user = ADMIN) {
+  await page.addInitScript(d => { window.__AICAP_TODAY__ = d }, today)
+  await loginAndOpen(page, '/#/board', user)
+  await expect(page.locator('#map .card').first()).toBeVisible()
+}
+
 /** 生成一个最小但结构合法的 MP3(ID3v2 头 + MPEG1 Layer III 静音帧),用于音频上传用例 */
 function writeTempMp3(fileName) {
   const id3v2 = Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -873,6 +913,242 @@ test.describe('FE-BRD 用户故事看板', () => {
         await apiSend(request, token, 'PATCH', `/api/tasks/${TASK}`, { owner_id: beforeTask.owner_id })
       }
     }
+  })
+
+  test('[FE-BRD-08] 总览密度:37 条故事一条不丢,整图由 2730px 压到一屏以内', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const stories = await apiGet(request, token, '/api/stories')
+    await openMapWithToday(page)
+
+    // 默认详细态:固定 148px 卡高,整图远高于一屏(这就是"看不到全局"的根因)
+    await expect(page.locator('#density-detail')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#map')).not.toHaveClass(/compact/)
+    const detail = await page.evaluate(() => {
+      const g = document.querySelector('#map')
+      const cards = [...document.querySelectorAll('#map .card')]
+      return { h: g.getBoundingClientRect().height, cardH: cards[0].getBoundingClientRect().height, n: cards.length }
+    })
+    expect(detail.n, '详细态卡片数 = 故事总数').toBe(stories.length)
+    expect(Math.round(detail.cardH), '详细态卡高 148px').toBe(148)
+    expect(detail.h, '详细态整图应远超一屏').toBeGreaterThan(2000)
+    const idsBefore = await page.locator('#map .card').evaluateAll(els => els.map(e => e.dataset.id).sort())
+
+    await page.locator('#density-compact').click()
+    await expect(page.locator('#density-compact')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#map')).toHaveClass(/compact/)
+    await page.waitForTimeout(300)   // 等切换时的那次自动滚动落定
+    const cs = await page.evaluate(() => {
+      const g = document.querySelector('#map')
+      const cards = [...document.querySelectorAll('#map .card')]
+      const r = g.getBoundingClientRect()
+      return {
+        nh: window.innerHeight, top: Math.round(r.top), h: Math.round(r.height),
+        cardH: Math.round(cards[0].getBoundingClientRect().height), n: cards.length,
+        descs: document.querySelectorAll('#map .card .carddesc').length,
+        statuses: document.querySelectorAll('#map .card .mapstatus').length,
+        overflow: cards.filter(c => c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1).length
+      }
+    })
+    // 总览是降级渲染,不是过滤:id 集合必须一字不差
+    expect(cs.n, '总览不得丢卡').toBe(stories.length)
+    expect(await page.locator('#map .card').evaluateAll(els => els.map(e => e.dataset.id).sort())).toEqual(idsBefore)
+    expect(cs.cardH, '总览小矩形 22px 高').toBe(22)
+    expect(cs.h, '总览整图应压到 600px 以内').toBeLessThan(600)
+    expect(cs.overflow, '小矩形内文字必须被裁掉而不是撑破卡片').toBe(0)
+    // 详细态才渲染的字段在总览下不渲染
+    expect(cs.descs, '总览不渲染描述').toBe(0)
+    expect(cs.statuses, '总览不渲染状态/切片行').toBe(0)
+    // 一屏看全:切换时会自动把地图滚进视野,滚完整图必须落在视口内
+    expect(cs.top + cs.h, '总览整图必须落在视口内(切换时自动滚动)').toBeLessThanOrEqual(cs.nh)
+
+    // 切回详细:恢复 148px 与超长整图
+    await page.locator('#density-detail').click()
+    await expect(page.locator('#map')).not.toHaveClass(/compact/)
+    const back = await page.evaluate(() => ({
+      cardH: Math.round(document.querySelector('#map .card').getBoundingClientRect().height),
+      h: Math.round(document.querySelector('#map').getBoundingClientRect().height)
+    }))
+    expect(back.cardH).toBe(148)
+    expect(back.h).toBeGreaterThan(2000)
+  })
+
+  test('[FE-BRD-09] 马甲图层:单选、图例常驻、计数守恒,且颜色之外必有字符标记', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const stories = await apiGet(request, token, '/api/stories')
+    const tasks = await apiGet(request, token, '/api/tasks')
+    const users = await apiGet(request, token, '/api/auth/users')
+    await openMapWithToday(page)
+
+    // 默认马甲 = 紧急程度;图例常驻并写明规则(不写颜色名)
+    await expect(page.locator('#skin')).toHaveValue('urgency')
+    await expect(page.locator('#maplegend')).toBeVisible()
+    await expect(page.locator('#maplegend .legendtitle')).toContainText('紧急程度')
+    await expect(page.locator('#maplegend .legenditem')).toHaveCount(6)
+    await expect(page.locator('#maplegend .legenditem[data-key="!"]')).toContainText('逾期')
+    // 图例必须写明规则本身(阈值),而不是只给颜色名——否则周推进后无法自行复算
+    await expect(page.locator('#maplegend .legenditem[data-key="!"]')).toContainText(`截止周 < W${QA_NOW_WEEK}`)
+    await expect(page.locator('#maplegend .legenditem[data-key="○"]')).toContainText(`截止周 ≥ W${QA_NOW_WEEK + 3}`)
+
+    /* 测试侧独立复算分档 → 与图例计数逐档比对(不写死 10/11/11 这类数字) */
+    const counts = {}
+    const glyphOf = {}
+    for (const s of stories) {
+      const k = urgencyKeyOf(s, tasks)
+      counts[k] = (counts[k] || 0) + 1
+      glyphOf[s.id] = URGENCY_GLYPH[k]
+    }
+    for (const [k, n] of Object.entries(counts)) {
+      await expect(page.locator(`#maplegend .legenditem[data-key="${URGENCY_GLYPH[k]}"]`), `图例「${k}」计数`)
+        .toHaveAttribute('data-count', String(n))
+    }
+    const sum = await page.locator('#maplegend .legenditem').evaluateAll(els => els.reduce((a, e) => a + Number(e.dataset.count), 0))
+    expect(sum, '图例计数之和必须等于故事总数(灰色"无排期"单列但不漏)').toBe(stories.length)
+    await expect(page.locator('#legendsum')).toContainText(`合计 ${stories.length} / 当前筛选 ${stories.length}`)
+
+    /* 逐卡校验:颜色之外的第二通道(字符标记)必须与复算分档一致 */
+    const marks = await page.locator('#map .card').evaluateAll(els => els.map(e => ({
+      id: e.dataset.id, key: e.dataset.skinKey, sking: e.querySelector('.sking')?.textContent.trim() ?? null
+    })))
+    expect(marks.length).toBe(stories.length)
+    for (const m of marks) {
+      expect(m.key, `${m.id} 的 data-skin-key`).toBe(glyphOf[m.id])
+      expect(m.sking, `${m.id} 卡内字形标记`).toBe(glyphOf[m.id])
+    }
+    // 单图层:每张卡恰好一个 tone-*(叠加多维度会退化成彩虹图)
+    const toneCounts = await page.locator('#map .card').evaluateAll(els => els.map(e => (e.className.match(/tone-[\w-]+/g) || []).length))
+    expect([...new Set(toneCounts)], '同一时刻只允许一个着色维度').toEqual([1])
+
+    /* 总览态下同一个标记出现在小矩形里,颜色由左侧色条承担 */
+    await page.locator('#density-compact').click()
+    await expect(page.locator('#map')).toHaveClass(/compact/)
+    const chips = await page.locator('#map .card').evaluateAll(els => els.map(e => ({
+      id: e.dataset.id, mark: e.querySelector('.chipmark')?.textContent.trim() ?? null
+    })))
+    for (const c of chips) expect(c.mark, `${c.id} 小矩形标记`).toBe(glyphOf[c.id])
+    await page.locator('#density-detail').click()
+
+    /* 切「负责人」:图例变成成员清单,计数仍守恒 */
+    await page.locator('#skin').selectOption('owner')
+    await expect(page.locator('#maplegend .legendtitle')).toContainText('负责人')
+    const unassigned = stories.filter(s => s.owner_id == null).length
+    await expect(page.locator('#maplegend .legenditem')).toHaveCount(users.length + (unassigned ? 1 : 0))
+    const ownerSum = await page.locator('#maplegend .legenditem').evaluateAll(els => els.reduce((a, e) => a + Number(e.dataset.count), 0))
+    expect(ownerSum, '负责人图例计数之和仍等于故事总数').toBe(stories.length)
+    const ownerGlyph = Object.fromEntries(stories.map(s => [s.id, s.owner_id == null ? '—' : 'P' + s.owner_id]))
+    const ownerMarks = await page.locator('#map .card').evaluateAll(els => els.map(e => ({ id: e.dataset.id, key: e.dataset.skinKey })))
+    for (const m of ownerMarks) expect(m.key, `${m.id} 的负责人标记`).toBe(ownerGlyph[m.id])
+
+    /* 切「Sprint」:4 个切片,计数按切片归属 */
+    await page.locator('#skin').selectOption('sprint')
+    await expect(page.locator('#maplegend .legendtitle')).toContainText('Sprint')
+    await expect(page.locator('#maplegend .legenditem')).toHaveCount(4)
+    const slice = s => (s.sprint >= 4 ? 4 : s.sprint)
+    for (const n of [1, 2, 3, 4]) {
+      await expect(page.locator(`#maplegend .legenditem[data-key="S${n}"]`), `切片 S${n} 计数`)
+        .toHaveAttribute('data-count', String(stories.filter(s => slice(s) === n).length))
+    }
+
+    /* 切「无着色」:不新增任何颜色类,卡片左边框回到基线 2px,图例整体撤走 */
+    await page.locator('#skin').selectOption('none')
+    await expect(page.locator('#maplegend')).toHaveCount(0)
+    await expect(page.locator('#map')).not.toHaveClass(/skinned/)
+    expect(await page.locator('#map .card').evaluateAll(els => els.filter(e => /tone-/.test(e.className)).length), '无着色时不得残留颜色类').toBe(0)
+    expect(await page.locator('#map .card').first().evaluate(e => getComputedStyle(e).borderLeftWidth), '无着色时左边框回到基线 2px').toBe('2px')
+  })
+
+  test('[FE-BRD-10] 格内排序真实生效且不改数据;切到状态看板不受马甲影响', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const stories = await apiGet(request, token, '/api/stories')
+    const tasks = await apiGet(request, token, '/api/tasks')
+    await openMapWithToday(page)
+
+    await expect(page.locator('#sortby')).toHaveValue('origin')
+    /* 空格的 id 顺序预期:按 mapcell 在 DOM 里的次序 = 切片顺序 × 活动顺序 */
+    const sliceMatch = [s => s.sprint === 1, s => s.sprint === 2, s => s.sprint === 3, s => s.sprint >= 4]
+    const cellIds = () => page.locator('#map .mapcell').evaluateAll(els => els.map(e => [...e.querySelectorAll('.card')].map(c => c.dataset.id)))
+    const expectedCells = (cmp) => {
+      const out = []
+      for (let sl = 0; sl < 4; sl++) {
+        for (let a = 1; a <= 5; a++) {
+          const list = stories.filter(s => sliceMatch[sl](s) && s.activity === a).map(s => s.id)
+          out.push(cmp ? cmp(list) : list)
+        }
+      }
+      return out
+    }
+    expect(await cellIds(), '原次序 = 数据自身次序,不得重排').toEqual(expectedCells())
+
+    const byOwner = list => [...list].sort((x, y) => {
+      const o = id => { const s = stories.find(v => v.id === id); return s.owner_id == null ? 999 : s.owner_id }
+      return o(x) - o(y)
+    })
+    await page.locator('#sortby').selectOption('owner')
+    await expect(page.locator('#sortby')).toHaveValue('owner')
+    expect(await cellIds(), '按负责人排序:格内按 owner_id 升序,未分配排最后').toEqual(expectedCells(byOwner))
+
+    const rank = id => {
+      const s = stories.find(v => v.id === id)
+      if (s.status === 2) return 999
+      const d = deadlineWeekOf(s, tasks)
+      return d == null ? 998 : d - QA_NOW_WEEK
+    }
+    const byUrgency = list => [...list].sort((x, y) => rank(x) - rank(y))
+    await page.locator('#sortby').selectOption('urgency')
+    expect(await cellIds(), '按紧急程度排序:格内按「截止周 − 当前周」升序').toEqual(expectedCells(byUrgency))
+
+    // 排序只影响呈现:接口数据不变
+    const after = await apiGet(request, token, '/api/stories')
+    expect(after.map(s => s.id)).toEqual(stories.map(s => s.id))
+
+    /* 状态看板:不带马甲、不带总览,卡高保持基线 132px,地图控件收起 */
+    await page.locator('#density-compact').click()
+    await page.locator('#boardtab').click()
+    await expect(page.locator('#boardpanel')).toBeVisible()
+    await expect(page.locator('#density-compact')).toHaveCount(0)
+    await expect(page.locator('#skin')).toHaveCount(0)
+    const board = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('#board .card')]
+      return {
+        n: cards.length, h: Math.round(cards[0].getBoundingClientRect().height),
+        toned: cards.filter(c => /tone-/.test(c.className)).length,
+        chipped: cards.filter(c => /\bchip\b/.test(c.className)).length
+      }
+    })
+    expect(board.n, '状态看板卡片数不受影响').toBe(stories.length)
+    expect(board.h, '状态看板卡高保持基线 132px').toBe(132)
+    expect(board.toned, '状态看板不套马甲(已按状态分列,再上色是冗余)').toBe(0)
+    expect(board.chipped, '状态看板不进入总览').toBe(0)
+
+    // 切回地图:密度选择被保留
+    await page.locator('#maptab').click()
+    await expect(page.locator('#map')).toHaveClass(/compact/)
+  })
+
+  test('[FE-BRD-11] 同一份数据换「今天」→ 紧急度分档随之推进,证明该图层不是静态装饰', async ({ browser, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const stories = await apiGet(request, token, '/api/stories')
+    const tasks = await apiGet(request, token, '/api/tasks')
+    const rows = {}
+
+    for (const [day, week] of [['2026-08-31', 1], ['2026-10-01', 5]]) {
+      const ctx = await browser.newContext()
+      const page = await ctx.newPage()
+      await page.addInitScript(d => { window.__AICAP_TODAY__ = d }, day)
+      await loginAndOpen(page, '/#/board', ADMIN)
+      await expect(page.locator('#map .card').first()).toBeVisible()
+      await expect(page.locator('#todayanchor')).toContainText(`第 ${week} 周`)
+      const overdue = stories.filter(s => urgencyKeyOf(s, tasks, week) === 'overdue').length
+      rows[day] = {
+        week, overdue,
+        ui: Number(await page.locator('#maplegend .legenditem[data-key="!"]').getAttribute('data-count')),
+        sum: await page.locator('#maplegend .legenditem').evaluateAll(els => els.reduce((a, e) => a + Number(e.dataset.count), 0))
+      }
+      expect(rows[day].ui, `${day}(W${week}) 界面逾期数 = 复算值`).toBe(overdue)
+      expect(rows[day].sum, `${day}(W${week}) 图例计数仍守恒`).toBe(stories.length)
+      await ctx.close()
+    }
+    expect(rows['2026-10-01'].overdue, 'W5 的逾期数必须严格多于 W1(否则说明锚点没被读取)')
+      .toBeGreaterThan(rows['2026-08-31'].overdue)
   })
 })
 
