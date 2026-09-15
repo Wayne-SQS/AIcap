@@ -119,33 +119,37 @@ public class GitHubActivitySyncService {
 
         // 1) commits
         try {
-            List<ActivityRecord> commits = fetchCommits(from, to, warnings, errors);
-            pulled.put("commits", commits.size());
-            persistAll(commits, out);
+            FetchOutcome c = fetchCommits(from, to, warnings, errors);
+            pulled.put("commits", c.pulled());
+            persistAll(c.records(), out);
+            bumpSkipped(out, c.unmapped());
         } catch (Exception e) {
             errors.add("commits 拉取失败: " + brief(e));
         }
         // 2) PR(合并事件)
         try {
-            List<ActivityRecord> prs = fetchMergedPullRequests(from, to, warnings, errors);
-            pulled.put("prs", prs.size());
-            persistAll(prs, out);
+            FetchOutcome p = fetchMergedPullRequests(from, to, warnings, errors);
+            pulled.put("prs", p.pulled());
+            persistAll(p.records(), out);
+            bumpSkipped(out, p.unmapped());
         } catch (Exception e) {
             errors.add("PR 拉取失败: " + brief(e));
         }
         // 3) PR Reviews
         try {
-            List<ActivityRecord> reviews = fetchReviews(from, to, warnings, errors);
-            pulled.put("reviews", reviews.size());
-            persistAll(reviews, out);
+            FetchOutcome r = fetchReviews(from, to, warnings, errors);
+            pulled.put("reviews", r.pulled());
+            persistAll(r.records(), out);
+            bumpSkipped(out, r.unmapped());
         } catch (Exception e) {
             errors.add("Review 拉取失败: " + brief(e));
         }
         // 4) Issues(创建)
         try {
-            List<ActivityRecord> issues = fetchIssues(from, to, warnings, errors);
-            pulled.put("issues", issues.size());
-            persistAll(issues, out);
+            FetchOutcome i = fetchIssues(from, to, warnings, errors);
+            pulled.put("issues", i.pulled());
+            persistAll(i.records(), out);
+            bumpSkipped(out, i.unmapped());
         } catch (Exception e) {
             errors.add("Issue 拉取失败: " + brief(e));
         }
@@ -155,10 +159,15 @@ public class GitHubActivitySyncService {
 
     // ---------- 拉取(每类按页拉取,受 maxPages 限制) ----------
 
-    private List<ActivityRecord> fetchCommits(LocalDate from, LocalDate to,
-                                              List<String> warnings, List<String> errors) throws Exception {
+    /** 一次拉取的结果:pulled=日期范围内从 GitHub 拉取的事件总数(含未映射), records=可入库记录, unmapped=未映射到系统成员而被跳过的数量 */
+    private record FetchOutcome(List<ActivityRecord> records, int pulled, int unmapped) {}
+
+    private FetchOutcome fetchCommits(LocalDate from, LocalDate to,
+                                      List<String> warnings, List<String> errors) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
+        int pulled = 0;
+        int unmapped = 0;
         List<JsonNode> rows = getPages("/repos/{repo}/commits",
                 Map.of("since", sinceIso(from), "until", untilIso(to)), "sha");
         for (JsonNode c : rows) {
@@ -173,6 +182,7 @@ public class GitHubActivitySyncService {
             LocalDateTime at = parseTime(ca.path("author").path("date").asText(""));
             // 服务端二次过滤:不信任 API 边界(防御时区/边界误差),只保留本地日期范围内的提交
             if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
+            pulled++;
             ActivityRecord r = baseRecord(login, email, name, at, members);
             r.setActivityType("commit");
             r.setTitle(truncate(title, 200));
@@ -182,18 +192,21 @@ public class GitHubActivitySyncService {
             r.setGithubEventId(sha);
             r.setTaskId(resolveTask(title + " " + message));
             if (r.getUserId() == null) {
+                unmapped++;
                 warnings.add("commit " + truncate(sha, 7) + " 作者无法映射到系统成员(" + login + "/" + email + "),已跳过");
                 continue;
             }
             out.add(r);
         }
-        return out;
+        return new FetchOutcome(out, pulled, unmapped);
     }
 
-    private List<ActivityRecord> fetchMergedPullRequests(LocalDate from, LocalDate to,
-                                                         List<String> warnings, List<String> errors) throws Exception {
+    private FetchOutcome fetchMergedPullRequests(LocalDate from, LocalDate to,
+                                                 List<String> warnings, List<String> errors) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
+        int pulled = 0;
+        int unmapped = 0;
         List<JsonNode> rows = getPages("/repos/{repo}/pulls",
                 Map.of("state", "all", "sort", "updated", "direction", "desc"), "number");
         for (JsonNode p : rows) {
@@ -201,6 +214,7 @@ public class GitHubActivitySyncService {
             if (mergedAt.isBlank()) continue;   // 只同步"已合并"事件
             LocalDateTime at = parseTime(mergedAt);
             if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
+            pulled++;
             int number = p.path("number").asInt(0);
             String title = "PR #" + number + ": " + p.path("title").asText("");
             String login = p.path("user").path("login").asText("");
@@ -213,18 +227,21 @@ public class GitHubActivitySyncService {
             r.setGithubEventId("pr-" + number + "-merged");
             r.setTaskId(resolveTask(title + " " + body));
             if (r.getUserId() == null) {
+                unmapped++;
                 warnings.add("PR #" + number + " 创建者无法映射到系统成员(" + login + "),已跳过");
                 continue;
             }
             out.add(r);
         }
-        return out;
+        return new FetchOutcome(out, pulled, unmapped);
     }
 
-    private List<ActivityRecord> fetchReviews(LocalDate from, LocalDate to,
-                                              List<String> warnings, List<String> errors) throws Exception {
+    private FetchOutcome fetchReviews(LocalDate from, LocalDate to,
+                                      List<String> warnings, List<String> errors) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
+        int pulled = 0;
+        int unmapped = 0;
         // 先取范围内已合并的 PR 号(限制数量,控制请求量)
         List<Integer> prNumbers = new ArrayList<>();
         List<JsonNode> rows = getPages("/repos/{repo}/pulls",
@@ -246,6 +263,7 @@ public class GitHubActivitySyncService {
                 if (submitted.isBlank()) continue;
                 LocalDateTime at = parseTime(submitted);
                 if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
+                pulled++;
                 String login = rv.path("user").path("login").asText("");
                 String state = rv.path("state").asText("COMMENTED");
                 String body = rv.path("body").asText("");
@@ -255,19 +273,22 @@ public class GitHubActivitySyncService {
                 r.setDetail(truncate("GitHub Review " + state + " · PR #" + number + (body.isBlank() ? "" : " · " + firstLine(body)), 1000));
                 r.setGithubEventId("review-" + rv.path("id").asText(""));
                 if (r.getUserId() == null) {
+                    unmapped++;
                     warnings.add("PR #" + number + " 的 Review 无法映射到系统成员(" + login + "),已跳过");
                     continue;
                 }
                 out.add(r);
             }
         }
-        return out;
+        return new FetchOutcome(out, pulled, unmapped);
     }
 
-    private List<ActivityRecord> fetchIssues(LocalDate from, LocalDate to,
-                                             List<String> warnings, List<String> errors) throws Exception {
+    private FetchOutcome fetchIssues(LocalDate from, LocalDate to,
+                                     List<String> warnings, List<String> errors) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
+        int pulled = 0;
+        int unmapped = 0;
         List<JsonNode> rows = getPages("/repos/{repo}/issues",
                 Map.of("state", "all", "since", sinceIso(from)), "number");
         for (JsonNode i : rows) {
@@ -275,6 +296,7 @@ public class GitHubActivitySyncService {
             String created = i.path("created_at").asText("");
             LocalDateTime at = parseTime(created);
             if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
+            pulled++;
             int number = i.path("number").asInt(0);
             String title = i.path("title").asText("");
             String login = i.path("user").path("login").asText("");
@@ -286,12 +308,13 @@ public class GitHubActivitySyncService {
             r.setGithubEventId("issue-" + number);
             r.setTaskId(resolveTask(title + " " + body));
             if (r.getUserId() == null) {
+                unmapped++;
                 warnings.add("Issue #" + number + " 创建者无法映射到系统成员(" + login + "),已跳过");
                 continue;
             }
             out.add(r);
         }
-        return out;
+        return new FetchOutcome(out, pulled, unmapped);
     }
 
     // ---------- 通用拉取与写入 ----------
@@ -363,6 +386,13 @@ public class GitHubActivitySyncService {
         }
         out.put("synced", synced);
         out.put("skipped", skipped);
+    }
+
+    /** 将"未映射到系统成员而跳过"的数量并入 skipped 统计,保证 pulled = synced + skipped + warnings 数自洽 */
+    private void bumpSkipped(Map<String, Object> out, int unmapped) {
+        if (unmapped > 0) {
+            out.put("skipped", (int) out.get("skipped") + unmapped);
+        }
     }
 
     // ---------- 映射与转换 ----------
