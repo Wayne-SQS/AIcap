@@ -27,9 +27,11 @@ public class ActivityRecord {
     private String detail;
     /** 所属模块,如 权限/前端 */
     private String module;
-    /** manual=手动录入 / import=批量导入 */
+    /** manual=手动录入 / import=批量导入 / github=GitHub 同步 */
     private String source;
     private LocalDateTime happenedAt;
+    /** GitHub 事件唯一ID(commit sha/PR号/review id/issue号),同步幂等去重 */
+    private String githubEventId;
     private Integer createdBy;
     private LocalDateTime createdAt;
 }

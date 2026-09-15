@@ -44,5 +44,9 @@ export const profileAgentApi = {
   addCorrection: (userId, field, correctedValue, reason = '') =>
     api(`/api/profile-agent/corrections?userId=${userId}&field=${encodeURIComponent(field)}&correctedValue=${encodeURIComponent(correctedValue)}&reason=${encodeURIComponent(reason)}`, { method: 'POST' }),
   /** 画像纠正历史 */
-  corrections: (userId = null) => api('/api/profile-agent/corrections' + (userId != null ? `?userId=${userId}` : ''))
+  corrections: (userId = null) => api('/api/profile-agent/corrections' + (userId != null ? `?userId=${userId}` : '')),
+  /** GitHub 同步状态(US34) */
+  githubStatus: () => api('/api/profile-agent/github/status'),
+  /** 手动触发 GitHub 活动同步(admin/owner) */
+  githubSync: (start, end) => api(`/api/profile-agent/github/sync?start=${start}&end=${end}`, { method: 'POST' })
 }

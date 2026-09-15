@@ -38,6 +38,34 @@ const compareResult = ref(null)
 const prevStart = ref('')
 const prevEnd = ref('')
 
+/* US34:GitHub 同步状态与手动触发 */
+const githubStatus = ref(null)
+const githubSyncing = ref(false)
+const isManager = computed(() => ['admin', 'owner'].includes(meeting.currentUser?.role))
+async function checkGithub() {
+  try {
+    githubStatus.value = await profileAgentApi.githubStatus()
+  } catch (e) {
+    githubStatus.value = { enabled: false, error: e.message }
+  }
+}
+async function syncGithub() {
+  if (!rangeStart.value || !rangeEnd.value) return notify('请先选择时间范围')
+  githubSyncing.value = true
+  try {
+    const r = await profileAgentApi.githubSync(rangeStart.value, rangeEnd.value)
+    notify(r.error || `GitHub 同步完成:新增 ${r.synced ?? 0} 条,跳过 ${r.skipped ?? 0} 条`)
+    if (r.warnings && r.warnings.length) notify(`有 ${r.warnings.length} 条无法归属成员(见详情)`)
+    checkGithub()
+    loadAnalysis()
+  } catch (e) {
+    notify(e.message || 'GitHub 同步失败')
+  } finally {
+    githubSyncing.value = false
+  }
+}
+checkGithub()
+
 const members = computed(() => (result.value?.members || []))
 const risks = computed(() => (result.value?.team_risks || []))
 const currentMember = computed(() =>
@@ -213,6 +241,12 @@ loadAnalysis()
       <label>结束 <input v-model="rangeEnd" type="date"></label>
       <button class="ghost" :disabled="loading" @click="loadAnalysis">查询</button>
       <span style="flex:1"></span>
+      <span v-if="githubStatus" class="small" :style="{ color: githubStatus.enabled ? '#2e7d32' : '#b8860b' }">
+        GitHub {{ githubStatus.enabled ? `同步已启用(${githubStatus.configured_repo})` : '未配置' }}
+      </span>
+      <button v-if="isManager" class="ghost" :disabled="githubSyncing" @click="syncGithub">
+        {{ githubSyncing ? '同步中…' : '⟳ 同步 GitHub 活动' }}
+      </button>
       <button class="ghost" :disabled="running" @click="runAnalysis">{{ running ? '分析中…' : '▶ 触发正式分析(留痕)' }}</button>
       <button class="primary" :disabled="!risks.length" @click="submitRisks">⚖ 风险建议送审({{ risks.length }})</button>
     </div>
@@ -257,6 +291,10 @@ loadAnalysis()
             <li>擅长方向: {{ currentMember.dynamic_profile.good_at }}</li>
             <li>难度承受: {{ currentMember.dynamic_profile.difficulty_capacity }}</li>
             <li>交付及时性: {{ currentMember.dynamic_profile.delivery_timeliness }}</li>
+            <li>代码稳定性: {{ currentMember.dynamic_profile.code_stability }}</li>
+            <li>返工情况: {{ currentMember.dynamic_profile.rework_rate }}</li>
+            <li>缺陷修复: {{ currentMember.dynamic_profile.defect_fix_capability }}</li>
+            <li>Review 参与: {{ currentMember.dynamic_profile.review_participation }}</li>
             <li>当前负载: {{ currentMember.dynamic_profile.current_load_percent }}%({{ currentMember.dynamic_profile.risk_flags }})</li>
             <li>推荐任务类型: {{ currentMember.dynamic_profile.recommended_task_types.join(';') }}</li>
           </ul>

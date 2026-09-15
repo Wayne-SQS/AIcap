@@ -2,6 +2,7 @@ package com.aicap.controller;
 
 import com.aicap.dto.ProfileAgentDtos;
 import com.aicap.entity.User;
+import com.aicap.profile.GitHubActivitySyncService;
 import com.aicap.security.Roles;
 import com.aicap.service.ProfileAgentService;
 import jakarta.validation.Valid;
@@ -32,6 +33,7 @@ import java.util.Map;
 public class ProfileAgentController {
 
     private final ProfileAgentService service;
+    private final GitHubActivitySyncService githubSync;
 
     /** 录入一条活动事实(commit/pr/review/bugfix/task_done/note) */
     @PostMapping("/activities")
@@ -143,8 +145,7 @@ public class ProfileAgentController {
     @PostMapping("/corrections")
     public Map<String, Object> addCorrection(@RequestParam Integer userId,
                                              @RequestParam String field,
-                                             @RequestParam String correctedValue,
-                                             @RequestParam(required = false) String reason) {
+                                             @RequestParam String correctedValue,                                             @RequestParam(required = false) String reason) {
         User actor = Roles.writer();
         return service.addCorrection(userId, field, correctedValue, reason, actor);
     }
@@ -154,5 +155,21 @@ public class ProfileAgentController {
     public List<Map<String, Object>> corrections(@RequestParam(required = false) Integer userId) {
         Roles.any();
         return service.corrections(userId);
+    }
+
+    /** GitHub 同步状态(US34:仓库绑定与成员映射的当前配置状态) */
+    @GetMapping("/github/status")
+    public Map<String, Object> githubStatus() {
+        Roles.any();
+        return githubSync.status();
+    }
+
+    /** 手动触发 GitHub 活动同步(admin/owner;未配置时返回未配置状态,不发起外部请求) */
+    @PostMapping("/github/sync")
+    public Map<String, Object> githubSync(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        Roles.reviewer();
+        return githubSync.sync(start, end);
     }
 }

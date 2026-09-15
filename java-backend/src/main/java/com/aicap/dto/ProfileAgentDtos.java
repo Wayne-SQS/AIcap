@@ -16,14 +16,14 @@ public final class ProfileAgentDtos {
     private ProfileAgentDtos() {
     }
 
-    /** POST /api/profile-agent/activities 录入活动 */
-    public record ActivityIn(@NotNull Integer userId,
-                             @Size(max = 10) String taskId,
-                             @NotBlank @Size(max = 20) String activityType,
+    /** POST /api/profile-agent/activities 录入活动(契约字段为 snake_case,容忍 camelCase) */
+    public record ActivityIn(@NotNull @JsonAlias("user_id") Integer userId,
+                             @Size(max = 10) @JsonAlias("task_id") String taskId,
+                             @NotBlank @Size(max = 20) @JsonAlias("activity_type") String activityType,
                              @NotBlank @Size(max = 200) String title,
                              @Size(max = 1000) String detail,
                              @Size(max = 100) String module,
-                             @NotNull String happenedAt) {
+                             @NotNull @JsonAlias("happened_at") String happenedAt) {
         public ActivityIn {
             if (detail == null) detail = "";
             if (module == null) module = "";
@@ -44,7 +44,8 @@ public final class ProfileAgentDtos {
 
     /** PATCH /api/profile-agent/difficulty/{taskId} 人工修正难度 */
     public record DifficultyIn(@NotBlank @Size(max = 10) String level,
-                               @Min(0) @Max(100) Integer score) {
+                               @Min(0) @Max(100) Integer score,
+                               @Size(max = 500) String reason) {
     }
 
     /** 难度评估输出 */
