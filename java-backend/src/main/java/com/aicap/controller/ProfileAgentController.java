@@ -122,9 +122,10 @@ public class ProfileAgentController {
     @PostMapping("/risks/submit-suggestions")
     public List<String> submitRiskSuggestions(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+            @RequestParam(required = false) String agent) {
         User actor = Roles.writer();
-        return service.submitRiskSuggestions(start, end, actor);
+        return service.submitRiskSuggestions(start, end, agent, actor);
     }
 
     /** 能力画像快照(按时间查看画像变化,文档 4.7) */

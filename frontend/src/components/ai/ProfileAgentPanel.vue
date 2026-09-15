@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
+import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { profileAgentApi } from '@/api/profileAgent'
@@ -13,6 +14,7 @@ import { profileAgentApi } from '@/api/profileAgent'
    - 全部结论带证据;数据不足时如实显示,不编造 */
 
 const meeting = useMeetingStore()
+const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
@@ -41,7 +43,8 @@ const prevEnd = ref('')
 /* US34:GitHub 同步状态与手动触发 */
 const githubStatus = ref(null)
 const githubSyncing = ref(false)
-const isManager = computed(() => ['admin', 'owner'].includes(meeting.currentUser?.role))
+const lastSync = ref(null)
+const isManager = computed(() => ['admin', 'owner'].includes(session.currentUser?.role))
 async function checkGithub() {
   try {
     githubStatus.value = await profileAgentApi.githubStatus()
@@ -56,6 +59,7 @@ async function syncGithub() {
     const r = await profileAgentApi.githubSync(rangeStart.value, rangeEnd.value)
     notify(r.error || `GitHub 同步完成:新增 ${r.synced ?? 0} 条,跳过 ${r.skipped ?? 0} 条`)
     if (r.warnings && r.warnings.length) notify(`有 ${r.warnings.length} 条无法归属成员(见详情)`)
+    lastSync.value = r
     checkGithub()
     loadAnalysis()
   } catch (e) {
@@ -243,6 +247,9 @@ loadAnalysis()
       <span style="flex:1"></span>
       <span v-if="githubStatus" class="small" :style="{ color: githubStatus.enabled ? '#2e7d32' : '#b8860b' }">
         GitHub {{ githubStatus.enabled ? `同步已启用(${githubStatus.configured_repo})` : '未配置' }}
+      </span>
+      <span v-if="lastSync" class="small mono" :title="(lastSync.warnings || []).join('\n')">
+        ⟳ 最近同步:拉取 {{ (lastSync.pulled?.commits ?? 0) + (lastSync.pulled?.prs ?? 0) + (lastSync.pulled?.reviews ?? 0) + (lastSync.pulled?.issues ?? 0) }} → 入库 {{ lastSync.synced ?? 0 }} / 跳过 {{ lastSync.skipped ?? 0 }}
       </span>
       <button v-if="isManager" class="ghost" :disabled="githubSyncing" @click="syncGithub">
         {{ githubSyncing ? '同步中…' : '⟳ 同步 GitHub 活动' }}

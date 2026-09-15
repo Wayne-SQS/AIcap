@@ -35,7 +35,7 @@ watch(() => meeting.online, v => {
       <MeetingPanel />
     </div>
 
-    <div class="h-sec">任务提交智能体 · Commit Agent</div>
+    <div class="h-sec">任务提交智能体 · Commit Agent(真实活动 + GitHub 同步)</div>
     <div id="submit-agent">
       <SubmitAgentPanel />
     </div>

@@ -1260,7 +1260,7 @@ public class ProfileAgentService {
      * 复用 suggestions 表(kind=profile),证据=风险事实,影响对象=相关成员/任务,
      * change_json=建议落入需求池的条目内容。人工审核通过后才会写入正式数据。
      */
-    public List<String> submitRiskSuggestions(LocalDate start, LocalDate end, User user) {
+    public List<String> submitRiskSuggestions(LocalDate start, LocalDate end, String agent, User user) {
         Map<String, Object> result = analyze(start, end, true);   // 送审是正式动作:LLM 正式分析
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> risks = (List<Map<String, Object>>) result.get("team_risks");
@@ -1286,7 +1286,7 @@ public class ProfileAgentService {
 
             Suggestion s = new Suggestion();
             s.setId("SP" + UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-            s.setAgent("画像智能体");
+            s.setAgent(agent == null || agent.isBlank() ? "画像智能体" : agent);
             s.setKind("profile");
             s.setEvidence(evidenceFull);
             s.setAffected(affected);

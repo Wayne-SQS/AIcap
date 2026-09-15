@@ -24,9 +24,9 @@ export const profileAgentApi = {
   /** 人工修正难度 */
   overrideDifficulty: (taskId, payload) =>
     api(`/api/profile-agent/difficulty/${taskId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  /** 团队风险 → 送审(统一 AI 建议审核中心) */
-  submitRiskSuggestions: (start, end) =>
-    api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}`, { method: 'POST' }),
+  /** 团队风险 → 送审(统一 AI 建议审核中心);agent 为送审来源标识,默认「画像智能体」 */
+  submitRiskSuggestions: (start, end, agent = '画像智能体') =>
+    api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}&agent=${encodeURIComponent(agent)}`, { method: 'POST' }),
   /** 画像快照 */
   snapshots: (userId = null) => api('/api/profile-agent/snapshots' + (userId != null ? `?userId=${userId}` : '')),
   /** 画像快照趋势(变化原因) */
