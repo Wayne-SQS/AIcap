@@ -334,6 +334,10 @@ public class GitHubActivitySyncService {
         if (resp.statusCode() == 404) {
             throw new IllegalStateException("仓库不存在或无权访问(404): " + props.getRepo());
         }
+        // 空仓库是正常初始状态(commits API 返回 409 "Git Repository is empty"),按"暂无数据"处理,不记错误
+        if (resp.statusCode() == 409 && resp.body().contains("empty")) {
+            return objectMapper.readTree("[]");
+        }
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
             throw new IllegalStateException("GitHub API " + resp.statusCode() + ": " + truncate(resp.body(), 200));
         }
