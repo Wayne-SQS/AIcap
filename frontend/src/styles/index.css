@@ -227,15 +227,13 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .legenditem .legenddetail{color:var(--muted);font-size:11px}
 .legendsum{margin-left:auto}
 
-/* 总览:单行小矩形 + 格内多列换行 —— 整图由 ~2730px 压到 300~500px,四个切片一屏看全;
-   卡片降级信息集为「编号 + 标题(截断) + 马甲标记」,描述/验收/子任务明细在总览下隐藏。
-   换行阈值 80px 是按**最窄支持宽度**定的,不是按宽屏:有侧栏时活动列内容宽 =
-   视口 − 238(侧栏) − 56(内边距) − 4(地图边框) − 64(脊线列),再除以 5。
-     · 1440 视口 → 约 202px/列 · 1280 视口 → 约 175px/列
-   注意 auto-fill 的列数算法把 gap 也算进单列宽度:(内容宽 + gap) / (min + gap)。
-   取 min=94 时 1280 下是 (175+3)/(94+3)=1.83 → 只剩 1 列,最挤的格子会从 80px 涨到
-   156px,整图 309px→513px,一屏看全当场失效;min=86 也仍是 1.99 差一点。故取 80px:
-   (175+3)/83=2.14 → 稳定 2 列。这两个数字都是实测出来的,不是估的。 */
+/* 总览:每个活动格里「一条一行」,每行只给标题(完整显示,不截断)+ 马甲标记;
+   描述 / 验收 / 状态行在总览下不渲染 —— 想看这些切「详细」或点开卡片即可。
+   高度不再压成一屏:可读性优先,允许整块上下变高(实测 2730px → 约 600px,仍远低于详细态)。
+   此处刻意只留**一列**(1fr)。此前用 auto-fill + minmax(80px) 排成 2 列把整图压到 337px,
+   代价是每格只剩约 86px、标题被截成 3~4 个字,反而看不清 —— 按实际使用反馈改回单列。
+   活动列宽约 175~202px(视口 − 238 侧栏 − 56 内边距 − 4 边框 − 64 脊线列,再除以 5),
+   单列时这点宽度足够放下绝大多数标题;个别超长标题允许折到第二行,不省略。 */
 .mapgrid.compact{grid-template-columns:64px repeat(5,minmax(128px,1fr));min-width:704px}
 /* 表头两行(label + 名称)在总览下按 1.3 行高收窄;否则继承 body 的 1.65,白占 ~28px */
 .mapgrid.compact .maphead{min-height:0;padding:6px 8px;line-height:1.3}
@@ -244,14 +242,16 @@ input:focus,select:focus,textarea:focus{background:#fff}
    把整行从 ~58px 顶到 89px(实测过),这是总览高度最大的单点瓶颈 */
 .mapgrid.compact .sprinthead{padding:5px 7px;font-size:11px;line-height:1.3}
 .mapgrid.compact .sprinthead .small{display:block;font-size:11px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mapgrid.compact .mapcell{min-height:38px;padding:4px;gap:3px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));align-content:start}
+.mapgrid.compact .mapcell{min-height:38px;padding:4px;gap:3px;display:grid;grid-template-columns:1fr;align-content:start}
 .mapgrid.compact .mapcell>.small{min-height:0;padding:0;align-items:center;justify-content:flex-start}
-.chip{height:22px;min-height:22px;padding:0 5px;display:flex;align-items:center;gap:4px;font-size:11px;line-height:1;overflow:hidden;box-shadow:none;cursor:pointer}
+/* 高度随标题自适应(超长标题折行),不再是固定 22px 单行 */
+.chip{min-height:22px;padding:2px 6px;display:flex;align-items:flex-start;gap:5px;font-size:11px;line-height:1.3;overflow:hidden;box-shadow:none;cursor:pointer}
 .chip:hover{transform:none;box-shadow:2px 2px 0 var(--ink)}
 .chip:active{transform:none}
-.chip .chipmark{flex:0 0 auto;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--ink);background:var(--tone,var(--paper-2));font-family:var(--mono);font-size:10px;font-weight:700;font-style:normal}
-.chip .chipid{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:700}
-.chip .chiptitle{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-soft)}
+.chip .chipmark{flex:0 0 auto;width:13px;height:13px;margin-top:1px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--ink);background:var(--tone,var(--paper-2));font-family:var(--mono);font-size:10px;font-weight:700;font-style:normal}
+.chip .chipid{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:700;margin-top:1px}
+/* 标题不截断:换行而不是省略号(总览的意义就是让人看清是哪条故事) */
+.chip .chiptitle{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;color:var(--ink-soft)}
 
 /* 工具栏的地图呈现层:密度分段 + 马甲/排序 + 今日锚点 */
 .mapctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

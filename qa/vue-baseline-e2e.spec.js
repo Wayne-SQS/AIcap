@@ -915,7 +915,7 @@ test.describe('FE-BRD 用户故事看板', () => {
     }
   })
 
-  test('[FE-BRD-08] 总览密度:37 条故事一条不丢,整图由 2730px 压到一屏以内', async ({ page, request }) => {
+  test('[FE-BRD-08] 总览密度:37 条一条不丢,每格一条一行、标题不截断,整图压到 1/5 以内', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const stories = await apiGet(request, token, '/api/stories')
     await openMapWithToday(page)
@@ -940,26 +940,38 @@ test.describe('FE-BRD 用户故事看板', () => {
     const cs = await page.evaluate(() => {
       const g = document.querySelector('#map')
       const cards = [...document.querySelectorAll('#map .card')]
-      const r = g.getBoundingClientRect()
+      /* filter(Boolean):若总览态没有降级渲染(卡片里没有 .chiptitle),这里会拿到 null ——
+         让它干净地在下面的断言里暴露,而不是在 evaluate 里抛 TypeError */
+      const titles = cards.map(c => c.querySelector('.chiptitle')).filter(Boolean)
+      const cells = [...document.querySelectorAll('#map .mapcell')]
       return {
-        nh: window.innerHeight, top: Math.round(r.top), h: Math.round(r.height),
-        cardH: Math.round(cards[0].getBoundingClientRect().height), n: cards.length,
+        h: Math.round(g.getBoundingClientRect().height), n: cards.length,
         descs: document.querySelectorAll('#map .card .carddesc').length,
         statuses: document.querySelectorAll('#map .card .mapstatus').length,
-        overflow: cards.filter(c => c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1).length
+        overflow: cards.filter(c => c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1).length,
+        // 每格列数 = 该格里 chip 左边缘去重后的个数;全部为 1 即「一条一行」
+        colsPerCell: cells.map(c => new Set([...c.querySelectorAll('.chip')].map(x => Math.round(x.getBoundingClientRect().left))).size).filter(n => n > 0),
+        maxChipH: Math.max(...cards.map(c => Math.round(c.getBoundingClientRect().height))),
+        // 标题被截断 = scrollWidth > clientWidth(省略号/裁切);要求为 0
+        truncatedTitles: titles.filter(t => t.scrollWidth > t.clientWidth).map(t => t.textContent.trim()),
+        titleCount: titles.length
       }
     })
     // 总览是降级渲染,不是过滤:id 集合必须一字不差
     expect(cs.n, '总览不得丢卡').toBe(stories.length)
     expect(await page.locator('#map .card').evaluateAll(els => els.map(e => e.dataset.id).sort())).toEqual(idsBefore)
-    expect(cs.cardH, '总览小矩形 22px 高').toBe(22)
-    expect(cs.h, '总览整图应压到 600px 以内').toBeLessThan(600)
-    expect(cs.overflow, '小矩形内文字必须被裁掉而不是撑破卡片').toBe(0)
-    // 详细态才渲染的字段在总览下不渲染
+    expect(cs.titleCount, '每张卡都要有标题元素').toBe(stories.length)
+    // 一条一行:每个有卡片的活动格都只排一列(此前为压高度排成 2 列 → 标题只剩 3~4 个字)
+    expect([...new Set(cs.colsPerCell)], '每个活动格只能排一列').toEqual([1])
+    // 标题必须完整可见:换行可以,省略号不行
+    expect(cs.truncatedTitles, '总览下标题不得被截断(长标题应换行而不是省略)').toEqual([])
+    // 降级渲染:高度远小于详细态的 148px(允许长标题折成两行)
+    expect(cs.maxChipH, '总览卡片高度应远低于详细态的 148px').toBeLessThan(60)
+    expect(cs.h, '总览整图应压到详细态的 1/4 以内').toBeLessThan(detail.h / 4)
+    expect(cs.overflow, '文字必须换行而不是撑破卡片').toBe(0)
+    // 详细态才渲染的字段在总览下不渲染(想看就切回详细或点开卡片)
     expect(cs.descs, '总览不渲染描述').toBe(0)
     expect(cs.statuses, '总览不渲染状态/切片行').toBe(0)
-    // 一屏看全:切换时会自动把地图滚进视野,滚完整图必须落在视口内
-    expect(cs.top + cs.h, '总览整图必须落在视口内(切换时自动滚动)').toBeLessThanOrEqual(cs.nh)
 
     // 切回详细:恢复 148px 与超长整图
     await page.locator('#density-detail').click()
@@ -970,6 +982,10 @@ test.describe('FE-BRD 用户故事看板', () => {
     }))
     expect(back.cardH).toBe(148)
     expect(back.h).toBeGreaterThan(2000)
+
+    /* 注:这里**不再**断言「总览整图落在视口内」——最初为了一屏看全把格子排成 2 列,
+       结果每格只剩约 86px、标题被截成 3~4 个字,反而看不清(实际使用反馈)。
+       现按「可读性优先、高度可以变长」定稿:单列 + 标题不截断,整图 2730px → 约 550px。 */
   })
 
   test('[FE-BRD-09] 马甲图层:单选、图例常驻、计数守恒,且颜色之外必有字符标记', async ({ page, request }) => {
