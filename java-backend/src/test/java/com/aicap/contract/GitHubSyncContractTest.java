@@ -51,9 +51,12 @@ class GitHubSyncContractTest extends ContractTestSupport {
         assertStatus(r, 200);   // 业务上"未配置"是有效状态,不是 5xx
         assertFalse(r.json().path("enabled").asBoolean(), r.body());
         assertTrue(r.json().path("error").asText().contains("未配置"), r.body());
-        // member 无权限触发同步(admin/owner 专属)
+        // 四人成员(admin/owner/member)都能触发同步:「完成任务 → 触发智能体读仓库」这条链上
+        // 触发者是普通成员;只读查看者(viewer)仍然 403
         assertStatus(post("/api/profile-agent/github/sync?start=2026-08-25&end=2026-09-15",
-                token(USER_MEMBER), null), 403);
+                token(USER_MEMBER), null), 200);
+        assertStatus(post("/api/profile-agent/github/sync?start=2026-08-25&end=2026-09-15",
+                token(USER_VIEWER), null), 403);
     }
 
     @Test

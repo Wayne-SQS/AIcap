@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * GitHub 接入端到端契约测试(本地 mock GitHub API,验证真实同步链路):
  * - 四类事件(commit/PR 合并/Review/Issue 创建)解析与落库,source=github;
  * - 成员映射(GITHUB_USER_MAPPING → 系统成员),未映射活动跳过并记 warnings;
+ * - 无 author.login 的提交者(GitHub 上未关联账号)靠映射的邮箱/姓名键兜底归属,不被当成未映射;
  * - commit/PR/Issue 文本中 Txx 自动关联任务;
  * - 服务端日期边界防线:API 返回范围外(本地 9/16)的 commit 不入库;
  * - 幂等:同一 github_event_id 二次同步 skipped 递增,synced=0;
@@ -47,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "github.token=fake-token-for-contract-test",
         "github.repo=acme/core",
         "github.api-base=http://127.0.0.1:18923",
-        "github.user-mapping-json={\"li-ming\":\"李锐铭\",\"zhang-san\":\"孙秋实\",\"gao-owner\":\"高思晗\"}"
+        "github.user-mapping-json={\"li-ming\":\"李锐铭\",\"zhang-san\":\"孙秋实\",\"gao-owner\":\"高思晗\",\"mcc-dev\":\"高思晗\"}"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class GitHubSyncEndToEndContractTest {
@@ -72,7 +73,8 @@ class GitHubSyncEndToEndContractTest {
             body = """
                     [{"sha":"abc111","commit":{"author":{"name":"李锐铭","email":"liming@x.com","date":"2026-09-10T03:00:00Z"},"message":"feat(auth): T03 权限模块"}},
                      {"sha":"abc222","commit":{"author":{"name":"Zhang San","email":"zhang@x.com","date":"2026-09-15T20:00:00Z"},"message":"fix(profile): 修复 T05"}},
-                     {"sha":"abc333","author":{"login":"unknown-dev"},"commit":{"author":{"name":"Unknown","email":"unknown@x.com","date":"2026-09-11T02:00:00Z"},"message":"docs: 更新说明"}}]
+                     {"sha":"abc333","author":{"login":"unknown-dev"},"commit":{"author":{"name":"Unknown","email":"unknown@x.com","date":"2026-09-11T02:00:00Z"},"message":"docs: 更新说明"}},
+                     {"sha":"abc444","commit":{"author":{"name":"mcc-dev","email":"mcc@mcc.mcc","date":"2026-09-11T04:00:00Z"},"message":"feat(ui): 四类视图完善"}}]
                     """.replace("\n", "");
         } else if (path.startsWith("/repos/acme/core/pulls/42/reviews")) {
             body = """
@@ -104,13 +106,13 @@ class GitHubSyncEndToEndContractTest {
     void clearEvents() {
         // 各测试方法独立:先清掉本测试的 GitHub 事件,保证 synced 计数确定
         activityMapper.delete(new QueryWrapper<ActivityRecord>()
-                .in("github_event_id", "abc111", "abc222", "abc333", "pr-42-merged", "review-9001", "issue-7"));
+                .in("github_event_id", "abc111", "abc222", "abc333", "abc444", "pr-42-merged", "review-9001", "issue-7"));
     }
 
     @AfterAll
     void cleanup() {
         activityMapper.delete(new QueryWrapper<ActivityRecord>()
-                .in("github_event_id", "abc111", "abc222", "abc333", "pr-42-merged", "review-9001", "issue-7"));
+                .in("github_event_id", "abc111", "abc222", "abc333", "abc444", "pr-42-merged", "review-9001", "issue-7"));
         if (server != null) server.stop(0);
     }
 
@@ -129,14 +131,16 @@ class GitHubSyncEndToEndContractTest {
         Map<String, Object> pulled = (Map<String, Object>) r.get("pulled");
 
         // 拉取解析量:pulled = 日期范围内且时间戳可解析的事件数(含未映射成员,口径见 43431dc 三分离)
-        // commits API 返回 3:abc111 入库;abc222 越界(本地 9/16)被边界防线过滤,不计入 pulled;
-        // abc333 在范围内但作者未映射 → 计入 pulled,入库时并入 skipped / pr 1 / review 1 / issue 1(PR 节点被跳过)
-        assertEquals(2, pulled.get("commits"));
+        // commits API 返回 4:abc111 入库;abc222 越界(本地 9/16)被边界防线过滤,不计入 pulled;
+        // abc333 在范围内但作者未映射 → 计入 pulled,入库时并入 skipped;
+        // abc444 无 author.login(GitHub 上未关联账号),靠 GITHUB_USER_MAPPING 的姓名键兜底归属 → 入库
+        // pr 1 / review 1 / issue 1(PR 节点被跳过)
+        assertEquals(3, pulled.get("commits"));
         assertEquals(1, pulled.get("prs"));
         assertEquals(1, pulled.get("reviews"));
         assertEquals(1, pulled.get("issues"));
-        // 入库:abc111 + pr-42-merged + review-9001 + issue-7 = 4;abc222 越界(本地 9/16)被服务端过滤
-        assertEquals(4, r.get("synced"));
+        // 入库:abc111 + abc444 + pr-42-merged + review-9001 + issue-7 = 5;abc222 越界(本地 9/16)被服务端过滤
+        assertEquals(5, r.get("synced"));
         // abc333 未映射 → 计入 skipped(三分离口径:pulled = synced + skipped)
         assertEquals(1, r.get("skipped"));
         @SuppressWarnings("unchecked")
@@ -146,7 +150,7 @@ class GitHubSyncEndToEndContractTest {
 
         List<ActivityRecord> rows = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
                 .eq("source", "github").orderByAsc("github_event_id"));
-        assertEquals(4, rows.size(), "source=github 应恰为 4 条");
+        assertEquals(5, rows.size(), "source=github 应恰为 5 条");
 
         var byId = new java.util.HashMap<String, ActivityRecord>();
         for (ActivityRecord a : rows) byId.put(a.getGithubEventId(), a);
@@ -160,6 +164,11 @@ class GitHubSyncEndToEndContractTest {
         assertEquals("2026-09-10 11:00:00", c.getHappenedAt().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         // 越界 commit 未入库
         assertNull(byId.get("abc222"));
+        // 无 author.login 的提交(GitHub 上未关联账号,如 mcc@mcc.mcc):
+        // 靠 GITHUB_USER_MAPPING 的姓名键兜底(作者名 mcc-dev → 高思晗 id=2),而不是被跳过
+        ActivityRecord noLogin = byId.get("abc444");
+        assertEquals("commit", noLogin.getActivityType());
+        assertEquals(2, noLogin.getUserId(), "无 login 的提交者应能靠映射的姓名键归属");
         // PR 合并:pr-<number>-merged + T06
         ActivityRecord pr = byId.get("pr-42-merged");
         assertEquals("pr", pr.getActivityType());
@@ -180,10 +189,10 @@ class GitHubSyncEndToEndContractTest {
     @Test
     void sync_twice_isIdempotent() {
         Map<String, Object> r1 = syncService.sync(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 15));
-        assertEquals(4, r1.get("synced"));
+        assertEquals(5, r1.get("synced"));
         Map<String, Object> r2 = syncService.sync(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 15));
         assertEquals(0, r2.get("synced"));
-        // 4 条已存在(幂等跳过) + 1 条未映射(abc333,每次都计入 skipped) = 5
-        assertEquals(5, r2.get("skipped"));
+        // 5 条已存在(幂等跳过) + 1 条未映射(abc333,每次都计入 skipped) = 6
+        assertEquals(6, r2.get("skipped"));
     }
 }

@@ -1,15 +1,24 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
+import { useAgentRefresh, completingTaskId } from '@/composables/useAgentRefresh'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { memberLabel } from '@/data/memberIdentity'
 
 /* 成员任务明细抽屉(移植 legacy 新版 #member-drawer,交互按 Vue 重写)
-   关闭方式:关闭按钮 / 点击遮罩 / Esc;筛选状态在抽屉内部维护,不污染页面其它视图 */
+   关闭方式:关闭按钮 / 点击遮罩 / Esc;筛选状态在抽屉内部维护,不污染页面其它视图
+
+   这里是「谁提交了 → 到自己任务后面点已完成 → 触发智能体」的落点:
+   任务行的状态原先只是只读文字,成员没有任何入口把任务置为已完成。 */
 const props = defineProps({
   memberId: { type: Number, required: true }
 })
 const emit = defineEmits(['close'])
 const project = useProjectStore()
+const session = useSessionStore()
+const { completeTask } = useAgentRefresh()
+const doneTitle = computed(() => (session.isViewer ? READONLY_TITLE : '标记完成并触发任务提交智能体'))
 
 const filter = ref('all')
 const FILTERS = [['all', '全部'], ['todo', '待办'], ['doing', '进行中'], ['done', '已完成'], ['blocked', '阻塞']]
@@ -64,7 +73,18 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
               <b :title="t.name">{{ t.name }}</b>
               <div class="task-meta">{{ storyRefText(t) }} · Sprint {{ project.taskSprintList(t).join('/') }} · W{{ t.w[0] }}–W{{ t.w[1] }} · {{ t.h }}h · 进度 {{ t.progress || 0 }}%</div>
             </div>
-            <span class="task-state" :class="project.taskStatusKey(t)">{{ project.taskStatusText(t) }}</span>
+            <span class="task-tail">
+              <span class="task-state" :class="project.taskStatusKey(t)">{{ project.taskStatusText(t) }}</span>
+              <button
+                v-if="project.taskStatusKey(t) !== 'done'"
+                type="button"
+                class="task-done"
+                :data-task-done="t.id"
+                :disabled="session.isViewer || completingTaskId === t.id"
+                :title="doneTitle"
+                @click="completeTask(t)"
+              >{{ completingTaskId === t.id ? '提交中…' : '✓ 已完成' }}</button>
+            </span>
           </div>
           <div v-if="!filtered.length" class="empty">该筛选条件下暂无任务。</div>
         </div>

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
+import { useAgentRefresh, completingTaskId } from '@/composables/useAgentRefresh'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MILESTONES } from '@/data/seed'
 import { memberLabel } from '@/data/memberIdentity'
@@ -20,6 +21,9 @@ const sprintLabel = ['', 'S1', 'S1', 'S2', 'S2', 'S3', 'S3']
 const sprintOf = w => Math.ceil(w / 2)
 /* 只读账号(viewer)的编辑入口保持可见但禁用,title 说明原因 */
 const viewerTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
+/* 在当前(选中)任务上标记完成 → 触发任务提交智能体,见 useAgentRefresh */
+const { completeTask } = useAgentRefresh()
+const doneTitle = computed(() => (session.isViewer ? READONLY_TITLE : '标记完成并触发任务提交智能体'))
 
 const selection = ref(null)          // { type:'task'|'story', id }
 const taskEditorRef = ref(null)
@@ -204,6 +208,14 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
           <h3>{{ selectedTask.name }}</h3>
           <div class="actions">
             <button type="button" class="primary" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.open(selectedTask.id)">编辑任务</button>
+            <button
+              v-if="project.taskStatusKey(selectedTask) !== 'done'"
+              type="button"
+              :data-task-done="selectedTask.id"
+              :disabled="session.isViewer || completingTaskId === selectedTask.id"
+              :title="doneTitle"
+              @click="completeTask(selectedTask)"
+            >{{ completingTaskId === selectedTask.id ? '提交中…' : '✓ 标记已完成' }}</button>
             <button v-if="selectedTask.card" type="button" @click="selectStory(selectedTask.card)">查看父卡 {{ selectedTask.card }}</button>
           </div>
         </div>

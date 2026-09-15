@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { AGENT_UPDATED_EVENT } from '@/composables/useAgentRefresh'
 import { profileAgentApi } from '@/api/profileAgent'
 
 /* AI 任务提交与成员能力画像智能体面板
@@ -20,7 +21,10 @@ const { guard } = usePermissionGuard()
 
 const today = new Date()
 const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-const iso = d => d.toISOString().slice(0, 10)
+/* 本地日期串:不能用 toISOString()——它按 UTC 输出,东八区的本地零点会被减掉一天
+   (new Date(2026, 8, 1) → '2026-08-31'),会让「本月」起点和后端查询区间整体差一天。
+   口径与 SubmitAgentPanel 的 iso 保持一致 */
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const rangeStart = ref(iso(monthStart))
 const rangeEnd = ref(iso(today))
 
@@ -44,7 +48,10 @@ const prevEnd = ref('')
 const githubStatus = ref(null)
 const githubSyncing = ref(false)
 const lastSync = ref(null)
-const isManager = computed(() => ['admin', 'owner'].includes(session.currentUser?.role))
+/* 手动同步入口:后端 /github/sync 与其余写接口同为 Roles.writer()(admin/owner/member),
+   只有只读查看者(viewer)不可用。此前这里按 admin/owner 隐藏按钮,与后端口径不一致,
+   导致成员在自己的任务上点「已完成」后无法重试同步。后端仍是最终判据(403 会如实提示)。 */
+const canWrite = computed(() => !session.isViewer)
 async function checkGithub() {
   try {
     githubStatus.value = await profileAgentApi.githubStatus()
@@ -75,7 +82,6 @@ async function syncGithub() {
     githubSyncing.value = false
   }
 }
-checkGithub()
 
 const members = computed(() => (result.value?.members || []))
 const risks = computed(() => (result.value?.team_risks || []))
@@ -150,10 +156,17 @@ async function loadDifficulty() {
   }
 }
 
+const heatmapError = ref('')
 async function loadHeatmap() {
+  heatmapError.value = ''
   try {
     heatmapRows.value = await profileAgentApi.heatmap(rangeStart.value, rangeEnd.value)
-  } catch { /* 空态 */ }
+  } catch (e) {
+    /* 原先用 catch {} 静默吞异常:接口挂了和「该区间没活动」在界面上一模一样,
+       都是空热力图。这里如实把失败原因暴露出来 */
+    heatmapRows.value = []
+    heatmapError.value = e.message || '热力图加载失败'
+  }
 }
 
 async function pickDay(date) {
@@ -205,7 +218,10 @@ const anomalyItems = m => {
     ...(o.possibly_late_tasks || []).map(t => `任务 ${t} 计划结束周已过仍未完成(延期风险)`)
   ]
 }
-const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', milestone_risk: '🟣 里程碑延期风险' }
+/* kind → 展示文案:必须覆盖后端 team_risks 实际产出的全部 kind,少一个键会静默退化成「⚪ 项目风险」。
+   后端 kind 全集见 ProfileAgentService.teamAnalysis(overload/single_point/stalled/missing_review/
+   missing_test/module_concentration/milestone_risk)与 ProfileAgentBrain 的风险类型提示词 */
+const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', missing_test: '🟤 任务缺测试活动记录', module_concentration: '⚫ 模块工作过于集中', milestone_risk: '🟣 里程碑延期风险' }
 
 /* 画像纠正(文档 4.7:允许成员纠正错误信息) */
 const corrOpen = ref(false)
@@ -231,9 +247,28 @@ async function submitCorrection() {
 
 const LEVEL_TEXT = { low: '低', medium: '中', high: '高', extreme: '极高' }
 const LEVEL_COLOR = { low: '#4caf50', medium: '#ffc107', high: '#ff9800', extreme: '#f44336' }
-const TYPE_TEXT = { commit: 'Commit', pr: 'PR', review: 'Review', bugfix: '缺陷修复', task_done: '任务完成', note: '状态更新' }
+const TYPE_TEXT = { commit: 'Commit', pr: 'PR', review: 'Review', bugfix: '缺陷修复', task_done: '任务完成', test: '测试', note: '状态更新' }
 
-loadAnalysis()
+/* 登录态就绪后再拉取(与 AiView 对会议 store 的 watch 同范式):
+   - 离线演示模式 / 未登录时直接发请求会 401,而 client.js 的 401 分支会触发全局
+     handleUnauthorized() → 误弹「登录已过期」并强制打开登录框;
+   - 若面板先挂载、之后才登录(在 AI 页面点顶栏登录),也必须能自动补拉,
+     否则 result 永远是 null、githubStatus 永远停在「未登录」 */
+watch(() => session.online, v => {
+  if (!v) return
+  loadAnalysis()
+  checkGithub()
+}, { immediate: true })
+
+/* 成员把任务标记完成 → useAgentRefresh 触发智能体读仓库并评估 → 广播本事件。
+   面板已挂载时立即重新拉取,避免"智能体更新了但页面还是旧的" */
+function onAgentUpdated() {
+  if (!session.online) return
+  loadAnalysis()
+  checkGithub()
+}
+onMounted(() => window.addEventListener(AGENT_UPDATED_EVENT, onAgentUpdated))
+onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpdated))
 </script>
 
 <template>
@@ -262,7 +297,7 @@ loadAnalysis()
       <span v-else-if="lastSync" class="small mono" :title="(lastSync.warnings || []).join('\n')">
         ⟳ 最近同步:拉取 {{ (lastSync.pulled?.commits ?? 0) + (lastSync.pulled?.prs ?? 0) + (lastSync.pulled?.reviews ?? 0) + (lastSync.pulled?.issues ?? 0) }} → 入库 {{ lastSync.synced ?? 0 }} / 跳过 {{ lastSync.skipped ?? 0 }}
       </span>
-      <button v-if="isManager" class="ghost" :disabled="githubSyncing" @click="syncGithub">
+      <button v-if="canWrite" class="ghost" :disabled="githubSyncing" @click="syncGithub">
         {{ githubSyncing ? '同步中…' : '⟳ 同步 GitHub 活动' }}
       </button>
       <button class="ghost" :disabled="running" @click="runAnalysis">{{ running ? '分析中…' : '▶ 触发正式分析(留痕)' }}</button>
@@ -272,7 +307,7 @@ loadAnalysis()
 
     <div v-if="result">
       <div class="pa-meta small">
-        分析范围 {{ fmtRange }} · 数据来源: {{ (result.data_sources || []).join(' / ') }} · 生成于 {{ result.generated_at }}
+        分析范围 {{ fmtRange() }} · 数据来源: {{ (result.data_sources || []).join(' / ') }} · 生成于 {{ result.generated_at }}
       </div>
 
       <!-- 成员工作摘要(4.3) -->
@@ -347,6 +382,7 @@ loadAnalysis()
              :title="row.date + ' 共 ' + row.total + ' 条活动'" @click="pickDay(row.date)">
         </div>
       </div>
+      <p v-if="heatmapError" class="small" style="color:#e05555" role="alert">热力图加载失败:{{ heatmapError }}</p>
       <p class="small" style="margin:4px 0 0">
         颜色深浅 = 当日活动数量(Commit/PR/Review/缺陷修复/任务完成/状态更新);点击某天查看当天具体活动。
         绿格子展示的是<b>活动分布</b>,不等于工作质量。

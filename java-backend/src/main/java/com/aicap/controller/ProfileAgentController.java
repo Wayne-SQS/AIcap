@@ -103,14 +103,22 @@ public class ProfileAgentController {
         return service.analyze(start, end);
     }
 
-    /** 触发整包分析(工作事实/贡献/画像/团队风险),结果留痕可重试 */
+    /**
+     * 触发整包分析(工作事实/贡献/画像/团队风险),结果留痕可重试。
+     *
+     * <p><b>userId 可选</b>:只评估这一名成员(成员完成任务后由前端传入,避免每次都把全团队
+     * 5 个人重新 LLM 评估一遍)。不传 = 全团队正式分析(人工点「运行分析」/风险送审走这里)。
+     * 单人范围下不调 LLM 团队风险归因 —— 喂不完整的团队事实会得出错的团队结论,改为规则引擎,
+     * 结果里以 scope 字段如实标出本次范围。
+     */
     @PostMapping("/analysis/run")
     public Map<String, Object> runAnalysis(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-                                           @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+                                           @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                           @RequestParam(required = false) Integer userId) {
         // 触发分析会落库(运行记录/画像快照)并消耗 LLM 额度 → 只读角色 viewer 必须拒绝。
         // 此前 Roles.any() 允许 viewer,与本类注释"触发分析:admin/owner(member 可看本人分析)"及 US02 只读约束冲突。
         User actor = Roles.writer();
-        return service.runAnalysis(start, end, actor);
+        return service.runAnalysis(start, end, actor, userId);
     }
 
     /** 分析运行记录(最近 20 条,失败留痕) */
@@ -167,12 +175,19 @@ public class ProfileAgentController {
         return githubSync.status();
     }
 
-    /** 手动触发 GitHub 活动同步(admin/owner;未配置时返回未配置状态,不发起外部请求) */
+    /**
+     * 手动触发 GitHub 活动同步(未配置时返回未配置状态,不发起外部请求)。
+     *
+     * <p>权限与其余写接口一致(Roles.writer():admin/owner/member),不是 reviewer():
+     * 「四人成员中任意人完成任务 → 在自己任务上点已完成 → 触发智能体读仓库」这条链上,
+     * 触发者就是普通成员(member),卡在 admin/owner 会让成员点完后同步不动。
+     * 只读查看者(viewer)仍然 403。
+     */
     @PostMapping("/github/sync")
     public Map<String, Object> githubSync(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        Roles.reviewer();
+        Roles.writer();
         return githubSync.sync(start, end);
     }
 }

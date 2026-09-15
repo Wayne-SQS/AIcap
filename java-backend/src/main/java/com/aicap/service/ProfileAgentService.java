@@ -78,12 +78,18 @@ public class ProfileAgentService {
             List.of("commit", "pr", "review", "bugfix", "task_done", "note", "test");
     /** 分析时间范围最大跨度(天):防超大响应/资源耗尽 */
     private static final int MAX_RANGE_DAYS = 400;
-    /** 同一用户两次正式分析的最短间隔(毫秒):防刷 API 额度 */
+    /** 同一用户两次**全团队**正式分析的最短间隔(毫秒):防刷 API 额度(6 次 LLM 调用/次) */
     private static final long RUN_RATE_LIMIT_MS = 30_000L;
+    /**
+     * 单人评估(成员完成任务触发)的去抖窗口:只防双击。
+     * 与全团队分析**分开计数**——四名成员连续完成多个任务时,每次都必须能评估;
+     * 单人评估只消耗 1 次成员画像调用,不该被全团队那条 30 秒窗口挡住。
+     */
+    private static final long SCOPED_RUN_DEBOUNCE_MS = 3_000L;
     /** 按任务粒度的评估锁:防止并发请求对同一任务重复评估/重复落库 */
     private final ConcurrentHashMap<String, Object> taskLocks = new ConcurrentHashMap<>();
-    /** 按用户粒度的正式分析频率限制 */
-    private final ConcurrentHashMap<Integer, Long> lastRunByUser = new ConcurrentHashMap<>();
+    /** 分析频率限制:键 = "team:<请求者>" / "scoped:<请求者>",两条通道互不影响 */
+    private final ConcurrentHashMap<String, Long> lastRunByUser = new ConcurrentHashMap<>();
 
     // ---------- 活动录入 ----------
 
@@ -366,17 +372,34 @@ public class ProfileAgentService {
 
     /** 文档 4.11:整包分析结果(只读预览:复用已存难度评估,成员/风险走规则引擎,不调 LLM、不落库) */
     public Map<String, Object> analyze(LocalDate start, LocalDate end) {
-        return analyze(start, end, false);
+        return analyze(start, end, false, null);
+    }
+
+    /** 全团队成员分析(不带范围收窄) */
+    public Map<String, Object> analyze(LocalDate start, LocalDate end, boolean useLlm) {
+        return analyze(start, end, useLlm, null);
     }
 
     /**
      * 整包分析(双模式,每条结论带证据、区分事实与推断):
      * - useLlm=false(预览):零 LLM 调用、零写库,难度复用已存评估,成员/风险走规则引擎;
      * - useLlm=true(正式分析):LLM 内核优先(成员画像+团队风险+难度评估),失败逐项降级规则引擎并落库。
+     *
+     * <p><b>onlyUserId(可选)</b>:只分析这一名成员。成员完成任务后前端只传提交者,
+     * 把"每次都把 5 个人重新 LLM 评估一遍"降为 1 次成员画像调用(6 次 → 1 次);
+     * 该范围下跳过 LLM 团队风险归因(只喂一个人的事实会得出错的团队结论),团队风险走规则引擎,
+     * 返回结果带 scope 字段如实标出本次范围。
      */
-    public Map<String, Object> analyze(LocalDate start, LocalDate end, boolean useLlm) {
+    public Map<String, Object> analyze(LocalDate start, LocalDate end, boolean useLlm, Integer onlyUserId) {
         validateRange(start, end);   // M2: 时间范围上限与顺序校验
-        List<User> users = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"));
+        List<User> allUsers = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"));
+        List<User> users = allUsers;
+        if (onlyUserId != null) {
+            users = allUsers.stream().filter(u -> onlyUserId.equals(u.getId())).toList();
+            if (users.isEmpty()) {
+                throw ApiException.notFound("成员不存在: " + onlyUserId);
+            }
+        }
         List<Task> tasks = taskMapper.selectList(null);
         Map<String, ProfileAgentDtos.DifficultyOut> diffByTask = new HashMap<>();
         for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(start, end, useLlm)) {
@@ -389,8 +412,10 @@ public class ProfileAgentService {
             members.add(memberAnalysis(u, tasks, diffByTask, start, end, useLlm));
         }
         // ---- LLM 内核优先:团队风险归因;失败/未配置 → 规则引擎降级 ----
+        // 单人范围(onlyUserId!=null)不调 LLM:团队风险必须看全体成员,只看一个人会把
+        // "他在做关键路径""模块集中在他身上"这类判断做错,宁可降级规则引擎并如实标注。
         boolean llmTeam = false;
-        if (useLlm && brain.available()) {
+        if (useLlm && onlyUserId == null && brain.available()) {
             try {
                 Map<String, Object> teamFacts = new LinkedHashMap<>();
                 teamFacts.put("range", start + " ~ " + end);
@@ -429,7 +454,14 @@ public class ProfileAgentService {
             }
         }
         if (!llmTeam) {
-            teamRisks.addAll(teamAnalysis(users, tasks, diffByTask, start, end));
+            /* 规则引擎的团队风险遍历**全部任务**(不只本次评估的成员),其 nameOf 成员名表必须来自
+               全体成员:只传范围收窄后的列表会让 nameOf 缺人 → Map.of 拒绝 null → NPE
+               (症状是 503「分析失败…: null」,因为 NPE 的 getMessage() 为 null)。 */
+            teamRisks.addAll(teamAnalysis(allUsers, tasks, diffByTask, start, end));
+            if (onlyUserId != null) {
+                // 单人范围:只留与这名成员相关的风险,不把全团队风险混进"只评估了他"的结果
+                teamRisks.removeIf(r -> !onlyUserId.equals(toIntOrNull(r.get("user_id"))));
+            }
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -440,6 +472,8 @@ public class ProfileAgentService {
         boolean anyLlm = members.stream().anyMatch(m -> "llm".equals(m.get("generated_by")))
                 || (!useLlm ? false : llmTeam);
         result.put("engine", anyLlm ? "llm" : "rules_fallback");
+        // 本次评估范围:team = 全团队(人工触发/送审);member:N = 只评估第 N 号成员(完成任务触发)
+        result.put("scope", onlyUserId == null ? "team" : "member:" + onlyUserId);
         result.put("data_sources", List.of("activity_records(手动/导入的活动事实)", "tasks(任务状态与工时)", "difficulty_assessments(难度评估)", "member_profiles(成员画像)"));
         result.put("members", members);
         result.put("team_risks", teamRisks);
@@ -792,23 +826,7 @@ public class ProfileAgentService {
         int loadPct = loadPercent(u, myTasks);
         m.put("current_load_percent", loadPct);
 
-        // ---- LLM 内核优先:成员分析由大脑(推理+工具+记忆)生成;失败/未配置/预览模式 → 规则引擎降级 ----
-        Map<String, Object> brainOut = useLlm ? brain.memberAnalysis(u.getId(), objective) : null;
-        if (brainOut != null) {
-            @SuppressWarnings("unchecked")
-            List<String> llmInference = (List<String>) brainOut.get("ai_inference");
-            m.put("ai_inference", llmInference);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> llmPortrait = (Map<String, Object>) brainOut.get("dynamic_profile");
-            llmPortrait.putIfAbsent("current_load_percent", loadPct);   // 负载是系统算术值,以系统为准
-            m.put("dynamic_profile", llmPortrait);
-            m.put("generated_by", "llm");
-            m.put("confidence", brainOut.get("confidence"));
-            m.put("evidence_refs", brainOut.get("evidence_refs"));
-            return m;
-        }
-
-        // ---- 规则引擎降级备胎(原模板推断) ----
+        // ---- 规则引擎完整画像(9 字段):既是 LLM 不可用时的降级结果,也是 LLM 路径的字段兜底 ----
         Map<String, Object> portrait = new LinkedHashMap<>();
         MemberProfile mp = memberProfileMapper.selectOne(
                 new QueryWrapper<MemberProfile>().eq("user_id", u.getId()).last("LIMIT 1"));
@@ -832,6 +850,42 @@ public class ProfileAgentService {
         portrait.put("risk_flags", loadPct >= 90 ? "负载过高,可能影响 Sprint 里程碑" :
                 loadPct >= 70 ? "负载偏高,建议关注" : "正常");
         portrait.put("recommended_task_types", buildRecommendations(mp, mainModule));
+
+        // ---- LLM 内核优先:成员分析由大脑(推理+工具+记忆)生成;失败/未配置/预览模式 → 规则引擎降级 ----
+        Map<String, Object> brainOut = useLlm ? brain.memberAnalysis(u.getId(), objective) : null;
+        if (brainOut != null) {
+            @SuppressWarnings("unchecked")
+            List<String> llmInference = (List<String>) brainOut.get("ai_inference");
+            m.put("ai_inference", llmInference);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llmPortrait = (Map<String, Object>) brainOut.get("dynamic_profile");
+            /* 只覆盖 LLM 真正给出的白名单字段,缺失字段保留上面规则引擎算出的完整值。
+               ProfileAgentBrain 只保留 LLM 实际输出且非空的字段,若像原先那样整体替换,
+               前端「动态能力画像」逐字段直取(ProfileAgentPanel「动态能力画像」9 行)会把缺失项
+               渲染成字面量 undefined;原实现 llmPortrait 为 null 时 putIfAbsent 还会直接 NPE。 */
+            if (llmPortrait != null) {
+                for (Map.Entry<String, Object> e : llmPortrait.entrySet()) {
+                    Object v = e.getValue();
+                    if (v == null) continue;
+                    if ("recommended_task_types".equals(e.getKey())) {
+                        /* 前端用 recommended_task_types.join 渲染:LLM 把它输出成字符串时
+                           必须归一成列表,否则前端会因 .join 不是函数而整块渲染失败 */
+                        if (v instanceof List<?> list) portrait.put(e.getKey(), list);
+                        else if (v instanceof String s && !s.isBlank()) portrait.put(e.getKey(), List.of(s));
+                        continue;
+                    }
+                    portrait.put(e.getKey(), v);
+                }
+            }
+            portrait.put("current_load_percent", loadPct);   // 负载是系统算术值,以系统为准
+            m.put("dynamic_profile", portrait);
+            m.put("generated_by", "llm");
+            m.put("confidence", brainOut.get("confidence"));
+            m.put("evidence_refs", brainOut.get("evidence_refs"));
+            return m;
+        }
+
+        // ---- 规则引擎降级备胎(原模板推断) ----
         m.put("ai_inference", inference);
         m.put("dynamic_profile", portrait);
         m.put("generated_by", "rules_fallback");
@@ -1041,15 +1095,29 @@ public class ProfileAgentService {
 
     /** 触发一次分析:同步执行并留痕(小数据量同步即可;失败落库可重试) */
     public Map<String, Object> runAnalysis(LocalDate start, LocalDate end, User user) {
+        return runAnalysis(start, end, user, null);
+    }
+
+    /**
+     * 触发一次分析(带范围):onlyUserId 非空时只评估这一名成员。
+     * 成员完成任务后前端只传提交者 —— 每次完成任务的 LLM 成本从「5 次成员画像 + 1 次团队风险」
+     * 降到「1 次成员画像」,且只对提交者的提交物做评估。
+     */
+    public Map<String, Object> runAnalysis(LocalDate start, LocalDate end, User user, Integer onlyUserId) {
         validateRange(start, end);   // M2
-        // M4 修复:同一用户 30 秒内限流,防止反复触发烧 API 额度
+        /* M4 修复:限流防刷额度,但两条通道分开计数——
+           全团队分析(6 次 LLM 调用)30 秒/人;单人评估(1 次调用)只做 3 秒双击去抖,
+           否则同一名成员连续完成两个任务时,第二次评估会被"稍后再试"顶掉。 */
         long now = System.currentTimeMillis();
-        Long last = lastRunByUser.get(user.getId());
-        if (last != null && now - last < RUN_RATE_LIMIT_MS) {
-            double waitSec = Math.ceil((RUN_RATE_LIMIT_MS - (now - last)) / 1000.0);
+        boolean scoped = onlyUserId != null;
+        String limitKey = (scoped ? "scoped:" : "team:") + user.getId();
+        long limitMs = scoped ? SCOPED_RUN_DEBOUNCE_MS : RUN_RATE_LIMIT_MS;
+        Long last = lastRunByUser.get(limitKey);
+        if (last != null && now - last < limitMs) {
+            double waitSec = Math.ceil((limitMs - (now - last)) / 1000.0);
             throw ApiException.unprocessable("分析请求过于频繁,请 " + (long) waitSec + " 秒后再试");
         }
-        lastRunByUser.put(user.getId(), now);
+        lastRunByUser.put(limitKey, now);
 
         ProfileAgentRun run = new ProfileAgentRun();
         run.setId(UUID.randomUUID().toString());
@@ -1064,7 +1132,7 @@ public class ProfileAgentService {
         brain.startRecording();
         try {
             // 可观测:录制本轮分析的每步 thought/action/observation/tokens(验收标准 3:决策可回溯)
-            Map<String, Object> result = analyze(start, end, true);
+            Map<String, Object> result = analyze(start, end, true, onlyUserId);
             Map<String, Object> observability = brain.collectSteps();
             result.put("observability", observability);
             @SuppressWarnings("unchecked")
@@ -1078,6 +1146,7 @@ public class ProfileAgentService {
                     "member_count", members.size(),
                     "risk_count", ((List<?>) result.get("team_risks")).size(),
                     "engine", result.get("engine"),
+                    "scope", result.get("scope"),   // team / member:N —— 运行记录里能看出这次评估了谁
                     "observability", observability)));
             runMapper.updateById(run);
             return result;

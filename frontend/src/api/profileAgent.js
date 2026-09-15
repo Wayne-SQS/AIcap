@@ -4,8 +4,8 @@ import { api } from './client'
 export const profileAgentApi = {
   /** 整包分析(只读预览) */
   analysis: (start, end) => api(`/api/profile-agent/analysis?start=${start}&end=${end}`),
-  /** 正式分析(留痕,可重试) */
-  run: (start, end) => api(`/api/profile-agent/analysis/run?start=${start}&end=${end}`, { method: 'POST' }),
+  /** 正式分析(留痕,可重试);传 userId 时只评估这一名成员(只评估某人的提交物) */
+  run: (start, end, userId) => api(`/api/profile-agent/analysis/run?start=${start}&end=${end}${userId != null ? `&userId=${userId}` : ''}`, { method: 'POST' }),
   /** 运行记录 */
   runs: () => api('/api/profile-agent/runs'),
   /** 活动列表 */
@@ -47,6 +47,6 @@ export const profileAgentApi = {
   corrections: (userId = null) => api('/api/profile-agent/corrections' + (userId != null ? `?userId=${userId}` : '')),
   /** GitHub 同步状态(US34) */
   githubStatus: () => api('/api/profile-agent/github/status'),
-  /** 手动触发 GitHub 活动同步(admin/owner) */
+  /** 手动触发 GitHub 活动同步(admin/owner/member;只读查看者 403) */
   githubSync: (start, end) => api(`/api/profile-agent/github/sync?start=${start}&end=${end}`, { method: 'POST' })
 }

@@ -380,6 +380,10 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .task-state.doing{background:var(--orange)}
 .task-state.done{background:var(--green)}
 .task-state.blocked,.task-state.cancelled{background:var(--pink)}
+/* 成员在自己的任务上「✓ 已完成」→ 触发任务提交智能体(useAgentRefresh.completeTask) */
+.task-item .task-tail{display:flex;gap:6px;align-items:center;justify-content:flex-end}
+.task-item .task-done{padding:3px 8px;font-size:11px;font-weight:700;white-space:nowrap}
+.task-item .task-done:not(:disabled){background:var(--green)}
 @media(max-width:720px){.drawer-panel{width:100%;min-width:0}}
 .mcard .head{display:flex;gap:12px;align-items:center;margin-bottom:12px}
 .mcard .avatar{width:46px;height:46px;font-size:15px}

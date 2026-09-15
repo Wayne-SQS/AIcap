@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
+import { AGENT_UPDATED_EVENT } from '@/composables/useAgentRefresh'
 import { profileAgentApi } from '@/api/profileAgent'
 
 /* 任务提交智能体(Commit Agent):真实数据
@@ -16,7 +17,9 @@ const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
 const online = computed(() => session.apiMode && !!session.currentUser)
-const isManager = computed(() => ['admin', 'owner'].includes(session.currentUser?.role))
+/* 手动同步入口:后端 /github/sync 与其余写接口同为 Roles.writer()(admin/owner/member),
+   只有只读查看者(viewer)不可用——成员靠它在自己完成任务后重试同步 */
+const canWrite = computed(() => !session.isViewer)
 
 /* 时间范围:默认近 30 天 */
 function iso(d) {
@@ -81,6 +84,25 @@ async function loadActivities() {
   }
 }
 
+/* 活动列表:按成员可查 + 如实报总条数。
+   真实数据是 67 条活动,而列表原先直接 slice(0,20):排在后面的成员(罗子涵 2 条、高思晗 1 条,
+   提交日期更早)在界面上一条都看不到,而且界面不说自己被截断了 —— 既看不到也不知道。
+   现在:成员筛选项 + 「共 N 条,当前显示最近 20 条」+ 可展开全部。 */
+const ACT_LIMIT = 20
+const activeUid = ref(null)      // null = 全部
+const showAll = ref(false)
+const filteredActivities = computed(() => (activeUid.value == null
+  ? activities.value
+  : activities.value.filter(a => a.user_id === activeUid.value)))
+const shownActivities = computed(() => (showAll.value
+  ? filteredActivities.value
+  : filteredActivities.value.slice(0, ACT_LIMIT)))
+const listTruncated = computed(() => !showAll.value && filteredActivities.value.length > ACT_LIMIT)
+function pickMember(uid) {
+  activeUid.value = activeUid.value === uid ? null : uid
+  showAll.value = false
+}
+
 /* ---------- 成员工作状态(事实,按真实活动聚合) + 推断与风险(画像分析) ---------- */
 const analysis = ref(null)
 const analysisLoading = ref(false)
@@ -135,7 +157,8 @@ const memberFacts = computed(() => {
 })
 
 const risks = computed(() => (analysis.value?.team_risks || []))
-const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', milestone_risk: '🟣 里程碑延期风险' }
+/* kind → 展示文案:必须覆盖后端 team_risks 实际产出的全部 kind,少一个键会静默退化成「⚪ 项目风险」 */
+const RISK_TEXT = { overload: '🔴 成员负载过高', single_point: '🟠 关键单点依赖', stalled: '🟡 任务长期无进展', missing_review: '🔵 高难度任务缺 Review', missing_test: '🟤 任务缺测试活动记录', module_concentration: '⚫ 模块工作过于集中', milestone_risk: '🟣 里程碑延期风险' }
 
 /* ---------- 生成协调建议 → 送审(真实闭环) ---------- */
 const submitting = ref(false)
@@ -160,8 +183,28 @@ function fmtSync(p) {
   return `拉取 ${n} 条 → 入库 ${p.synced ?? 0} / 跳过 ${p.skipped ?? 0}${p.warnings?.length ? ` / ${p.warnings.length} 条警告` : ''}`
 }
 
-checkGithub()
-onMounted(() => { if (online.value) { loadActivities(); loadAnalysis() } })
+/* 登录态就绪后再拉取(与 AiView 对会议 store 的 watch 同范式):
+   - 原实现在 setup 顶层无条件 checkGithub(),离线演示模式 / 未登录时必然 401,
+     client.js 的 401 分支会触发全局 handleUnauthorized() → 误弹「登录已过期」并强制打开登录框,
+     且 githubStatus 被永久污染成 { enabled:false, error:'未登录' };
+   - 原 onMounted 只在挂载那一刻判断一次 online:若先挂载后登录,活动与分析永远不会自动加载 */
+watch(() => online.value, v => {
+  if (!v) return
+  checkGithub()
+  loadActivities()
+  loadAnalysis()
+}, { immediate: true })
+
+/* 成员把任务标记完成 → useAgentRefresh 触发智能体读仓库并评估 → 广播本事件。
+   面板已挂载时立即重新拉取(活动列表 = 智能体找到的提交物),不用刷新整页 */
+function onAgentUpdated() {
+  if (!online.value) return
+  checkGithub()
+  loadActivities()
+  loadAnalysis()
+}
+onMounted(() => window.addEventListener(AGENT_UPDATED_EVENT, onAgentUpdated))
+onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpdated))
 </script>
 
 <template>
@@ -185,7 +228,7 @@ onMounted(() => { if (online.value) { loadActivities(); loadAnalysis() } })
       </div>
       <div class="sa-sync-ops">
         <span v-if="lastSync" class="small mono">{{ fmtSync(lastSync) }}</span>
-        <button v-if="isManager" id="submit-github-sync" class="ghost" :disabled="githubSyncing" @click="syncGithub">
+        <button v-if="canWrite" id="submit-github-sync" class="ghost" :disabled="githubSyncing" @click="syncGithub">
           {{ githubSyncing ? '同步中…' : '⟳ 立即同步 GitHub' }}
         </button>
         <span v-else class="small" style="opacity:.7">同步需 管理员/负责人 权限</span>
@@ -197,19 +240,47 @@ onMounted(() => { if (online.value) { loadActivities(); loadAnalysis() } })
     </div>
 
     <!-- 最近提交/活动(真实) -->
-    <div class="h-sec" style="margin-top:0">最近活动 · {{ rangeStart }} ~ {{ rangeEnd }}</div>
+    <div class="h-sec" style="margin-top:0">
+      最近活动 · {{ rangeStart }} ~ {{ rangeEnd }}
+      <span class="small" style="font-weight:400">
+        · 共 {{ filteredActivities.length }} 条<template v-if="listTruncated">，当前显示最近 {{ ACT_LIMIT }} 条</template>
+      </span>
+    </div>
     <p v-if="!online" class="small">离线演示模式:需连接后端读取真实活动(在线登录后自动加载)。</p>
     <p v-else-if="activitiesLoading" class="small">正在加载真实活动…</p>
     <p v-else-if="activitiesError" class="small" style="color:#e05555" role="alert">加载失败:{{ activitiesError }}</p>
-    <div v-else-if="activities.length" id="commits" style="margin-bottom:14px">
-      <div v-for="a in activities.slice(0, 20)" :key="a.activity_id" class="commit-row">
-        <span class="tag2">{{ TYPE_TEXT[a.activity_type] || a.activity_type }}</span>
-        <span class="msg">{{ a.title }}</span>
-        <span v-if="a.module" class="small" style="flex:0 0 auto">{{ a.module }}</span>
-        <span class="small" style="flex:0 0 auto">{{ nameOf[a.user_id] || `成员#${a.user_id}` }}</span>
-        <span class="sha">{{ a.happened_at ? a.happened_at.slice(0, 10) : '' }}</span>
+    <template v-else-if="activities.length">
+      <!-- 按成员筛选:每个人的提交物都要查得到,不能只靠"最近 20 条" -->
+      <div class="sa-filter" id="act-filter">
+        <button type="button" data-act-member="all" :class="{ active: activeUid === null }" @click="pickMember(null)">
+          全部 {{ activities.length }}
+        </button>
+        <button
+          v-for="f in memberFacts" :key="f.uid" type="button"
+          :data-act-member="f.uid" :class="{ active: activeUid === f.uid }"
+          @click="pickMember(f.uid)"
+        >{{ f.name }} {{ f.total }}</button>
       </div>
-    </div>
+      <div id="commits" style="margin-bottom:14px">
+        <div v-for="a in shownActivities" :key="a.activity_id" class="commit-row">
+          <span class="tag2">{{ TYPE_TEXT[a.activity_type] || a.activity_type }}</span>
+          <span class="msg">{{ a.title }}</span>
+          <span v-if="a.module" class="small" style="flex:0 0 auto">{{ a.module }}</span>
+          <span class="small" style="flex:0 0 auto">{{ nameOf[a.user_id] || `成员#${a.user_id}` }}</span>
+          <span class="sha">{{ a.happened_at ? a.happened_at.slice(0, 10) : '' }}</span>
+        </div>
+        <p v-if="!filteredActivities.length" class="pool-note">
+          该成员在此时间范围内没有活动记录。
+          <button type="button" class="ghost" data-act-member="all" @click="pickMember(null)">返回全部</button>
+        </p>
+        <button v-else-if="listTruncated" type="button" id="act-show-all" class="ghost" @click="showAll = true">
+          展开全部 {{ filteredActivities.length }} 条
+        </button>
+        <button v-else-if="showAll && filteredActivities.length > ACT_LIMIT" type="button" id="act-show-less" class="ghost" @click="showAll = false">
+          只看最近 {{ ACT_LIMIT }} 条
+        </button>
+      </div>
+    </template>
     <p v-else class="pool-note">该时间范围内暂无活动记录。可先在上方触发 GitHub 同步,或在「画像智能体」面板录入活动事实。</p>
 
     <!-- 成员工作状态(事实,聚合自真实活动) -->
@@ -263,4 +334,7 @@ onMounted(() => { if (online.value) { loadActivities(); loadAnalysis() } })
 .sa-sync-ops { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .sum-card h4 .warn { color: #b8860b; }
 .commit-row .msg { flex: 1; }
+.sa-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.sa-filter button { padding: 3px 9px; font-size: 11px; font-family: var(--mono); font-weight: 700; }
+.sa-filter button.active { background: var(--green); }
 </style>

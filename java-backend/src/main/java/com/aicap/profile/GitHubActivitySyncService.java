@@ -411,8 +411,14 @@ public class GitHubActivitySyncService {
     /** 映射 GitHub 提交者 → 系统 user_id;无法映射返回 null */
     private Integer resolveUserId(String login, String email, String name, Map<String, Integer> members) {
         Map<String, String> mapping = parseUserMapping();
-        if (login != null && !login.isBlank() && mapping.containsKey(login)) {
-            Integer id = members.get(mapping.get(login));
+        /* 显式映射按 登录名 → 邮箱 → 提交者姓名 依次取键。
+           原因:GitHub 上「未关联账号」的提交者拿不到 login(如 mcc@mcc.mcc → author=null、login="""),
+           若只认 login,这类提交永远无法归属——实测 mcc 那条就是这样被跳过的。
+           这类提交者往往只有一个假邮箱加一个作者名,只能靠姓名(或邮箱)兜底配置。
+           登录名优先级不变,所以已有配置行为完全向后兼容。 */
+        for (String key : new String[]{login, email, name}) {
+            if (key == null || key.isBlank() || !mapping.containsKey(key)) continue;
+            Integer id = members.get(mapping.get(key));
             if (id != null) return id;
         }
         if (login != null && !login.isBlank() && members.containsKey(login)) return members.get(login);

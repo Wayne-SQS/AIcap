@@ -100,7 +100,10 @@ cd D:\AIcap\java-backend; mvn spring-boot:run
 ```
 
 **同步机制与边界**:
-- 手动触发:前端「AI 助手 → 任务提交智能体 / 画像智能体 → ⟳ 立即同步」(仅管理员/负责人可见按钮);或 `POST /api/profile-agent/github/sync?start=YYYY-MM-DD&end=YYYY-MM-DD`
+- 自动触发(主路径,只在有人提交时才跑):任一成员在**自己的任务**上点「✓ 已完成」(成员任务明细抽屉 / 甘特任务详情)→ 前端自动调 `POST /api/profile-agent/github/sync`(读仓库提交物)→ 再调 `POST /api/profile-agent/analysis/run?userId=<提交者>`(**只评估提交者本人**,1 次成员画像调用,不是全团队 6 次)→ 广播事件让两个智能体面板立即刷新
+- 没有定时轮询:`GITHUB_AUTO_SYNC_HOURS=0` 时每小时那次 `@Scheduled` 只空转一次、不发任何请求;`profile-agent.scheduled.enabled=false`(默认)时每周一那次也不跑。全团队正式分析只在人工点「运行分析」/「送审」时才做
+- 连续完成多个任务:前端把评估**串行排队**(当前这位评估完自动接着评估下一位),不丢请求;后端限流分两条通道——全团队分析 30 秒/人,单人评估只做 3 秒双击去抖,所以四名成员连续完成任务时每一次都会被评估
+- 手动触发:前端「AI 助手 → 任务提交智能体 / 画像智能体 → ⟳ 立即同步」(管理员/负责人/成员可见,只读查看者不可见);或 `POST /api/profile-agent/github/sync?start=YYYY-MM-DD&end=YYYY-MM-DD`
 - 幂等:同一 GitHub 事件按 `github_event_id` 唯一入库,重复同步只跳过不重复插入
 - 成员映射:未在 `GITHUB_USER_MAPPING` 中的提交者不入库,同步结果中如实列出警告条数
 - 统计口径:`pulled`=本次真实拉取数 / `synced`=新增入库 / `skipped`=跳过(含已存在与未映射)
@@ -109,7 +112,7 @@ cd D:\AIcap\java-backend; mvn spring-boot:run
 ### 3. 安全须知
 
 - API Key 与 GitHub Token **一律走环境变量**,`.gitignore` 已忽略运行产物;不要把密钥写进任何 `.md/.bat/.vue/.java` 后提交
-- 同步按钮仅管理员/负责人可见;送审建议进入「AI 审核中心」,**人工审核通过才会执行**,LLM 只提出建议不直接改数据
+- 同步按钮对管理员/负责人/成员可见(后端 `Roles.writer()`),只读查看者不可见也不可调用;送审建议进入「AI 审核中心」,**人工审核通过才会执行**,LLM 只提出建议不直接改数据
 
 ## 功能视图
 
