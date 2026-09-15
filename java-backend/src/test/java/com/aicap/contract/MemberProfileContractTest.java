@@ -179,4 +179,44 @@ class MemberProfileContractTest extends ContractTestSupport {
                 json(payload(List.of(map("name", "匿名", "level", 3))))), 401);
         assertNotNull(profileOf(ADMIN_ID));
     }
+
+    /**
+     * 画像文本不得是「双编码乱码」。
+     *
+     * <p><b>为什么加这条</b>:开发库 {@code AIcap} 里 user_id=3(孙秋实)/4(罗子涵)的画像曾被写成
+     * UTF-8 → cp1252 双编码,界面上整块画像全是 {@code MySQL 8 ä¸ç´¢å¼ä¼å} 这种乱码,
+     * 而当时**没有任何用例会红** —— 既有断言只查「非空 / level∈1..5 / 技术栈互不相同」,
+     * 这些对乱码一律成立。脏数据是靠人眼发现的,这本身就是测试缺口。
+     *
+     * <p><b>判据</b>:中文被逐字节拆开后**一个 CJK 字符都不剩**,只剩 Latin-1 字母与 cp1252 标点。
+     * 因此取「含非 ASCII 但一个 CJK 都没有」:纯 ASCII 的合法值(Docker / Git / JUnit /
+     * MyBatis-Plus)天然不受影响,含中文的正常值必然有 CJK,而乱码必然命中。
+     *
+     * <p><b>适用范围</b>:这条判据只给「以中文为主的画像文本」用,不是通用乱码检测器 ——
+     * 对「W1–W2」这类只有排版符号、没有中文的串会误报,所以不外推到其他表。
+     *
+     * <p><b>为什么能防住复发</b>:契约测试每个上下文都会
+     * {@code TRUNCATE member_profiles} 后重新播种(见 {@code db/reset_test_data.sql}),
+     * 所以任何一条把乱码写进库的路径(种子串被写坏、请求体编码不对)都会在这里被挡住。
+     * 开发库的历史脏数据不受影响(它不会被重播),那类只能按
+     * {@code qa/测试用例设计_当前基线_v3.md} §9.4 的 {@code ENV-D03} 手工修。
+     */
+    @Test
+    void profiles_textFields_neverDoubleEncoded() {
+        ApiResponse r = get("/api/members/profiles", token(USER_ADMIN));
+        assertStatus(r, 200);
+        List<String> bad = new ArrayList<>();
+        for (JsonNode p : r.json()) {
+            List<String> texts = new ArrayList<>(List.of(p.path("title").asText(), p.path("summary").asText()));
+            for (String dim : List.of("tech_stack", "capabilities", "process_domains")) {
+                for (JsonNode item : p.path(dim)) texts.add(item.path("name").asText());
+            }
+            for (String t : texts) {
+                boolean nonAscii = t.chars().anyMatch(c -> c > 0x7f);
+                boolean hasCjk = t.chars().anyMatch(c -> Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN);
+                if (nonAscii && !hasCjk) bad.add(p.path("user_id").asInt() + " → " + t);
+            }
+        }
+        assertTrue(bad.isEmpty(), "画像文本不得是双编码乱码(中文被拆成 Latin-1,一个 CJK 都不剩): " + bad);
+    }
 }

@@ -75,7 +75,7 @@ if ((-not $backendUp -or -not $frontendUp) -and -not $SkipE2E) {
 
 # ---- 1. backend contract tests (JUnit) --------------------------------
 if (-not $SkipBackend) {
-    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (127 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (128 cases) ===" -ForegroundColor Cyan
     # JAVA_HOME must point at JDK 23: the ambient environment may carry a JDK 8,
     # which makes surefire fork Java 8 and fail with
     # "class file version 67.0 ... only recognizes class file versions up to 52.0".
@@ -97,7 +97,7 @@ if (-not $SkipBackend) {
     $summary = ''
     $hit = $mvnOut | Select-String -Pattern 'Tests run:.*Failures:.*Errors:.*Skipped' | Select-Object -Last 1
     if ($hit) { $summary = $hit.Line.Trim() }
-    Add-Result 'backend-contract (JUnit, 127 cases)' ($mvnExit -eq 0) $summary
+    Add-Result 'backend-contract (JUnit, 128 cases)' ($mvnExit -eq 0) $summary
     Pop-Location
 }
 
