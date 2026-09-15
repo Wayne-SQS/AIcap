@@ -103,11 +103,11 @@ if (-not $SkipBackend) {
 
 # ---- 2. frontend current-baseline E2E (Playwright) --------------------
 if (-not $SkipE2E) {
-    Write-Host "`n=== [2/3] frontend E2E: qa/vue-baseline-e2e.spec.js (41 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [2/3] frontend E2E: qa/vue-baseline-e2e.spec.js (44 cases) ===" -ForegroundColor Cyan
     Push-Location (Join-Path $repo 'qa')
     if (-not (Test-Path 'node_modules')) {
         Write-Warning 'qa/node_modules missing - run: cd qa; npm install'
-        Add-Result 'frontend-e2e (qa/, 41 cases)' $false 'qa/node_modules missing'
+        Add-Result 'frontend-e2e (qa/, 44 cases)' $false 'qa/node_modules missing'
     } else {
         $e2eOut = & npx playwright test 2>&1
         $e2eExit = $LASTEXITCODE
@@ -116,7 +116,7 @@ if (-not $SkipE2E) {
         $detail = 'see qa/report/index.html'
         $hit = $e2eOut | Select-String -Pattern '\d+ passed' | Select-Object -Last 1
         if ($hit) { $detail = $hit.Line.Trim() }
-        Add-Result 'frontend-e2e (qa/, 41 cases)' ($e2eExit -eq 0) $detail
+        Add-Result 'frontend-e2e (qa/, 44 cases)' ($e2eExit -eq 0) $detail
     }
     Pop-Location
 }

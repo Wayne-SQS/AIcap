@@ -204,6 +204,40 @@ async function openMapWithToday(page, today = QA_TODAY, user = ADMIN) {
   await expect(page.locator('#map .card').first()).toBeVisible()
 }
 
+/**
+ * 模拟把地图卡片拖到某个格子里(HTML5 拖放)。
+ * data-cell 的格式是「切片号-活动号」,例如 '2-4' = Sprint 2 × A4。
+ *
+ * 刻意分两步(dragover → 断言落点高亮 → drop):同一个 JS 任务里连发 dragover+drop 的话,
+ * Vue 还没来得及把 .dragover 渲染出来就已经被 drop 清掉了,高亮这个可交互提示就永远断言不到。
+ * 拖拽数据放在拖拽起点的 DataTransfer 上,与落点 isCellDrop 的读取方式一致。
+ */
+async function dragToCell(page, storyId, cell) {
+  await page.evaluate(({ id, cell }) => {
+    const card = document.querySelector(`#map .card[data-id="${id}"]`)
+    const target = document.querySelector(`#map .mapcell[data-cell="${cell}"]`)
+    if (!card || !target) throw new Error(`拖拽元素不存在: card=${!!card} cell=${!!target}`)
+    const dt = new DataTransfer()
+    window.__dragDT = dt
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }))
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }))
+  }, { id: storyId, cell })
+  // 落点必须给出高亮反馈(与状态看板换列同一套 --yellow 提示)
+  await expect(page.locator(`#map .mapcell[data-cell="${cell}"]`), `${cell} 应高亮为可落点`).toHaveClass(/dragover/)
+  await page.evaluate(cell => {
+    document.querySelector(`#map .mapcell[data-cell="${cell}"]`)
+      .dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: window.__dragDT }))
+  }, cell)
+}
+
+/** 拖拽一次并收集确认框文案(确认后返回;文案用于断言"这次拖动会改什么"被说清楚了) */
+async function dragAndConfirm(page, storyId, cell) {
+  let msg = ''
+  page.once('dialog', d => { msg = d.message(); d.accept() })
+  await dragToCell(page, storyId, cell)
+  return msg
+}
+
 /** 生成一个最小但结构合法的 MP3(ID3v2 头 + MPEG1 Layer III 静音帧),用于音频上传用例 */
 function writeTempMp3(fileName) {
   const id3v2 = Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -1171,6 +1205,160 @@ test.describe('FE-BRD 用户故事看板', () => {
     }
     expect(rows['2026-10-01'].overdue, 'W5 的逾期数必须严格多于 W1(否则说明锚点没被读取)')
       .toBeGreaterThan(rows['2026-08-31'].overdue)
+  })
+
+  test('[FE-BRD-12] 拖动卡片换切片:改 Sprint 并级联挪未完成子任务,确认框说清影响范围', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    /* 夹具:US10 在 A3×S1 且挂着 feature 子任务 T07(w1–w2、未完成)—— 后端没有 POST /api/tasks,
+       任务造不出来,只能借用基线这对(与 FE-BRD-07 同一对),结束逐字段还原。 */
+    const STORY = 'US10'
+    const TASK = 'T07'
+    const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+    const beforeTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+    expect(beforeStory.sprint, `夹具前提:${STORY} 在 Sprint 1`).toBe(1)
+    expect(beforeTask.kanban_card_id, `夹具前提:${TASK} 挂在 ${STORY} 上`).toBe(STORY)
+    expect(beforeTask.status, `夹具前提:${TASK} 未完成才会被级联`).not.toBe(2)
+    let restored = false
+
+    try {
+      await openMapWithToday(page)
+      // 旧版原型里地图卡是 draggable=false(地图只读),本次才让它可拖
+      await expect(page.locator(`#map .card[data-id="${STORY}"]`), '地图卡片必须可拖').toHaveAttribute('draggable', 'true')
+
+      const msg = await dragAndConfirm(page, STORY, '2-4')   // 拖到 Sprint 2 × A4
+      await expect(page.locator('#toast')).toContainText(`${STORY} → A4 × Sprint 2 · 已同步到服务器`)
+
+      // 确认框必须说清"这次拖动会改什么":级联会改写执行层数据,不能悄悄做
+      expect(msg, '确认框应说明切片变化').toContain(`迭代 S${beforeStory.sprint} → S2`)
+      expect(msg, '确认框应说明会级联挪几条子任务、挪几周').toContain('级联挪动 1 条未完成子任务后移 2 周')
+      expect(msg, '确认框应说明已完成/已取消的保留原记录').toContain('保留原记录')
+      expect(msg, '横向移位必须提示它改变的是叙事流程位置,不是优先级').toContain('横轴是用户流程顺序')
+
+      // 落库:故事换切片(一体化:执行层跟着走)
+      const afterStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const afterTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(afterStory.sprint, '故事应落到 Sprint 2').toBe(2)
+      expect(afterStory.activity, '故事应落到 A4').toBe(4)
+      expect(afterTask.week_start, '未完成子任务应后移 2 周').toBe(beforeTask.week_start + 2)
+      expect(afterTask.week_end, '未完成子任务结束周同步后移').toBe(beforeTask.week_end + 2)
+
+      // 反向拖回:Δ = −2 周,并逐字段还原
+      const back = await dragAndConfirm(page, STORY, '1-3')
+      expect(back).toContain('前移 2 周')
+      await expect(page.locator('#toast')).toContainText(`${STORY} → A3 × Sprint 1`)
+      const backStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const backTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(backStory.sprint, `${STORY} Sprint 应还原`).toBe(beforeStory.sprint)
+      expect(backStory.activity, `${STORY} 活动应还原`).toBe(beforeStory.activity)
+      expect(backTask.week_start, `${TASK} 周次应还原`).toBe(beforeTask.week_start)
+      expect(backTask.week_end, `${TASK} 结束周应还原`).toBe(beforeTask.week_end)
+      restored = true
+    } finally {
+      if (!restored) {
+        await apiSend(request, token, 'PATCH', `/api/stories/${STORY}`, { activity: beforeStory.activity, sprint: beforeStory.sprint })
+        await apiSend(request, token, 'PATCH', `/api/tasks/${TASK}`, { week_start: beforeTask.week_start, week_end: beforeTask.week_end })
+      }
+    }
+  })
+
+  test('[FE-BRD-13] 拖动卡片换骨干活动:只动活动列、不碰子任务;只读账号不可拖', async ({ page, browser, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const STORY = 'US06'   // A4×S1,无子任务 —— 横向移动不该产生任何级联
+    const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+    const beforeTasks = await apiGet(request, token, '/api/tasks')
+    let restored = false
+
+    try {
+      await openMapWithToday(page)
+      const msg = await dragAndConfirm(page, STORY, '1-5')   // 同一行内横向移动:Sprint 不变
+      await expect(page.locator('#toast')).toContainText(`${STORY} → A5 × Sprint 1`)
+
+      expect(msg, '确认框应点名是骨干活动变了').toContain('骨干活动')
+      expect(msg, '横向移动必须提示叙事位置变化').toContain('横轴是用户流程顺序')
+      expect(msg, 'Sprint 没变时不应提级联').not.toContain('级联挪动')
+
+      const afterStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      expect(afterStory.activity, '活动应改为 A5').toBe(5)
+      expect(afterStory.sprint, '同一行内移动不得改切片').toBe(beforeStory.sprint)
+      // 只改活动:所有任务的周次必须一字未动
+      const afterTasks = await apiGet(request, token, '/api/tasks')
+      expect(afterTasks.map(t => `${t.id}:${t.week_start}-${t.week_end}`))
+        .toEqual(beforeTasks.map(t => `${t.id}:${t.week_start}-${t.week_end}`))
+
+      // 还原
+      await dragAndConfirm(page, STORY, '1-4')
+      /* 等写库落地再读接口:drop 事件本身是同步返回的,而 onMapMove 里
+         confirm → PATCH → loadAll → notify 是一串 await —— toast 在最后才出,
+         所以断言 toast 也就等到了落库(少了这行会读到旧值,误判成"没改") */
+      await expect(page.locator('#toast')).toContainText(`${STORY} → A4 × Sprint 1 · 已同步到服务器`)
+      const backStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      expect(backStory.activity, `${STORY} 活动应还原`).toBe(beforeStory.activity)
+      expect(backStory.sprint).toBe(beforeStory.sprint)
+      restored = true
+    } finally {
+      if (!restored) {
+        await apiSend(request, token, 'PATCH', `/api/stories/${STORY}`, { activity: beforeStory.activity, sprint: beforeStory.sprint })
+      }
+    }
+
+    /* 只读查看者:卡片不可拖(只能看)。用独立 context,避免影响上面的 admin 会话。 */
+    const ctx = await browser.newContext()
+    const guest = await ctx.newPage()
+    await openMapWithToday(guest, QA_TODAY, VIEWER)
+    await expect(guest.locator(`#map .card[data-id="${STORY}"]`), '只读账号的卡片必须不可拖').toHaveAttribute('draggable', 'false')
+    await ctx.close()
+  })
+
+  test('[FE-BRD-14] 编辑弹窗改 Sprint:仅挪未完成子任务,已完成/已取消保留原记录(逐字段还原)', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const STORY = 'US10'
+    const TASK = 'T07'
+    const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+    const beforeTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+    expect(beforeStory.sprint, `夹具前提:${STORY} 在 Sprint 1`).toBe(1)
+    let restored = false
+
+    try {
+      await openMapWithToday(page)
+      await openBoardTab(page)
+      await searchBoard(page, STORY)
+      const dialog = await openStoryEditor(page, STORY)
+      await dialog.locator('select[name=sprint]').selectOption('2')
+      let msg = ''
+      page.once('dialog', d => { msg = d.message(); d.accept() })
+      await dialog.locator('button[type=submit]').click()
+      await expect(dialog).toBeHidden()
+
+      // 这条写入路径(弹窗改 Sprint → 级联挪子任务)此前没有任何用例覆盖,属裸奔路径
+      expect(msg, '确认框应说明挪几条未完成 / 保留几条').toContain('1 条未完成子任务')
+      expect(msg, '已完成与已取消的都保留原记录').toContain('已完成/已取消子任务将保留原记录')
+      const afterStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const afterTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(afterStory.sprint, '故事 Sprint 应改为 2').toBe(2)
+      expect(afterTask.week_start, '未完成子任务应随之后移 2 周').toBe(beforeTask.week_start + 2)
+      expect(afterTask.week_end).toBe(beforeTask.week_end + 2)
+
+      // 还原:再走一次弹窗改回 Sprint 1(级联反向)
+      await page.reload()
+      await openBoardTab(page)
+      await searchBoard(page, STORY)
+      const again = await openStoryEditor(page, STORY)
+      await again.locator('select[name=sprint]').selectOption('1')
+      page.once('dialog', d => d.accept())
+      await again.locator('button[type=submit]').click()
+      await expect(again).toBeHidden()
+      const backStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
+      const backTask = (await apiGet(request, token, '/api/tasks')).find(t => t.id === TASK)
+      expect(backStory.sprint).toBe(beforeStory.sprint)
+      expect(backTask.week_start, `${TASK} 周次应还原`).toBe(beforeTask.week_start)
+      expect(backTask.week_end).toBe(beforeTask.week_end)
+      restored = true
+    } finally {
+      if (!restored) {
+        await apiSend(request, token, 'PATCH', `/api/stories/${STORY}`, { sprint: beforeStory.sprint })
+        await apiSend(request, token, 'PATCH', `/api/tasks/${TASK}`, { week_start: beforeTask.week_start, week_end: beforeTask.week_end })
+      }
+    }
   })
 })
 

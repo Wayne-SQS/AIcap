@@ -181,7 +181,24 @@ export const useProjectStore = defineStore('project', {
     predecessorsOf: s => id => taskRefs((s.tasks.find(t => t.id === id) || {}).dependsOn),
     dependentsOf: s => id => s.tasks.filter(t => taskRefs(t.dependsOn).includes(id)).map(t => t.id),
     storiesForTask: s => task => taskRefs(task.story)
-      .map(id => s.stories.find(x => x.id === id.toUpperCase())).filter(Boolean)
+      .map(id => s.stories.find(x => x.id === id.toUpperCase())).filter(Boolean),
+
+    /* ==================== Sprint 位移规则(唯一住处) ====================
+       每个 Sprint = 2 周;周次夹紧到六周计划 W1–W6,且结束周不得早于开始周。
+       编辑弹窗的「改 Sprint → 级联挪未完成子任务」与故事地图的纵向拖拽共用这一处 ——
+       此前该公式只写在 StoryEditorDialog.submit() 里,拖拽若另写一遍必然逐渐漂移。
+       回归锚点:FE-BRD-12(拖拽纵向)、FE-BRD-14(弹窗改 Sprint)。 */
+    sprintShiftOf: () => (fromSprint, toSprint) => (toSprint - fromSprint) * 2,
+    shiftWeek: () => (w, shift) => {
+      const ws = Math.min(Math.max(w[0] + shift, 1), 6)
+      return [ws, Math.min(Math.max(w[1] + shift, ws), 6)]
+    },
+    /** 可被级联挪动的子任务:未完成且未取消。
+        取消(status 3)的语义是「真废弃」,再给它排新周次没有意义;
+        这与负责人级联同口径(那里也是 `status !== 2 && status !== 3`),
+        此前 Sprint 级联只判了 `!== 2`、把已取消的也算进去 —— 基线 T01–T16 没有已取消任务,
+        所以差异一直不可见,属隐性不一致。 */
+    movableSubsOf: s => id => s.tasks.filter(t => t.card === id && t.type === 'feature' && t.status !== 2 && t.status !== 3),
   },
   actions: {
     /** 新建故事的编号分配:US 命名空间顺延,与后端 StoryController.nextStoryId 的 US%02d 口径一致
@@ -263,6 +280,38 @@ export const useProjectStore = defineStore('project', {
       this.serverSync = true
       this.savehint = '已连接后端 · 数据实时同步到服务器'
       this.checkConsistency()
+    },
+    /* ==================== 故事地图拖拽落位 ====================
+       一次改「骨干活动 / 发布切片」两个字段中的一个或两个,并按上面的位移规则级联子任务。
+       先算计划(plan)再落库,是为了让调用方能在写入前弹一次确认 —— 避免"先写一半再问"。 */
+    storyMovePlan(id, target) {
+      const story = this.stories.find(s => s.id === id)
+      if (!story) return null
+      const activity = target.activity == null ? story.activity : target.activity
+      const sprint = target.sprint == null ? story.sprint : target.sprint
+      const subs = this.tasks.filter(t => t.card === id && t.type === 'feature')
+      const undone = this.movableSubsOf(id)
+      return {
+        id, story,
+        from: { activity: story.activity, sprint: story.sprint },
+        to: { activity, sprint },
+        activityChanged: activity !== story.activity,
+        sprintChanged: sprint !== story.sprint,
+        shift: this.sprintShiftOf(story.sprint, sprint),
+        undone,
+        kept: subs.filter(t => !undone.includes(t))
+      }
+    },
+    /** 离线/本机落位:改故事 + 挪子任务 + 写变更记录(在线由调用方走 API 后 loadAll) */
+    applyStoryMoveLocal(plan) {
+      const { story, to } = plan
+      if (plan.activityChanged) story.activity = to.activity
+      if (plan.sprintChanged) story.sprint = to.sprint
+      for (const t of plan.undone) t.w = this.shiftWeek(t.w, plan.shift)
+      this.persist()
+      this.addlog('move', plan.id,
+        `A${plan.from.activity}×S${plan.from.sprint} → A${to.activity}×S${to.sprint}` +
+        (plan.undone.length ? ` · 级联挪动 ${plan.undone.length} 条未完成子任务 ${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周` : ''))
     },
     restoreLocal() {
       const init = loadStories()

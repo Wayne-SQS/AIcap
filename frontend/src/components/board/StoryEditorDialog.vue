@@ -73,22 +73,23 @@ async function submit() {
     sprint: +form.sprint, activity: +form.activity
   }
   if (!payload.title || !payload.description || !payload.acceptance) { notify('请填写标题、用户故事和验收条件'); return }
-  /* 跨 Sprint 变更:默认仅挪动未完成子任务到新时间轴,已完成子任务保留原记录(防误伤历史) */
+  /* 跨 Sprint 变更:默认仅挪动未完成子任务到新时间轴,已完成/已取消子任务保留原记录(防误伤历史)。
+     位移公式与"哪些子任务可挪"都取自 store 的 sprintShiftOf / shiftWeek / movableSubsOf ——
+     与故事地图的纵向拖拽共用一处口径,避免两条路径各写一遍而漂移(FE-BRD-12/14)。 */
   if (editing.value) {
     const old = project.stories.find(x => x.id === editing.value)
     if (old && old.sprint !== payload.sprint) {
       const subs = project.subTasksOf(editing.value)
-      const undone = subs.filter(t => t.status !== 2)
+      const undone = project.movableSubsOf(editing.value)
+      const kept = subs.filter(t => !undone.includes(t))
       if (subs.length) {
-        const ok = confirm(`该卡 Sprint 由 S${old.sprint} 变更为 S${payload.sprint}。\n默认仅挪动 ${undone.length} 条未完成子任务到新时间轴,${subs.length - undone.length} 条已完成子任务将保留原记录。确认?`)
+        const ok = confirm(`该卡 Sprint 由 S${old.sprint} 变更为 S${payload.sprint}。\n默认仅挪动 ${undone.length} 条未完成子任务到新时间轴,${kept.length} 条已完成/已取消子任务将保留原记录。确认?`)
         if (ok) {
-          const shift = (payload.sprint - old.sprint) * 2
+          const shift = project.sprintShiftOf(old.sprint, payload.sprint)
           for (const t of undone) {
-            const ws = Math.min(Math.max(t.w[0] + shift, 1), 6)
-            const we = Math.min(Math.max(t.w[1] + shift, ws), 6)
-            t.w = [ws, we]
+            t.w = project.shiftWeek(t.w, shift)
             if (session.apiMode) {
-              try { await tasksApi.patch(t.id, { week_start: ws, week_end: we }) }
+              try { await tasksApi.patch(t.id, { week_start: t.w[0], week_end: t.w[1] }) }
               catch (err) { notify('子任务 ' + t.id + ' 挪动失败:' + err.message) }
             }
           }

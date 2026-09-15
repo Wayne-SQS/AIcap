@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import StoryCard from './StoryCard.vue'
 import { activities } from '@/constants'
 import { MAP_SPRINTS } from '@/data/seed'
@@ -26,8 +26,19 @@ const props = defineProps({
   sortBy: { type: String, default: 'origin' },
   nowWeek: { type: Number, default: 1 }
 })
-const emit = defineEmits(['open'])
+const emit = defineEmits(['open', 'move'])
 const project = useProjectStore()
+
+/* 拖拽落点:每个格子的坐标天然就是「骨干活动 × 发布切片」两个值,
+   所以一次落位可以同时表达"改活动"和"改切片" —— 具体语义与级联由 BoardView 决定
+   (它读 storyMovePlan 算计划,必要时先弹确认再落库)。 */
+const dragOverCell = ref('')
+function onCellDrop(sp, i, e) {
+  dragOverCell.value = ''
+  /* 编号从 dataTransfer 里取(与状态看板换列同一约定),而不是靠父组件的模块级变量,
+     这样落点自身就是完备的,不依赖拖拽起点是否上报过 */
+  emit('move', { id: e.dataTransfer.getData('text/plain'), activity: i + 1, sprint: sp.number })
+}
 
 const compact = computed(() => props.density === 'compact')
 
@@ -77,7 +88,14 @@ function cellStories(sp, i) {
       <div v-for="(a, i) in activities" :key="a" class="maphead"><span class="map-code">A{{ i + 1 }}</span><strong>{{ a }}</strong></div>
       <template v-for="sp in sprintList" :key="sp.number">
         <div class="sprinthead" :class="sp.cls">{{ sp.name }}<br><span class="small">{{ sp.tag }}</span></div>
-        <div v-for="(a, i) in activities" :key="sp.number + '-' + i" class="mapcell" :class="[sp.cls, { compact }]">
+        <div
+          v-for="(a, i) in activities" :key="sp.number + '-' + i"
+          class="mapcell" :class="[sp.cls, { compact, dragover: dragOverCell === sp.number + '-' + i }]"
+          :data-cell="sp.number + '-' + (i + 1)"
+          @dragover.prevent="dragOverCell = sp.number + '-' + i"
+          @dragleave="dragOverCell = ''"
+          @drop.prevent="onCellDrop(sp, i, $event)"
+        >
           <StoryCard
             v-for="s in cellStories(sp, i)" :key="s.id" :story="s"
             :map="true" :compact="compact" :skin="cardSkin(s)"

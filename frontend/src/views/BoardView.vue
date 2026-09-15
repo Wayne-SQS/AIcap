@@ -5,6 +5,7 @@ import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
+import { tasksApi } from '@/api/tasks'
 import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
 import { currentWeek, todayText } from '@/data/planCalendar'
 import BoardSummary from '@/components/board/BoardSummary.vue'
@@ -89,6 +90,47 @@ function onCardDragStart(id, e) {
   e.dataTransfer.effectAllowed = 'move'
 }
 
+/* ==================== 故事地图:拖动改「骨干活动 / 发布切片」 ====================
+   地图的每个格子 = 骨干活动 × 发布切片,所以一次落位可同时表达两件事:
+     · 纵向(跨切片行)→ 改 story.sprint,并按 project.sprintShiftOf 级联挪未完成子任务
+     · 横向(跨活动列)→ 改 story.activity。横轴是**用户流程顺序**(叙事骨架),不是优先级,
+       项目管理上必须让人意识到这一点,所以横向一律确认,避免被误读成"调优先级"
+   确认策略:横向一定确认;纵向只在**会级联改写执行层数据**(有未完成子任务)时确认 ——
+   没有子任务的卡片保持拖拽该有的流畅感。 */
+async function onMapMove(target) {
+  const plan = project.storyMovePlan(target.id, target)
+  if (!plan || (!plan.activityChanged && !plan.sprintChanged)) return
+  if (guard('拖动故事改切片')) return
+
+  const moves = []
+  if (plan.sprintChanged) {
+    moves.push(plan.undone.length
+      ? `· 迭代 S${plan.from.sprint} → S${plan.to.sprint}:级联挪动 ${plan.undone.length} 条未完成子任务${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周;已完成的 ${plan.kept.length} 条保留原记录`
+      : `· 迭代 S${plan.from.sprint} → S${plan.to.sprint}`)
+  }
+  if (plan.activityChanged) {
+    moves.push(`· 骨干活动 A${plan.from.activity} ${activities[plan.from.activity - 1]} → A${plan.to.activity} ${activities[plan.to.activity - 1]}(横轴是用户流程顺序,移位会改变叙事位置)`)
+  }
+  if ((plan.activityChanged || plan.undone.length) &&
+      !confirm(`将 ${plan.id} 移到 A${plan.to.activity} × Sprint ${plan.to.sprint}:\n${moves.join('\n')}\n确认?`)) return
+
+  const label = `${plan.id} → A${plan.to.activity} × Sprint ${plan.to.sprint}`
+  if (session.apiMode) {
+    try {
+      await storiesApi.patch(plan.id, { activity: plan.to.activity, sprint: plan.to.sprint })
+      for (const t of plan.undone) {
+        const [ws, we] = project.shiftWeek(t.w, plan.shift)
+        await tasksApi.patch(t.id, { week_start: ws, week_end: we })
+      }
+      await project.loadAll()
+      notify(label + ' · 已同步到服务器')
+    } catch (err) { notify(err.message) }
+  } else {
+    project.applyStoryMoveLocal(plan)
+    notify(label + (project.storageOK ? '' : ' · 暂未保存到本机'))
+  }
+}
+
 /* ==================== 导出 / 恢复演示 ==================== */
 function dl(name, blob) {
   const a = document.createElement('a')
@@ -171,7 +213,7 @@ async function resetDemo() {
       <StoryMapGrid
         :data="data" :sprint="sprint" :density="density" :skin="skin"
         :sort-by="sortBy" :now-week="nowWeek"
-        @open="openEditor($event)"
+        @open="openEditor($event)" @move="onMapMove"
       />
     </div>
 

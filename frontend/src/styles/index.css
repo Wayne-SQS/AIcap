@@ -185,6 +185,8 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .mapcell.s3{background:rgba(183,211,232,.1)}
 .mapcell.s4{background:rgba(211,193,230,.08)}
 .mapcell>.small{display:flex;align-items:flex-start;justify-content:center;min-height:30px;padding-top:8px;opacity:.48;font-size:11px}
+/* 故事地图拖拽落点高亮:沿用状态看板换列时的同一套提示色(--yellow),不引入新视觉语言 */
+.mapcell.dragover{background:var(--yellow)}
 .sprinthead{border-right:1px solid var(--ink);border-bottom:2px solid var(--ink);padding:9px 8px;background:var(--paper-2);font-family:var(--mono);font-weight:700;font-size:12px;line-height:1.45}
 .sprinthead.s1{background:#e1ecd5}.sprinthead.s2{background:#eee8da}.sprinthead.s3{background:#e1eaed}.sprinthead.s4{background:#e8e3dc}
 .sprinthead .small{color:var(--ink-soft)}
