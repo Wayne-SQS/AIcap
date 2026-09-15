@@ -141,4 +141,18 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
         // 无 LLM 密钥时,未被人工修正的任务应为规则引擎降级(rules)
         assertTrue(seen.contains("rules"), "缺少 rules 来源评估: " + seen + " body=" + r.body());
     }
+
+    // ---------- US02:只读角色不得触发正式分析(会落库运行记录/画像快照,并消耗 LLM 额度) ----------
+
+    @Test
+    void runAnalysis_viewerForbidden() {
+        // 此前 controller 用 Roles.any(),viewer 也能触发 → 与 US02 只读约束冲突
+        ApiResponse denied = post("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15",
+                token(USER_VIEWER), null);
+        assertStatus(denied, 403);
+        // 只读预览仍允许(不落库、不调 LLM)
+        ApiResponse preview = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15",
+                token(USER_VIEWER));
+        assertStatus(preview, 200);
+    }
 }

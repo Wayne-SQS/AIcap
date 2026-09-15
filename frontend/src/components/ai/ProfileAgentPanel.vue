@@ -57,8 +57,15 @@ async function syncGithub() {
   githubSyncing.value = true
   try {
     const r = await profileAgentApi.githubSync(rangeStart.value, rangeEnd.value)
-    notify(r.error || `GitHub 同步完成:新增 ${r.synced ?? 0} 条,跳过 ${r.skipped ?? 0} 条`)
-    if (r.warnings && r.warnings.length) notify(`有 ${r.warnings.length} 条无法归属成员(见详情)`)
+    if (r.error) {
+      notify(r.error)   // 未配置:后端单数 error
+    } else {
+      // 拉取失败写进 errors[](不是 error):如实报失败,不显示成"新增 0 条"
+      const errs = Array.isArray(r.errors) ? r.errors : []
+      if (errs.length) notify(`GitHub 同步未完成:${errs.length} 项事件拉取失败 — ${errs[0]}`)
+      else notify(`GitHub 同步完成:新增 ${r.synced ?? 0} 条,跳过 ${r.skipped ?? 0} 条`)
+      if (r.warnings && r.warnings.length) notify(`有 ${r.warnings.length} 条无法归属成员(见详情)`)
+    }
     lastSync.value = r
     checkGithub()
     loadAnalysis()
@@ -248,7 +255,11 @@ loadAnalysis()
       <span v-if="githubStatus" class="small" :style="{ color: githubStatus.enabled ? '#2e7d32' : '#b8860b' }">
         GitHub {{ githubStatus.enabled ? `同步已启用(${githubStatus.configured_repo})` : '未配置' }}
       </span>
-      <span v-if="lastSync" class="small mono" :title="(lastSync.warnings || []).join('\n')">
+      <span v-if="lastSync && lastSync.errors && lastSync.errors.length" class="small" role="alert"
+            style="color:#e05555" :title="lastSync.errors.join('\n')">
+        ⟳ 最近同步失败:{{ lastSync.errors.length }} 项 — {{ lastSync.errors[0] }}
+      </span>
+      <span v-else-if="lastSync" class="small mono" :title="(lastSync.warnings || []).join('\n')">
         ⟳ 最近同步:拉取 {{ (lastSync.pulled?.commits ?? 0) + (lastSync.pulled?.prs ?? 0) + (lastSync.pulled?.reviews ?? 0) + (lastSync.pulled?.issues ?? 0) }} → 入库 {{ lastSync.synced ?? 0 }} / 跳过 {{ lastSync.skipped ?? 0 }}
       </span>
       <button v-if="isManager" class="ghost" :disabled="githubSyncing" @click="syncGithub">

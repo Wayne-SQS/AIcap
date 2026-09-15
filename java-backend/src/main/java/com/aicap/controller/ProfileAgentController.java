@@ -107,7 +107,9 @@ public class ProfileAgentController {
     @PostMapping("/analysis/run")
     public Map<String, Object> runAnalysis(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        User actor = Roles.any();
+        // 触发分析会落库(运行记录/画像快照)并消耗 LLM 额度 → 只读角色 viewer 必须拒绝。
+        // 此前 Roles.any() 允许 viewer,与本类注释"触发分析:admin/owner(member 可看本人分析)"及 US02 只读约束冲突。
+        User actor = Roles.writer();
         return service.runAnalysis(start, end, actor);
     }
 

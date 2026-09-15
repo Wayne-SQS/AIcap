@@ -101,15 +101,18 @@ const contribs = ref([])
 function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-/** 最近 6 个完整自然周(周一起,42 天),与 6 周 × 7 天网格对齐 */
+/** 最近 6 个完整自然周(周一起,恰好 42 天):与 6 周 × 7 天网格一一对应 */
 function lastSixFullWeeks() {
   const now = new Date()
   const dow = (now.getDay() + 6) % 7
   const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
+  // 结束 = 上一个完整自然周的周日(本周尚未结束,不算"完整周")
   const end = new Date(thisMonday)
-  end.setDate(thisMonday.getDate() + 6)
+  end.setDate(thisMonday.getDate() - 1)
+  // 起始 = 结束往前 42 天(周一起):start 落在周一,网格 42 格的行标签(一..日)才与真实星期对齐,
+  // 且查询范围与渲染格数严格一致(此前 -41 会让整体错一天、并多查 6 天不计入格子却计入总数)
   const start = new Date(thisMonday)
-  start.setDate(thisMonday.getDate() - 41)
+  start.setDate(thisMonday.getDate() - 42)
   return { start: fmtDate(start), end: fmtDate(end) }
 }
 function contribTip(c, d, w) {

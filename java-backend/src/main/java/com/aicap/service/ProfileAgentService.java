@@ -1261,7 +1261,9 @@ public class ProfileAgentService {
      * change_json=建议落入需求池的条目内容。人工审核通过后才会写入正式数据。
      */
     public List<String> submitRiskSuggestions(LocalDate start, LocalDate end, String agent, User user) {
-        Map<String, Object> result = analyze(start, end, true);   // 送审是正式动作:LLM 正式分析
+        // 送审是正式动作:走 runAnalysis(与"触发正式分析"同一条路)——
+        // 留 profile_agent_runs 痕迹 + 受 30 秒限流;此前直接 analyze(...) 会绕过限流且事后无记录可查
+        Map<String, Object> result = runAnalysis(start, end, user);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> risks = (List<Map<String, Object>>) result.get("team_risks");
         List<String> ids = new ArrayList<>();

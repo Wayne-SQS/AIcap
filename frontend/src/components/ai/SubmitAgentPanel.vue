@@ -41,8 +41,13 @@ async function syncGithub() {
   githubSyncing.value = true
   try {
     const r = await profileAgentApi.githubSync(rangeStart.value, rangeEnd.value)
+    // 未配置:后端返回单数 error,原样转述
     if (r.error) { notify(r.error); return }
-    notify(`GitHub 同步完成:拉取 ${(r.pulled?.commits ?? 0) + (r.pulled?.prs ?? 0) + (r.pulled?.reviews ?? 0) + (r.pulled?.issues ?? 0)} 条事件,入库 ${r.synced ?? 0},跳过 ${r.skipped ?? 0}`)
+    // 拉取失败(403 限流/超时/404/非 JSON)后端写进 errors[],不是 error:
+    // 必须如实报失败,不能因为 pulled/synced/skipped 缺失就用 ?? 0 显示成"同步完成 0 条"
+    const errs = Array.isArray(r.errors) ? r.errors : []
+    if (errs.length) notify(`GitHub 同步未完成:${errs.length} 项事件拉取失败 — ${errs[0]}`)
+    else notify(`GitHub 同步完成:拉取 ${(r.pulled?.commits ?? 0) + (r.pulled?.prs ?? 0) + (r.pulled?.reviews ?? 0) + (r.pulled?.issues ?? 0)} 条事件,入库 ${r.synced ?? 0},跳过 ${r.skipped ?? 0}`)
     if (r.warnings && r.warnings.length) notify(`有 ${r.warnings.length} 条事件无法归属成员(已跳过,见警告)`)
     lastSync.value = r
     await Promise.all([checkGithub(), loadActivities()])
@@ -185,6 +190,10 @@ onMounted(() => { if (online.value) { loadActivities(); loadAnalysis() } })
         </button>
         <span v-else class="small" style="opacity:.7">同步需 管理员/负责人 权限</span>
       </div>
+      <span v-if="lastSync && lastSync.errors && lastSync.errors.length" class="small" role="alert"
+            style="flex:1 0 100%;color:#e05555">
+        ⚠ 同步未完成:{{ lastSync.errors.length }} 项失败 — {{ lastSync.errors.join('；') }}
+      </span>
     </div>
 
     <!-- 最近提交/活动(真实) -->

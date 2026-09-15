@@ -128,15 +128,17 @@ class GitHubSyncEndToEndContractTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> pulled = (Map<String, Object>) r.get("pulled");
 
-        // 拉取解析量:pulled 是"解析后待入库"数——commits API 返回 3,服务端过滤后仅 1
-        // (abc111 入库;abc222 越界本地9/16被边界防线过滤;abc333 未映射成员记 warnings) / pr 1 / review 1 / issue 1(PR 节点被跳过)
-        assertEquals(1, pulled.get("commits"));
+        // 拉取解析量:pulled = 日期范围内且时间戳可解析的事件数(含未映射成员,口径见 43431dc 三分离)
+        // commits API 返回 3:abc111 入库;abc222 越界(本地 9/16)被边界防线过滤,不计入 pulled;
+        // abc333 在范围内但作者未映射 → 计入 pulled,入库时并入 skipped / pr 1 / review 1 / issue 1(PR 节点被跳过)
+        assertEquals(2, pulled.get("commits"));
         assertEquals(1, pulled.get("prs"));
         assertEquals(1, pulled.get("reviews"));
         assertEquals(1, pulled.get("issues"));
-        // 入库:abc111 + pr-42-merged + review-9001 + issue-7 = 4;abc222 越界(本地 9/16)被服务端过滤;abc333 未映射跳过
+        // 入库:abc111 + pr-42-merged + review-9001 + issue-7 = 4;abc222 越界(本地 9/16)被服务端过滤
         assertEquals(4, r.get("synced"));
-        assertEquals(0, r.get("skipped"));
+        // abc333 未映射 → 计入 skipped(三分离口径:pulled = synced + skipped)
+        assertEquals(1, r.get("skipped"));
         @SuppressWarnings("unchecked")
         List<String> warnings = (List<String>) r.get("warnings");
         assertEquals(1, warnings.size());
@@ -181,6 +183,7 @@ class GitHubSyncEndToEndContractTest {
         assertEquals(4, r1.get("synced"));
         Map<String, Object> r2 = syncService.sync(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 15));
         assertEquals(0, r2.get("synced"));
-        assertEquals(4, r2.get("skipped"));
+        // 4 条已存在(幂等跳过) + 1 条未映射(abc333,每次都计入 skipped) = 5
+        assertEquals(5, r2.get("skipped"));
     }
 }

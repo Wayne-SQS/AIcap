@@ -50,10 +50,10 @@ aicap:
     timeout-seconds: 45
     agent-worker-enabled: ${AICAP_AGENT_WORKER_ENABLED:true}
 
-# 鐢诲儚鏅鸿兘浣?鐙珛 LLM 鍐呮牳,瑙?ProfileLlmProperties,鐜鍙橀噺鍓嶇紑 PROFILE_LLM_*)
+# 画像智能体:独立 LLM 内核(见 ProfileLlmProperties,环境变量前缀 PROFILE_LLM_*)
 profile-agent:
   scheduled:
-    # 姣忓懆鑷姩鍒嗘瀽鐨勫紑鍏?榛樿鍏抽棴(鏈厤瀵嗛挜鐧借窇/浜х敓璐圭敤);寮€鍚渶 PROFILE_LLM_API_KEY
+    # 每周自动分析的开关;默认关闭(未配密钥会白跑/产生费用),开启需 PROFILE_LLM_API_KEY
     enabled: ${PROFILE_AGENT_SCHEDULED_ENABLED:false}
     cron: ${PROFILE_AGENT_SCHEDULED_CRON:0 0 9 * * MON}
 # US34:GitHub 仓库与成员映射(活动同步源)。未配置时同步接口返回"未配置"状态,不发任何外部请求。
