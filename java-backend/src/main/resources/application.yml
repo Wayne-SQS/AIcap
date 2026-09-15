@@ -49,3 +49,27 @@ aicap:
     model: ${AICAP_LLM_MODEL:deepseek-v4-flash}
     timeout-seconds: 45
     agent-worker-enabled: ${AICAP_AGENT_WORKER_ENABLED:true}
+
+# 鐢诲儚鏅鸿兘浣?鐙珛 LLM 鍐呮牳,瑙?ProfileLlmProperties,鐜鍙橀噺鍓嶇紑 PROFILE_LLM_*)
+profile-agent:
+  scheduled:
+    # 姣忓懆鑷姩鍒嗘瀽鐨勫紑鍏?榛樿鍏抽棴(鏈厤瀵嗛挜鐧借窇/浜х敓璐圭敤);寮€鍚渶 PROFILE_LLM_API_KEY
+    enabled: ${PROFILE_AGENT_SCHEDULED_ENABLED:false}
+    cron: ${PROFILE_AGENT_SCHEDULED_CRON:0 0 9 * * MON}
+# US34:GitHub 仓库与成员映射(活动同步源)。未配置时同步接口返回"未配置"状态,不发任何外部请求。
+github:
+  enabled: ${GITHUB_ENABLED:false}
+  # GitHub Personal Access Token(只需 repo 只读权限);建议用环境变量注入,勿提交到仓库
+  token: ${GITHUB_TOKEN:}
+  # 仓库 owner/repo,如 neusoft/cloud-brain
+  repo: ${GITHUB_REPO:}
+  api-base: ${GITHUB_API_BASE:https://api.github.com}
+  # GitHub 登录名 → 系统 username 的映射(JSON 字符串,环境变量注入)
+  # 例: GITHUB_USER_MAPPING='{"li-ming":"李锐铭","zhang-san":"孙秋实"}'
+  user-mapping-json: ${GITHUB_USER_MAPPING:}
+  # 定时自动同步间隔(小时),0=不自动
+  auto-sync-hours: ${GITHUB_AUTO_SYNC_HOURS:0}
+  # 单类事件最大拉取页数(每页100条);活跃仓库建议调大
+  max-pages: 5
+  # 单次同步拉取 Review 的 PR 数上限(每 PR 1 个请求)
+  review-pr-limit: 30

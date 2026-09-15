@@ -133,7 +133,8 @@ public class MeetingController {
 
     /** 组装 SuggestionOut(对齐 FastAPI _out:agent_run_id 推导 + approved_changes) */
     private MeetingDtos.SuggestionOut toOut(Suggestion s, MeetingSuggestionRecord record) {
-        Meeting meeting = meetingService.getMeeting(record.getMeetingId());
+        // 非会议来源(如画像智能体)的建议没有所属会议,meeting 字段置空而不是 404
+        Meeting meeting = record.getMeetingId() == null ? null : meetingService.getMeeting(record.getMeetingId());
 
         String agentRunId = null;
         String[] parts = record.getClientRequestId().split(":");
@@ -164,7 +165,9 @@ public class MeetingController {
         MeetingDtos.PoolChanges changes = parseChanges(s.getChangeJson());
 
         return new MeetingDtos.SuggestionOut(
-                agentRunId, approvedChanges, s.getId(), meeting.getId(), meeting.getTitle(),
+                agentRunId, approvedChanges, s.getId(),
+                meeting == null ? null : meeting.getId(),
+                meeting == null ? null : meeting.getTitle(),
                 "pool.create", record.getOrigin(), s.getEvidence(), s.getNote(), changes,
                 s.getStatus(), s.getCreatedAt(), record.getSubmittedBy(),
                 record.getReviewedBy(), record.getReviewedAt(), record.getReason(),

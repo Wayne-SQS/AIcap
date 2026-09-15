@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS `meetings` (
 CREATE TABLE IF NOT EXISTS `meeting_suggestion_records` (
   `id` int NOT NULL AUTO_INCREMENT,
   `suggestion_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `meeting_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `meeting_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '可空:画像智能体等非会议来源的建议没有所属会议',
   `client_request_id` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
   `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `submitted_by` int NOT NULL,
@@ -205,4 +205,90 @@ CREATE TABLE IF NOT EXISTS `meeting_audio` (
   KEY `ix_meeting_audio_uploaded_by` (`uploaded_by`),
   CONSTRAINT `meeting_audio_ibfk_1` FOREIGN KEY (`meeting_id`) REFERENCES `meetings` (`id`),
   CONSTRAINT `meeting_audio_ibfk_2` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ AI 任务提交与成员能力画像智能体(画像智能体)数据表 ============
+
+-- 成员提交活动事实记录(commit/PR/Review/缺陷修复等),画像智能体的数据源;
+-- task_id 可空:未关联任务的活动本身就是文档 4.6 中的「提交异常模式」证据
+CREATE TABLE IF NOT EXISTS `activity_records` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `task_id` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务(Txx),可空=未关联',
+  `activity_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'commit/pr/review/bugfix/task_done/note/test',
+  `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '活动标题,如「修复登录接口 401」',
+  `detail` varchar(1000) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '证据细节',
+  `module` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '所属模块,如 权限/前端',
+  `source` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual' COMMENT 'manual=手动录入 / import=批量导入 / github=GitHub 同步',
+  `happened_at` datetime NOT NULL COMMENT '活动发生时间',
+  `github_event_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'GitHub 事件唯一ID(commit sha/PR号/review id/issue号),同步幂等去重',
+  `created_by` int DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ix_activity_records_github_event` (`github_event_id`),
+  KEY `ix_activity_records_user_time` (`user_id`,`happened_at`),
+  KEY `ix_activity_records_task` (`task_id`),
+  CONSTRAINT `activity_records_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `activity_records_ibfk_2` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`),
+  CONSTRAINT `activity_records_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 任务难度评估(AI 依据工时/依赖/核心模块/返工等生成,必须带依据;人工可修正覆盖)
+CREATE TABLE IF NOT EXISTS `difficulty_assessments` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `task_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `level` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'low/medium/high/extreme',
+  `score` int NOT NULL DEFAULT '0' COMMENT '难度分 0..100',
+  `basis` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON 数组:难度依据,逐条可追溯',
+  `assessed_by` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ai' COMMENT 'ai=智能体LLM / rules=规则引擎降级 / manual=人工(永远优先)',
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_difficulty_task` (`task_id`),
+  CONSTRAINT `difficulty_assessments_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 动态能力画像快照(按时间范围整包 JSON;区分 objective=事实 与 inference=AI 推断)
+CREATE TABLE IF NOT EXISTS `profile_snapshots` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `range_start` date NOT NULL,
+  `range_end` date NOT NULL,
+  `payload_json` longtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '画像整包:擅长方向/难度承受/交付及时性/负载/风险/推荐任务',
+  `generated_by` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ai',
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_profile_snapshots_user` (`user_id`,`range_start`,`range_end`),
+  CONSTRAINT `profile_snapshots_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 画像智能体分析运行记录(镜像 meeting_agent_runs:可重试、失败留痕)
+CREATE TABLE IF NOT EXISTS `profile_agent_runs` (
+  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `range_start` date NOT NULL,
+  `range_end` date NOT NULL,
+  `requested_by` int NOT NULL,
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'pending/running/succeeded/failed',
+  `attempt` int NOT NULL DEFAULT '1',
+  `result_json` longtext COLLATE utf8mb4_unicode_ci,
+  `error_message` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_profile_agent_runs_status` (`status`),
+  CONSTRAINT `profile_agent_runs_ibfk_1` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 成员对 AI 画像的纠正(文档 4.7:允许成员纠正错误信息;纠正永久保留并展示在画像旁)
+CREATE TABLE IF NOT EXISTS `profile_corrections` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '被纠正的画像所属成员(本人提交)',
+  `field` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '纠正的画像字段,如 good_at/recommended_task_types',
+  `corrected_value` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '成员确认的正确描述',
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '纠正理由(可选)',
+  `created_by` int NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_profile_corrections_user` (`user_id`,`created_at`),
+  CONSTRAINT `profile_corrections_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `profile_corrections_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -56,6 +56,61 @@ cd frontend && npm install && npm run dev   # 起前端 http://localhost:5173
 # 别名:成员1–成员4 与真名双向互通;成员5 的显示名「只读查看者」也可直接登录
 ```
 
+## AI 与 GitHub 接入配置(重要)
+
+### 1. LLM API 密钥(画像分析 / 任务提交智能体 / 会议智能体)
+
+后端通过**环境变量**读取 DeepSeek API Key,**不写入任何配置文件或代码仓库**:
+
+| 环境变量 | 用途 | 示例 |
+|---|---|---|
+| `PROFILE_LLM_API_KEY` | 画像分析 / 任务提交智能体的难度评估、成员推断、风险归因 | `sk-xxxxxxxx` |
+| `AICAP_LLM_API_KEY` | 会议智能体的会议分析 | 同一把 Key 即可 |
+
+PowerShell 启动后端前注入(每次新开终端都要设置,`setx` 只对**之后**新开的进程生效):
+
+```powershell
+$env:PROFILE_LLM_API_KEY = "sk-你的key"
+$env:AICAP_LLM_API_KEY   = "sk-你的key"
+cd D:\AIcap\java-backend
+mvn spring-boot:run        # 或 java -jar target\aicap-java-backend.jar
+```
+
+> 未配置 Key 时后端仍可运行,AI 分析会回退为「规则打分 + 明确标注的数据不足」,**不会伪造模型结论**;配置后自动启用真实模型。
+
+### 2. GitHub 同步(活动数据接入)
+
+后端以 **GitHub REST API(用 PAT 认证)** 拉取仓库的 Commit / PR / Review / Issue 事件,映射到系统成员后落库 `activity_records(source='github')`,供成员任务图、画像分析、任务提交智能体消费。
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `GITHUB_ENABLED` | 是 | `true` 开启同步 |
+| `GITHUB_REPO` | 是 | 仓库名,格式 `owner/repo`,如 `lili618li/aiglcs` |
+| `GITHUB_TOKEN` | 是 | Personal Access Token(fine-grained PAT 需授予仓库 Contents:Read / Pull requests:Read 等只读权限;不要把 token 提交进仓库) |
+| `GITHUB_USER_MAPPING` | 是 | GitHub 用户名 → 系统成员真名 的 JSON 映射,如 `{"lili618li":"李锐铭","Wayne-SQS":"孙秋实","LHWYAN":"罗子涵","13555853258":"高思晗"}` |
+
+一次性启动示例(把上面的 LLM 变量一并带上):
+
+```powershell
+$env:GITHUB_ENABLED="true"
+$env:GITHUB_REPO="lili618li/aiglcs"
+$env:GITHUB_TOKEN="github_pat_..."
+$env:GITHUB_USER_MAPPING='{"lili618li":"李锐铭","Wayne-SQS":"孙秋实","LHWYAN":"罗子涵","13555853258":"高思晗"}'
+cd D:\AIcap\java-backend; mvn spring-boot:run
+```
+
+**同步机制与边界**:
+- 手动触发:前端「AI 助手 → 任务提交智能体 / 画像智能体 → ⟳ 立即同步」(仅管理员/负责人可见按钮);或 `POST /api/profile-agent/github/sync?start=YYYY-MM-DD&end=YYYY-MM-DD`
+- 幂等:同一 GitHub 事件按 `github_event_id` 唯一入库,重复同步只跳过不重复插入
+- 成员映射:未在 `GITHUB_USER_MAPPING` 中的提交者不入库,同步结果中如实列出警告条数
+- 统计口径:`pulled`=本次真实拉取数 / `synced`=新增入库 / `skipped`=跳过(含已存在与未映射)
+- 同步状态查询:`GET /api/profile-agent/github/status`
+
+### 3. 安全须知
+
+- API Key 与 GitHub Token **一律走环境变量**,`.gitignore` 已忽略运行产物;不要把密钥写进任何 `.md/.bat/.vue/.java` 后提交
+- 同步按钮仅管理员/负责人可见;送审建议进入「AI 审核中心」,**人工审核通过才会执行**,LLM 只提出建议不直接改数据
+
 ## 功能视图
 
 | 视图 | 说明 |

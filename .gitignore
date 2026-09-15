@@ -38,3 +38,10 @@ qa/node_modules/
 qa/report/
 qa/test-results/
 qa/playwright-report/
+
+# 运行时产物(本机日志/PID/临时文件,不进仓库)
+*.log
+*.pid
+build_pkg.log
+build_test*.log
+sync_result.json
