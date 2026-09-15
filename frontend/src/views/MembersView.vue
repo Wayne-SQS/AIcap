@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { membersApi } from '@/api/members'
+import { profileAgentApi } from '@/api/profileAgent'
 import { useToast } from '@/composables/useToast'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import MemberProfileDialog from '@/components/members/MemberProfileDialog.vue'
@@ -12,7 +13,8 @@ import { ROLE_TXT } from '@/data/seed'
 /* 成员任务图
    - 成员卡片 / 热力图 / Bandwidth / 开发活动图:5 名后端真实成员,容量取 users.capacity_hours
    - 点成员卡片 → 右侧任务明细抽屉(状态筛选)
-   - 成员画像板块(技术栈 / 工作能力 / 开发流程领域)为真实后端数据,置于页面顶部 */
+   - 成员画像板块(技术栈 / 工作能力 / 开发流程领域)为真实后端数据,置于页面顶部
+   - 开发活动图读取真实活动记录(activity_records,含 GitHub 同步),不再使用样例数据 */
 const project = useProjectStore()
 const session = useSessionStore()
 const { notify } = useToast()
@@ -49,8 +51,6 @@ function onSaved(saved) {
   editing.value = null
   notify('画像已更新')
 }
-watch(online, v => { if (v) loadProfiles() }, { immediate: true })
-onMounted(loadProfiles)
 
 /* ==================== 成员卡片 ==================== */
 const totalAllocated = computed(() => project.tasks.reduce((a, t) => a + Math.max(0, Number(t.h) || 0), 0))
@@ -91,39 +91,77 @@ const bandwidthCards = computed(() => project.members.map(m => {
   return { m, alloc, cap, pct: cap ? Math.round(alloc / cap * 100) : 0, state: project.capacityStatus(cap ? alloc / cap : 0) }
 }))
 
-/* ==================== 成员开发活动图(样例数据,6 周 × 7 天) ==================== */
-function seeded(s) {
-  let x = s >>> 0
-  return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296 }
-}
-function makeContrib(count) {
-  const out = []
-  for (let m = 0; m < count; m++) {
-    const rnd = seeded(1000 + m * 77)
-    const days = Array.from({ length: 7 }, () => Array(6).fill(0))
-    for (let d = 0; d < 7; d++) {
-      for (let w = 0; w < 6; w++) {
-        const v = rnd(), threshold = .42 - (w / 5) * .12
-        days[d][w] = v > threshold ? (v > threshold + .42 ? 4 : v > threshold + .28 ? 3 : v > threshold + .14 ? 2 : 1) : 0
-      }
-    }
-    out.push(days)
-  }
-  return out
-}
+/* ==================== 成员开发活动图(真实数据:activity_records,含 GitHub 同步) ==================== */
 const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
-const contribs = computed(() => {
-  const matrix = makeContrib(project.members.length)
-  return project.members.map((m, i) => {
-    const rows = matrix[i]
-    const flat = rows.flat()
-    return {
-      m, rows,
-      total: flat.reduce((a, b) => a + b, 0),
-      activeDays: flat.filter(v => v > 0).length
-    }
-  })
-})
+const contribLoading = ref(false)
+const contribError = ref('')
+const contribs = ref([])
+
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+/** 最近 6 个完整自然周(周一起,42 天),与 6 周 × 7 天网格对齐 */
+function lastSixFullWeeks() {
+  const now = new Date()
+  const dow = (now.getDay() + 6) % 7
+  const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow)
+  const end = new Date(thisMonday)
+  end.setDate(thisMonday.getDate() + 6)
+  const start = new Date(thisMonday)
+  start.setDate(thisMonday.getDate() - 41)
+  return { start: fmtDate(start), end: fmtDate(end) }
+}
+function contribTip(c, d, w) {
+  const meta = c.meta[d][w]
+  if (!meta || meta.total === 0) return `${c.m.name} · ${meta ? meta.date : '?'}\n无活动`
+  const parts = Object.entries(meta.counts || {}).filter(([, n]) => n > 0).map(([t, n]) => `${t}×${n}`).join(' ')
+  return `${c.m.name} · ${meta.date}\n活动 ${meta.total} 次${parts ? '\n' + parts : ''}\n来源:活动记录(含 GitHub 同步)`
+}
+async function loadContribs() {
+  if (!online.value) { contribs.value = []; contribError.value = ''; return }
+  if (!profiles.value.length) { contribs.value = []; contribError.value = '成员画像未加载，无法获取真实活动数据'; return }
+  contribLoading.value = true
+  contribError.value = ''
+  const { start, end } = lastSixFullWeeks()
+  try {
+    // 成员以后端真实画像为准(user_id 1..5),不再用前端 0-based seed id,避免查询错位
+    const members = profiles.value.map((p, i) => ({
+      id: p.user_id,
+      name: p.display_name,
+      frontId: project.members[i] ? project.members[i].id : p.user_id
+    }))
+    contribs.value = await Promise.all(members.map(async m => {
+      const rows = await profileAgentApi.heatmap(start, end, m.id)
+      const dayMap = new Map(rows.map(r => [r.date, r]))
+      const grid = Array.from({ length: 7 }, () => Array(6).fill(0))
+      const meta = Array.from({ length: 7 }, () => Array(6).fill(null))
+      const base = new Date(start + 'T00:00:00')
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(base)
+        d.setDate(base.getDate() + i)
+        const key = fmtDate(d)
+        const row = dayMap.get(key)
+        const total = row ? row.total : 0
+        const w = Math.floor(i / 7)
+        const dd = i % 7
+        grid[dd][w] = Math.min(total, 4)
+        meta[dd][w] = row ? { date: key, total: row.total, counts: row.counts } : { date: key, total: 0, counts: null }
+      }
+      const flat = grid.flat()
+      // 数字口径:真实活动总数/活跃天数取 heatmap 原始值;grid 仅用于格子颜色分级(单日 >4 统一最深色)
+      const realTotal = rows.reduce((a, r) => a + r.total, 0)
+      const realActive = rows.filter(r => r.total > 0).length
+      return { m, rows: grid, meta, total: realTotal, activeDays: realActive }
+    }))
+  } catch (e) {
+    contribError.value = e.message || '加载真实活动数据失败'
+    contribs.value = []
+  } finally {
+    contribLoading.value = false
+  }
+}
+watch(online, async v => { if (v) { await loadProfiles(); await loadContribs() } }, { immediate: true })
+onMounted(async () => { await loadProfiles(); await loadContribs() })
 </script>
 
 <template>
@@ -213,14 +251,17 @@ const contribs = computed(() => {
       </div>
     </div>
 
-    <div class="h-sec">成员开发活动图 · 样例数据</div>
-    <div class="contrib-wrap" id="contrib">
+    <div class="h-sec">成员开发活动图 · 真实数据（最近 6 周）</div>
+    <p v-if="!online" class="small">离线演示模式：活动图需连接后端读取真实活动记录（在线登录后自动加载）。</p>
+    <p v-else-if="contribLoading" class="small">正在加载真实活动数据…</p>
+    <p v-else-if="contribError" class="small" role="alert">活动数据加载失败：{{ contribError }}</p>
+    <div v-else class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">
-          <span class="avatar" :class="'a' + c.m.id">P{{ c.m.id + 1 }}</span>{{ c.m.name }}
-          <span class="small mono" style="margin-left:auto">样例活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
+          <span class="avatar" :class="'a' + c.m.frontId">P{{ c.m.frontId + 1 }}</span>{{ c.m.name }}
+          <span class="small mono" style="margin-left:auto">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
         </div>
-        <div class="small" style="margin-bottom:8px;color:var(--muted)">{{ project.memberRoleText(c.m.id) }}</div>
+        <div class="small" style="margin-bottom:8px;color:var(--muted)">{{ project.memberRoleText(c.m.frontId) }}</div>
         <div class="contrib-grid">
           <span class="grid-corner"></span>
           <span v-for="w in 6" :key="'h' + w" class="week-label" :style="{ gridColumn: w + 1, gridRow: 1 }">W{{ w }}</span>
@@ -230,7 +271,7 @@ const contribs = computed(() => {
               v-for="(v, w) in row" :key="'c' + d + '-' + w"
               class="c-cell" :class="'c' + v"
               :style="{ gridColumn: w + 2, gridRow: d + 2 }"
-              :title="`${c.m.name} · W${w + 1} · 周${DAY_LABELS[d]}\n样例活动：${v}\n非真实 GitHub 数据`"
+              :title="contribTip(c, d, w)"
             ></span>
           </template>
         </div>
@@ -242,7 +283,7 @@ const contribs = computed(() => {
         <span>一般</span><span class="sw c2"></span>
         <span>较多</span><span class="sw c3"></span>
         <span>活跃</span><span class="sw c4"></span>
-        <span>样例数据 · 非真实 GitHub 事件</span>
+        <span>真实数据 · 来自活动记录（含 GitHub 同步），悬停看日期与活动明细</span>
       </div>
     </div>
   </section>
