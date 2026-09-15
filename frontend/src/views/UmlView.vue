@@ -235,12 +235,11 @@ const messages = MSG.map(([from, to, label, details, type], i) => {
     </div>
 
     <p class="uml-note">
-      演示版：用例图按需求基线（{{ project.stories.length }} 条故事）渲染 —— 用例名取自故事标题，节点上的 US 标注由故事编号派生，
-      两者都随故事数据变化自动更新（删掉故事，其编号会自动从标注上消失，不再留幽灵编号）。
-      但 15 个用例的布局、故事归属与角色关联由 <code>USECASE_LAYOUT</code> / <code>RELATIONS</code> 静态定义：新增或删除故事不会增减用例节点。
+      演示版：用例图按需求基线（{{ project.stories.length }} 条故事）渲染 —— 用例名取自故事标题、US 标注由故事编号派生，
+      两者都随故事数据自动更新（删掉故事，编号即从标注上消失，不留幽灵编号）。
+      但 15 个用例的布局与角色关联由 <code>USECASE_LAYOUT</code> / <code>RELATIONS</code> 静态定义，增删故事不会增减用例节点。
       <span id="uml-unmapped">未被任何用例引用的故事 {{ unmappedStories.length }} 条<template v-if="unmappedText">（{{ unmappedText }}）</template></span>。
-      时序图不由数据生成，它按 Spring Boot 3（Java 23）后端的真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
-      悬停可高亮关联，点击用例（或回车 / 空格）可展开对应故事明细；完整版支持交互编辑。
+      时序图不由数据生成，按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
     </p>
 
     <div class="h-sec">

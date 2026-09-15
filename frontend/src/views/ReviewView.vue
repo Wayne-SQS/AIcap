@@ -122,7 +122,7 @@ function openMeeting(id) {
 
     <!-- 在线:服务器建议 -->
     <div v-else id="sug-list">
-      <p class="pool-note">真实会议建议 · 本轮仅支持新增需求池条目。{{ meeting.mayReview ? '你可以采纳、修改后采纳或拒绝。行动项与协调事项请查看对应会议的完整分析。' : '仅管理员或负责人可以审核。' }}</p>
+      <p class="pool-note">真实会议建议 · 本轮仅支持新增需求池条目。{{ meeting.mayReview ? '你可以采纳、修改后采纳或拒绝。' : '仅管理员或负责人可以审核。' }}</p>
       <button id="review-refresh" @click="refresh">刷新建议</button>
       <div v-for="s in meeting.suggestions" :key="s.id" class="sug-card" :data-meeting-suggestion="s.id">
         <div class="sug-head">

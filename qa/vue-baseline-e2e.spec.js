@@ -374,6 +374,12 @@ test.describe('FE-OVW 项目总览', () => {
     expect(cardCounts.slice(0, 3)).toEqual([bucketTotal(0), bucketTotal(1), bucketTotal(2)])
     expect(cardCounts[3],
       'Sprint 4+ 卡片数应等于后端第 4 桶').toBe(bucketTotal(3))
+
+    /* 分节标题里的切片数必须与真实切片数一致:此前写死「三阶段递进」,
+       而界面早已是 4 片(含 Sprint 4+ 后续路线)—— 属文案与数据脱节,不是纯文案问题。
+       期望值取后端 by_sprint 的桶数,不写死 4。 */
+    await expect(page.locator('.h-sec', { hasText: 'Sprint 进度' }))
+      .toContainText(`${dash.by_sprint.length} 个发布切片`)
   })
 
   test('[FE-OVW-02] 完成比例与总完成度为 0–100 数字,且与状态/工时加权口径一致,并与 /api/dashboard 交叉校验', async ({ page, request }) => {

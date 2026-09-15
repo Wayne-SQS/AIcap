@@ -54,7 +54,7 @@ function cellStories(sp, i) {
 </script>
 
 <template>
-  <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；点击故事可查看验收条件。Sprint 4+ 为后续路线（US09 / US15 / US21），不纳入本学期六周承诺。</p>
+  <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；点击故事可查看验收条件。Sprint 4+ 为后续路线，不纳入本学期六周承诺。</p>
 
   <!-- 常驻图例:每个色块都带字符标记 + 实时计数,计数之和恒等于当前筛选范围(可相加校验) -->
   <div v-if="legend.length" class="maplegend" id="maplegend" :data-skin="skin">

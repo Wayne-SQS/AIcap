@@ -136,9 +136,9 @@ async function submitPromote() {
   <section class="view" id="view-pool">
     <div class="hero">
       <div>
-        <div class="eyebrow">REQUIREMENT POOL / 需求池</div>
+        <div class="eyebrow">REQUIREMENT POOL / 未确认需求</div>
         <h1>需求池</h1>
-        <p>会议中临时出现、尚未确定 Sprint 或负责人的需求先放这里，不丢失、不提前承诺。</p>
+        <p>尚未确认的需求先放这里，不丢失、不提前承诺。</p>
       </div>
       <button class="primary" id="pool-add" :disabled="session.isViewer" :title="viewerTitle" @click="startAdd">＋ 新增需求</button>
     </div>
@@ -192,7 +192,7 @@ async function submitPromote() {
               <option v-for="(a, i) in activities" :key="a" :value="i + 1">A{{ i + 1 }} · {{ a }}</option>
             </select>
           </label>
-          <p class="small">尚未确定 Sprint 时可取消，需求继续保留在需求池。移入后初始状态为待办。</p>
+          <p class="small">未确定 Sprint 可取消，需求留在池中；移入后为待办。</p>
           <div class="sug-acts">
             <button type="button" @click="closePromote">取消</button>
             <button type="submit" class="primary" :disabled="promoting">确认</button>

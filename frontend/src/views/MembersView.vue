@@ -137,7 +137,7 @@ const contribs = computed(() => {
       </div>
     </div>
 
-    <div class="h-sec">成员画像 · 技术栈 / 工作能力 / 熟悉的开发流程领域</div>
+    <div class="h-sec">成员画像</div>
     <p v-if="!online" class="small">离线演示模式：画像需连接后端读取（在线登录后自动加载）。</p>
     <p v-else-if="profileError" class="small" role="alert">画像加载失败：{{ profileError }}</p>
     <div v-else class="profile-grid" id="member-profiles">
@@ -214,7 +214,7 @@ const contribs = computed(() => {
       </div>
     </div>
 
-    <div class="h-sec">成员开发活动图 · 样例数据</div>
+    <div class="h-sec">成员开发活动图</div>
     <div class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">

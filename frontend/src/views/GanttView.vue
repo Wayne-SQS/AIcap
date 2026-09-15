@@ -145,7 +145,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
       <div>
         <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
         <h1>甘特图</h1>
-        <p>开发任务强制挂载看板卡（父条 = 子任务周并集 + 工时加权进度） · 管理任务独立虚线 · 点击任务条查看前置 / 后续任务并可编辑排期。</p>
+        <p>开发任务强制挂载看板卡 · 管理任务独立虚线。</p>
       </div>
       <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
     </div>
@@ -187,7 +187,6 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
       </span>
       <span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span>
       <span class="chip"><span class="diamond-key"></span>菱形 = 里程碑</span>
-      <span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span>
       <span class="chip note">子任务条 = 计划起止范围（不按工时比例）</span>
       <span class="chip note">父卡条 = 子任务周并集，填充 = 工时加权进度</span>
       <span class="chip note">点击任务条查看前置 / 后续任务</span>
@@ -196,7 +195,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
     <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;选中父卡 → 故事血缘 + 编辑故事 -->
     <div class="gantt-detail" :class="{ empty: !selection }" id="gantt-detail">
       <template v-if="!selection">
-        点击任务条可查看关联故事、前置任务与后续任务；点击父卡条可查看该看板卡的子任务血缘。任务条表示计划起止时间范围，不按工时比例绘制。
+        点击任务条可查看关联故事、前置任务与后续任务；点击父卡条可查看该看板卡的子任务血缘。
       </template>
 
       <template v-else-if="selectedTask">

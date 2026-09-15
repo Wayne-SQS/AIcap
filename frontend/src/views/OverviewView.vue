@@ -41,7 +41,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       <div>
         <div class="eyebrow">PROJECT OVERVIEW / 项目总览</div>
         <h1>爱管理</h1>
-        <p>支持软件团队管理需求、安排任务、四视图联动与六项 AI 能力的协作平台。</p>
+        <p>四人小队 · 六周迭代 · 从需求到交付的一体化协作平台。</p>
       </div>
       <button class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="go('board')">＋ 新建用户故事</button>
     </div>
@@ -63,13 +63,13 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       </div>
     </div>
 
-    <div class="h-sec">Sprint 进度 · 三阶段递进</div>
+    <div class="h-sec">Sprint 进度 · 4 个发布切片</div>
     <div class="sprint-grid" id="sprint-grid">
       <div v-for="c in sprintCards" :key="c.name" class="sprint" :class="c.cls">
         <div class="top"><h3>{{ c.name }}</h3><span class="pct">{{ c.p }}%</span></div>
         <div class="tagline">{{ c.tag }} · {{ c.list.length }} 个故事</div>
         <div class="bar"><i :style="{ width: c.p + '%' }"></i></div>
-        <div class="meta">完成 {{ c.d }} / {{ c.list.length }} · 工时加权 {{ c.p }}% · {{ c.weeks }}</div>
+        <div class="meta">完成 {{ c.d }} / {{ c.list.length }} · {{ c.weeks }}</div>
       </div>
     </div>
 
