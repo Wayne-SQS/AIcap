@@ -1,5 +1,7 @@
 # 本地课程/归档材料，不上传到公开仓库
 归档_其他材料/
+# 实验指导书原始 zip(4.5MB 课程材料;其派生文本在 qa/_docx_dump/,同样仅本地查阅)
+实验1(1).zip
 爱管理_像素风用户故事看板.html
 项目规划方案(3).docx
 爱管理_三大AI智能体功能设计.md
@@ -15,6 +17,8 @@ Thumbs.db
 # python / backend
 backend/.env
 backend/mysql-data/
+# Qdrant 数据目录(本地容器运行时生成):与 mysql-data 同理,是运行时状态不是源码
+backend/qdrant-data/
 backend/backup_*.sql
 __pycache__/
 *.pyc

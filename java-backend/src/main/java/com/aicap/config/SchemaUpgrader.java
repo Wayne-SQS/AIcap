@@ -47,6 +47,10 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"capacity_hours", "`capacity_hours` int NOT NULL DEFAULT '60'"},
     };
 
+    private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
+            {"embedding_model", "`embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
@@ -61,6 +65,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             }
             if (tableExists(conn, "users")) {
                 added.addAll(addMissing(conn, "users", USER_COLUMNS));
+            }
+            // knowledge_chunks 建表时可不存在;补列后老向量因 embedding_model 为空会被判为过期,
+            // 下次重建自动重算 —— 这正是引入该列的目的,无需额外回填
+            if (tableExists(conn, "knowledge_chunks")) {
+                added.addAll(addMissing(conn, "knowledge_chunks", KNOWLEDGE_CHUNK_COLUMNS));
             }
             if (added.isEmpty()) {
                 log.info("存量库列迁移:列集合已是最新,无需变更");

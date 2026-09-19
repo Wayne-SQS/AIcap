@@ -18,3 +18,19 @@ services:
       - ./mysql-data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Qdrant 向量库(RAG 检索层可选实现;默认用 mysql 实现,不需要本服务)
+  # 启用:docker compose up -d qdrant,然后设 AICAP_VECTOR_STORE=qdrant
+  #
+  # 境内网络提示:直连 Docker Hub 拉本镜像实测 8 分钟无进展。若 compose 拉起时卡在
+  # "Pulling fs layer",先用镜像源拉下来打回标准 tag,compose 便会直接用本地镜像:
+  #   docker pull docker.1ms.run/qdrant/qdrant:latest
+  #   docker tag  docker.1ms.run/qdrant/qdrant:latest qdrant/qdrant:latest
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aicap-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant-data:/qdrant/storage

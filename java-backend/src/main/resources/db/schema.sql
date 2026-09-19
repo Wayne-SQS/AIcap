@@ -7,6 +7,7 @@
 --           → meeting_agent_runs → meeting_agent_events → story_logs
 --           → member_profiles(成员画像,1:1 users)
 --           → meeting_audio(会议录音/上传的 mp3 元数据,文件落盘)
+--           → knowledge_chunks / knowledge_vectors(RAG 检索层,S1)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS `users` (
@@ -292,3 +293,40 @@ CREATE TABLE IF NOT EXISTS `profile_corrections` (
   CONSTRAINT `profile_corrections_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
   CONSTRAINT `profile_corrections_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ RAG 检索层(S1):知识块与向量 ============
+
+-- 知识块主表:一切可检索内容的统一落点,由 content_hash 支持增量重建(只对变更行重新 embedding)。
+-- 关键:meeting 源的 chunk_index 与 AnalysisValidator.segmentsFor() 产出的 seg-N 一一对齐
+-- (chunk_index = N-1),因此检索命中的 chunk 可以直接当 Agent 证据引用 —— 免费拿到的一致性。
+CREATE TABLE IF NOT EXISTS `knowledge_chunks` (
+  `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'chunk 唯一 id:{source_type}:{source_id}:{chunk_index}',
+  `source_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'story/pool_item/task/meeting/doc/profile',
+  `source_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '源记录主键(meeting 为会议 id,doc 为相对路径)',
+  `chunk_index` int NOT NULL DEFAULT '0' COMMENT '同源内序号(从 0 起;meeting 源 = seg 号 - 1)',
+  `content` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '增强前缀 + 原文:实际参与向量化与关键词检索的文本',
+  `raw_content` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '原文(不含前缀):展示与证据引用用',
+  `content_hash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'SHA-256(content),增量索引比对用',
+  `acl_role` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'member' COMMENT '最低可见角色:member < owner < admin',
+  `metadata_json` json DEFAULT NULL COMMENT 'title/priority/sprint/seg_id 等结构化字段',
+  `embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '产出当前向量的模型名;与当前配置不一致即视为待重算',
+  `embedded_at` datetime DEFAULT NULL COMMENT 'NULL = 待索引',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_source_chunk` (`source_type`,`source_id`,`chunk_index`),
+  KEY `idx_embedded` (`embedded_at`),
+  KEY `idx_source` (`source_type`,`source_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识块';
+
+-- 向量表(MysqlVectorStore 用)。与 knowledge_chunks 分表而非加列,理由有二:
+--   1) 两种向量实现可同时落库,支撑同数据集的 P99 延迟对比(设计文档 A4 的 benchmark);
+--   2) Qdrant 侧不需要这张表,分表后"向量存在哪"是纯粹的实现细节。
+CREATE TABLE IF NOT EXISTS `knowledge_vectors` (
+  `chunk_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `model` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '产出该向量的 embedding 模型名',
+  `dimension` int NOT NULL COMMENT '向量维度:写入前校验,防止换模型后新旧向量混用',
+  `vector` mediumblob NOT NULL COMMENT 'float32 小端连续存储',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`chunk_id`),
+  KEY `idx_vector_model` (`model`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 向量(MySQL 暴力检索实现)';
