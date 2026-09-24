@@ -169,6 +169,8 @@ public class AgentJobs {
             log.warn("meeting-agent run {} failed internally: {}", runId, e.toString());
             fail(runId, token, new AgentError("internal_error",
                     "分析失败，未保存建议；请稍后重试或检查服务端"));
+        } finally {
+            client.clearModelOverride();
         }
         return true;
     }

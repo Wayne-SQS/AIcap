@@ -1,14 +1,12 @@
 <script setup>
 import { watch } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
-import { AIS } from '@/data/seed'
 import MeetingPanel from '@/components/ai/MeetingPanel.vue'
 import SubmitAgentPanel from '@/components/ai/SubmitAgentPanel.vue'
 import ProfileAgentPanel from '@/components/ai/ProfileAgentPanel.vue'
 import ChatBox from '@/components/ai/ChatBox.vue'
 
-/* AI 助手视图:结构对齐旧版 L596-631,逻辑对齐 renderAI(L1092-1103)
-   会议智能体(离线演示/在线审核) + 任务提交智能体 + 对话演示 */
+/* AI 助手视图:只承载会议智能体；Planning Agent 独立为画图智能体页面。 */
 const meeting = useMeetingStore()
 
 /* bootstrap 完成后 online 才为 true:watch 保证登录态就绪后拉取会议数据 */
@@ -23,13 +21,9 @@ watch(() => meeting.online, v => {
       <div>
         <div class="eyebrow">AI COPILOT / 智能体协作</div>
         <h1>AI 助手</h1>
-        <p>AI 提出可追溯的建议；人验证依据、决定采纳并承担结果责任。</p>
+        <p>会议、任务提交与画像智能体提供可追溯建议；Planning Agent 在独立页面执行项目规划。</p>
       </div>
     </div>
-    <div class="ai-grid" id="ai-grid">
-      <div v-for="a in AIS" :key="a.name" class="aicard"><span class="ic">{{ a.ic }}</span><h3>{{ a.name }}</h3><p>{{ a.desc }}</p></div>
-    </div>
-
     <div class="h-sec">会议智能体 · Meeting Agent</div>
     <div id="meeting">
       <MeetingPanel />

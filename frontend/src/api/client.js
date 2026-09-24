@@ -27,7 +27,7 @@ function isLoginPath(path) {
 }
 
 export async function api(path, opts = {}) {
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {})
+  const headers = Object.assign({}, opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, opts.headers || {})
   const token = getAuthToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
   const res = await fetch(apiBase() + path, Object.assign({}, opts, { headers }))

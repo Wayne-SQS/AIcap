@@ -3,8 +3,9 @@ import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
-import { STORIES_KEY, LOG_KEY, POOL_KEY } from '@/constants'
-import { SEED, TASKS, POOL_SEED, MEMBERS, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
+import { milestonesApi } from '@/api/milestones'
+import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
+import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
 import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
 
 /* 项目数据基座:stories/tasks/pool/log 四份数据 + members(真实成员)
@@ -46,6 +47,20 @@ function loadPool() {
   return structuredClone(POOL_SEED)
 }
 
+function validTask(t) {
+  return typeof t?.id === 'string' && typeof t?.name === 'string' && Number.isInteger(t.owner) &&
+    Array.isArray(t.w) && t.w.length === 2 && t.w.every(Number.isInteger) &&
+    t.w[0] >= 1 && t.w[1] <= 6 && t.w[0] <= t.w[1] && Number.isFinite(Number(t.h))
+}
+
+function loadTasks() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TASKS_KEY))
+    if (Array.isArray(saved) && saved.length && saved.every(validTask)) return saved
+  } catch { /* ignore */ }
+  return structuredClone(TASKS)
+}
+
 function loadLog() {
   try {
     const sl = JSON.parse(localStorage.getItem(LOG_KEY))
@@ -59,7 +74,7 @@ function weeklyHoursOf(task, out) {
   const start = Math.max(1, task.w[0]), end = Math.min(6, task.w[1]), count = Math.max(1, end - start + 1)
   const base = Math.floor(task.h / count)
   let remainder = task.h - base * count
-  for (let w = start; w <= end; w++) out[w - 1] = base + (remainder-- > 0 ? 1 : 0)
+  for (let w = start; w <= end; w++) out[w - 1] += base + (remainder-- > 0 ? 1 : 0)
   return out
 }
 
@@ -74,10 +89,11 @@ export const useProjectStore = defineStore('project', {
     return {
       stories: init.stories,
       storageOK: init.storageOK,
-      tasks: structuredClone(TASKS),
+      tasks: loadTasks(),
       pool: loadPool(),
       log: loadLog(),
       members: structuredClone(MEMBERS),
+      milestones: structuredClone(MILESTONES),
       serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
       savehint: '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     }
@@ -227,6 +243,7 @@ export const useProjectStore = defineStore('project', {
         w: [t.week_start, t.week_end], story: t.story_ref || '',
         card: t.kanban_card_id || null, type: t.task_type || 'feature',
         dependsOn: t.depends_on || '',
+        priority: t.priority || 'Should',
         status: t.status != null ? t.status : 0,
         progress: t.progress != null ? t.progress : 0,
         blocked: Boolean(t.blocked),
@@ -270,6 +287,8 @@ export const useProjectStore = defineStore('project', {
       const [st, tk, pl, lg, users] = await Promise.all([
         storiesApi.list(), tasksApi.list(), poolApi.list(), storiesApi.logs(), authApi.users()
       ])
+      let milestoneRows = []
+      try { milestoneRows = await milestonesApi.list() } catch { milestoneRows = [] }
       this.stories = st.map(this.mapStory)
       this.tasks = tk.map(this.mapTask)
       this.mergeMembers(users)
@@ -277,6 +296,10 @@ export const useProjectStore = defineStore('project', {
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
          与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
       this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
+      this.milestones = milestoneRows.map(m => ({
+        id: m.id, week: m.week, name: m.name, desc: m.description || '',
+        status: m.status || 'planned', related: m.related_task_ids ?? m.relatedTaskIds ?? ''
+      }))
       this.serverSync = true
       this.savehint = '已连接后端 · 数据实时同步到服务器'
       this.checkConsistency()
@@ -313,12 +336,23 @@ export const useProjectStore = defineStore('project', {
         `A${plan.from.activity}×S${plan.from.sprint} → A${to.activity}×S${to.sprint}` +
         (plan.undone.length ? ` · 级联挪动 ${plan.undone.length} 条未完成子任务 ${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周` : ''))
     },
+    clearServerData() {
+      // 后端在线但尚未完成认证时，禁止本地演示缓存进入正式项目集合。
+      this.stories = []
+      this.tasks = []
+      this.pool = []
+      this.log = []
+      this.milestones = []
+      this.serverSync = false
+      this.savehint = '已连接后端 · 登录后加载正式项目数据'
+    },
     restoreLocal() {
       const init = loadStories()
       this.stories = init.stories
       this.pool = loadPool()
-      this.tasks = structuredClone(TASKS)
+      this.tasks = loadTasks()
       this.members = structuredClone(MEMBERS)
+      this.milestones = structuredClone(MILESTONES)
       this.log = loadLog()
       this.serverSync = false
       this.savehint = '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
@@ -326,6 +360,12 @@ export const useProjectStore = defineStore('project', {
     persist() {
       try {
         localStorage.setItem(STORIES_KEY, JSON.stringify(this.stories))
+        this.storageOK = true
+      } catch { this.storageOK = false }
+    },
+    persistTasks() {
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(this.tasks))
         this.storageOK = true
       } catch { this.storageOK = false }
     },

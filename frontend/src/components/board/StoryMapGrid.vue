@@ -1,23 +1,14 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import StoryCard from './StoryCard.vue'
 import { activities } from '@/constants'
 import { MAP_SPRINTS } from '@/data/seed'
 import { useProjectStore } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
 import { legendOf, sortStories, skinOf, SKINS } from '@/data/boardSkins'
+import { useCanvasZoom } from '@/composables/useCanvasZoom'
+import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
-/* 故事地图:横向骨干活动 × 纵向发布切片(含 Sprint 4+「后续路线」)
-   切片列增减由 MAP_SPRINTS 决定,卡片沿用 StoryCard(map 模式)
-
-   两个正交的呈现开关(纯展示,不改动任何数据):
-     density  详细(.mapcard 固定 148px 高) / 总览(.chip 单行 22px,格内多列换行)
-              —— 详细态整图约 2600px(需要滚三屏),总览态约 500px,四个切片一屏看全,
-                 这样"切片分布"这个故事地图唯一不可替代的信息才读得出来。
-     skin     马甲图层(单选,禁止叠加,配常驻图例):紧急程度 / 负责人 / Sprint / 无着色
-     sortBy   格内排序:原次序 / 紧急程度 / 负责人
-
-   nowWeek 由 BoardView 注入 —— 全应用只有 data/planCalendar.js 一处定义"现在",
-   本组件不做任何时间推断,也就没有第二套口径。 */
 const props = defineProps({
   data: { type: Array, required: true },
   sprint: { type: String, required: true },
@@ -28,21 +19,18 @@ const props = defineProps({
 })
 const emit = defineEmits(['open', 'move'])
 const project = useProjectStore()
-
-/* 拖拽落点:每个格子的坐标天然就是「骨干活动 × 发布切片」两个值,
-   所以一次落位可以同时表达"改活动"和"改切片" —— 具体语义与级联由 BoardView 决定
-   (它读 storyMovePlan 算计划,必要时先弹确认再落库)。 */
-const dragOverCell = ref('')
-function onCellDrop(sp, i, e) {
-  dragOverCell.value = ''
-  /* 编号从 dataTransfer 里取(与状态看板换列同一约定),而不是靠父组件的模块级变量,
-     这样落点自身就是完备的,不依赖拖拽起点是否上报过 */
-  emit('move', { id: e.dataTransfer.getData('text/plain'), activity: i + 1, sprint: sp.number })
-}
+const session = useSessionStore()
+const dragStoryId = ref('')
+const dropKey = ref('')
+const pointerDrag = ref(null)
+const suppressClick = ref(false)
+const mapViewport = ref(null)
+const mapShell = ref(null)
+const mapCanvas = ref(null)
+const { zoom, zoomMode, minZoom, maxZoom, canvasStyle, shellStyle, zoomIn, zoomOut, setZoomPercent, resetZoom, fitToCanvas } =
+  useCanvasZoom({ viewport: mapViewport, canvas: mapCanvas, shell: mapShell, fillViewportWidth: true, minContentWidth: 968, fitMinZoom: 0.2, initialMode: 'manual' })
 
 const compact = computed(() => props.density === 'compact')
-
-/* 马甲计算的注入上下文:成员色/姓名来自 store,其余来自本组件 —— boardSkins 保持纯函数 */
 const ctx = computed(() => ({
   skin: props.skin,
   tasks: project.tasks,
@@ -54,57 +42,90 @@ const ctx = computed(() => ({
 const skinLabel = computed(() => (SKINS.find(s => s.key === props.skin) || {}).label || '')
 const legend = computed(() => legendOf(props.skin, props.data, ctx.value))
 const legendSum = computed(() => legend.value.reduce((a, r) => a + r.count, 0))
-function cardSkin(s) { return skinOf(s, ctx.value) }
-
-const sprintList = computed(() => MAP_SPRINTS.filter(sp =>
-  props.sprint === 'all' || (props.sprint === '4plus' ? sp.number === 4 : sp.number === +props.sprint)
-))
-function cellStories(sp, i) {
-  return sortStories(props.data.filter(s => sp.matches(s) && s.activity === i + 1), props.sortBy, ctx.value)
+function cardSkin(story) { return skinOf(story, ctx.value) }
+const sprintList = computed(() => MAP_SPRINTS.filter(sp => props.sprint === 'all' || (props.sprint === '4plus' ? sp.number === 4 : sp.number === +props.sprint)))
+function cellStories(sp, i) { return sortStories(props.data.filter(s => sp.matches(s) && s.activity === i + 1), props.sortBy, ctx.value) }
+function keyOf(sp, activity) { return `${sp.number}-${activity}` }
+function startDrag(id) { dragStoryId.value = id }
+function clearDrag() { dragStoryId.value = ''; dropKey.value = '' }
+function emitMove(storyId, sprint, activity) {
+  if (!storyId || session.isViewer) return
+  emit('move', { storyId, id: storyId, sprint, activity })
 }
+function drop(sp, activity, event) {
+  const storyId = dragStoryId.value || event.dataTransfer?.getData('text/plain')
+  clearDrag()
+  emitMove(storyId, sp.number, activity)
+}
+function startPointer(id, event) {
+  if (session.isViewer || event.button !== 0) return
+  pointerDrag.value = { id, startX: event.clientX, startY: event.clientY, moved: false }
+  document.addEventListener('pointermove', movePointer)
+  document.addEventListener('pointerup', endPointer, { once: true })
+}
+function startPointerFromGrid(event) {
+  const card = event.target.closest('.card[data-id]')
+  if (card) startPointer(card.dataset.id, event)
+}
+function movePointer(event) {
+  const drag = pointerDrag.value
+  if (!drag) return
+  drag.moved ||= Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5
+  if (!drag.moved) return
+  dragStoryId.value = drag.id
+  const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-map-drop]')
+  dropKey.value = cell?.dataset.mapDrop || ''
+}
+function endPointer() {
+  document.removeEventListener('pointermove', movePointer)
+  const drag = pointerDrag.value
+  const target = dropKey.value
+  pointerDrag.value = null
+  clearDrag()
+  if (!drag?.moved || !target) return
+  const [sprint, activity] = target.split('-').map(Number)
+  suppressClick.value = true
+  emitMove(drag.id, sprint, activity)
+  setTimeout(() => { suppressClick.value = false }, 0)
+}
+function captureClick(event) {
+  if (suppressClick.value) { event.preventDefault(); event.stopPropagation() }
+}
+onBeforeUnmount(() => document.removeEventListener('pointermove', movePointer))
 </script>
 
 <template>
   <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；点击故事可查看验收条件。Sprint 4+ 为后续路线，不纳入本学期六周承诺。</p>
-
-  <!-- 常驻图例:每个色块都带字符标记 + 实时计数,计数之和恒等于当前筛选范围(可相加校验) -->
   <div v-if="legend.length" class="maplegend" id="maplegend" :data-skin="skin">
     <span class="legendtitle">马甲 · {{ skinLabel }}</span>
-    <span
-      v-for="r in legend" :key="r.glyph" class="legenditem" :class="r.tone"
-      :data-key="r.glyph" :data-count="r.count"
-    >
-      <i class="legendmark" aria-hidden="true">{{ r.glyph }}</i>
-      <span>{{ r.label }}</span>
-      <span v-if="r.detail" class="legenddetail">{{ r.detail }}</span>
-      <b>{{ r.count }}</b>
+    <span v-for="r in legend" :key="r.glyph" class="legenditem" :class="r.tone" :data-key="r.glyph" :data-count="r.count">
+      <i class="legendmark" aria-hidden="true">{{ r.glyph }}</i><span>{{ r.label }}</span>
+      <span v-if="r.detail" class="legenddetail">{{ r.detail }}</span><b>{{ r.count }}</b>
     </span>
     <span class="legendsum small" id="legendsum">合计 {{ legendSum }} / 当前筛选 {{ data.length }}</span>
   </div>
-
-  <div class="mapwrap" tabindex="0" aria-label="可横向滚动的故事地图">
-    <div class="mapgrid" id="map" :class="{ compact, skinned: skin !== 'none' }">
-      <div class="maphead"><span class="map-code">ROADMAP</span><strong>发布切片</strong></div>
-      <div v-for="(a, i) in activities" :key="a" class="maphead"><span class="map-code">A{{ i + 1 }}</span><strong>{{ a }}</strong></div>
-      <template v-for="sp in sprintList" :key="sp.number">
-        <div class="sprinthead" :class="sp.cls">{{ sp.name }}<br><span class="small">{{ sp.tag }}</span></div>
-        <div
-          v-for="(a, i) in activities" :key="sp.number + '-' + i"
-          class="mapcell" :class="[sp.cls, { compact, dragover: dragOverCell === sp.number + '-' + i }]"
-          :data-cell="sp.number + '-' + (i + 1)"
-          @dragover.prevent="dragOverCell = sp.number + '-' + i"
-          @dragleave="dragOverCell = ''"
-          @drop.prevent="onCellDrop(sp, i, $event)"
-        >
-          <StoryCard
-            v-for="s in cellStories(sp, i)" :key="s.id" :story="s"
-            :map="true" :compact="compact" :skin="cardSkin(s)"
-            @open="emit('open', $event)"
-          />
-          <span v-if="!cellStories(sp, i).length" class="small">暂无故事</span>
-        </div>
-      </template>
-      <div v-if="!data.length" class="empty" style="grid-column:1/-1">没有匹配的故事，试试调整筛选条件。</div>
+  <CanvasZoomControls :zoom="zoom" :min-zoom="minZoom" :max-zoom="maxZoom" :zoom-mode="zoomMode"
+    :reset-zoom="resetZoom" :fit-to-canvas="fitToCanvas" :zoom-in="zoomIn" :zoom-out="zoomOut" :set-zoom-percent="setZoomPercent" />
+  <div ref="mapViewport" class="mapwrap canvas-zoom-viewport" tabindex="0" aria-label="可横向滚动的故事地图" @click.capture="captureClick">
+    <div ref="mapShell" class="canvas-zoom-shell" :style="shellStyle">
+      <div ref="mapCanvas" class="mapgrid" id="map" :class="{ compact, skinned: skin !== 'none' }" :style="canvasStyle" @pointerdown.capture="startPointerFromGrid">
+        <div class="maphead"><span class="map-code">ROADMAP</span><strong>发布切片</strong></div>
+        <div v-for="(a, i) in activities" :key="a" class="maphead"><span class="map-code">A{{ i + 1 }}</span><strong>{{ a }}</strong></div>
+        <template v-for="sp in sprintList" :key="sp.number">
+          <div class="sprinthead" :class="sp.cls">{{ sp.name }}<br><span class="small">{{ sp.tag }}</span></div>
+          <div v-for="(a, i) in activities" :key="sp.number + '-' + i"
+            class="mapcell" :class="[sp.cls, { compact, 'is-drop-target': dropKey === keyOf(sp, i + 1) }]"
+            :data-cell="sp.number + '-' + (i + 1)" :data-map-drop="`${sp.number}-${i + 1}`"
+            @dragenter.prevent="dropKey = keyOf(sp, i + 1)" @dragover.prevent="dropKey = keyOf(sp, i + 1)"
+            @dragleave.self="dropKey = ''" @drop.prevent="drop(sp, i + 1, $event)">
+            <StoryCard v-for="story in cellStories(sp, i)" :key="story.id" :story="story" :map="true"
+              :compact="compact" :skin="cardSkin(story)" :class="{ 'is-dragging': dragStoryId === story.id }"
+              @open="emit('open', $event)" @dragstart="startDrag(story.id)" @dragend="clearDrag" />
+            <span v-if="!cellStories(sp, i).length" class="small">暂无故事</span>
+          </div>
+        </template>
+        <div v-if="!data.length" class="empty" style="grid-column:1/-1">没有匹配的故事，试试调整筛选条件。</div>
+      </div>
     </div>
   </div>
 </template>

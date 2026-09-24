@@ -11,6 +11,7 @@ const navGroups = [
       { view: 'board', icon: '▦', label: '用户故事看板' },
       { view: 'gantt', icon: '▤', label: '甘特图' },
       { view: 'members', icon: '▥', label: '成员任务图' },
+      { view: 'profiles', icon: '▤', label: '成员画像' },
       { view: 'uml', icon: '◇', label: 'UML 图' }
     ]
   },
@@ -19,6 +20,8 @@ const navGroups = [
     topGap: true,
     items: [
       { view: 'ai', icon: '✦', label: 'AI 助手' },
+      { view: 'drawing-agent', icon: '✎', label: '画图智能体' },
+      { view: 'project-generator', icon: '✚', label: '智能生成项目图' },
       { view: 'review', icon: '✓', label: 'AI 审核中心' }
     ]
   }

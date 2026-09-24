@@ -19,7 +19,7 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
   skin: { type: Object, default: null }
 })
-const emit = defineEmits(['open'])
+const emit = defineEmits(['open', 'dragstart', 'dragend'])
 const project = useProjectStore()
 const session = useSessionStore()
 
@@ -41,6 +41,7 @@ const ownerName = computed(() => (props.story.owner == null ? '未分配' : proj
 function onDragStart(e) {
   e.dataTransfer.setData('text/plain', props.story.id)
   e.dataTransfer.effectAllowed = 'move'
+  emit('dragstart', e)
 }
 </script>
 
@@ -58,6 +59,7 @@ function onDragStart(e) {
     :aria-label="'编辑 ' + story.id + ' ' + story.title"
     @click="emit('open', story.id)"
     @dragstart="onDragStart"
+    @dragend="emit('dragend')"
   >
     <i class="chipmark" aria-hidden="true">{{ skin ? skin.glyph : '·' }}</i>
     <b class="chipid">{{ story.id }}</b>
@@ -77,6 +79,7 @@ function onDragStart(e) {
     :aria-label="'编辑 ' + story.id + ' ' + story.title"
     @click="emit('open', story.id)"
     @dragstart="onDragStart"
+    @dragend="emit('dragend')"
   >
     <div class="cardtop">
       <span v-if="skin" class="sking" :title="skinText">{{ skin.glyph }}</span>
