@@ -9,6 +9,7 @@ import com.aicap.rag.Hit;
 import com.aicap.rag.RagProperties;
 import com.aicap.rag.RetrievalContext;
 import com.aicap.rag.RetrievalService;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -44,15 +45,22 @@ public class PlatformToolService {
     private static final int MAX_QUERY_CHARS = 500;
     private static final int MAX_CONTENT_CHARS = 600;
 
-    /** 统一响应信封。字段恒输出(含 null),与项目其余接口一致 */
+    /**
+     * 统一响应信封。字段恒输出(含 null),与项目其余接口一致。
+     *
+     * <p>字段名显式写成 snake_case:Jackson 没配全局命名策略,record 字段会原样输出成
+     * camelCase,而本项目对外 JSON 一律 snake_case(其余接口靠手写 Map 或
+     * {@code @JsonProperty} 达成)。不标注就会分叉 —— 契约文档写的是
+     * {@code latency_ms},实际却回 {@code latencyMs},编排层按文档取字段会拿到 null。
+     */
     public record ToolOutcome(String tool,
                               boolean ok,
                               JsonNode result,
                               JsonNode retrieval,
                               List<String> limitations,
-                              long latencyMs,
-                              String errorCode,
-                              String errorMessage) {
+                              @JsonProperty("latency_ms") long latencyMs,
+                              @JsonProperty("error_code") String errorCode,
+                              @JsonProperty("error_message") String errorMessage) {
     }
 
     private final PlatformToolCatalog catalog;
