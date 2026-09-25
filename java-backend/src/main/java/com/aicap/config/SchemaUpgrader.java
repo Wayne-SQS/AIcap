@@ -49,6 +49,7 @@ public class SchemaUpgrader implements ApplicationRunner {
 
     private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
             {"embedding_model", "`embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"acl_rank", "`acl_rank` int DEFAULT NULL"},
     };
 
     @Override
@@ -67,9 +68,14 @@ public class SchemaUpgrader implements ApplicationRunner {
                 added.addAll(addMissing(conn, "users", USER_COLUMNS));
             }
             // knowledge_chunks 建表时可不存在;补列后老向量因 embedding_model 为空会被判为过期,
-            // 下次重建自动重算 —— 这正是引入该列的目的,无需额外回填
+            // 下次重建自动重算 —— 这正是引入该列的目的,无需额外回填。
+            // acl_rank 不同:它参与过滤,不填等于整库不可见,必须回填(判定见 hasNullAclRank)
             if (tableExists(conn, "knowledge_chunks")) {
                 added.addAll(addMissing(conn, "knowledge_chunks", KNOWLEDGE_CHUNK_COLUMNS));
+                if (hasNullAclRank(conn)) {
+                    backfillAclRank(conn);
+                }
+                added.addAll(ensureFulltextIndex(conn));
             }
             if (added.isEmpty()) {
                 log.info("存量库列迁移:列集合已是最新,无需变更");
@@ -80,6 +86,81 @@ public class SchemaUpgrader implements ApplicationRunner {
             // 列缺失会让后续播种与接口静默出错,因此启动即失败,不做降级
             throw new IllegalStateException("存量库列迁移失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 关键词检索路依赖的 ngram 全文索引(S2,设计文档 A5)。
+     *
+     * <p>为什么必须在这里补:{@code CREATE TABLE IF NOT EXISTS} 只在建表时生效,
+     * 对<b>已经存在</b>的 {@code knowledge_chunks} 表加索引它不会做任何事 ——
+     * 于是老库上关键词路会在第一次查询时抛 "Can't find FULLTEXT index matching the
+     * column list",而新库一切正常。这类"只有老库坏"的缺陷最容易漏掉。
+     *
+     * <p>索引存在性靠 {@code SHOW INDEX} 判定:MySQL 的 {@code CREATE INDEX}
+     * <b>没有</b> {@code IF NOT EXISTS},不先查就重跑必然报 Duplicate key name,
+     * 而本组件每次启动都会跑。
+     *
+     * @return 本次真正新建的索引(空集 = 已存在)
+     */
+    private Set<String> ensureFulltextIndex(Connection conn) throws SQLException {
+        if (indexExists(conn, "knowledge_chunks", "ft_content")) {
+            return Set.of();
+        }
+        execute(conn, "ALTER TABLE `knowledge_chunks` ADD FULLTEXT KEY `ft_content` (`content`) WITH PARSER ngram");
+        log.info("knowledge_chunks.ft_content 缺失,已补建 ngram 全文索引");
+        return Set.of("knowledge_chunks.ft_content");
+    }
+
+    /**
+     * 用 {@code acl_role} 回填为 NULL 的 {@code acl_rank}。
+     *
+     * <p>该不该跑由 {@link #hasNullAclRank} 按<b>数据</b>判定,而不是"本次是否刚补上该列":
+     * MySQL 的 DDL 自动提交,若 ALTER 成功而随后这次 UPDATE 没提交(进程被杀 / UPDATE 超时 /
+     * 连接断),下次启动时列已存在 —— 按"刚补列"判定就永远不会再回填,而全为 NULL 的
+     * {@code acl_rank} 会让<b>检索对所有人返回空,且不报错</b>({@code NULL <= x} 不成立)。
+     * 按数据判定自带自愈:下面的 UPDATE 幂等({@code WHERE acl_rank IS NULL})。
+     * 这不是假想:把列手工补上、留 NULL、再启动,旧判定确实一行都没回填。
+     *
+     * <p>不回填的后果不是"少个字段"而是<b>什么都搜不到</b>。
+     *
+     * <p>下面 CASE 里的 {@code 'member'/'owner'/'admin'} 是<b>迁移快照</b>,不是第二份
+     * ladder:它只对存量数据跑一次,跑完即失效,此后新增的块一律由 {@code KnowledgeIndexer}
+     * 调 {@link com.aicap.rag.RetrievalContext#rankOf} 写入 —— 所以不存在"改了 Java 的
+     * ladder 却忘了改这里"的漂移。{@code ELSE 3} 与 {@code rankOf} 的
+     * "未识别角色按最高要求处理"一致:认不出的角色宁可不给看,也不能给所有人看。
+     */
+    private void backfillAclRank(Connection conn) throws SQLException {
+        execute(conn, "UPDATE `knowledge_chunks` SET `acl_rank` = CASE `acl_role` "
+                + "WHEN 'member' THEN 1 WHEN 'owner' THEN 2 WHEN 'admin' THEN 3 ELSE 3 END "
+                + "WHERE `acl_rank` IS NULL");
+        log.info("knowledge_chunks.acl_rank 已按 acl_role 回填");
+    }
+
+    /**
+     * 是否还有 {@code acl_rank} 为 NULL 的块 —— 判定回填的唯一依据(见 {@link #backfillAclRank})。
+     *
+     * <p>{@code LIMIT 1} 让它在最坏情况下也只扫到第一行;相比"整库静默搜不到东西",
+     * 每次启动多这一次查询是完全划算的。
+     */
+    private boolean hasNullAclRank(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT 1 FROM `knowledge_chunks` WHERE `acl_rank` IS NULL LIMIT 1")) {
+            return rs.next();
+        }
+    }
+
+    private boolean indexExists(Connection conn, String table, String indexName) throws SQLException {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getIndexInfo(conn.getCatalog(), null, table, false, false)) {
+            while (rs.next()) {
+                String name = rs.getString("INDEX_NAME");
+                if (name != null && indexName.equalsIgnoreCase(name)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** 返回本次新增的 "表.列" 集合 */

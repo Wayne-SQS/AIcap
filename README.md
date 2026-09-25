@@ -327,7 +327,9 @@ java -jar target\aicap-java-backend.jar
 & .\qa\run-all.ps1 -SkipE2E        # 只跑后端契约
 ```
 
-**后端契约测试现状**:`cd java-backend && mvn -B test` = **148 项全绿**(输入中"128 项"是 v3 文档记录时的数量,画像智能体接入后新增了 20 项)。
+**后端契约测试现状**:`cd java-backend && mvn -B test` = **223 项全绿**(上表"后端契约 128"与下方注释"148 项"分别是 v3 文档记录时、画像智能体接入后的数量;此后 RAG 检索层 S1/S2 接入,并新增了对 MySQL / Qdrant 两套向量库实现各跑一遍的参数化测试)。
+
+> 跑全量后端测试**需要 Qdrant 容器**(`cd backend && docker compose up -d qdrant`):索引与检索两组契约测试各跑两遍实现,qdrant 那一遍连不上会直接失败 —— 不做静默跳过,因为 ACL 在 Qdrant 侧落在 payload 而非 SQL 里,漏测就是权限后门。
 
 更早的 legacy 基线(旧 `index.html` + FastAPI 后端)测试文档仍在 `qa/` 内,已标注「旧基线」仅作归档;运行前置与目录说明见 `qa/README.md`。
 

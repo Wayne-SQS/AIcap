@@ -39,12 +39,34 @@ public record RetrievalContext(int userId, String role, Set<String> allowedSourc
     }
 
     /**
-     * 角色的等级化,供向量库侧的数值过滤使用(Qdrant 用 range.lte,MySQL 用 FIELD())。
-     * 未识别角色按最高要求处理(默认拒绝,而不是默认放行)。
+     * 角色的等级化。<b>这是 ladder 的唯一出处</b>:索引时由它算出
+     * {@code knowledge_chunks.acl_rank}(同一个数也进 Qdrant 的 payload),
+     * 检索时两套实现比的就是这个数 —— Qdrant 用 {@code range.lte},
+     * MySQL 用 {@code acl_rank <= roleRank}。SQL 里不再出现角色名字面量。
+     *
+     * <p>未识别角色按最高要求处理(默认拒绝,而不是默认放行)。这一点必须与 SQL 侧同向:
+     * 早先 MySQL 用 {@code FIELD(c.acl_role,...)} 比字符串,而 {@code FIELD} 对认不出的
+     * 值返回 0,{@code 0 <= 任何等级} 恒成立 ——「认不出」在 MySQL 上等于「人人可见」,
+     * 在 Qdrant 上却等于「只有 admin 可见」,同一个块两套实现结论相反。
      */
     public static int rankOf(String aclRole) {
         int idx = LADDER.indexOf(aclRole == null ? "" : aclRole);
         return idx < 0 ? LADDER.size() : idx + 1;
+    }
+
+    /**
+     * 是否为 ladder 中已定义的角色 —— 供配置校验复用。
+     *
+     * <p>必须由 ladder 的持有者回答,而不是让调用方自己列一遍角色名:那正是"第二份 ladder"
+     * 的开端,而两份编码迟早会在「认不出的角色」上分叉。
+     */
+    public static boolean isKnownRole(String role) {
+        return role != null && LADDER.contains(role);
+    }
+
+    /** ladder 本身(只读),用于在报错信息里列出合法取值。 */
+    public static List<String> knownRoles() {
+        return LADDER;
     }
 
     /**

@@ -8,6 +8,7 @@
 --           → member_profiles(成员画像,1:1 users)
 --           → meeting_audio(会议录音/上传的 mp3 元数据,文件落盘)
 --           → knowledge_chunks / knowledge_vectors(RAG 检索层,S1)
+--           → retrieval_logs(RAG 混合检索日志,S2)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS `users` (
@@ -315,7 +316,10 @@ CREATE TABLE IF NOT EXISTS `knowledge_chunks` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_source_chunk` (`source_type`,`source_id`,`chunk_index`),
   KEY `idx_embedded` (`embedded_at`),
-  KEY `idx_source` (`source_type`,`source_id`)
+  KEY `idx_source` (`source_type`,`source_id`),
+  -- 关键词检索路(设计文档 A5)。必须 ngram 分词器:默认分词按空格切,
+  -- 中文整段会变成一个 token,等于关键词路直接失效。
+  FULLTEXT KEY `ft_content` (`content`) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识块';
 
 -- 向量表(MysqlVectorStore 用)。与 knowledge_chunks 分表而非加列,理由有二:
@@ -330,3 +334,24 @@ CREATE TABLE IF NOT EXISTS `knowledge_vectors` (
   PRIMARY KEY (`chunk_id`),
   KEY `idx_vector_model` (`model`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 向量(MySQL 暴力检索实现)';
+
+-- 检索日志(S2):每次混合检索落一行,供检索调试台回看与 S7 评测复现。
+-- 为什么存 JSON 而不是拆成明细表:它只被「按时间倒序翻最近 N 条」这一种方式读取,
+-- 拆表后要 JOIN 回三路排名反而更慢;而 JSON 列能原样保住调试时真正要看的东西 ——
+-- 每一路各自的排名与分数(只存最终结果的话,「为什么这条没被召回」就查不出来了)。
+CREATE TABLE IF NOT EXISTS `retrieval_logs` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `query` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '原始查询词',
+  `user_id` int NOT NULL COMMENT '调用者 id',
+  `role` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '调用者角色(ACL 过滤依据)',
+  `routes_json` json DEFAULT NULL COMMENT '各路召回明细:[{name,items:[{chunk_id,score}]}]',
+  `fused_json` json DEFAULT NULL COMMENT 'RRF 融合后候选:[{chunk_id,rrf_score}]',
+  `final_json` json DEFAULT NULL COMMENT '精排后最终结果:[{chunk_id,score,reason}]',
+  `reranker` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '实际生效的精排实现:none/llm',
+  `degraded` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '降级原因(如精排调用失败);NULL = 未降级',
+  `latency_ms` int NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_created` (`created_at`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 混合检索日志';

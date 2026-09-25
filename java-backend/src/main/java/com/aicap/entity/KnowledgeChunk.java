@@ -26,6 +26,15 @@ public class KnowledgeChunk {
     private String rawContent;      // 原文
     private String contentHash;     // SHA-256(content)
     private String aclRole;         // member < owner < admin
+    /**
+     * {@code aclRole} 的数值化,由 {@link com.aicap.rag.RetrievalContext#rankOf} 求出。
+     *
+     * <p>冗余一列是为了让两套向量库实现过滤<b>同一个标量</b>:Qdrant 要在 payload 里用
+     * {@code range.lte},MySQL 要在 SQL 里比大小,而字符串角色两边都没法比较大小。
+     * 若让 SQL 各写各的 {@code FIELD(c.acl_role, ...)},ladder 就有了第二份定义 ——
+     * 一旦两边对"未识别角色"的处理不一致,同一个块会在一套实现里可见、在另一套里不可见。
+     */
+    private Integer aclRank;
     private String metadataJson;
     /**
      * 产出当前向量的 embedding 模型名。

@@ -75,6 +75,21 @@ aicap:
     qdrant:
       base-url: ${AICAP_QDRANT_URL:http://127.0.0.1:6333}
       collection: ${AICAP_QDRANT_COLLECTION:aicap_chunks}
+    # 混合检索(S2,设计文档 A5/A6):三路召回 → RRF 融合 → 精排
+    retrieval:
+      # 三级漏斗:每路召回 → 融合保留 → 精排后进 prompt
+      routes-top-k: ${AICAP_RAG_ROUTES_TOPK:20}
+      fuse-top-k: ${AICAP_RAG_FUSE_TOPK:20}
+      final-top-k: ${AICAP_RAG_FINAL_TOPK:5}
+      # RRF 常数 K;越小则头部名次差距被放得越大
+      rrf-k: ${AICAP_RAG_RRF_K:60}
+      # 每次检索是否写 retrieval_logs(调试台回看与 S7 评测复现依赖它)
+      log-enabled: ${AICAP_RAG_LOG_ENABLED:true}
+      rerank:
+        # llm = 调模型 listwise 精排(需 AICAP_LLM_API_KEY);none = 直通,用于评测消融
+        provider: ${AICAP_RAG_RERANK_PROVIDER:llm}
+        max-candidates: ${AICAP_RAG_RERANK_MAX_CANDIDATES:20}
+        max-content-chars: ${AICAP_RAG_RERANK_MAX_CHARS:600}
 
 # 画像智能体:独立 LLM 内核(见 ProfileLlmProperties,环境变量前缀 PROFILE_LLM_*)
 profile-agent:

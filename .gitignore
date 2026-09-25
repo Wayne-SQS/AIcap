@@ -49,3 +49,6 @@ qa/playwright-report/
 build_pkg.log
 build_test*.log
 sync_result.json
+
+# WorkBuddy 本地工作区数据(记忆与会话记录,不进仓库)
+.workbuddy/

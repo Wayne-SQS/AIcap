@@ -6,9 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,12 +19,29 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * RAG 索引层契约测试(S1)。
+ * RAG 索引层契约测试(S1)—— <b>两套向量库实现各跑一遍</b>。
  *
  * <p>被测量:{@code GET /api/admin/knowledge/stats}、{@code POST /api/admin/knowledge/reindex}、
  * {@code GET /api/admin/knowledge/search}。
  *
- * <p>关键设计:
+ * <h2>为什么是「抽象基类 + 两个子类」而不是 {@code @ParameterizedTest}</h2>
+ * 向量库实现由 {@code aicap.rag.vector-store} 在<b>启动时</b>经
+ * {@code @ConditionalOnProperty} 选定 Bean,运行期换不了;而 {@code @SpringBootTest}
+ * 的 {@code properties} 必须是编译期常量,参数化方法喂不进去。JUnit 的 {@code @Nested}
+ * 也不行 —— Spring 不为嵌套类单独建上下文。所以逻辑全部上提到这里,只有注解留在
+ * {@link KnowledgeIndexMysqlContractTest} 与 {@link KnowledgeIndexQdrantContractTest}。
+ * 代价是那份公共 properties 块要写两遍,这与本项目「数据源逐类内联、不搞
+ * {@code application-test.yml} profile」的既有约定是一致的。
+ *
+ * <h2>为什么必须跑两遍(而不是"mysql 通了就算数")</h2>
+ * 两条实现的落点完全不同:{@link com.aicap.rag.MysqlVectorStore} 靠 SQL 比
+ * {@code knowledge_chunks.acl_rank} 列;{@link com.aicap.rag.QdrantVectorStore}
+ * 把同一个数存进 payload,用 {@code range.lte} 过滤。
+ * <b>只测一条,另一条上的权限洞不会有任何人发现</b> —— 而"语义检索绕过可见性"
+ * 正是本项目红线③。{@link #aclConfigChangeIsAppliedWithoutForce} 尤其如此:
+ * 它断言的是"改配置必须真的挡住检索",而这在两条实现上是两段不同的代码。
+ *
+ * <h2>三条隔离手段</h2>
  * <ul>
  *   <li><b>不调用真实 embedding</b>:{@link EmbeddingFixture} 是本地 OpenAI 兼容服务
  *       (127.0.0.1:19378),向量由文本哈希确定性生成。整条链(切分→向量化→落库→检索)
@@ -34,33 +49,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>文档源指向临时目录</b>:真跑 {@code ../docs} 会把仓库文档全量索引进来,
  *       测试既慢又依赖仓库内容。{@code @BeforeAll} 里把 {@link RagProperties#setDocsDir}
  *       指到临时目录,doc 源的内容因此完全可控。</li>
- *   <li><b>doc 源设为 admin 可见</b>({@code aicap.rag.acl.doc=admin}),
- *       否则全部源都是 member 级,ACL 过滤这条路径没有任何用例会走到。</li>
+ *   <li><b>独立测试库 + 独立向量集合</b>:MySQL 侧是 {@code aicap_java_test}
+ *       (由 {@code reset_test_data.sql} 清空),Qdrant 侧是 {@code aicap_chunks_test}
+ *       (由 {@link QdrantTestSupport#resetCollection} 删除)。两边都不能碰开发数据。</li>
  * </ul>
- * 隔离:独立测试库 {@code aicap_java_test},且 {@code reset_test_data.sql} 会清空知识表。
+ *
+ * <p>{@code doc} 源设为 admin 可见({@code aicap.rag.acl.doc=admin}),
+ * 否则全部源都是 member 级,ACL 过滤这条路径没有任何用例会走到。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/aicap_java_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false",
-        "spring.datasource.username=aiguanli",
-        "spring.datasource.password=aiguanli-2026",
-        "spring.sql.init.data-locations=classpath:db/reset_test_data.sql",
-        // 本类不测 Agent 队列,关掉 worker 避免与其他类的上下文抢队列
-        "aicap.llm.agent-worker-enabled=false",
-        "aicap.rag.vector-store=mysql",
-        "aicap.rag.embedding.dimension=" + EmbeddingFixture.DIMENSION,
-        "aicap.rag.embedding.model=fixture-embed",
-        "aicap.rag.embedding.base-url=http://127.0.0.1:19378",
-        "aicap.rag.embedding.api-key=fixture-key",
-        "aicap.rag.embedding.batch-size=16",
-        "aicap.rag.acl.doc=admin"
-})
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class KnowledgeIndexContractTest extends ContractTestSupport {
+abstract class KnowledgeIndexContractTest extends ContractTestSupport {
 
-    private final EmbeddingFixture fixture = new EmbeddingFixture();
+    /** 本遍跑的是哪条实现。由子类给出,用于断言配置真的选对了 Bean(见各子类 javadoc) */
+    protected abstract String expectedVectorStore();
 
     @Autowired
-    private RagProperties ragProperties;
+    protected RagProperties ragProperties;
+
+    private final EmbeddingFixture fixture = new EmbeddingFixture();
 
     private Path docsDir;
 
@@ -85,6 +90,24 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
                 会议转写功能需要支持录音自动转写,并保留原文片段用于证据引用。
                 """);
         ragProperties.setDocsDir(docsDir.toAbsolutePath().toString());
+        // 必须在任何索引发生之前清空向量库(见 resetVectorStoreBeforeIndex)
+        resetVectorStoreBeforeIndex();
+    }
+
+    /**
+     * 向量库侧的清理钩子,在任何索引发生<b>之前</b>调用。
+     *
+     * <p>默认空实现:MySQL 那一遍的隔离由 {@code reset_test_data.sql} 负责(它清掉
+     * {@code knowledge_chunks} / {@code knowledge_vectors},相当于把向量库也清了)。
+     * Qdrant 的点不归那个脚本管,所以那一遍必须覆写成删集合 ——
+     * 见 {@link KnowledgeIndexQdrantContractTest}。
+     *
+     * <p>做成钩子而不是靠子类的 {@code @BeforeAll},是为了让"先清后建"这个顺序由代码
+     * 保证:JUnit 是父类 {@code @BeforeAll} 先跑,顺序一旦反过来,表现是断言看到上一轮
+     * 残留的点,而不是一条能读懂的错误。
+     */
+    protected void resetVectorStoreBeforeIndex() {
+        // MySQL 实现:无操作,隔离已由 reset_test_data.sql 完成
     }
 
     @AfterAll
@@ -138,6 +161,13 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
         int updated = r.json().path("updated").asInt();
         int embedded = r.json().path("embedded").asInt();
 
+        // 配置 → 条件 Bean → 响应,这条链要端到端钉住。少这一句,子类把 properties 打错
+        // 时会静默地跑在另一条实现上,而用例照样全绿 —— 参数化的意义就没了。
+        // 注意键名是 camelCase:本响应直接序列化 IndexReport 记录,而下面的 /stats
+        // 是手搭的 Map,那边才是 vector_store。两处键名不同是既有事实,不是笔误
+        assertEquals(expectedVectorStore(), r.json().path("vectorStore").asText(),
+                "重建报告里的向量库与配置不符: " + r.body());
+
         assertTrue(scanned > 0, "应至少扫描到种子数据(37 故事 + 16 任务 + 画像): " + r.body());
         assertEquals(0, r.json().path("failed").asInt(), "不应有向量化失败: " + r.body());
         // force=true 时全部重算,因此落库数应等于扫描数,且全部走了一次 embedding
@@ -151,10 +181,17 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
         assertTrue(bySource.path("story").asInt() > 0, "story 源应有块: " + stats.body());
         assertTrue(bySource.path("task").asInt() > 0, "task 源应有块: " + stats.body());
         assertTrue(bySource.path("doc").asInt() > 0, "doc 源应有块: " + stats.body());
+        assertEquals(expectedVectorStore(), stats.json().path("vector_store").asText(),
+                "统计里的向量库与配置不符: " + stats.body());
         assertEquals(scanned, stats.json().path("total_chunks").asInt(), "统计总数应与重建报告一致");
         assertEquals(0, stats.json().path("pending_chunks").asInt(), "重建后不应有待索引块");
         assertEquals(0, stats.json().path("stale_vectors").asInt(), "重建后不应有旧模型残留的向量");
-        assertEquals("mysql", stats.json().path("vector_store").asText());
+
+        // 向量库里的点数必须与块数相等。对 Qdrant 这一遍尤其关键:多出来的点只可能是
+        // 上一轮残留(收集没清干净),而陈旧点会被 search 当成有效命中返回 ——
+        // 这正是 MySQL 侧 reset_test_data.sql 与 Qdrant 侧 resetCollection 要解决的问题
+        assertEquals(scanned, stats.json().path("total_vectors").asInt(),
+                "向量库点数应恰好等于块数(多=有陈旧点、少=有块没写进去): " + stats.body());
     }
 
     @Test
@@ -182,6 +219,10 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
      * <p>这是本项目真跑数据时暴露的缺陷的回归测试:原先增量判断只看 content_hash,
      * 换模型时内容一字未改 → 全部判为"未变" → 库里留着旧模型的向量、查询却用新模型
      * 编码,相似度成为噪声<b>且不报任何错</b>。比索引失败更危险,因为没人会发现。
+     *
+     * <p>对 Qdrant 这一遍,重算还多一层意义:{@code embedding_model} 只记在 MySQL 里,
+     * 向量本体在 Qdrant,判定过期靠的是重新 upsert 覆盖同一 UUID 的点。
+     * 若 point id 不是确定性映射,这里会表现为"旧向量还在、新向量也在",检索结果翻倍。
      */
     @Test
     void switchingEmbeddingModelRecomputesStaleVectors() {
@@ -202,6 +243,11 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
             assertEquals(scanned, switched.json().path("embedded").asInt(),
                     "过期块必须全部重新向量化: " + switched.body());
             assertTrue(fixture.embeddedTexts() > 0, "应真的调用了 embedding");
+
+            // 覆盖写(而非追加)必须在向量库里得到验证:点数翻倍就是 point id 不稳定
+            assertEquals(scanned, get("/api/admin/knowledge/stats", token(USER_ADMIN)).json()
+                    .path("total_vectors").asInt(),
+                    "重算应是覆盖同一批点,不应在向量库里堆积重复点");
 
             // 关键后半段:重算后必须回到"零调用"。若模型名没落库,这里会再次全量重算 ——
             // 只断言"换模型会重算"是不够的,那不能区分"真的记住了模型"和"永远重算"
@@ -229,6 +275,10 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
      * {@code content_hash} 覆盖不到它。只改 ACL 时内容与模型都没变 → 增量判断认为"未变"
      * → 分支根本不进 → 库里留着旧角色。表现是"配置里已把某个源收紧为 admin,
      * 检索却照样查得到",权限静默失效。
+     *
+     * <p>本用例是"必须跑两套实现"的最强理由:MySQL 实现靠 SQL JOIN 现读角色,
+     * 而 Qdrant 把 {@code acl_rank} 存在 payload 里 —— <b>不重写向量就改不掉</b>。
+     * 两条实现的失效方式不同,只测一条等于只验了一半。
      */
     @Test
     void aclConfigChangeIsAppliedWithoutForce() {
@@ -301,7 +351,8 @@ class KnowledgeIndexContractTest extends ContractTestSupport {
 
         JsonNode items = r.json().path("items");
         assertTrue(items.isArray() && items.size() > 0, "应检索到结果: " + r.body());
-        // 分数必须真的有区分度:全等分说明相似度算错了(例如恒返 0 或未归一化)
+        // 分数必须真的有区分度:全等分说明相似度算错了(例如恒返 0 或未归一化)。
+        // 两条实现的打分口径不同(应用层余弦 vs Qdrant 的 Cosine 距离),这条断言同时钉住两者
         double first = items.get(0).path("score").asDouble();
         assertTrue(first > 0, "首位得分应大于 0: " + r.body());
 

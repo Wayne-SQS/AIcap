@@ -12,6 +12,11 @@
 # Prerequisites (already running):
 #   - MySQL container aiguanli-mysql on host port 3307 (dev DB AIcap,
 #     contract-test DB aicap_java_test)
+#   - Qdrant container aicap-qdrant on host port 6333 - REQUIRED by the
+#     backend RAG contract tests, which run twice: once per vector store
+#     implementation (mysql and qdrant). The qdrant pass fails loudly if
+#     the container is down, on purpose: ACL filtering lives in the Qdrant
+#     payload rather than in SQL, so skipping that pass would hide it.
 #   - Spring Boot backend on http://127.0.0.1:8080
 #   - Vite dev server on http://localhost:5173  (needed by both E2E suites)
 #   - qa/node_modules installed once: cd qa; npm install
@@ -63,19 +68,26 @@ Write-Host ("repo: {0}" -f $repo)
 # ---- 0. preconditions -------------------------------------------------
 $backendUp = Test-Endpoint 'http://127.0.0.1:8080/api/health'
 $frontendUp = Test-Endpoint 'http://localhost:5173/'
+$qdrantUp = Test-Endpoint 'http://127.0.0.1:6333/collections'
 $backendState = 'DOWN'
 if ($backendUp) { $backendState = 'UP' }
 $frontendState = 'DOWN'
 if ($frontendUp) { $frontendState = 'UP' }
+$qdrantState = 'DOWN'
+if ($qdrantUp) { $qdrantState = 'UP' }
 Write-Host ("backend  http://127.0.0.1:8080  : {0}" -f $backendState)
 Write-Host ("frontend http://localhost:5173    : {0}" -f $frontendState)
+Write-Host ("qdrant   http://127.0.0.1:6333    : {0}" -f $qdrantState)
 if ((-not $backendUp -or -not $frontendUp) -and -not $SkipE2E) {
     Write-Warning 'backend/frontend not reachable - E2E suites need both. Start them, or pass -SkipE2E.'
+}
+if (-not $qdrantUp -and -not $SkipBackend) {
+    Write-Warning 'qdrant not reachable - the RAG contract tests run against both vector stores and WILL fail. Start it: cd backend; docker compose up -d qdrant'
 }
 
 # ---- 1. backend contract tests (JUnit) --------------------------------
 if (-not $SkipBackend) {
-    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (128 cases) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [1/3] backend contract tests: java-backend mvn -o -B test (223 cases) ===" -ForegroundColor Cyan
     # JAVA_HOME must point at JDK 23: the ambient environment may carry a JDK 8,
     # which makes surefire fork Java 8 and fail with
     # "class file version 67.0 ... only recognizes class file versions up to 52.0".
@@ -97,7 +109,7 @@ if (-not $SkipBackend) {
     $summary = ''
     $hit = $mvnOut | Select-String -Pattern 'Tests run:.*Failures:.*Errors:.*Skipped' | Select-Object -Last 1
     if ($hit) { $summary = $hit.Line.Trim() }
-    Add-Result 'backend-contract (JUnit, 128 cases)' ($mvnExit -eq 0) $summary
+    Add-Result 'backend-contract (JUnit, 223 cases)' ($mvnExit -eq 0) $summary
     Pop-Location
 }
 

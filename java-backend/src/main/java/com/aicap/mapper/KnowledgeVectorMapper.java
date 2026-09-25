@@ -17,8 +17,16 @@ public interface KnowledgeVectorMapper extends BaseMapper<KnowledgeVector> {
      *
      * <p>ACL 必须在 SQL 里过滤,不能捞回来再筛 —— 否则 top-k 会被无权结果占满,
      * 有权结果反而挤不进来(设计文档 A7)。{@code acl_role} 语义是「最低可见角色」,
-     * 因此用 {@code FIELD()} 比等级:{@code member=1 < owner=2 < admin=3},
+     * 比的是它的数值化 {@code acl_rank}:{@code member=1 < owner=2 < admin=3},
      * 调用者等级 >= chunk 要求等级 才可见。
+     *
+     * <p>这里<b>曾经</b>写的是 {@code FIELD(c.acl_role,'member','owner','admin') <= roleRank},
+     * 而 {@code FIELD} 对未识别的角色字符串返回 <b>0</b> —— {@code 0 <= roleRank} 对任何
+     * 调用者都成立,即<b>默认放行</b>;Qdrant 侧读的是 {@code rankOf} 写进 payload 的
+     * {@code acl_rank},对未识别角色给的是「最高要求」,即<b>默认拒绝</b>。
+     * 同一个块于是能在 MySQL 上人人可见、在 Qdrant 上只有 admin 可见,而当时的测试
+     * 用的全是合法角色名,两边都绿。改成比 {@code acl_rank} 后 ladder 只剩 Java 一处,
+     * {@code acl_rank IS NOT NULL} 又让"没写等级"同样落到不可见,方向不会再有分歧。
      *
      * @param sourceTypesCsv 逗号分隔的源类型白名单;null = 不限(用 FIND_IN_SET 避免动态 SQL)
      */
@@ -32,7 +40,8 @@ public interface KnowledgeVectorMapper extends BaseMapper<KnowledgeVector> {
             FROM `knowledge_vectors` v
             JOIN `knowledge_chunks` c ON c.`id` = v.`chunk_id`
             WHERE v.`model` = #{model}
-              AND FIELD(c.`acl_role`, 'member', 'owner', 'admin') <= #{roleRank}
+              AND c.`acl_rank` IS NOT NULL
+              AND c.`acl_rank` <= #{roleRank}
               AND (#{sourceTypesCsv,jdbcType=VARCHAR} IS NULL
                    OR FIND_IN_SET(c.`source_type`, #{sourceTypesCsv,jdbcType=VARCHAR}) > 0)
             LIMIT #{limit}

@@ -129,8 +129,9 @@ public class KnowledgeIndexer {
                     }
                     // 向量作废就置空 embedded_at,让 stats 的 pending 数如实反映"还没算完";
                     // 万一本次 embedding 失败,下次重建也仍会判它过期。
-                    // ACL 变更同样要重算:MySQL 实现靠 JOIN 读角色,但 Qdrant 把 acl_rank
-                    // 存在 payload 里,不重写向量就改不掉 —— 两种实现行为必须一致。
+                    // ACL 变更同样要重算:acl_rank 要进 Qdrant 的 payload,而 payload 只在
+                    // upsert 向量时一起写,不重写向量就改不掉。MySQL 侧的 acl_rank 是表列,
+                    // updateById 本可单独搞定 —— 但两套实现的行为必须一致,所以一并重算。
                     old.setEmbeddedAt(null);
                     chunkMapper.updateById(old);
                     pending.add(old);
@@ -223,14 +224,18 @@ public class KnowledgeIndexer {
         row.setRawContent(chunk.rawContent());
         row.setContentHash(hash);
         row.setAclRole(chunk.aclRole());
+        // 角色与它的数值化在同一个地方写入,两者不可能对不上;SQL 侧只读 acl_rank,
+        // 因此 MySQL 与 Qdrant 过滤的是同一个数(见 KnowledgeChunk.aclRank)
+        row.setAclRank(RetrievalContext.rankOf(chunk.aclRole()));
         row.setMetadataJson(writeJson(chunk.metadata()));
     }
 
     /**
      * 进向量库的 payload。
      *
-     * <p>{@code acl_rank} 是冗余的数值化角色,存在的唯一理由是让 Qdrant 能用
-     * {@code range.lte} 表达「等级不高于调用者」—— 字符串角色在 Qdrant 里没法比较大小。
+     * <p>{@code acl_rank} 取的是落库那一列,不在这里重算:它与 MySQL 侧 SQL 过滤的是
+     * 同一个数(该列由 {@link #applyContent} 写入),两套实现因此不可能对同一个块
+     * 得出不同的可见性。
      */
     private Map<String, Object> payloadOf(KnowledgeChunk c) {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -238,7 +243,7 @@ public class KnowledgeIndexer {
         payload.put("source_type", c.getSourceType());
         payload.put("source_id", c.getSourceId());
         payload.put("acl_role", c.getAclRole());
-        payload.put("acl_rank", RetrievalContext.rankOf(c.getAclRole()));
+        payload.put("acl_rank", c.getAclRank());
         if (c.getMetadataJson() != null && !c.getMetadataJson().isBlank()) {
             try {
                 Map<?, ?> meta = objectMapper.readValue(c.getMetadataJson(), Map.class);
