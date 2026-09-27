@@ -71,4 +71,3 @@ async function submit() {
 fieldset { margin-top: 12px; padding: 12px; border: 1px solid var(--line, #ddd); border-radius: 8px; min-width: 0; }
 select, textarea { width: 100%; }
 </style>
-

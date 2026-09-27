@@ -31,4 +31,3 @@ export const planningAnalysesApi = {
   reviews: (meetingId, analysisId) => api(`${record(meetingId, analysisId)}/proposal-reviews`),
   executions: (meetingId, analysisId) => api(`${record(meetingId, analysisId)}/proposal-executions`)
 }
-

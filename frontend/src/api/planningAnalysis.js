@@ -11,4 +11,3 @@ export async function analyzePlanning(meetingId, payload) {
   }
   return result
 }
-

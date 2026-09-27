@@ -33,4 +33,3 @@ async function execute() {
     <div v-if="error" role="alert">{{ error }} <button type="button" :disabled="busy" @click="emit('refresh')">刷新执行状态</button></div>
   </div>
 </template>
-
