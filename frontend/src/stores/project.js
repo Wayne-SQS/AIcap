@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useSessionStore } from '@/stores/session'
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { poolApi } from '@/api/pool'
@@ -265,6 +266,15 @@ export const useProjectStore = defineStore('project', {
         }
       })
       this.members.sort((a, b) => a.id - b.id)
+    },
+    async refreshStoriesAndLogs() {
+      const session = useSessionStore()
+      const token = session.authToken
+      const [stories, logs] = await Promise.all([storiesApi.list(), storiesApi.logs()])
+      if (!session.online || session.authToken !== token) return
+      this.stories = stories.map(this.mapStory)
+      this.log = logs.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
+      this.checkConsistency()
     },
     async loadAll() {
       const [st, tk, pl, lg, users] = await Promise.all([

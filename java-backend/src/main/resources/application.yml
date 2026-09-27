@@ -13,7 +13,7 @@ spring:
     init:
       # 建表自举:全部 CREATE TABLE IF NOT EXISTS,幂等;全新空库无需先跑 FastAPI
       mode: always
-      schema-locations: classpath:db/schema.sql
+      schema-locations: classpath:db/schema.sql,classpath:db/status-analyses.sql,classpath:db/status-proposal-reviews.sql,classpath:db/status-proposal-executions.sql,classpath:db/planning-analyses.sql,classpath:db/planning-proposal-reviews.sql,classpath:db/planning-proposal-executions.sql
   jackson:
     time-zone: Asia/Shanghai
     # 对齐 FastAPI:字段恒输出(含 null),不裁剪

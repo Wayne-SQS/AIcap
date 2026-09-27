@@ -7,6 +7,7 @@ import { useReviewStore } from '@/stores/review'
 import { SUG_KEY } from '@/constants'
 import AgentRunPanel from './AgentRunPanel.vue'
 import RecorderPanel from './RecorderPanel.vue'
+import StatusAnalysisPanel from './StatusAnalysisPanel.vue'
 
 /* 会议智能体面板:离线=演示转写+生成建议;在线=保存会议/选择/手动录入待审建议
    对齐旧版 renderMeeting + meeting-review.js */
@@ -143,6 +144,7 @@ function genDemoSuggestion() {
       @click="deleteMeeting"
     >{{ deleting ? '删除中…' : '删除当前会议' }}</button>
     <pre id="saved-transcript" style="white-space:pre-wrap;max-height:240px;overflow:auto">{{ meeting.selectedMeeting?.transcript || '暂无会议，请先保存。' }}</pre>
+    <StatusAnalysisPanel :key="meeting.selected" :meeting-id="meeting.selected" />
     <AgentRunPanel />
     <RecorderPanel />
     <form id="meeting-proposal-form" @submit.prevent="submitProposal">

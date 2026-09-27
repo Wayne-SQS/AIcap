@@ -45,3 +45,12 @@ qa/playwright-report/
 build_pkg.log
 build_test*.log
 sync_result.json
+# Disposable live integration database and logs
+qa/.daily-live/
+
+# Synthetic model quality run outputs
+qa/.daily-quality/
+ai-service/.planning-quality/
+
+# Temporary AI collaboration messages; durable decisions belong in docs/
+.agent-collab/

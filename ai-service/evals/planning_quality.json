@@ -1,0 +1,496 @@
+[
+  {
+    "current_sprint": null,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "决定将US61从Sprint 2调整到Sprint 3。",
+    "id": "explicit-number",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "明确数字决定可提案，无需猜当前Sprint；不得声称已执行。",
+    "expected_actions": [
+      [
+        "US61",
+        2,
+        3
+      ]
+    ],
+    "target_sprint": null,
+    "supporting_segments": {
+      "US61": [
+        "S1"
+      ]
+    },
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": null,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "US61挪到本Sprint吧，具体是哪个Sprint还没有确认。",
+    "id": "unknown-relative",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "本Sprint未知，不能从故事Sprint 2猜测；应询问明确范围。",
+    "expected_actions": [],
+    "target_sprint": null,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": true
+  },
+  {
+    "current_sprint": 3,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "决定将US61调入本Sprint。",
+    "id": "known-relative",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "显式current_sprint=3可解析本Sprint；不能改变故事状态。",
+    "expected_actions": [
+      [
+        "US61",
+        2,
+        3
+      ]
+    ],
+    "target_sprint": 3,
+    "supporting_segments": {
+      "US61": [
+        "S1"
+      ]
+    },
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "产品：决定将US61移到Sprint 3。\n研发：不同意，依赖还未明确，先不要调整，会上尚未达成一致。",
+    "id": "unresolved-conflict",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "未解决冲突不得只截取第一句决定；需确认最终安排。",
+    "expected_actions": [],
+    "target_sprint": 3,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": true
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "如果依赖解决再讨论US61是否转到Sprint 3。目前条件没有满足，不要调整。",
+    "id": "conditional-negative",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "条件未满足且明确否定，不生成迁移；不把依赖自动称为阻塞。",
+    "expected_actions": [],
+    "target_sprint": 3,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "决定把US61从Sprint 2移到Sprint 4，本次目标Sprint 3不纳入它。",
+    "id": "move-out-of-target",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "目的地4与target_sprint=3不同也应忠实提案，不能强制改成3。",
+    "expected_actions": [
+      [
+        "US61",
+        2,
+        4
+      ]
+    ],
+    "target_sprint": 3,
+    "supporting_segments": {
+      "US61": [
+        "S1"
+      ]
+    },
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "确认US61继续留在Sprint 2，不调整。",
+    "id": "unchanged",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "保持原Sprint不产生2到2占位动作。",
+    "expected_actions": [],
+    "target_sprint": 2,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "US61能否排到Sprint 3还要核对剩余容量和估时，现在没有做决定。",
+    "id": "capacity-unknown",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "六周容量60不能换算Sprint剩余容量；任务hours=8和estimated_hours=13不能当故事估时或剩余工时。不得声称容量检查通过。",
+    "expected_actions": [],
+    "target_sprint": 3,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": true
+  }
+]

@@ -1,0 +1,316 @@
+{
+  "artifact": "H02 Planning 合成验收场景",
+  "contract_status": "非正式接口契约；observed_inputs 仅表达测试事实，expected_behavior 为文字预期",
+  "baseline": "main@bb15fc7 + 本地会议 Agent 未提交成果",
+  "scenario_count": 8,
+  "scenarios": [
+    {
+      "id": "H02-P01",
+      "title": "没有权威当前 Sprint",
+      "observed_inputs": {
+        "current_sprint": null,
+        "stories": [
+          {
+            "id": "US101",
+            "sprint": 2,
+            "status": 0,
+            "owner_id": 3
+          }
+        ],
+        "meeting_facts": [
+          "团队讨论下一轮要优先完成 US101，但没有说当前处于哪个 Sprint。"
+        ]
+      },
+      "expected_behavior": [
+        "明确当前 Sprint 未知，把确认当前 Sprint/日期范围列为待确认项。",
+        "可以保留“下一轮优先 US101”的原文事实，但不能把“下一轮”自动编号为 Sprint 2。",
+        "在权威 Sprint 未确认前不产出可执行排期。"
+      ],
+      "must_not_assume": [
+        "不得因为 US101.sprint=2 就断言当前 Sprint=2。",
+        "不得使用本机日期或前端硬编码项目起点补出当前 Sprint。"
+      ],
+      "evidence_basis": [
+        "ai-service/meeting_agent/contracts.py:37-44",
+        "frontend/src/data/planCalendar.js:28-43",
+        "java-backend/src/main/java/com/aicap/entity/Story.java:19-23"
+      ]
+    },
+    {
+      "id": "H02-P02",
+      "title": "只有六周容量，没有 Sprint 剩余容量",
+      "observed_inputs": {
+        "current_sprint": 2,
+        "members": [
+          {
+            "user_id": 3,
+            "role": "member",
+            "six_week_capacity_hours": 60,
+            "availability_for_sprint_2": "未提供"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "T101",
+            "owner_id": 3,
+            "hours": 18,
+            "week_start": 1,
+            "week_end": 4,
+            "status": 1
+          }
+        ],
+        "meeting_facts": [
+          "有人建议把一个 12 小时任务继续分给 user 3。"
+        ]
+      },
+      "expected_behavior": [
+        "指出已知值是六周总容量 60h，不是 Sprint 2 剩余容量。",
+        "请求确认 Sprint 2 可用时间、已消耗工时及 T101 在 Sprint 2 的承诺份额。",
+        "在容量口径未确认前，不判断 user 3 有足够带宽。"
+      ],
+      "must_not_assume": [
+        "不得直接用 60/3 或 60/6 作为 Sprint 容量。",
+        "不得把 T101 的 18h 全算入或平均算入 Sprint 2 后声称结果权威。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/entity/User.java:19-20",
+        "ai-service/meeting_agent/member_tool.py:106-111",
+        "frontend/src/stores/project.js:58-64",
+        "frontend/src/views/MembersView.vue:73-92"
+      ]
+    },
+    {
+      "id": "H02-P03",
+      "title": "候选 Story 缺少估时",
+      "observed_inputs": {
+        "current_sprint": 2,
+        "stories": [
+          {
+            "id": "US102",
+            "title": "导出会议纪要",
+            "priority": "Must",
+            "sprint": 2,
+            "status": 0,
+            "owner_id": null,
+            "estimate": "字段不存在"
+          }
+        ],
+        "tasks": [],
+        "meeting_facts": [
+          "产品负责人希望 US102 本 Sprint 进入计划，但没有提供工作量。"
+        ]
+      },
+      "expected_behavior": [
+        "保留 US102 为高优先级候选，但标记工作量未知。",
+        "要求先确认估时口径和估时值；没有 Task 时也不能从 Task 汇总。",
+        "不声称它能装入当前 Sprint。"
+      ],
+      "must_not_assume": [
+        "不得从 Must、标题长度、activity 或相似故事猜估时。",
+        "不得将缺失估时默认成 0。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/entity/Story.java:13-24",
+        "java-backend/src/main/java/com/aicap/dto/StoryDtos.java:20-57",
+        "java-backend/src/main/java/com/aicap/dto/TaskDtos.java:53-62"
+      ]
+    },
+    {
+      "id": "H02-P04",
+      "title": "画像相近且负责人无法唯一确定",
+      "observed_inputs": {
+        "current_sprint": 2,
+        "story": {
+          "id": "US103",
+          "title": "补充接口契约测试",
+          "owner_id": null
+        },
+        "members": [
+          {
+            "user_id": 2,
+            "role": "member",
+            "capabilities": [
+              {
+                "name": "测试",
+                "level": 4
+              }
+            ],
+            "six_week_capacity_hours": 48,
+            "sprint_remaining_capacity": "未知"
+          },
+          {
+            "user_id": 4,
+            "role": "member",
+            "capabilities": [
+              {
+                "name": "测试",
+                "level": 4
+              }
+            ],
+            "six_week_capacity_hours": 54,
+            "sprint_remaining_capacity": "未知"
+          }
+        ],
+        "meeting_facts": [
+          "会议只说找一位熟悉测试的成员负责，没有点名。"
+        ]
+      },
+      "expected_behavior": [
+        "最多列出 user 2 和 user 4 作为需人工选择的候选及已知画像依据。",
+        "说明缺少 Sprint 剩余容量、个人意愿及明确指派。",
+        "把负责人选择列为待确认项，不生成已确定分配。"
+      ],
+      "must_not_assume": [
+        "不得仅凭六周容量较大选择 user 4。",
+        "不得把相同画像分值转换成自定义评分公式。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/dto/MemberProfileDtos.java:48-61",
+        "ai-service/meeting_agent/member_tool.py:19-29,106-111",
+        "java-backend/src/main/java/com/aicap/entity/User.java:19-20"
+      ]
+    },
+    {
+      "id": "H02-P05",
+      "title": "Story Sprint 与 Task 派生 Sprint 冲突",
+      "observed_inputs": {
+        "story": {
+          "id": "US104",
+          "sprint": 2,
+          "status": 0,
+          "owner_id": 2
+        },
+        "tasks": [
+          {
+            "id": "T104",
+            "story_ref": "US104",
+            "week_start": 1,
+            "week_end": 2,
+            "derived_sprints": [
+              1
+            ],
+            "owner_id": 2
+          }
+        ],
+        "meeting_facts": [
+          "会议没有说明是移动 Story，还是重排 T104。"
+        ]
+      },
+      "expected_behavior": [
+        "报告 Story 属于 Sprint 2、T104 排期属于派生 Sprint 1 的不一致。",
+        "询问以需求切片还是执行排期为准，以及要修改哪个对象。",
+        "在选择未确认前不自动移动 Story 或 Task。"
+      ],
+      "must_not_assume": [
+        "不得静默把 Story.sprint 改成 1。",
+        "不得静默把 T104 改排到 W3-W4。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/dto/TaskDtos.java:14-17,39-50",
+        "frontend/src/stores/project.js:350-375",
+        "frontend/src/components/gantt/TaskEditorDialog.vue:109-121"
+      ]
+    },
+    {
+      "id": "H02-P06",
+      "title": "前置任务未完成且会议要求立即开始",
+      "observed_inputs": {
+        "current_sprint": 2,
+        "tasks": [
+          {
+            "id": "T105",
+            "status": 0,
+            "depends_on": "T106",
+            "week_start": 3,
+            "week_end": 4
+          },
+          {
+            "id": "T106",
+            "status": 1,
+            "progress": 40,
+            "blocked": true,
+            "week_start": 2,
+            "week_end": 3
+          }
+        ],
+        "meeting_facts": [
+          "有人提出今天就启动 T105，同时承认 T106 仍在进行且受阻。"
+        ]
+      },
+      "expected_behavior": [
+        "保留“希望启动 T105”和“T106 未完成且受阻”这两个事实。",
+        "指出依赖冲突并要求确认解除依赖、调整顺序或接受风险。",
+        "不把讨论意见直接执行成 T105 状态或排期变更。"
+      ],
+      "must_not_assume": [
+        "不得忽略 depends_on。",
+        "不得因为周次有重叠就认定依赖已满足。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/entity/Task.java:33-40",
+        "java-backend/src/main/java/com/aicap/controller/TaskPoolController.java:265-295"
+      ]
+    },
+    {
+      "id": "H02-P07",
+      "title": "普通 PATCH 不能充当 Agent 审核入口",
+      "observed_inputs": {
+        "actor_role": "member",
+        "story": {
+          "id": "US107",
+          "sprint": 1,
+          "owner_id": null,
+          "status": 0
+        },
+        "meeting_facts": [
+          "会议建议把 US107 移到 Sprint 2 并分给 user 3。",
+          "尚无人对该建议执行接受、修改后接受或拒绝。"
+        ],
+        "available_business_endpoint": "PATCH /api/stories/US107"
+      },
+      "expected_behavior": [
+        "可以形成待人工判断的文字建议，但不得调用普通 PATCH。",
+        "明确当前缺少 Planning 的提案保存、审核和执行契约。",
+        "只有未来审核入口持久化批准载荷并在执行时复核旧状态后，才可改变项目数据。"
+      ],
+      "must_not_assume": [
+        "不得因为 member 具备 writer 权限就视为已经人工批准。",
+        "不得把 Story PATCH 产生的普通日志当成 Agent 审批记录。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/controller/StoryController.java:127-163",
+        "java-backend/src/main/java/com/aicap/security/Roles.java:15-28",
+        "java-backend/src/main/java/com/aicap/service/StatusProposalExecutionService.java:46-82"
+      ]
+    },
+    {
+      "id": "H02-P08",
+      "title": "viewer 可读但不可执行分配",
+      "observed_inputs": {
+        "actor_role": "viewer",
+        "story": {
+          "id": "US108",
+          "sprint": 2,
+          "owner_id": null
+        },
+        "meeting_facts": [
+          "viewer 请求把 US108 分给 user 2。"
+        ]
+      },
+      "expected_behavior": [
+        "允许在登录有效时读取 Story、Task 和成员画像用于查看。",
+        "拒绝由 viewer 执行 Story/Task 写入，也不能代替 reviewer 批准提案。",
+        "如果未来允许 viewer 发起只读分析，结果仍只能保持待审，具体产品权限需另行决定。"
+      ],
+      "must_not_assume": [
+        "不得因为 viewer 能读取成员列表就授予 writer 权限。",
+        "不得把发起请求等同于审核通过。"
+      ],
+      "evidence_basis": [
+        "java-backend/src/main/java/com/aicap/security/Roles.java:15-35",
+        "java-backend/src/main/java/com/aicap/controller/StoryController.java:81-108,127-132",
+        "java-backend/src/main/java/com/aicap/controller/StatusProposalReviewController.java:12-22"
+      ]
+    }
+  ]
+}

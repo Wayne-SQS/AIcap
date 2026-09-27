@@ -26,11 +26,11 @@ function isLoginPath(path) {
   return String(path).split('?')[0].replace(/\/+$/, '') === '/api/auth/login'
 }
 
-export async function api(path, opts = {}) {
+export async function api(path, opts = {}, base = apiBase()) {
   const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {})
   const token = getAuthToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
-  const res = await fetch(apiBase() + path, Object.assign({}, opts, { headers }))
+  const res = await fetch(base + path, Object.assign({}, opts, { headers }))
   if (res.status === 401) {
     /* 先解析响应体拿后端真实原因(登录失败时是「用户名或密码错误」),解析不到才退回「未登录」 */
     let msg = '未登录'
