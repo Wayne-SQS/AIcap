@@ -9,8 +9,11 @@ const routes = [
   { path: '/board', name: 'board', component: () => import('@/views/BoardView.vue') },
   { path: '/gantt', name: 'gantt', component: () => import('@/views/GanttView.vue') },
   { path: '/members', name: 'members', component: () => import('@/views/MembersView.vue') },
+  { path: '/profiles', name: 'profiles', component: () => import('@/views/ProfilesView.vue') },
   { path: '/uml', name: 'uml', component: () => import('@/views/UmlView.vue') },
   { path: '/ai', name: 'ai', component: () => import('@/views/AiView.vue') },
+  { path: '/drawing-agent', name: 'drawing-agent', component: () => import('@/views/DrawingAgentView.vue') },
+  { path: '/project-generator', name: 'project-generator', component: () => import('@/views/ProjectGeneratorView.vue') },
   { path: '/review', name: 'review', component: () => import('@/views/ReviewView.vue') }
 ]
 

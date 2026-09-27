@@ -31,6 +31,7 @@ export const useSessionStore = defineStore('session', {
       this.authToken = null
       this.currentUser = null
       setAuthToken(null)
+      useProjectStoreSafe()?.clearServerData()
       const { notify } = useToast()
       notify('登录已过期，请重新登录')
       this.openLogin()
@@ -49,9 +50,12 @@ export const useSessionStore = defineStore('session', {
             } catch (e) {
               this.authToken = null
               setAuthToken(null)
+              useProjectStoreSafe()?.clearServerData()
               this.openLogin()
             }
           } else {
+            // 在线但尚未认证时，不允许启动阶段的本地缓存继续作为正式项目数据。
+            useProjectStoreSafe()?.clearServerData()
             this.openLogin()
           }
         } else {
@@ -100,7 +104,7 @@ export const useSessionStore = defineStore('session', {
       // 对齐旧版 dialog close 处理:在线但未登录 → 回退离线
       if (this.apiMode && !this.currentUser) {
         this.apiMode = false
-        useProjectStoreSafe()?.restoreLocal()
+        useProjectStoreSafe()?.clearServerData()
       }
     }
   }

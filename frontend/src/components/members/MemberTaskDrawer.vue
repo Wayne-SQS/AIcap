@@ -14,11 +14,14 @@ import { memberLabel } from '@/data/memberIdentity'
 const props = defineProps({
   memberId: { type: Number, required: true }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'reassign'])
 const project = useProjectStore()
 const session = useSessionStore()
 const { completeTask } = useAgentRefresh()
 const doneTitle = computed(() => (session.isViewer ? READONLY_TITLE : '标记完成并触发任务提交智能体'))
+const dragTaskId = ref('')
+const dropMemberId = ref(null)
+const pointerDrag = ref(null)
 
 const filter = ref('all')
 const FILTERS = [['all', '全部'], ['todo', '待办'], ['doing', '进行中'], ['done', '已完成'], ['blocked', '阻塞']]
@@ -34,8 +37,52 @@ function storyRefText(t) {
 function onKeydown(e) {
   if (e.key === 'Escape') emit('close')
 }
+function startTaskDrag(task, event) {
+  if (session.isViewer) return
+  dragTaskId.value = task.id
+  event.dataTransfer.setData('application/x-aiguanli-task', task.id)
+  event.dataTransfer.setData('text/plain', task.id)
+  event.dataTransfer.effectAllowed = 'move'
+}
+function clearDrag() { dragTaskId.value = ''; dropMemberId.value = null }
+function dropTo(ownerId, event) {
+  const taskId = dragTaskId.value || event.dataTransfer?.getData('application/x-aiguanli-task')
+  clearDrag()
+  if (taskId && !session.isViewer) emit('reassign', { taskId, ownerId })
+}
+function selectOwner(task, event) {
+  const ownerId = Number(event.target.value)
+  event.target.value = String(task.owner)
+  emit('reassign', { taskId: task.id, ownerId })
+}
+function startPointer(task, event) {
+  if (session.isViewer || event.button !== 0 || event.target.closest('select')) return
+  pointerDrag.value = { taskId: task.id, startX: event.clientX, startY: event.clientY, moved: false }
+  document.addEventListener('pointermove', movePointer)
+  document.addEventListener('pointerup', endPointer, { once: true })
+}
+function movePointer(event) {
+  const drag = pointerDrag.value
+  if (!drag) return
+  drag.moved ||= Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5
+  if (!drag.moved) return
+  dragTaskId.value = drag.taskId
+  const zone = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-owner-drop]')
+  dropMemberId.value = zone ? Number(zone.dataset.ownerDrop) : null
+}
+function endPointer() {
+  document.removeEventListener('pointermove', movePointer)
+  const drag = pointerDrag.value
+  const ownerId = dropMemberId.value
+  pointerDrag.value = null
+  clearDrag()
+  if (drag?.moved && ownerId !== null) emit('reassign', { taskId: drag.taskId, ownerId })
+}
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('pointermove', movePointer)
+})
 </script>
 
 <template>
@@ -66,12 +113,35 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             >{{ label }}</button>
           </div>
         </div>
+        <div class="task-owner-zones" aria-label="任务负责人放置区域">
+          <div class="small">拖动任务到成员，或使用任务行中的负责人下拉框</div>
+          <div class="owner-zone-grid">
+            <div
+              v-for="m in project.members" :key="m.id" class="owner-drop-zone"
+              :class="{ current: m.id === memberId, 'is-drop-target': dropMemberId === m.id }"
+              :data-owner-drop="m.id"
+              @dragenter.prevent="dropMemberId = m.id" @dragover.prevent="dropMemberId = m.id"
+              @dragleave.self="dropMemberId = null" @drop.prevent="dropTo(m.id, $event)"
+            ><span class="avatar" :class="'a' + m.id">P{{ m.id + 1 }}</span><span>{{ m.name }}</span></div>
+          </div>
+        </div>
         <div class="task-list">
-          <div v-for="t in filtered" :key="t.id" class="task-item">
+          <div
+            v-for="t in filtered" :key="t.id" class="task-item"
+            :class="{ 'is-dragging': dragTaskId === t.id }"
+            :draggable="!session.isViewer" :title="session.isViewer ? READONLY_TITLE : '拖动以调整负责人'"
+            @dragstart="startTaskDrag(t, $event)" @dragend="clearDrag"
+            @pointerdown="startPointer(t, $event)"
+          >
             <span class="task-key">{{ t.id }}</span>
             <div class="task-summary">
               <b :title="t.name">{{ t.name }}</b>
-              <div class="task-meta">{{ storyRefText(t) }} · Sprint {{ project.taskSprintList(t).join('/') }} · W{{ t.w[0] }}–W{{ t.w[1] }} · {{ t.h }}h · 进度 {{ t.progress || 0 }}%</div>
+              <div class="task-meta">{{ storyRefText(t) }} · {{ t.priority || 'Should' }} · Sprint {{ project.taskSprintList(t).join('/') }} · W{{ t.w[0] }}–W{{ t.w[1] }} · {{ t.h }}h · 进度 {{ t.progress || 0 }}%</div>
+            </div>
+            <div class="task-item-actions">
+              <select :value="String(t.owner)" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : '修改负责人'" @change="selectOwner(t, $event)">
+                <option v-for="m in project.members" :key="m.id" :value="String(m.id)">{{ m.name }}</option>
+              </select>
             </div>
             <span class="task-tail">
               <span class="task-state" :class="project.taskStatusKey(t)">{{ project.taskStatusText(t) }}</span>

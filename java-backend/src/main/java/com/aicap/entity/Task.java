@@ -34,6 +34,8 @@ public class Task {
     private Integer status;
     /** 前置任务 ID(逗号分隔的 Txx;空串/空表示无前置) */
     private String dependsOn;
+    /** MoSCoW 任务优先级，与 Story 使用同一枚举但独立存储 */
+    private String priority;
     /** 完成百分比 0..100 */
     private Integer progress;
     /** 是否阻塞(库中 0/1,对外输出布尔) */

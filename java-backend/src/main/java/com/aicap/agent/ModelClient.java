@@ -28,8 +28,8 @@ public class ModelClient {
     private final AgentProperties props;
     private final ObjectMapper mapper;
     private final HttpClient http;
-    /** 每次运行可覆盖(优先 run 上记录的模型名);null = 用配置默认 */
-    private String modelOverride;
+    /** 每个 worker 可覆盖自己的模型名，避免并行 Agent 互相覆盖。 */
+    private final ThreadLocal<String> modelOverride = new ThreadLocal<>();
 
     public ModelClient(AgentProperties props, ObjectMapper mapper) {
         this.props = props;
@@ -40,7 +40,11 @@ public class ModelClient {
     }
 
     public void setModelOverride(String model) {
-        this.modelOverride = model;
+        this.modelOverride.set(model);
+    }
+
+    public void clearModelOverride() {
+        this.modelOverride.remove();
     }
 
     /** 一次助手回复:message 为可直接回填 messages 的 assistant 消息节点 */
@@ -54,7 +58,8 @@ public class ModelClient {
         }
         URI base = parseBaseUrl(props.getBaseUrl());
         ObjectNode body = mapper.createObjectNode();
-        body.put("model", modelOverride != null ? modelOverride : props.getModel());
+        String selectedModel = modelOverride.get();
+        body.put("model", selectedModel != null ? selectedModel : props.getModel());
         body.set("messages", mapper.valueToTree(messages));
         body.put("stream", false);
         body.put("max_tokens", AgentProperties.MAX_TOKENS);

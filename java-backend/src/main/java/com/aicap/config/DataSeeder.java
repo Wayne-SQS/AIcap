@@ -350,6 +350,12 @@ public class DataSeeder implements ApplicationRunner {
         for (TaskRow row : TASKS) {
             Task task = existing.get(row.id());
             if (task == null) {
+                // 已有正式业务数据时，缺失任务可能是 Project Generator replace
+                // 有意删除的结果，不能在每次启动时按演示基线自动补回。
+                // 只有旧 M 故事基线正在迁移时，才允许重建完整的任务演示基线。
+                if (!migrated) {
+                    continue;
+                }
                 Task created = new Task();
                 created.setId(row.id());
                 applyTaskValues(created, row);
@@ -389,6 +395,7 @@ public class DataSeeder implements ApplicationRunner {
         task.setEstimatedHours(row.hours());
         task.setTaskType(MANAGEMENT_TASKS.contains(task.getId()) ? "management" : "feature");
         task.setDependsOn(row.dependsOn());
+        if (task.getPriority() == null || task.getPriority().isBlank()) task.setPriority("Should");
         task.setStatus(row.status());
         task.setProgress(row.progress());
         task.setBlocked(row.blocked());

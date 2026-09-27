@@ -1,6 +1,7 @@
 /* localStorage key 与全局常量(与旧版 index.html 逐字一致,勿改) */
 export const TOKEN_KEY = 'aiguanli_token'
 export const STORIES_KEY = 'aiguanli-pixel-stories-v1'
+export const TASKS_KEY = 'aiguanli-pixel-tasks-v1'
 export const LOG_KEY = 'aiguanli-pixel-log-v1'
 export const POOL_KEY = 'aiguanli-pixel-pool-v1'
 export const SUG_KEY = 'aiguanli-pixel-sug-v1'
@@ -14,6 +15,7 @@ export const VIEW_NAMES = {
   board: '用户故事看板',
   gantt: '甘特图',
   members: '成员任务图',
+  profiles: '成员画像',
   uml: 'UML 图',
   ai: 'AI 助手',
   review: 'AI 审核中心'
