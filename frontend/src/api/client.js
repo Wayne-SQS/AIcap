@@ -64,4 +64,3 @@ export async function health() {
     return false
   }
 }
-
