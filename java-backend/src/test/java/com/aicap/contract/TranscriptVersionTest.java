@@ -55,6 +55,13 @@ class TranscriptVersionTest {
           {"client_request_id":"r1","draft":{"audio_id":"a1","sha256":"%s","duration_ms":1000,"language":"zh","text":"原始草稿","segments":[{"segment_id":"S1","start_ms":0,"end_ms":900,"text":"原始草稿","speaker_id":null}]}}
           """.formatted("a".repeat(64)));
     }
+    ObjectNode bodyWithPreview() throws Exception {
+        var result=body(); ((ObjectNode)result.path("draft")).set("diarization",mapper.readTree("""
+          {"engine":"sherpa-onnx-pyannote3-eres2net","duration_ms":1000,"requested_num_speakers":2,"speaker_count":2,
+          "turns":[{"start_ms":0,"end_ms":600,"speaker_id":"SPK1"},{"start_ms":500,"end_ms":900,"speaker_id":"SPK2"}],
+          "identity_status":"anonymous_only"}
+          """)); return result;
+    }
     ObjectNode confirmation() throws Exception { return (ObjectNode)mapper.readTree("{\"title\":\"已核对会议\",\"text\":\"修正后的文本\",\"acknowledged\":true}"); }
     ObjectNode alignedConfirmation() throws Exception {
         var input=confirmation(); input.set("speaker_alignment",mapper.readTree("""
@@ -113,6 +120,26 @@ class TranscriptVersionTest {
             if(fault.equals("segment")) ((ObjectNode)alignment.path("assignments").get(0)).put("segment_id","S2");
             if(fault.equals("engine")) alignment.put("engine","unknown");
             assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",otherId,invalid,1)).getStatus());
+        }
+    }
+    @Test void persistsValidatedDiarizationPreviewAndPinsConfirmationToIt() throws Exception {
+        var body=bodyWithPreview(); var row=service.save("m1",body,1);
+        assertEquals(body.path("draft").path("diarization"),row.path("draft").path("diarization"));
+        var confirmed=service.confirm("m1",row.path("id").asText(),alignedConfirmation(),1);
+        assertEquals(body.path("draft").path("diarization").path("turns"),confirmed.path("confirmation").path("input").path("speaker_alignment").path("turns"));
+        var second=bodyWithPreview(); second.put("client_request_id","r2"); var secondId=service.save("m1",second,1).path("id").asText();
+        var changed=alignedConfirmation(); ((ObjectNode)changed.path("speaker_alignment").path("turns").get(1)).put("end_ms",850);
+        assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",secondId,changed,1)).getStatus());
+    }
+    @Test void rejectsMalformedDiarizationPreview() throws Exception {
+        for(var fault:java.util.List.of("engine","duration","identity","hint","label")) {
+            var invalid=bodyWithPreview(); var preview=(ObjectNode)invalid.path("draft").path("diarization");
+            if(fault.equals("engine")) preview.put("engine","unknown");
+            if(fault.equals("duration")) preview.put("duration_ms",999);
+            if(fault.equals("identity")) preview.put("identity_status","identified");
+            if(fault.equals("hint")) preview.put("requested_num_speakers",9);
+            if(fault.equals("label")) ((ObjectNode)preview.path("turns").get(0)).put("speaker_id","Alice");
+            assertEquals(422,assertThrows(ApiException.class,()->service.save("m1",invalid,1)).getStatus());
         }
     }
     @Test void failedConfirmationRollsBackNewMeeting() throws Exception {

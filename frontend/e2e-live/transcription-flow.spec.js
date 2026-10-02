@@ -48,7 +48,9 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await expect(panel).toContainText('转写版本已保存，可刷新恢复。')
   const versionPath = `http://127.0.0.1:18180/api/meetings/${meetingId}/transcript-versions`
   const headers = { Authorization: `Bearer ${token}` }
-  const versionDraft = { audio_id:data.audio.audio_id, sha256:data.audio.sha256, duration_ms:data.duration_ms, language:data.language, text:data.text, segments:data.segments }
+  const versionDraft = { audio_id:data.audio.audio_id, sha256:data.audio.sha256, duration_ms:data.duration_ms, language:data.language, text:data.text, segments:data.segments,
+    diarization:{engine:speakerData.engine,duration_ms:speakerData.duration_ms,requested_num_speakers:speakerData.requested_num_speakers,
+      speaker_count:speakerData.speaker_count,turns:speakerData.turns,identity_status:speakerData.identity_status} }
   const stored = await (await request.get(versionPath,{headers})).json()
   expect(stored).toHaveLength(1)
   const version = stored[0]
@@ -58,12 +60,7 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
   await page.reload()
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
-  await speakerPanel.getByLabel('预计人数').selectOption('1')
-  const restoredSpeakerResponse = page.waitForResponse(r => r.url().endsWith('/diarization/run') && r.request().method() === 'POST')
-  await speakerPanel.getByRole('button',{name:'分析说话人时间段'}).click()
-  const restoredSpeakerResult = await restoredSpeakerResponse
-  expect(restoredSpeakerResult.status(),await restoredSpeakerResult.text()).toBe(200)
-  const restoredSpeakerData = await restoredSpeakerResult.json()
+  await expect(panel.getByLabel(/S1/).first()).toHaveValue('SPK1')
   // Synthetic human correction exercises the existing Daily fixture, not STT semantic accuracy.
   const corrected = 'US13 今天开始开发。负责人和截止时间仍待确认。'
   await panel.getByLabel('人工核对文本').fill(corrected)
@@ -77,7 +74,8 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(confirmation.input.text).toBe(corrected)
   expect(confirmation.input.speaker_alignment.audio_sha256).toBe(data.audio.sha256)
   expect(confirmation.input.speaker_alignment.speaker_count).toBe(1)
-  expect(confirmation.input.speaker_alignment.turns).toEqual(restoredSpeakerData.turns)
+  expect(versions[0].draft.diarization.turns).toEqual(speakerData.turns)
+  expect(confirmation.input.speaker_alignment.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.assignments).toHaveLength(data.segments.length)
   expect(confirmation.input.speaker_alignment.assignments.every(item => item.speaker_id === 'SPK1')).toBe(true)
   expect(await (await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:confirmation.input})).json()).toEqual(versions[0])
@@ -95,5 +93,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify(restoredSpeakerData,null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify(speakerData,null,2))
 })

@@ -12,9 +12,16 @@ export async function listVersions(id) {
   if (!Array.isArray(rows)) throw new Error('转写历史响应无效')
   return rows.map(row => validate(row, id))
 }
-export async function saveVersion(id, result) {
+export async function saveVersion(id, result, diarization) {
+  const preview = diarization?.status === 'draft' && diarization.audio?.sha256 === result.audio.sha256
+      && diarization.duration_ms === result.duration_ms
+    ? { engine: diarization.engine, duration_ms: diarization.duration_ms,
+        requested_num_speakers: diarization.requested_num_speakers ?? null,
+        speaker_count: diarization.speaker_count, turns: diarization.turns,
+        identity_status: diarization.identity_status }
+    : null
   const draft = { audio_id: result.audio.audio_id, sha256: result.audio.sha256, duration_ms: result.duration_ms,
-    language: result.language, text: result.text, segments: result.segments }
+    language: result.language, text: result.text, segments: result.segments, ...(preview ? { diarization: preview } : {}) }
   // Stable per-content request: retrying even after reload cannot duplicate the same draft.
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(draft)))
   const key = Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join('')
@@ -23,7 +30,8 @@ export async function saveVersion(id, result) {
     // Object key order is not significant in JSON.
     if (row.client_request_id !== key || row.draft.audio_id !== draft.audio_id || row.draft.sha256 !== draft.sha256
         || row.draft.text !== draft.text || row.draft.duration_ms !== draft.duration_ms
-        || row.draft.language !== draft.language || JSON.stringify(row.draft.segments) !== JSON.stringify(draft.segments)) throw new Error('保存结果与本次草稿不符')
+        || row.draft.language !== draft.language || JSON.stringify(row.draft.segments) !== JSON.stringify(draft.segments)
+        || JSON.stringify(row.draft.diarization ?? null) !== JSON.stringify(draft.diarization ?? null)) throw new Error('保存结果与本次草稿不符')
   }
   return row
 }

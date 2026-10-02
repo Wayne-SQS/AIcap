@@ -88,14 +88,16 @@ test('time-overlap suggestion can be changed and persists with diarization snaps
   await speaker.getByRole('button',{name:'分析说话人时间段'}).click()
   await expect(speaker).toContainText('检测 2 位匿名说话人')
   await panel(page).getByRole('button',{name:'保存转写版本'}).click()
+  expect(requests.saves[0].draft.diarization).toEqual({engine:'sherpa-onnx-pyannote3-eres2net',duration_ms:2000,requested_num_speakers:2,speaker_count:2,identity_status:'anonymous_only',
+    turns:[{start_ms:0,end_ms:400,speaker_id:'SPK1'},{start_ms:300,end_ms:1900,speaker_id:'SPK2'}]})
+  await page.reload()
   await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK2')
   await panel(page).getByLabel(/S1/).selectOption('SPK1')
   await prepare(page); await panel(page).getByRole('button',{name:'确认并创建分析会议'}).click()
   const alignment=requests.confirms[0].speaker_alignment
   expect(alignment.audio_sha256).toBe('a'.repeat(64)); expect(alignment.turns).toHaveLength(2)
   expect(alignment.assignments).toEqual([{segment_id:'S1',speaker_id:'SPK1'}])
-  await page.reload()
-  await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK1')
+  await page.reload(); await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK1')
 })
 test('late save does not leak into another meeting',async({page})=>{
   await setup(page); let release; const gate=new Promise(r=>release=r)

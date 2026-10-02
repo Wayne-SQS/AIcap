@@ -269,7 +269,7 @@ def main():
         report = dict(status='passed', suite=suite, database=sql('SELECT VERSION()'), model='faster-whisper-base-local' if suite == 'transcription' else 'none' if suite == 'assignment' else real_model_name if args.real_model else 'deterministic HTTP fixture',
             model_mode='local_stt' if suite == 'transcription' else 'not_used' if suite == 'assignment' else 'real_provider_single_call' if args.real_model else 'fixture',
             model_calls=model_calls, counts=counts.split('\t'), scope='real browser/Vite/Python/Java/JWT/MySQL')
-        report['speech_model_calls'] = 3 if suite == 'transcription' else 0
+        report['speech_model_calls'] = 2 if suite == 'transcription' else 0
         (RUN / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         print(json.dumps(report, ensure_ascii=False), flush=True)
     finally:

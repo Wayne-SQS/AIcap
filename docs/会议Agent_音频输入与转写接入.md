@@ -65,9 +65,9 @@ Assignment隔离真实服务套件附带音频准备验证：通过真实JWT向J
 
 Java新增 `meeting_transcript_versions` 表，随启动的SQL初始化自动建表。必须重新打包并重启Java后使用新页面。接口均位于 `/api/meetings/{meetingId}/transcript-versions`：GET列出版本，POST保存，POST `/{id}/confirm`人工确认。保存/确认需admin、owner或member，查看需登录，viewer不能写。
 
-保存请求为 `{client_request_id,draft}`；draft严格包含audio_id、sha256、duration_ms、language、text、segments。服务端检查音频归属/hash、非空全文、片段编号/时间范围/全文一致，拒绝声称已识别说话人的字段。返回provenance=caller_submitted：它是当前用户提交的转写快照，Java不把前端载荷认证为服务端模型原始输出。确认请求严格为 `{title,text,acknowledged:true}`，返回confirmation包含input、confirmed_by、confirmed_at、analysis_meeting_id。模型草稿来源与人工确认身份分开记录。
+保存请求为 `{client_request_id,draft}`；draft包含audio_id、sha256、duration_ms、language、text、segments，并可选包含同音频的diarization匿名时间段快照。服务端检查音频归属/hash、非空全文、片段编号/时间范围/全文一致；若有分离快照，还检查固定引擎、同一时长、匿名身份状态、人数提示、连续SPK标签和时间范围。返回provenance=caller_submitted：它是当前用户提交的转写快照，Java不把前端载荷认证为服务端模型原始输出。确认请求严格保存标题、文本、确认标记及可选对齐；返回confirmation包含input、confirmed_by、confirmed_at、analysis_meeting_id。模型草稿来源与人工确认身份分开记录。
 
-转写关联的原音频、原会议和新分析会议均保留：删除返回409，外键保护并发情况下的来源。当前没有删除版本或撤销确认入口；确认后的再次修订可手动新建会议，暂不提供同版本的多轮修订。同用户同草稿再次保存会去重，不生成新版本。无自动触发模型、无覆盖原会议、无自动执行提案。匿名时间段、身份识别和文字归属不属于此保存契约。
+转写关联的原音频、原会议和新分析会议均保留：删除返回409，外键保护并发情况下的来源。当前没有删除版本或撤销确认入口；确认后的再次修订可手动新建会议，暂不提供同版本的多轮修订。同用户同草稿及分离快照再次保存会去重，不生成新版本。无自动触发模型、无覆盖原会议、无自动执行提案。只保存匿名时间段和人工文字归属，不识别成员身份。
 
 验证：Java相关事务/契约回归178项通过（本轮新增版本7项、删除保护1项），浏览器转写/版本13项和Refinement/删除7项通过。真实MySQL/Java/Python/Vite/Edge链路验证保存、刷新、人工确认、幂等、删除保护以及核对文本进入Daily分析，证据见[第六十六轮验收记录](../qa/DAILY_LIVE.md)。Python业务逻辑本轮未改，不重复运行上轮242项单测。
 
@@ -96,6 +96,6 @@ Java新增 `meeting_transcript_versions` 表，随启动的SQL初始化自动建
 
 对齐与确认同事务持久化，同一确认请求继续保持幂等。确认响应不明时，页面冻结标题、文本和对齐选择并重试同一载荷；已确认历史重新打开后显示保存的选择。保存的是人工核对依据，不改变原始转写片段中的speaker_id=null，也不宣称文本时间戳已被重新切分。
 
-真实服务证据 `qa/.daily-live/8799a5209dc5402b8bb1b1cdbd39a43f/`：合成单人音频先转写和分离，保存版本并刷新；由于分离预览本身不持久化，刷新后明确重新运行一次分离，然后确认全部转写片段为SPK1。数据库确认JSON包含时间段快照与assignments，随后Daily分析读取人工核对全文；原会议保持不变。speech_model_calls=3代表STT一次、分离两次，文本夹具一次。
+从第六十九轮起，保存版本时会把当前同音频分离预览写入不可变draft。刷新后直接从版本恢复时间段并重新计算SPK预填，无需再次运行分离；确认载荷的引擎、时长、人数和turns必须与已存快照完全一致，防止确认阶段替换核对依据。没有快照的旧版本继续兼容纯文本确认，也可使用当前同音频临时预览。
 
-下一步需要使用获得授权的真实多人会议样本评估DER和自动预填准确率，再决定是否保存分离预览以避免刷新后重新计算。当前不做成员身份识别。
+真实服务证据 `qa/.daily-live/4c7199c866214fffbc29edbde8443401/`：合成单人音频执行STT和一次分离，保存版本后刷新，页面直接恢复SPK1预填并确认，随后Daily分析读取人工核对全文。speech_model_calls=2代表STT和分离各一次，文本夹具一次；数据库计数为1/1/0/1/1。当前仍需使用获得授权的真实多人会议样本评估DER和自动预填准确率，不做成员身份识别。

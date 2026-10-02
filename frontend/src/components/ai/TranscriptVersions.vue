@@ -9,18 +9,25 @@ const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
 const assignments = ref([])
 let generation = 0
 onBeforeUnmount(() => { ++generation })
+function transientPreview() {
+  const value = props.diarization
+  if (value?.status !== 'draft' || value.audio?.sha256 !== props.audio.sha256) return null
+  return value
+}
+function previewFor(row = selected.value) { return row?.draft?.diarization || transientPreview() || null }
 function choose(row) {
   selected.value = row; text.value = row.confirmation?.input.text || row.draft.text
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
   const stored = row.confirmation?.input?.speaker_alignment?.assignments
   assignments.value = row.draft.segments.map(segment => ({ segment_id:segment.segment_id,
-    speaker_id:stored?.find(item => item.segment_id===segment.segment_id)?.speaker_id ?? suggestedSpeaker(segment) }))
+    speaker_id:stored?.find(item => item.segment_id===segment.segment_id)?.speaker_id ?? suggestedSpeaker(segment,row) }))
 }
-function suggestedSpeaker(segment) {
-  if (!props.diarization?.turns?.length || props.diarization.audio?.sha256 !== props.audio.sha256) return null
+function suggestedSpeaker(segment,row = selected.value) {
+  const preview = previewFor(row)
+  if (!preview?.turns?.length) return null
   let best=null,bestOverlap=0
-  for(const turn of props.diarization.turns) {
+  for(const turn of preview.turns) {
     const overlap=Math.max(0,Math.min(segment.end_ms,turn.end_ms)-Math.max(segment.start_ms,turn.start_ms))
     if(overlap>bestOverlap) { bestOverlap=overlap; best=turn.speaker_id }
   }
@@ -49,7 +56,7 @@ async function save() {
   if (busy.value || !meeting.maySubmit || props.draft?.status !== 'draft') return
   const attempt = ++generation; busy.value = true; error.value = ''; notice.value = ''
   try {
-    const row = await saveVersion(props.meetingId, props.draft)
+    const row = await saveVersion(props.meetingId, props.draft, props.diarization)
     if (attempt === generation) { put(row); notice.value = '转写版本已保存，可刷新恢复。' }
   } catch (e) { if (attempt === generation) error.value = `保存未确认，可重试同一草稿或刷新历史：${e.message}` }
   finally { if (attempt === generation) busy.value = false }
@@ -57,9 +64,10 @@ async function save() {
 async function confirm() {
   if (busy.value || !meeting.maySubmit || !selected.value || selected.value.confirmation) return
   if (!pending.value && (!text.value.trim() || !title.value.trim() || !acknowledged.value)) { error.value = '请填写文本和标题，并确认已核对录音。'; return }
-  const speaker_alignment = props.diarization?.status === 'draft' && props.diarization.audio?.sha256 === selected.value.draft.sha256
-    ? { engine:props.diarization.engine, audio_sha256:props.diarization.audio.sha256, duration_ms:props.diarization.duration_ms,
-        speaker_count:props.diarization.speaker_count, turns:props.diarization.turns,
+  const preview = previewFor(selected.value)
+  const speaker_alignment = preview
+    ? { engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
+        speaker_count:preview.speaker_count, turns:preview.turns,
         assignments:assignments.value.map(item=>({segment_id:item.segment_id,speaker_id:item.speaker_id || null})) }
     : null
   pending.value ||= { title: title.value, text: text.value, acknowledged: true, speaker_alignment }
@@ -96,14 +104,14 @@ async function openAnalysis() {
         <details><summary>查看保存的原始片段</summary><ol><li v-for="s in selected.draft.segments" :key="s.segment_id">{{ s.start_ms/1000 }}–{{ s.end_ms/1000 }} 秒：{{ s.text }}</li></ol></details>
         <label class="field">分析会议标题<input v-model="title" maxlength="200" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit"></label>
         <label class="field">人工核对文本<textarea v-model="text" maxlength="16000" rows="6" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
-        <fieldset v-if="props.diarization?.status === 'draft' || selected.confirmation?.input?.speaker_alignment">
+        <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
-          <p>按时间重叠预填，仅供人工核对；可改为未知。确认后保存所用时间段快照。</p>
+          <p>按已保存的时间段快照预填，仅供人工核对；可改为未知。刷新无需重新分析。</p>
           <label v-for="(segment,index) in selected.draft.segments" :key="segment.segment_id" class="field">
             {{ segment.segment_id }} · {{ segment.text }}
             <select v-model="assignments[index].speaker_id" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
               <option :value="null">未知</option>
-              <option v-for="n in (props.diarization?.speaker_count || selected.confirmation?.input?.speaker_alignment?.speaker_count || 0)" :key="n" :value="`SPK${n}`">SPK{{ n }}</option>
+              <option v-for="n in (previewFor(selected)?.speaker_count || selected.confirmation?.input?.speaker_alignment?.speaker_count || 0)" :key="n" :value="`SPK${n}`">SPK{{ n }}</option>
             </select>
           </label>
         </fieldset>

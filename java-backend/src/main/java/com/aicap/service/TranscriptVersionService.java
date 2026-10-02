@@ -40,7 +40,10 @@ public class TranscriptVersionService {
         fields(body,"client_request_id","draft");
         require(body.path("client_request_id").isTextual() && body.path("client_request_id").asText().matches("[a-z0-9-]{1,80}"));
         require(body.toString().length()<=256*1024);
-        var d=body.path("draft"); fields(d,"audio_id","sha256","duration_ms","language","text","segments");
+        var d=body.path("draft");
+        require(d.isObject() && d.size()>=6 && d.size()<=7);
+        d.fieldNames().forEachRemaining(key->require(Set.of("audio_id","sha256","duration_ms","language","text","segments","diarization").contains(key)));
+        for(var key:List.of("audio_id","sha256","duration_ms","language","text","segments")) require(d.has(key));
         text(d.path("audio_id"),36); text(d.path("language"),20); text(d.path("text"),16000);
         require(d.path("sha256").isTextual() && d.path("sha256").asText().matches("[a-f0-9]{64}"));
         require(d.path("duration_ms").isInt() && d.path("duration_ms").asInt()>0 && d.path("duration_ms").asInt()<=600000);
@@ -55,6 +58,31 @@ public class TranscriptVersionService {
             text(s.path("text"),4000); lines.add(s.path("text").asText());
         }
         require(String.join("\n",lines).equals(d.path("text").asText()));
+        validateDiarization(d.get("diarization"),d);
+    }
+    private LinkedHashSet<String> validateTurns(JsonNode turns, int duration, int speakerCount) {
+        var labels=new LinkedHashSet<String>(); int previous=0;
+        require(turns.isArray() && !turns.isEmpty() && turns.size()<=4000);
+        for(var turn:turns) {
+            fields(turn,"start_ms","end_ms","speaker_id");
+            require(turn.path("start_ms").isInt() && turn.path("end_ms").isInt());
+            int start=turn.path("start_ms").asInt(),end=turn.path("end_ms").asInt();
+            require(start>=previous && start<end && end<=duration); previous=start;
+            String label=turn.path("speaker_id").asText(); require(label.matches("SPK(?:[1-9]|[12][0-9]|3[0-2])"));
+            if(labels.add(label)) require(label.equals("SPK"+labels.size()));
+        }
+        require(labels.size()==speakerCount); return labels;
+    }
+    private void validateDiarization(JsonNode preview,JsonNode draft) {
+        if(preview==null || preview.isNull()) return;
+        fields(preview,"engine","duration_ms","requested_num_speakers","speaker_count","turns","identity_status");
+        require(preview.path("engine").asText().equals("sherpa-onnx-pyannote3-eres2net"));
+        require(preview.path("identity_status").asText().equals("anonymous_only"));
+        require(preview.path("duration_ms").isInt() && preview.path("duration_ms").asInt()==draft.path("duration_ms").asInt());
+        var requested=preview.get("requested_num_speakers");
+        require(requested.isNull() || (requested.isInt() && requested.asInt()>=1 && requested.asInt()<=8));
+        require(preview.path("speaker_count").isInt() && preview.path("speaker_count").asInt()>=1 && preview.path("speaker_count").asInt()<=32);
+        validateTurns(preview.path("turns"),preview.path("duration_ms").asInt(),preview.path("speaker_count").asInt());
     }
     private void validateAlignment(JsonNode alignment, JsonNode draft) {
         if (alignment == null || alignment.isNull()) return;
@@ -63,17 +91,14 @@ public class TranscriptVersionService {
         require(alignment.path("audio_sha256").equals(draft.path("sha256")));
         require(alignment.path("duration_ms").isInt() && alignment.path("duration_ms").asInt()==draft.path("duration_ms").asInt());
         require(alignment.path("speaker_count").isInt() && alignment.path("speaker_count").asInt()>=1 && alignment.path("speaker_count").asInt()<=32);
-        var labels=new LinkedHashSet<String>(); int previous=0;
-        var turns=alignment.path("turns"); require(turns.isArray() && !turns.isEmpty() && turns.size()<=4000);
-        for(var turn:turns) {
-            fields(turn,"start_ms","end_ms","speaker_id");
-            require(turn.path("start_ms").isInt() && turn.path("end_ms").isInt());
-            int start=turn.path("start_ms").asInt(),end=turn.path("end_ms").asInt();
-            require(start>=previous && start<end && end<=alignment.path("duration_ms").asInt()); previous=start;
-            String label=turn.path("speaker_id").asText(); require(label.matches("SPK(?:[1-9]|[12][0-9]|3[0-2])"));
-            if(labels.add(label)) require(label.equals("SPK"+labels.size()));
+        var labels=validateTurns(alignment.path("turns"),alignment.path("duration_ms").asInt(),alignment.path("speaker_count").asInt());
+        var stored= draft.get("diarization");
+        if(stored!=null && !stored.isNull()) {
+            require(alignment.path("engine").equals(stored.path("engine")));
+            require(alignment.path("duration_ms").equals(stored.path("duration_ms")));
+            require(alignment.path("speaker_count").equals(stored.path("speaker_count")));
+            require(alignment.path("turns").equals(stored.path("turns")));
         }
-        require(labels.size()==alignment.path("speaker_count").asInt());
         var assignments=alignment.path("assignments");
         var segments=draft.path("segments");
         require(assignments.isArray() && assignments.size()==segments.size());
