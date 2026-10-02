@@ -276,11 +276,14 @@ def main():
         report['speech_model_calls'] = 2 if suite == 'transcription' else 0
         if suite == 'transcription':
             preview = json.loads((RUN / 'diarization-preview.json').read_text(encoding='utf-8'))
+            transcript = json.loads((RUN / 'transcription-draft.json').read_text(encoding='utf-8'))
             assignments = preview['expected_assignments']
             report.update(language=args.stt_language or 'en', requested_speakers=args.speaker_count or 1,
                 audio_fixture=args.stt_audio.name, transcript_segments=len(assignments),
                 suggested_segments=sum(item['speaker_id'] is not None for item in assignments),
-                suggested_labels=sorted({item['speaker_id'] for item in assignments if item['speaker_id']}))
+                suggested_labels=sorted({item['speaker_id'] for item in assignments if item['speaker_id']}),
+                multi_speaker_segments=sum(len(item['overlapping_speakers'])>1 for item in assignments),
+                word_timestamps=sum(len(segment.get('words') or []) for segment in transcript['segments']))
         (RUN / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         print(json.dumps(report, ensure_ascii=False), flush=True)
     finally:

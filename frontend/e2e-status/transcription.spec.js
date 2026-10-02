@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 const region = page => page.getByRole('region', { name: '音频转写：meeting.mp3', exact: true })
-function draft() { return { audio: { meeting_id: 'm1', audio_id: 'a1', sha256: 'a'.repeat(64), byte_size: 123 }, duration_ms: 2000, status: 'draft', language: 'zh', diarization_status: 'not_available', storage_status: 'not_saved', requires_human_review: true, segments: [{ segment_id: 'S1', start_ms: 100, end_ms: 1800, text: '负责人待确认。', speaker_id: null }], text: '负责人待确认。' } }
+function draft() { return { audio: { meeting_id: 'm1', audio_id: 'a1', sha256: 'a'.repeat(64), byte_size: 123 }, duration_ms: 2000, status: 'draft', language: 'zh', diarization_status: 'not_available', storage_status: 'not_saved', requires_human_review: true, segments: [{ segment_id: 'S1', start_ms: 100, end_ms: 1800, text: '负责人待确认。', speaker_id: null,
+  words:[{word_id:'S1W1',start_ms:100,end_ms:800,text:'负责人'},{word_id:'S1W2',start_ms:800,end_ms:1800,text:'待确认。'}] }], text: '负责人待确认。' } }
 async function setup(page, role='admin') {
   const requests=[]
   await page.addInitScript(() => localStorage.setItem('aiguanli_token','fixture-token'))
@@ -29,9 +30,9 @@ test('transcription displays timed draft and unknown speaker without overwriting
   await expect(page.locator('#saved-transcript')).toHaveText('原有会议文本')
   expect(requests).toEqual([{audio_id:'a1',language:'zh'}])
 })
-for(const fault of ['scope','timeline']) test(`transcription rejects malformed ${fault}`,async({page})=>{
+for(const fault of ['scope','timeline','words']) test(`transcription rejects malformed ${fault}`,async({page})=>{
   await setup(page)
-  await page.route('**/transcription/run',route=>{ const data=draft(); if(fault==='scope') data.audio.meeting_id='other'; else data.segments[0].end_ms=3000; return route.fulfill({json:data}) })
+  await page.route('**/transcription/run',route=>{ const data=draft(); if(fault==='scope') data.audio.meeting_id='other'; else if(fault==='timeline') data.segments[0].end_ms=3000; else data.segments[0].words[1].word_id='S1W9'; return route.fulfill({json:data}) })
   await region(page).getByRole('button',{name:'转写此音频'}).click()
   await expect(region(page).getByRole('alert')).toContainText('转写失败')
   await expect(region(page).getByRole('textbox')).toHaveCount(0)

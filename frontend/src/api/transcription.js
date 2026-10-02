@@ -15,6 +15,17 @@ export async function transcribeAudio(meetingId, audio, language) {
         || s.start_ms < previous || s.start_ms < 0 || s.end_ms <= s.start_ms || s.end_ms > result.duration_ms
         || typeof s.text !== 'string' || !s.text.trim()) throw new Error('转写时间戳或片段无效')
     previous = s.start_ms
+    if(s.words !== undefined && s.words !== null) {
+      if(!Array.isArray(s.words) || !s.words.length || s.words.length > 1000) throw new Error('词级时间戳无效')
+      let wordPrevious=s.start_ms
+      s.words.forEach((word,j)=>{
+        if(word.word_id!==`${s.segment_id}W${j+1}` || !Number.isInteger(word.start_ms) || !Number.isInteger(word.end_ms)
+            || word.start_ms<wordPrevious || word.start_ms<s.start_ms || word.end_ms<=word.start_ms || word.end_ms>s.end_ms
+            || typeof word.text!=='string' || !word.text.trim()) throw new Error('词级时间戳无效')
+        wordPrevious=word.start_ms
+      })
+      if(s.words.map(word=>word.text).join('').trim()!==s.text) throw new Error('词级文字与片段不一致')
+    }
   })
   if (result.text !== result.segments.map(s => s.text).join('\n')) throw new Error('转写文本与片段不一致')
   return result

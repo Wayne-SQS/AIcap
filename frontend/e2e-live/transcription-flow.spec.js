@@ -25,6 +25,7 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(result.status(), await result.text()).toBe(200)
   const data = await result.json()
   expect(data.status).toBe('draft'); expect(data.segments.length).toBeGreaterThan(0)
+  expect(data.segments.every(segment=>Array.isArray(segment.words) && segment.words.length>0)).toBe(true)
   if(language === 'en') {
     expect(data.text.toLowerCase()).toContain('login')
     expect(data.text.toLowerCase()).toContain('human confirmation')
@@ -66,12 +67,13 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await page.reload()
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
   const expectedAssignments = data.segments.map(segment => {
-    let speakerId=null,bestOverlap=0
+    let speakerId=null,bestOverlap=0; const overlappingSpeakers=[]
     for(const turn of speakerData.turns) {
       const overlap=Math.max(0,Math.min(segment.end_ms,turn.end_ms)-Math.max(segment.start_ms,turn.start_ms))
+      if(overlap>0 && !overlappingSpeakers.includes(turn.speaker_id)) overlappingSpeakers.push(turn.speaker_id)
       if(overlap>bestOverlap) { bestOverlap=overlap; speakerId=turn.speaker_id }
     }
-    return {segment_id:segment.segment_id,speaker_id:speakerId}
+    return {segment_id:segment.segment_id,speaker_id:speakerId,overlapping_speakers:overlappingSpeakers}
   })
   expect(expectedAssignments.every(item=>item.speaker_id)).toBe(true)
   expect([...new Set(expectedAssignments.map(item=>item.speaker_id))].sort()).toEqual(
@@ -90,6 +92,7 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(versions[0].draft.text).toBe(data.text)
   expect(confirmation.input.text).toBe(corrected)
   expect(confirmation.input.speaker_alignment.audio_sha256).toBe(data.audio.sha256)
+  expect(confirmation.input.speaker_alignment.alignment_version).toBe(2)
   expect(confirmation.input.speaker_alignment.speaker_count).toBe(expectedSpeakers)
   expect(versions[0].draft.diarization.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.turns).toEqual(speakerData.turns)

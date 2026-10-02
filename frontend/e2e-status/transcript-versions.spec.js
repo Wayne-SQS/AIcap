@@ -92,11 +92,13 @@ test('time-overlap suggestion can be changed and persists with diarization snaps
     turns:[{start_ms:0,end_ms:400,speaker_id:'SPK1'},{start_ms:300,end_ms:1900,speaker_id:'SPK2'}]})
   await page.reload()
   await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK2')
+  await expect(panel(page)).toContainText('跨说话人时间段：SPK1、SPK2')
   await panel(page).getByLabel(/S1/).selectOption('SPK1')
   await prepare(page); await panel(page).getByRole('button',{name:'确认并创建分析会议'}).click()
   const alignment=requests.confirms[0].speaker_alignment
   expect(alignment.audio_sha256).toBe('a'.repeat(64)); expect(alignment.turns).toHaveLength(2)
-  expect(alignment.assignments).toEqual([{segment_id:'S1',speaker_id:'SPK1'}])
+  expect(alignment.alignment_version).toBe(2)
+  expect(alignment.assignments).toEqual([{segment_id:'S1',speaker_id:'SPK1',overlapping_speakers:['SPK1','SPK2']}])
   await page.reload(); await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK1')
 })
 test('late save does not leak into another meeting',async({page})=>{

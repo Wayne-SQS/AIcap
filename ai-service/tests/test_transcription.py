@@ -15,7 +15,8 @@ from meeting_agent.transcription import LocalTranscriber, TranscriptionDraft, Tr
 class TranscriptionTests(unittest.TestCase):
     def setUp(self):
         self.meta = PreparedAudio(meeting_id='m1',audio_id='a1',sha256=hashlib.sha256(b'a').hexdigest(),byte_size=1,reported_duration_ms=None)
-        self.data = dict(language='zh',duration_ms=1000,status='draft',text='测试',segments=[dict(segment_id='S1',start_ms=0,end_ms=900,text='测试',speaker_id=None)])
+        self.data = dict(language='zh',duration_ms=1000,status='draft',text='测试',segments=[dict(segment_id='S1',start_ms=0,end_ms=900,text='测试',speaker_id=None,
+            words=[dict(word_id='S1W1',start_ms=0,end_ms=400,text='测'),dict(word_id='S1W2',start_ms=400,end_ms=900,text='试')])])
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         root=Path(self.temp.name); self.root=root
         for name in ('model.bin','config.json','tokenizer.json'): (root/name).write_text('fixture')
@@ -35,6 +36,7 @@ class TranscriptionTests(unittest.TestCase):
         self.assertEqual('not_available',result.diarization_status)
         self.assertTrue(result.requires_human_review)
         self.assertIsNone(result.segments[0].speaker_id)
+        self.assertEqual('S1W2',result.segments[0].words[1].word_id)
         self.assertEqual([],list((self.root/'.stt-work').iterdir()))
     def test_invalid_timestamps_and_text_rejected(self):
         for key,value in (('start_ms',-1),('end_ms',1100),('segment_id','S2'),('speaker_id','member-7')):
@@ -42,6 +44,8 @@ class TranscriptionTests(unittest.TestCase):
             with self.assertRaises(ValidationError): TranscriptionDraft(audio=self.meta,**data)
         self.data['text']='different'
         with self.assertRaises(TranscriptionError): self.invoke()
+        invalid=json.loads(json.dumps(self.data)); invalid['text']='测试'; invalid['segments'][0]['words'][1]['start_ms']=-1
+        with self.assertRaises(ValidationError): TranscriptionDraft(audio=self.meta,**invalid)
     def test_silence_is_explicit_no_speech(self):
         self.data.update(status='no_speech',text='',segments=[])
         self.assertEqual('no_speech',self.invoke().status)

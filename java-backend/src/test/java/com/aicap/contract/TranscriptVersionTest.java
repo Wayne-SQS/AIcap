@@ -70,6 +70,13 @@ class TranscriptVersionTest {
           "assignments":[{"segment_id":"S1","speaker_id":"SPK2"}]}
           """.formatted("a".repeat(64)))); return input;
     }
+    ObjectNode alignedConfirmationV2() throws Exception {
+        var input=confirmation(); input.set("speaker_alignment",mapper.readTree("""
+          {"alignment_version":2,"engine":"sherpa-onnx-pyannote3-eres2net","audio_sha256":"%s","duration_ms":1000,"speaker_count":2,
+          "turns":[{"start_ms":0,"end_ms":600,"speaker_id":"SPK1"},{"start_ms":500,"end_ms":900,"speaker_id":"SPK2"}],
+          "assignments":[{"segment_id":"S1","speaker_id":"SPK2","overlapping_speakers":["SPK1","SPK2"]}]}
+          """.formatted("a".repeat(64)))); return input;
+    }
     @Test void immutableSaveRetryAndMeetingScope() throws Exception {
         var b=body(); var row=service.save("m1",b,1);
         assertEquals(row,service.save("m1",b,1)); assertEquals(1,service.list("m1").size()); assertTrue(service.list("m2").isEmpty());
@@ -87,6 +94,17 @@ class TranscriptVersionTest {
             assertEquals(422,assertThrows(ApiException.class,()->service.save("m1",invalid,1)).getStatus());
         }
         assertTrue(service.list("m1").isEmpty());
+    }
+    @Test void validatesOptionalWordTimestampsAndKeepsOldDraftCompatibility() throws Exception {
+        var valid=body(); valid.put("client_request_id","words-ok"); var segment=(ObjectNode)valid.path("draft").path("segments").get(0);
+        segment.set("words",mapper.readTree("""
+          [{"word_id":"S1W1","start_ms":0,"end_ms":400,"text":"原始"},{"word_id":"S1W2","start_ms":400,"end_ms":900,"text":"草稿"}]
+          """));
+        assertEquals(2,service.save("m1",valid,1).path("draft").path("segments").get(0).path("words").size());
+        var invalid=body(); invalid.put("client_request_id","words-bad"); ((ObjectNode)invalid.path("draft").path("segments").get(0)).set("words",mapper.readTree("""
+          [{"word_id":"S1W1","start_ms":0,"end_ms":400,"text":"错误"}]
+          """));
+        assertEquals(422,assertThrows(ApiException.class,()->service.save("m1",invalid,1)).getStatus());
     }
     @Test void confirmationCreatesSeparateMeetingExactlyOnceAndPreservesDraft() throws Exception {
         var b=body(); var row=service.save("m1",b,1); var id=row.path("id").asText(); var input=confirmation();
@@ -125,11 +143,14 @@ class TranscriptVersionTest {
     @Test void persistsValidatedDiarizationPreviewAndPinsConfirmationToIt() throws Exception {
         var body=bodyWithPreview(); var row=service.save("m1",body,1);
         assertEquals(body.path("draft").path("diarization"),row.path("draft").path("diarization"));
-        var confirmed=service.confirm("m1",row.path("id").asText(),alignedConfirmation(),1);
+        var confirmed=service.confirm("m1",row.path("id").asText(),alignedConfirmationV2(),1);
         assertEquals(body.path("draft").path("diarization").path("turns"),confirmed.path("confirmation").path("input").path("speaker_alignment").path("turns"));
         var second=bodyWithPreview(); second.put("client_request_id","r2"); var secondId=service.save("m1",second,1).path("id").asText();
         var changed=alignedConfirmation(); ((ObjectNode)changed.path("speaker_alignment").path("turns").get(1)).put("end_ms",850);
         assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",secondId,changed,1)).getStatus());
+        var third=bodyWithPreview(); third.put("client_request_id","r3"); var thirdId=service.save("m1",third,1).path("id").asText();
+        var falseOverlap=alignedConfirmationV2(); ((ObjectNode)falseOverlap.path("speaker_alignment").path("assignments").get(0)).putArray("overlapping_speakers").add("SPK2");
+        assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",thirdId,falseOverlap,1)).getStatus());
     }
     @Test void rejectsMalformedDiarizationPreview() throws Exception {
         for(var fault:java.util.List.of("engine","duration","identity","hint","label")) {

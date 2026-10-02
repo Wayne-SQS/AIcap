@@ -230,3 +230,19 @@ ai-service/.venv/Scripts/python.exe qa/run_daily_live.py --suite transcription -
 最终证据 **qa/.daily-live/0535c057b46449ff901c0d026ef626e9/**：浏览器1/1、退出0、MySQL8.0.31。56.861秒音频得到12个转写片段；指定4人分离得到10个时间段。页面保存版本并刷新后，12/12片段均恢复非空预填，预填集合完整包含SPK1、SPK2、SPK3、SPK4；确认记录中的assignments逐项等于页面按最大重叠计算的结果，turns等于不可变版本快照。随后人工确认文本进入Daily分析，counts仍为 **1/1/0/1/1**，语音模型操作2次、固定文本夹具1次。
 
 机器可读result.json新增language、requested_speakers、audio_fixture、transcript_segments、suggested_segments和suggested_labels。用例同时保留默认英文/单人参数。前端production build通过；Java和Python生产代码未改。样本没有逐毫秒说话人真值或逐句身份标注，因此12/12只代表预填覆盖率，不代表归属准确率；不能据此计算DER。实际转写文本存在明显中文识别错误，仍必须人工核对。
+
+## 跨说话人片段保真（2026-10-02，第七十一轮）
+
+新确认协议为`alignment_version: 2`。每个assignment保存人工主`speaker_id`及由原始STT区间和不可变分离turns决定的`overlapping_speakers`。页面对多于一个重叠标签的片段显示跨说话人提示；Java重算并严格比对集合，拒绝伪造、漏报和乱序。既有version 1的两字段assignment仍可读取及幂等重试。
+
+最终真实证据 **qa/.daily-live/ec2b059fbf13410c965a07fbaca9fc09/**：浏览器1/1、退出0、MySQL8.0.31、speech2、固定文本夹具1、counts **1/1/0/1/1**。12个转写片段全部有主标签，其中4个被明确记录为跨说话人：S2=SPK1/SPK2、S6=SPK2/SPK3、S10=SPK1/SPK4、S11=SPK4/SPK3。result.json新增`multi_speaker_segments: 4`；确认JSON中的四个重叠集合与页面计算结果一致。
+
+验证：TranscriptVersionTest 10/10、Java21 package、前端相关19/19及production build通过。浏览器相关用例执行完毕后测试WebServer仍未自行退出，手动终止空闲会话；19项结果全部通过。Python生产逻辑未改。当前保留完整重叠事实但不拆分文字，因为现有STT只有段级时间戳；不能将主标签视为整段唯一发言人。
+
+## 词级时间戳持久化基础（2026-10-02，第七十二轮）
+
+本地Whisper启用词级时间戳。Python契约、前端响应验证和Java版本保存三层均检查：词ID按`SxWy`连续，时间在所属段内单调，词非空，全部词拼接并trim后严格等于段文本。新转写版本保存完整words；旧版无words段继续兼容。本轮不按词自动切分说话人，避免在验证基础未稳定前改变人工确认语义。
+
+最终真实证据 **qa/.daily-live/d509f15259f64be2a141aa4645a38fe6/**：官方四人中文音频浏览器1/1、退出0，12个转写片段包含 **95个词级时间戳**，12/12有主标签，SPK1–SPK4完整覆盖，2个片段仍跨说话人；speech2、文本夹具1、counts **1/1/0/1/1**。原始词时间戳、diarization、alignment v2和确认结果均在版本证据中。
+
+验证：Python全量245/245；TranscriptVersionTest新增词时间戳契约后11/11且Java21 package通过；转写与版本浏览器15/15，相关分离加入时19/19；前端production build通过。真实中文文本仍有明显识别错误，词时间戳存在不等于文字准确。

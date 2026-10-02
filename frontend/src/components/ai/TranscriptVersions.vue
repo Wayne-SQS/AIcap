@@ -15,13 +15,22 @@ function transientPreview() {
   return value
 }
 function previewFor(row = selected.value) { return row?.draft?.diarization || transientPreview() || null }
+function overlappingSpeakers(segment,row = selected.value) {
+  const speakers=[]
+  for(const turn of previewFor(row)?.turns || []) {
+    const overlap=Math.max(0,Math.min(segment.end_ms,turn.end_ms)-Math.max(segment.start_ms,turn.start_ms))
+    if(overlap>0 && !speakers.includes(turn.speaker_id)) speakers.push(turn.speaker_id)
+  }
+  return speakers
+}
 function choose(row) {
   selected.value = row; text.value = row.confirmation?.input.text || row.draft.text
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
   const stored = row.confirmation?.input?.speaker_alignment?.assignments
   assignments.value = row.draft.segments.map(segment => ({ segment_id:segment.segment_id,
-    speaker_id:stored?.find(item => item.segment_id===segment.segment_id)?.speaker_id ?? suggestedSpeaker(segment,row) }))
+    speaker_id:stored?.find(item => item.segment_id===segment.segment_id)?.speaker_id ?? suggestedSpeaker(segment,row),
+    overlapping_speakers:overlappingSpeakers(segment,row) }))
 }
 function suggestedSpeaker(segment,row = selected.value) {
   const preview = previewFor(row)
@@ -35,7 +44,8 @@ function suggestedSpeaker(segment,row = selected.value) {
 }
 watch(() => props.diarization, value => {
   if (!value || pending.value || selected.value?.confirmation || !selected.value) return
-  assignments.value=selected.value.draft.segments.map(segment=>({segment_id:segment.segment_id,speaker_id:suggestedSpeaker(segment)}))
+  assignments.value=selected.value.draft.segments.map(segment=>({segment_id:segment.segment_id,speaker_id:suggestedSpeaker(segment),
+    overlapping_speakers:overlappingSpeakers(segment)}))
 })
 function put(row) { rows.value = [row, ...rows.value.filter(r => r.id !== row.id)]; choose(row) }
 async function refresh() {
@@ -66,9 +76,10 @@ async function confirm() {
   if (!pending.value && (!text.value.trim() || !title.value.trim() || !acknowledged.value)) { error.value = '请填写文本和标题，并确认已核对录音。'; return }
   const preview = previewFor(selected.value)
   const speaker_alignment = preview
-    ? { engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
+    ? { alignment_version:2, engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
         speaker_count:preview.speaker_count, turns:preview.turns,
-        assignments:assignments.value.map(item=>({segment_id:item.segment_id,speaker_id:item.speaker_id || null})) }
+        assignments:assignments.value.map(item=>({segment_id:item.segment_id,speaker_id:item.speaker_id || null,
+          overlapping_speakers:item.overlapping_speakers})) }
     : null
   pending.value ||= { title: title.value, text: text.value, acknowledged: true, speaker_alignment }
   const attempt = ++generation; busy.value = true; error.value = ''; notice.value = ''
@@ -109,6 +120,7 @@ async function openAnalysis() {
           <p>按已保存的时间段快照预填，仅供人工核对；可改为未知。刷新无需重新分析。</p>
           <label v-for="(segment,index) in selected.draft.segments" :key="segment.segment_id" class="field">
             {{ segment.segment_id }} · {{ segment.text }}
+            <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
             <select v-model="assignments[index].speaker_id" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
               <option :value="null">未知</option>
               <option v-for="n in (previewFor(selected)?.speaker_count || selected.confirmation?.input?.speaker_alignment?.speaker_count || 0)" :key="n" :value="`SPK${n}`">SPK{{ n }}</option>
