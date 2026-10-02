@@ -278,11 +278,13 @@ def main():
             preview = json.loads((RUN / 'diarization-preview.json').read_text(encoding='utf-8'))
             transcript = json.loads((RUN / 'transcription-draft.json').read_text(encoding='utf-8'))
             assignments = preview['expected_assignments']
+            suggested_segment_ids = {item['segment_id'] for item in assignments if item['speaker_id']}
+            multi_segment_ids = {item['segment_id'] for item in assignments if len(item['overlapping_speakers'])>1}
             report.update(language=args.stt_language or 'en', requested_speakers=args.speaker_count or 1,
-                audio_fixture=args.stt_audio.name, transcript_segments=len(assignments),
-                suggested_segments=sum(item['speaker_id'] is not None for item in assignments),
+                audio_fixture=args.stt_audio.name, transcript_segments=len(transcript['segments']),
+                alignment_units=len(assignments), suggested_segments=len(suggested_segment_ids),
                 suggested_labels=sorted({item['speaker_id'] for item in assignments if item['speaker_id']}),
-                multi_speaker_segments=sum(len(item['overlapping_speakers'])>1 for item in assignments),
+                multi_speaker_segments=len(multi_segment_ids),
                 word_timestamps=sum(len(segment.get('words') or []) for segment in transcript['segments']))
         (RUN / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         print(json.dumps(report, ensure_ascii=False), flush=True)

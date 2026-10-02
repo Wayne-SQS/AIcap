@@ -23,14 +23,37 @@ function overlappingSpeakers(segment,row = selected.value) {
   }
   return speakers
 }
+function supportsWordAlignment(row) { return row?.draft?.segments?.length && row.draft.segments.every(segment=>segment.words?.length) }
+function buildAssignments(row) {
+  const stored=row.confirmation?.input?.speaker_alignment?.assignments
+  if(stored) return stored.map(item=>{
+    const segment=row.draft.segments.find(value=>value.segment_id===item.segment_id)
+    const words=item.word_ids?.map(id=>segment?.words?.find(word=>word.word_id===id)).filter(Boolean) || []
+    return {...item,display_text:(item.text || segment?.text || '').trim(),display_start_ms:words[0]?.start_ms ?? segment?.start_ms,
+      display_end_ms:words.at(-1)?.end_ms ?? segment?.end_ms}
+  })
+  if(!supportsWordAlignment(row)) return row.draft.segments.map(segment=>({segment_id:segment.segment_id,
+    speaker_id:suggestedSpeaker(segment,row),overlapping_speakers:overlappingSpeakers(segment,row),
+    display_text:segment.text,display_start_ms:segment.start_ms,display_end_ms:segment.end_ms}))
+  const result=[]
+  for(const segment of row.draft.segments) {
+    const groups=[]
+    for(const word of segment.words) {
+      const speaker=suggestedSpeaker(word,row), last=groups.at(-1)
+      if(last?.speaker_id===speaker) { last.word_ids.push(word.word_id); last.text+=word.text; last.end_ms=word.end_ms }
+      else groups.push({speaker_id:speaker,word_ids:[word.word_id],text:word.text,start_ms:word.start_ms,end_ms:word.end_ms})
+    }
+    groups.forEach((group,index)=>result.push({assignment_id:`${segment.segment_id}A${index+1}`,segment_id:segment.segment_id,
+      word_ids:group.word_ids,text:group.text,speaker_id:group.speaker_id,overlapping_speakers:overlappingSpeakers(group,row),
+      display_text:group.text.trim(),display_start_ms:group.start_ms,display_end_ms:group.end_ms}))
+  }
+  return result
+}
 function choose(row) {
   selected.value = row; text.value = row.confirmation?.input.text || row.draft.text
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
-  const stored = row.confirmation?.input?.speaker_alignment?.assignments
-  assignments.value = row.draft.segments.map(segment => ({ segment_id:segment.segment_id,
-    speaker_id:stored?.find(item => item.segment_id===segment.segment_id)?.speaker_id ?? suggestedSpeaker(segment,row),
-    overlapping_speakers:overlappingSpeakers(segment,row) }))
+  assignments.value = buildAssignments(row)
 }
 function suggestedSpeaker(segment,row = selected.value) {
   const preview = previewFor(row)
@@ -44,8 +67,7 @@ function suggestedSpeaker(segment,row = selected.value) {
 }
 watch(() => props.diarization, value => {
   if (!value || pending.value || selected.value?.confirmation || !selected.value) return
-  assignments.value=selected.value.draft.segments.map(segment=>({segment_id:segment.segment_id,speaker_id:suggestedSpeaker(segment),
-    overlapping_speakers:overlappingSpeakers(segment)}))
+  assignments.value=buildAssignments(selected.value)
 })
 function put(row) { rows.value = [row, ...rows.value.filter(r => r.id !== row.id)]; choose(row) }
 async function refresh() {
@@ -75,11 +97,14 @@ async function confirm() {
   if (busy.value || !meeting.maySubmit || !selected.value || selected.value.confirmation) return
   if (!pending.value && (!text.value.trim() || !title.value.trim() || !acknowledged.value)) { error.value = '请填写文本和标题，并确认已核对录音。'; return }
   const preview = previewFor(selected.value)
+  const wordAlignment=supportsWordAlignment(selected.value)
   const speaker_alignment = preview
-    ? { alignment_version:2, engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
+    ? { alignment_version:wordAlignment ? 3 : 2, engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
         speaker_count:preview.speaker_count, turns:preview.turns,
-        assignments:assignments.value.map(item=>({segment_id:item.segment_id,speaker_id:item.speaker_id || null,
-          overlapping_speakers:item.overlapping_speakers})) }
+        assignments:assignments.value.map(item=>wordAlignment
+          ? {assignment_id:item.assignment_id,segment_id:item.segment_id,word_ids:item.word_ids,text:item.text,
+              speaker_id:item.speaker_id || null,overlapping_speakers:item.overlapping_speakers}
+          : {segment_id:item.segment_id,speaker_id:item.speaker_id || null,overlapping_speakers:item.overlapping_speakers}) }
     : null
   pending.value ||= { title: title.value, text: text.value, acknowledged: true, speaker_alignment }
   const attempt = ++generation; busy.value = true; error.value = ''; notice.value = ''
@@ -117,9 +142,9 @@ async function openAnalysis() {
         <label class="field">人工核对文本<textarea v-model="text" maxlength="16000" rows="6" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
-          <p>按已保存的时间段快照预填，仅供人工核对；可改为未知。刷新无需重新分析。</p>
-          <label v-for="(segment,index) in selected.draft.segments" :key="segment.segment_id" class="field">
-            {{ segment.segment_id }} · {{ segment.text }}
+          <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组。仅供人工核对，可改为未知。</p>
+          <label v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field">
+            {{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}
             <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
             <select v-model="assignments[index].speaker_id" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
               <option :value="null">未知</option>

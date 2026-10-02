@@ -99,12 +99,20 @@ public class TranscriptVersionService {
         require(preview.path("speaker_count").isInt() && preview.path("speaker_count").asInt()>=1 && preview.path("speaker_count").asInt()<=32);
         validateTurns(preview.path("turns"),preview.path("duration_ms").asInt(),preview.path("speaker_count").asInt());
     }
+    private void validateOverlaps(JsonNode overlaps,int start,int end,JsonNode turns) {
+        var expected=new LinkedHashSet<String>();
+        for(var turn:turns)
+            if(Math.min(end,turn.path("end_ms").asInt())>Math.max(start,turn.path("start_ms").asInt()))
+                expected.add(turn.path("speaker_id").asText());
+        require(overlaps.isArray() && overlaps.size()==expected.size());
+        int index=0; for(var label:expected) require(overlaps.get(index++).asText().equals(label));
+    }
     private void validateAlignment(JsonNode alignment, JsonNode draft) {
         if (alignment == null || alignment.isNull()) return;
         int version=alignment.has("alignment_version") ? alignment.path("alignment_version").asInt(-1) : 1;
         if(version==1) fields(alignment,"engine","audio_sha256","duration_ms","speaker_count","turns","assignments");
         else {
-            require(version==2);
+            require(version==2 || version==3);
             fields(alignment,"alignment_version","engine","audio_sha256","duration_ms","speaker_count","turns","assignments");
         }
         require(alignment.path("engine").asText().equals("sherpa-onnx-pyannote3-eres2net"));
@@ -121,6 +129,31 @@ public class TranscriptVersionService {
         }
         var assignments=alignment.path("assignments");
         var segments=draft.path("segments");
+        if(version==3) {
+            require(assignments.isArray() && !assignments.isEmpty() && assignments.size()<=20000);
+            int assignmentIndex=0;
+            for(var segment:segments) {
+                var words=segment.path("words"); require(words.isArray() && !words.isEmpty());
+                int wordIndex=0,partIndex=0;
+                while(assignmentIndex<assignments.size() && assignments.get(assignmentIndex).path("segment_id").equals(segment.path("segment_id"))) {
+                    var item=assignments.get(assignmentIndex++);
+                    fields(item,"assignment_id","segment_id","word_ids","text","speaker_id","overlapping_speakers");
+                    require(item.path("assignment_id").asText().equals(segment.path("segment_id").asText()+"A"+(++partIndex)));
+                    require(item.path("speaker_id").isNull() || (item.path("speaker_id").isTextual() && labels.contains(item.path("speaker_id").asText())));
+                    var wordIds=item.path("word_ids"); require(wordIds.isArray() && !wordIds.isEmpty());
+                    var combined=new StringBuilder(); int start=-1,end=-1;
+                    for(var wordId:wordIds) {
+                        require(wordIndex<words.size() && wordId.equals(words.get(wordIndex).path("word_id")));
+                        var word=words.get(wordIndex++); if(start<0) start=word.path("start_ms").asInt();
+                        end=word.path("end_ms").asInt(); combined.append(word.path("text").asText());
+                    }
+                    require(item.path("text").isTextual() && item.path("text").asText().equals(combined.toString()));
+                    validateOverlaps(item.path("overlapping_speakers"),start,end,alignment.path("turns"));
+                }
+                require(partIndex>0 && wordIndex==words.size());
+            }
+            require(assignmentIndex==assignments.size()); return;
+        }
         require(assignments.isArray() && assignments.size()==segments.size());
         for(int i=0;i<assignments.size();i++) {
             var item=assignments.get(i);
@@ -129,13 +162,8 @@ public class TranscriptVersionService {
             require(item.path("segment_id").equals(segments.get(i).path("segment_id")));
             require(item.path("speaker_id").isNull() || (item.path("speaker_id").isTextual() && labels.contains(item.path("speaker_id").asText())));
             if(version==2) {
-                var expected=new LinkedHashSet<String>(); var segment=segments.get(i);
-                int segmentStart=segment.path("start_ms").asInt(),segmentEnd=segment.path("end_ms").asInt();
-                for(var turn:alignment.path("turns"))
-                    if(Math.min(segmentEnd,turn.path("end_ms").asInt())>Math.max(segmentStart,turn.path("start_ms").asInt()))
-                        expected.add(turn.path("speaker_id").asText());
-                var overlaps=item.path("overlapping_speakers"); require(overlaps.isArray() && overlaps.size()==expected.size());
-                int overlapIndex=0; for(var expectedLabel:expected) require(overlaps.get(overlapIndex++).asText().equals(expectedLabel));
+                var segment=segments.get(i);
+                validateOverlaps(item.path("overlapping_speakers"),segment.path("start_ms").asInt(),segment.path("end_ms").asInt(),alignment.path("turns"));
             }
         }
     }

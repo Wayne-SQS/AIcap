@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 const panel = page => page.getByRole('region', { name: '转写版本与人工核对', exact: true })
 const draft = { audio: { meeting_id:'m1', audio_id:'a1', sha256:'a'.repeat(64), byte_size:123 }, duration_ms:2000, language:'zh', status:'draft', diarization_status:'not_available', storage_status:'not_saved', requires_human_review:true,
-  text:'登陆接口待确认。', segments:[{segment_id:'S1',start_ms:0,end_ms:1900,text:'登陆接口待确认。',speaker_id:null}] }
+  text:'登陆接口待确认。', segments:[{segment_id:'S1',start_ms:0,end_ms:1900,text:'登陆接口待确认。',speaker_id:null,
+    words:[{word_id:'S1W1',start_ms:0,end_ms:400,text:'登陆'},{word_id:'S1W2',start_ms:400,end_ms:1900,text:'接口待确认。'}]}] }
 async function setup(page, { role='member', loseConfirmation=false }={}) {
   let version=null, target=null; const saves=[], confirms=[]
   await page.addInitScript(()=>localStorage.setItem('aiguanli_token','fixture-token'))
@@ -91,15 +92,18 @@ test('time-overlap suggestion can be changed and persists with diarization snaps
   expect(requests.saves[0].draft.diarization).toEqual({engine:'sherpa-onnx-pyannote3-eres2net',duration_ms:2000,requested_num_speakers:2,speaker_count:2,identity_status:'anonymous_only',
     turns:[{start_ms:0,end_ms:400,speaker_id:'SPK1'},{start_ms:300,end_ms:1900,speaker_id:'SPK2'}]})
   await page.reload()
-  await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK2')
+  await expect(panel(page).getByLabel(/^S1A1 ·/)).toHaveValue('SPK1')
+  await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveValue('SPK2')
   await expect(panel(page)).toContainText('跨说话人时间段：SPK1、SPK2')
-  await panel(page).getByLabel(/S1/).selectOption('SPK1')
+  await panel(page).getByLabel(/^S1A2 ·/).selectOption('SPK1')
   await prepare(page); await panel(page).getByRole('button',{name:'确认并创建分析会议'}).click()
   const alignment=requests.confirms[0].speaker_alignment
   expect(alignment.audio_sha256).toBe('a'.repeat(64)); expect(alignment.turns).toHaveLength(2)
-  expect(alignment.alignment_version).toBe(2)
-  expect(alignment.assignments).toEqual([{segment_id:'S1',speaker_id:'SPK1',overlapping_speakers:['SPK1','SPK2']}])
-  await page.reload(); await expect(panel(page).getByLabel(/S1/)).toHaveValue('SPK1')
+  expect(alignment.alignment_version).toBe(3)
+  expect(alignment.assignments).toEqual([
+    {assignment_id:'S1A1',segment_id:'S1',word_ids:['S1W1'],text:'登陆',speaker_id:'SPK1',overlapping_speakers:['SPK1','SPK2']},
+    {assignment_id:'S1A2',segment_id:'S1',word_ids:['S1W2'],text:'接口待确认。',speaker_id:'SPK1',overlapping_speakers:['SPK2']}])
+  await page.reload(); await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveValue('SPK1')
 })
 test('late save does not leak into another meeting',async({page})=>{
   await setup(page); let release; const gate=new Promise(r=>release=r)

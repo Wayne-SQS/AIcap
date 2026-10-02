@@ -246,3 +246,11 @@ ai-service/.venv/Scripts/python.exe qa/run_daily_live.py --suite transcription -
 最终真实证据 **qa/.daily-live/d509f15259f64be2a141aa4645a38fe6/**：官方四人中文音频浏览器1/1、退出0，12个转写片段包含 **95个词级时间戳**，12/12有主标签，SPK1–SPK4完整覆盖，2个片段仍跨说话人；speech2、文本夹具1、counts **1/1/0/1/1**。原始词时间戳、diarization、alignment v2和确认结果均在版本证据中。
 
 验证：Python全量245/245；TranscriptVersionTest新增词时间戳契约后11/11且Java21 package通过；转写与版本浏览器15/15，相关分离加入时19/19；前端production build通过。真实中文文本仍有明显识别错误，词时间戳存在不等于文字准确。
+
+## 按真实词边界生成对齐子段（2026-10-02，第七十三轮）
+
+alignment v3将每个词按与分离turn的最大重叠分配主SPK，再合并同一原片段内相邻同标签词。确认assignment包含`assignment_id/segment_id/word_ids/text/speaker_id/overlapping_speakers`。Java要求全部原始词按原顺序恰好覆盖一次，并复算子段重叠集合；历史v1/v2继续兼容。
+
+最终真实证据 **qa/.daily-live/9d66228b0619435ab48d7745bfe68859/**：浏览器1/1、退出0，12个原始片段、95个词生成13个对齐子段。S10实际拆为`S10A1=这是/SPK1`和`S10A2=我第四次半点度演讲/SPK4`；确认JSON的95个word_id完整且无重复。仍有S3A1自身跨SPK1/SPK2，说明单个Whisper词区间也可能跨分离边界，页面保留双标签提示，不按字符继续猜分。SPK1–4完整覆盖，speech2、文本夹具1、counts **1/1/0/1/1**。
+
+验证：TranscriptVersionTest 12/12、Java21 package、转写/版本浏览器15/15、前端build通过；Python生产逻辑未再修改，沿用本轮前一阶段245/245。result.json新增alignment_units=13，multi_speaker_segments=1按仍含多标签子段的原片段去重计数。

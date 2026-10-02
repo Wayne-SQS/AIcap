@@ -62,6 +62,11 @@ class TranscriptVersionTest {
           "identity_status":"anonymous_only"}
           """)); return result;
     }
+    ObjectNode bodyWithWordsPreview() throws Exception {
+        var result=bodyWithPreview(); ((ObjectNode)result.path("draft").path("segments").get(0)).set("words",mapper.readTree("""
+          [{"word_id":"S1W1","start_ms":0,"end_ms":400,"text":"原始"},{"word_id":"S1W2","start_ms":400,"end_ms":900,"text":"草稿"}]
+          """)); return result;
+    }
     ObjectNode confirmation() throws Exception { return (ObjectNode)mapper.readTree("{\"title\":\"已核对会议\",\"text\":\"修正后的文本\",\"acknowledged\":true}"); }
     ObjectNode alignedConfirmation() throws Exception {
         var input=confirmation(); input.set("speaker_alignment",mapper.readTree("""
@@ -75,6 +80,15 @@ class TranscriptVersionTest {
           {"alignment_version":2,"engine":"sherpa-onnx-pyannote3-eres2net","audio_sha256":"%s","duration_ms":1000,"speaker_count":2,
           "turns":[{"start_ms":0,"end_ms":600,"speaker_id":"SPK1"},{"start_ms":500,"end_ms":900,"speaker_id":"SPK2"}],
           "assignments":[{"segment_id":"S1","speaker_id":"SPK2","overlapping_speakers":["SPK1","SPK2"]}]}
+          """.formatted("a".repeat(64)))); return input;
+    }
+    ObjectNode alignedConfirmationV3() throws Exception {
+        var input=confirmation(); input.set("speaker_alignment",mapper.readTree("""
+          {"alignment_version":3,"engine":"sherpa-onnx-pyannote3-eres2net","audio_sha256":"%s","duration_ms":1000,"speaker_count":2,
+          "turns":[{"start_ms":0,"end_ms":600,"speaker_id":"SPK1"},{"start_ms":500,"end_ms":900,"speaker_id":"SPK2"}],
+          "assignments":[
+            {"assignment_id":"S1A1","segment_id":"S1","word_ids":["S1W1"],"text":"原始","speaker_id":"SPK1","overlapping_speakers":["SPK1"]},
+            {"assignment_id":"S1A2","segment_id":"S1","word_ids":["S1W2"],"text":"草稿","speaker_id":"SPK2","overlapping_speakers":["SPK1","SPK2"]}]}
           """.formatted("a".repeat(64)))); return input;
     }
     @Test void immutableSaveRetryAndMeetingScope() throws Exception {
@@ -162,6 +176,14 @@ class TranscriptVersionTest {
             if(fault.equals("label")) ((ObjectNode)preview.path("turns").get(0)).put("speaker_id","Alice");
             assertEquals(422,assertThrows(ApiException.class,()->service.save("m1",invalid,1)).getStatus());
         }
+    }
+    @Test void wordAlignmentCoversEveryWordExactlyOnce() throws Exception {
+        var body=bodyWithWordsPreview(); body.put("client_request_id","v3-ok"); var id=service.save("m1",body,1).path("id").asText();
+        var result=service.confirm("m1",id,alignedConfirmationV3(),1);
+        assertEquals(3,result.path("confirmation").path("input").path("speaker_alignment").path("alignment_version").asInt());
+        var second=bodyWithWordsPreview(); second.put("client_request_id","v3-bad"); var secondId=service.save("m1",second,1).path("id").asText();
+        var missing=alignedConfirmationV3(); ((ObjectNode)missing.path("speaker_alignment")).withArray("assignments").remove(1);
+        assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",secondId,missing,1)).getStatus());
     }
     @Test void failedConfirmationRollsBackNewMeeting() throws Exception {
         var id=service.save("m1",body(),1).path("id").asText();

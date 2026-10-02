@@ -66,20 +66,32 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
   await page.reload()
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
-  const expectedAssignments = data.segments.map(segment => {
+  const speakersFor = interval => {
     let speakerId=null,bestOverlap=0; const overlappingSpeakers=[]
     for(const turn of speakerData.turns) {
-      const overlap=Math.max(0,Math.min(segment.end_ms,turn.end_ms)-Math.max(segment.start_ms,turn.start_ms))
+      const overlap=Math.max(0,Math.min(interval.end_ms,turn.end_ms)-Math.max(interval.start_ms,turn.start_ms))
       if(overlap>0 && !overlappingSpeakers.includes(turn.speaker_id)) overlappingSpeakers.push(turn.speaker_id)
       if(overlap>bestOverlap) { bestOverlap=overlap; speakerId=turn.speaker_id }
     }
-    return {segment_id:segment.segment_id,speaker_id:speakerId,overlapping_speakers:overlappingSpeakers}
-  })
+    return {speakerId,overlappingSpeakers}
+  }
+  const expectedAssignments=[]
+  for(const segment of data.segments) {
+    const groups=[]
+    for(const word of segment.words) {
+      const {speakerId}=speakersFor(word),last=groups.at(-1)
+      if(last?.speaker_id===speakerId) { last.word_ids.push(word.word_id); last.text+=word.text; last.end_ms=word.end_ms }
+      else groups.push({speaker_id:speakerId,word_ids:[word.word_id],text:word.text,start_ms:word.start_ms,end_ms:word.end_ms})
+    }
+    groups.forEach((group,index)=>expectedAssignments.push({assignment_id:`${segment.segment_id}A${index+1}`,segment_id:segment.segment_id,
+      word_ids:group.word_ids,text:group.text,speaker_id:group.speaker_id,
+      overlapping_speakers:speakersFor(group).overlappingSpeakers}))
+  }
   expect(expectedAssignments.every(item=>item.speaker_id)).toBe(true)
   expect([...new Set(expectedAssignments.map(item=>item.speaker_id))].sort()).toEqual(
     Array.from({length:expectedSpeakers},(_,i)=>`SPK${i+1}`))
   for(const assignment of expectedAssignments)
-    await expect(panel.getByLabel(new RegExp(`^${assignment.segment_id} ·`))).toHaveValue(assignment.speaker_id || '')
+    await expect(panel.getByLabel(new RegExp(`^${assignment.assignment_id} ·`))).toHaveValue(assignment.speaker_id || '')
   // Synthetic human correction exercises the existing Daily fixture, not STT semantic accuracy.
   const corrected = 'US13 今天开始开发。负责人和截止时间仍待确认。'
   await panel.getByLabel('人工核对文本').fill(corrected)
@@ -92,11 +104,11 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(versions[0].draft.text).toBe(data.text)
   expect(confirmation.input.text).toBe(corrected)
   expect(confirmation.input.speaker_alignment.audio_sha256).toBe(data.audio.sha256)
-  expect(confirmation.input.speaker_alignment.alignment_version).toBe(2)
+  expect(confirmation.input.speaker_alignment.alignment_version).toBe(3)
   expect(confirmation.input.speaker_alignment.speaker_count).toBe(expectedSpeakers)
   expect(versions[0].draft.diarization.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.turns).toEqual(speakerData.turns)
-  expect(confirmation.input.speaker_alignment.assignments).toHaveLength(data.segments.length)
+  expect(confirmation.input.speaker_alignment.assignments.length).toBeGreaterThanOrEqual(data.segments.length)
   expect(confirmation.input.speaker_alignment.assignments).toEqual(expectedAssignments)
   expect(await (await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:confirmation.input})).json()).toEqual(versions[0])
   expect((await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:{...confirmation.input,text:'其他文本'}})).status()).toBe(409)
