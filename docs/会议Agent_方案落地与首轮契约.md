@@ -646,3 +646,373 @@ Java为隔离H2/MySQL模式+MockMvc；Python为HTTP测试夹具+模型fixture。
 下一步直接做Planning真实服务联调（同一合成会议从分析保存到人工审核执行并核对数据库/日志/看板），优先收敛端到端问题，不扩展新会议类型或反复打磨低影响措辞。
 
 最终验证：Planning加入后的完整前端浏览器回归41/41通过（48.4秒），生产构建通过。
+
+## 第三十六轮：Planning真实服务闭环验收（2026-09-28）
+
+在一次性MySQL 8.0.31中启动真实Java/Python/Vite/Edge，HTTP模型夹具只替代模型供应商。Planning浏览器1/1通过，验证分析保存、人工从目标Sprint3修改到4并批准、独立执行、重复请求、401/403、不可变分析、日志ID与数据库一致、刷新审计与故事地图；只改变Story.sprint，其他故事字段与Task列表不变。Daily另用新库回归1/1通过。两套均模型调用一次，测试服务已停止。详细命令与证据路径见qa/DAILY_LIVE.md。
+
+## 第三十七轮：Review分析核心（2026-09-28）
+
+依据既定Review顺序和H05溯源，本轮完成一个只读分析切片，不重设计已定架构。H05原交付冻结，SR-06及整体Sprint达标口径不作为已定要求。主AI确定本切片复用update_story_status且仅提出标记完成(status=2)，不新增独立验收实体；后续扩展不受本切片范围冒充既定完整方案。
+
+新增review_contracts.py、review_skill.py、review_workflow.py，读取故事描述/验收标准并执行LangGraph上下文→模型→校验。meeting_type固定sprint_review，输出摘要、待确认问题、待审完成提案。current_sprint未知不猜；acceptance_results/sprint_goal固定null。Skill review-completion-v1明确展示≠验收、保留否定/条件/局部范围/冲突，不将标准或Story.status当作验收发生的事实。
+
+contracts.py抽取共用状态溯源校验，Daily入口仍先按原契约验证；story_tool.py增加Review只读投影。严格验证整数状态、原始引用、目标/旧值、重复、空操作及额外字段，令牌不进入图状态或模型。纯引用匹配不能证明语义上确实通过验收，测试明确保留这个限制，不用关键词规则假装解决语义问题。
+
+新增test_review_workflow.py 11项及test_story_tool.py 1项，Python全量147项通过，git diff --check通过。使用真实LangGraph/模型适配器和本地HTTP夹具，尚未验证真实模型Review语义质量。本轮未新增HTTP、保存、人工审核执行或页面，不能把Review结果发到Daily持久化入口。
+
+下一轮优先接通Review持久化/查询及带鉴权分析入口，复用既有幂等、原文快照与错误恢复规则；随后接审核执行和页面，形成用户可用闭环。H05无需新增派工。
+
+## 第三十八轮：Review持久化查询与鉴权分析入口（2026-09-28）
+
+完成Python POST /api/meetings/{meeting_id}/review/analyze，先经Java角色和会议访问校验，再查询当前调用者的已存请求；未命中才运行Review工作流。新增review_store.py，复用有界HTTP、严格响应验证和原载荷至多一次保存重试；未知结果保留client_request_id，已有结果恢复不重调模型。
+
+Java新增ReviewAnalysisDtos、ReviewAnalysisService、ReviewAnalysisController和review-analyses.sql，注册application.yml。review-analyses资源支持提交、列表、详情和按当前调用者请求号查询。独立meeting_review_analyses保存原文、候选提案和数据库目标故事基础快照，不混用Daily记录。严格限制sprint_review/update_story_status且changes.status=2；再次检查原文引用、目标/旧状态、重复和无变更。会议锁与数据库唯一键实现并发幂等；同编号不同载荷409；保存不改变故事或写故事日志。
+
+测试：新增test_review_api.py 8项，test_api.py共用HTTP夹具支持Review路径；Python全量155项通过。新增ReviewAnalysisStorageTest 10项，连同Daily/Planning存储回归共28项通过，Java21编译BUILD SUCCESS。使用HTTP夹具及隔离H2/MySQL模式事务，不是Review真实MySQL/前端或真实模型验收。git diff --check通过。
+
+下一步集中实现Review逐项人工审核及批准后执行，继续保留权限、批准载荷绑定、执行前旧值复查、事务审计及幂等；再接页面与真实服务联调。本轮不开放未经审核的故事写入，也未运行业务数据库迁移。
+
+## 第三十九轮：Review人工审核与批准后执行（2026-09-28）
+
+新增ReviewProposalReviewService/Controller与ReviewProposalExecutionService/Controller，路径为review-analyses/{analysisId}/proposal-reviews和proposal-executions，支持GET/POST。admin/owner可审核执行，登录用户可读；按会议及分析记录绑定提案，禁止客户端提交执行载荷或审核人。
+
+支持approve、reject、modify_and_approve。本Review切片目标固定完成状态2，修改后接受仅修订changes.reason，并要求顶层reason说明修改原因；不改证据、故事、旧状态或完成目标。不正确的目标/验收结论应拒绝后重新分析。该选择是本切片实现范围，不将其当作整个既定方案的通用修改限制。
+
+原始提案与批准载荷分开保存，最终审核不可覆盖，同载荷同审核人可重试；批准检查故事旧状态，审核不写故事。独立执行只读持久批准载荷，再次锁定复查旧状态，原子更新Story.status、move日志、执行记录和审核执行状态。重复执行返回首次结果；任一步失败回滚，不影响Story.sprint或Task。
+
+新增review-proposal-reviews.sql、review-proposal-executions.sql并注册application.yml。扩展ReviewAnalysisStorageTest加载新服务/DDL；新增ReviewProposalFlowTest 7项，含继承存储共17项。连同Planning 14项、Daily 25项，共56项通过，Java21 BUILD SUCCESS；git diff --check通过。验证修改理由、不可变原记录、权限、待审/拒绝拦截、错误载荷、状态冲突、并发幂等、审计故障回滚和查询结果。测试是隔离H2/MySQL模式+MockMvc，没有Review生产库迁移或真实服务联调。
+
+下一轮集中接Review前端分析、审核（含修改理由）、执行和审计展示，复用已验证交互与请求恢复；之后完成真实服务联调。暂不扩大Review动作范围或进入Retro。
+
+## 第四十轮：Review前端闭环（2026-09-28）
+
+MeetingPanel增加“打开会议 Sprint Review”懒加载入口。新增ReviewAnalysisForm/Panel、ReviewProposalReviewForm/Execute及reviewAnalysis/reviewAnalyses API，调用独立Review分析/保存/审核执行接口。
+
+请求号按用户、会议和可选当前Sprint隔离，发送前写sessionStorage；未知结果和页面刷新后重试沿用编号。展示原文、摘要、待确认、证据、原提案及批准后理由；人工修改只修订理由且要求修改说明，不允许原样提交修改。拒绝后无执行入口；成员可分析但不能审核执行，只读用户仅查看。
+
+执行只发送proposal_id；确认检查归属、前后状态、目标完成2及审计字段；成功后缓存已确认结果并刷新故事日志。保留选择变化/卸载失效处理，不让旧异步结果覆盖当前面板。未改Daily/Planning交互。
+
+新增review-flow.spec.js六例：修改理由审核执行后刷新审计、残缺响应、成员权限、无效修改/拒绝、只读权限、未知分析刷新后原编号重试。生产构建通过；完整浏览器回归结果见续记。此轮为Vite/Edge+mock业务API，尚未Review真实Java/Python/MySQL联调。下一步完成真实服务联调，再据结果推进后续既定阶段。
+
+最终验证：完整浏览器47/47通过（含新增Review六例），npm run build通过，git diff --check通过。本轮未修改后端或调用真实模型。
+
+## 第四十一轮：Review真实服务闭环验证（2026-09-28）
+
+新增frontend/e2e-live/review-flow.spec.js，qa/run_daily_live.py增加--suite review，复用一次性MySQL目录和专用端口。重新打包Java，运行真实Edge/Vite/Python/Java/JWT/MySQL 8.0.31，只有模型响应使用本地HTTP夹具。
+
+浏览器1/1通过：保存合成会议→Review分析保存→人工修订理由并批准→单独执行→刷新审计/看板。种子US13为待办0，明确会议验收陈述经人工确认后同步为完成2。分析和审核后故事完整记录不变，执行后只改status；Sprint仍2、任务列表不变。重复执行返回首次结果，分析重试返回原分析且模型调用仅1次，原始记录不变；匿名执行401、只读执行/分析403。数据库分析、审核、执行和move日志各1条，日志ID匹配执行审计。
+
+证据目录qa/.daily-live/e3edc5ca620f40f79a87de6173e17c50/（忽略），result.json记录counts=2/2/1/1/1/1；命令与解释见qa/DAILY_LIVE.md。Java打包BUILD SUCCESS，git diff --check通过。不修改日常业务库，无真实模型语义质量结论。
+
+下一步使用H05已有案例开展Review真实模型的有界验收，重点区分展示/验收、部分范围、否定/条件及冲突；保留失败，避免反复提示词打磨。随后按既定顺序推进Retro/Refinement。
+
+## 第四十二轮：Review首轮真实模型验收（2026-09-28）
+
+新增review_evaluation.py、evals/review_quality.json、tests/test_review_evaluation.py，复用既有评测结构，检查契约/动作/证据及必要问题；拒绝覆盖原输出，供应商故障停止。H05原文件未改。转录和故事快照保持，缺描述/验收标准显式null；修正SR-01“准备演示≠已演示”、SR-07未明确目标不得绑定单个快照的候选预期，保留SR-06建议标记。
+
+Python158项通过。使用既有.env配置对8个合成案例各调用一次deepseek-v4-flash；动作/契约8/8通过，唯一完成候选为US07 1→2，其余空提案。但人工复核未通过：SR-06把状态1解释成未验收；SR-04追问将争议中的阻塞视为确定前提；SR-08追问无依据假设，另有低影响冗余。Skill保持review-completion-v1，本轮无提示词调整或重跑，无业务写入。
+
+原报告.review-quality/review-v1-20260928.json保持忽略，SHA256与逐例结论见evals/REVIEW_QUALITY_REVIEW.md。新增评测文件、说明与忽略规则；git diff --check通过。不能把8/8自动检查等同整体语义验收通过。
+
+下一步优先纠正状态含义与冲突前提，补正反对照并定向验证一次，不反复优化低影响措辞；随后继续既定Retro/Refinement顺序。
+
+## 第四十三轮：Review语义定向修正（2026-09-28）
+
+review_skill.py升级review-completion-v2：状态编码0待办/1进行中/2已完成不等于验收事实；争议来源必须在摘要/理由/问题中保留，已明确澄清则采纳最终结论；未来条件不改成已经完成的追问，不臆测已通过但快照未更新。
+
+新增evals/review_semantics.json四个正反案例，扩展test_review_evaluation.py验证Oracle及澄清证据；Python159项通过。原SR-04/06/08与新四例共7次真实deepseek-v4-flash定向复验，动作/契约7/7，人工逐条复核中目标缺陷未重现。澄清通过正例正常提出US13 1→2，避免修复退化成一律不提案。
+
+报告.review-quality/review-v2-target-20260928.json和组合案例文件保留，旧8例及v1报告未覆盖；哈希和人工结论见evals/REVIEW_QUALITY_REVIEW.md。仍有状态编码复述、无关缺失信息、重复问题及“双方确认”的轻微概括，列为低影响待办不继续本轮打磨。未做原8例全套或重复稳定性验证，不宣称Review全部质量通过。无业务写入，git diff --check通过。
+
+本轮到此，下一步按既定顺序推进Retro最小切片，继续保留证据、人工审核与执行分离。
+
+## 第四十四轮：Retro行动项分析核心（2026-09-28）
+
+本轮依据本地既定路线与US30事项/负责人/截止时间不得补造的要求，完成只读行动项候选切片。尝试重读原共享链接失败，未将无法读取的内容当作新设计依据；沿用本地已落地的Skill/Tool/LangGraph和create_action_item方向。
+
+新增retro_contracts.py、retro_skill.py、retro_workflow.py。SprintRetroInput含原文分段、可选current_sprint和成员ID/姓名投影；读取既有成员资料但不向模型发送能力画像/容量。输出摘要、明确决议（带证据）、待审create_action_item及待确认问题。changes包含title、description、owner_id和deadline_text；未知显式null，截止时间保留原文而不擅自换算日期。此为当前切片字段，不宣称既定方案已指定相同底层字段命名。
+
+retro-action-v1要求区分明确决定、建议、抱怨、条件和否定，不把讨论变成已批准行动或个人能力判断。同名/外部/无可靠映射的“我”不得自动指定成员；不写Story/Task/画像。契约检查精确引用、唯一性、成员存在、唯一姓名在引用中出现、截止短语来自引用和精确重复行动；不假装这些检查能证明语义上的责任指派、截止时间或采纳事实。
+
+新增test_retro_workflow.py八项，Python全量167项通过；真实LangGraph+只读/模型夹具，无真实模型或业务写入。git diff --check通过。当前无Retro HTTP、持久化、业务ActionItem实体、审核执行或页面。
+
+下一步集中接Retro候选持久化查询及带鉴权分析入口，再补独立ActionItem实体和审核执行，按原人工审核路线闭环。本轮到此停止。
+
+## 第四十五轮：Retro候选持久化与鉴权入口（2026-09-28）
+
+新增retro_store.py和Python POST /api/meetings/{meeting_id}/retro/analyze，验证调用角色/会议后按当前用户请求号恢复，未命中才读成员目录并运行模型。响应确认保存ID、请求号及pending/no_changes；共享存储传输保持原载荷重试与未知结果恢复。
+
+新增Java RetroAnalysisDtos/Service/Controller及retro-analyses.sql，注册application.yml。retro-analyses资源支持保存、列表、详情、当前调用者请求查询；meeting_retro_analyses保存不可变原文、决议、行动候选及涉及负责人的姓名快照。保存不创建ActionItem/Task/Story，不写故事日志。当前仍只有候选，无业务行动项实体。
+
+Java独立检查决议与行动引用、唯一编号、精确重复内容、原文截止短语、负责人存在及唯一姓名引用。owner_id/deadline_text必须显式填写值或null。指定负责人时稳定顺序锁用户目录，记录member_snapshots；同编号恢复不因后续改名而改写记录。会议锁+唯一约束支持并发幂等，异载荷409，非法批次不保存。证据检查仍不能证明语义上的真实指派或采纳。
+
+新增test_retro_api.py六项、RetroAnalysisStorageTest八项，扩展共用HTTP夹具。Python173项通过；Java Retro8+Review17+Planning14+Daily25=64项通过，Java21 BUILD SUCCESS。使用本地HTTP夹具及隔离H2真实事务；未做Retro真实MySQL/模型/浏览器联调。git diff --check通过。
+
+下一步集中实现业务ActionItem与Retro人工审核/批准后执行：批准载荷独立保存、创建和审计同一事务、重复执行返回首次结果。之后接前端和真实服务验证。本轮停止。
+
+## 第四十六轮：Retro人工审核与业务行动项执行（2026-09-28）
+
+新增RetroProposalReviewService/Controller、RetroProposalExecutionService/Controller，分别提供retro-analyses/{analysisId}/proposal-reviews和proposal-executions的GET/POST。admin/owner审核执行，登录用户可读。支持接受、拒绝、修改后接受；修改提交完整事项/描述/负责人/截止文本及修改说明，原提案和人工批准载荷分开保存。负责人可由人工重新指定，截止文本可人工修订；不能把人工修订当作原文证据。直接接受复查原姓名快照，执行复查批准时姓名；已审核决定不可覆盖，同审核人同载荷可重试。
+
+新增action-items.sql保存业务行动项及创建审计，retro-proposal-reviews.sql、retro-proposal-executions.sql保存审批和执行记录，注册application.yml。执行只接受proposal_id，读取持久批准载荷，在同一事务内创建初始open行动项、创建日志、执行记录并更新审核执行状态；并发重复执行返回首次结果。负责人/截止时间允许显式null。不写Story/Task/画像。ActionItemController提供按会议查询行动项及其审计；尚无行动项后续编辑/完成流转。
+
+扩展RetroAnalysisStorageTest初始化新表/服务，新增RetroProposalFlowTest八项，含继承存储共16项。初次验证发现JDBC自动生成键包含时间戳，已改为明确请求日志id。最终Retro16+Review17+Planning14+Daily25=72项通过，Java21 BUILD SUCCESS；覆盖批准/修改/拒绝、原记录不可变、权限、负责人变化、错误载荷、并发幂等、故障回滚及查询归属。测试使用隔离H2真实事务和MockMvc，未运行日常业务库迁移、Retro真实MySQL或模型验收。git diff --check通过。
+
+下一步集中接Retro前端：分析保存恢复、决议/证据展示、逐项人工审核、批准后执行和行动项审计，再进行真实服务联调。本轮停止。
+
+## 第四十七轮：Retro前端闭环（2026-09-28）
+
+MeetingPanel新增“打开会议 Sprint Retro”入口，新增retroAnalysis/retroAnalyses接口模块和RetroAnalysisForm/Panel、RetroProposalReviewForm/Execute。分析请求号按用户/会议/可选Sprint隔离，发送前保存，未知结果及页面刷新后沿用编号。展示原文、带证据的会议决议、待确认问题、候选及处理状态。
+
+人工审核支持接受、拒绝和修改后接受。修改需完整行动内容及原因，负责人用当前成员姓名/ID选择，可显式未确定；截止时间为空转换null，不推算日期。成员目录加载失败阻止修改后接受并提供重试。原提案和批准内容分开展示，审核后才出现独立执行入口；成员可分析不可审核执行，只读用户仅查看。
+
+执行只发送proposal_id，校验归属和完整审计确认后显示成功，保留已确认结果并刷新行动项。新增按会议展示已创建行动项及创建审计/批准载荷。分析列表、审核执行详情、成员目录和行动查询具备过期请求或卸载保护。未修改Python/Java业务逻辑，也未改既定方案。
+
+浏览器用例覆盖修改审核执行后刷新审计、残缺执行响应、无效修改/拒绝、角色权限、未知分析刷新重试、未知负责人/截止时间保留、成员目录失败恢复。测试使用Vite/Edge与mock业务API；Retro真实服务联调和模型语义验收待后续进行。下一步集中完成Retro真实Python/Java/MySQL业务闭环验证。
+
+最终验证：npm run build通过；完整浏览器回归53项通过，新增后补的两个边界用例2/2通过，合计55个不同用例（Retro8项、既有47项）。首轮修复分析组件导入路径后重新构建成功；完整回归测试服务关闭受沙箱限制停住，核实并停止本轮Vite进程后以exit0结束，补充测试在批准的沙箱外执行并正常退出。git diff --check通过。本轮到此停止。
+
+## 第四十八轮：Retro真实服务闭环验证（2026-09-29）
+
+新增frontend/e2e-live/retro-flow.spec.js；qa/run_daily_live.py增加--suite retro及复盘模型HTTP夹具、数据库结果断言，沿用独立MySQL目录/专用端口。2026-09-28启动，2026-09-29从持久日志和result.json核实完整成功结果；未因工具会话失效重复启动测试。
+
+真实Edge/Vite/Python/Java/JWT/MySQL 8.0.31浏览器1/1通过。模型夹具提出负责人/时间未知的行动，页面人工修改事项、选择负责人及补充截止文本后批准；分析和审核后不创建业务行动，待审执行409，独立执行才创建open行动项及审计。两个并发重复执行返回首次结果，已存分析重试返回原ID，模型总调用1次。原分析、故事、任务和成员资料保持不变；匿名执行401，只读分析/审核/执行403，查询行动项200。页面刷新后行动项和审计可读。
+
+数据库分析/审核/执行/行动项/行动项日志各1条，故事日志0条；创建审计ID与执行记录相符。证据目录qa/.daily-live/3b0311ebaf134f2f92173e549cdd4e32/保留且忽略，运行方法和计数说明见qa/DAILY_LIVE.md。Java21打包BUILD SUCCESS，git diff --check通过。未修改日常业务库；仅模型使用固定HTTP响应，不宣称真实模型语义通过。
+
+下一步集中开展Retro真实模型的有界验收，覆盖明确决定与建议、否定/条件、负责人歧义和截止时间缺失，保留失败结果；之后按既定路线继续Refinement。本轮停止。
+
+## 第四十九轮：Retro首轮真实模型验收（2026-09-29）
+
+新增retro_evaluation.py、evals/retro_quality.json、tests/test_retro_evaluation.py。每例一次，拒绝覆盖旧报告，供应商故障停止；自动比较行动数量、负责人、截止文本、证据片段及必要追问。原解析candidate与校验结果保留供文本复核。新增.retro-quality忽略规则，使用合成原文及最小成员投影，无业务写入。
+
+Python全量176项通过。首次因env路径不存在在调用前退出，随后使用既有backend/.env完成8次deepseek-v4-flash真实调用，自动检查8/8通过。逐条复核发现实质失败：retro-same-name把“整理发布检查表”改成“整理并发布检查表”，标题和描述新增发布动作。同名负责人仍正确为null，时间正确，说明字段/契约通过不等于行动语义准确。另有冲突案例把缺少方案细节表述成尚未明确的轻微概括。
+
+报告.retro-quality/retro-v1-20260929.json及其哈希、逐例结论记录于evals/RETRO_QUALITY_REVIEW.md；本轮不修改retro-action-v1，不重跑、不宣称整体质量通过。git diff --check通过。
+
+下一步优先修正名词对象与新增动作的边界，补“整理发布检查表/整理并发布检查表”正反对照，做一次定向复验，再按既定路线继续Refinement。本轮停止。
+
+## 第五十轮：Retro行动范围定向修正（2026-09-29）
+
+retro_skill.py升级retro-action-v2，明确标题/描述/理由/决议/摘要保持动词、对象及范围，事项名称不能拆成新增发布/部署等动作；已明确要求的动作不能删除。缺失信息追问不补造尚未明确等事实前提。新增evals/retro_semantics.json四个正反案例及一项离线验证，Python177项通过。
+
+原同名失败例/冲突例与新四例共6次deepseek-v4-flash调用，自动6/6，逐条复核中“整理发布检查表”未再新增发布，明确“整理并发布”正例保留两步，部署文档例未新增部署，未采纳建议无行动。没有业务写入或重复调优。
+
+残余问题：同名例把项目成员目录表述成参会成员，显式发布例摘要没有概括决定，另有泛化摘要及重复追问。记录待办，不宣称Retro整体语义全通过；按用户优先完整闭环的要求，不扩大本轮范围继续打磨。
+
+新报告.retro-quality/retro-v2-target-20260929.json、组合案例及SHA256记录于evals/RETRO_QUALITY_REVIEW.md，旧报告哈希未变。未做原8例全量或稳定性重跑。git diff --check通过。下一步按既定路线进入Refinement最小切片，本轮停止。
+
+## 第五十一轮：Refinement新故事候选分析核心（2026-09-29）
+
+依据本地记录的Refinement区分待讨论/确认需求/实际创建原则及create_story工具方向，实现新故事候选最小切片。尝试重读原共享链接失败，沿用本地既定记录，不将无法获取的细节当作已确定设计。已有故事修改、拆分等后续范围不在本轮实现。
+
+新增refinement_contracts.py、refinement_skill.py、refinement_workflow.py；StoryReadTool新增get_refinement_stories，复用PlanningStorySnapshot的业务字段和既有GET /api/stories认证传输。LangGraph只读上下文→模型→校验，无写工具，令牌不进模型/图状态，关闭tracing。refinement-create-v1仅提出明确决定新增的create_story候选，禁止讨论/否定/条件/未决冲突直接变成新故事。
+
+changes含title、description、acceptance、priority、sprint、activity；除标题外字段必须显式为值或null，缺失时追问，不借用StoryIn默认值。模型不得指定ID、负责人、状态或估时。业务创建所需缺失字段必须在后续人工审核处理。字段命名为当前实现选择，不宣称共享方案已指定。校验会议/引用/类型/编号/同名重复；既有与候选标题去首尾空白并casefold比较。同义重复和真实采纳语义仍需模型验收与人工审核，不能由精确检查代替。
+
+新增test_refinement_workflow.py八项及test_story_tool.py一项；Python全量186项通过，git diff --check通过。覆盖未知字段保留、空提案、输入/快照非法阻断、只读认证投影、调用隔离、供应商/工具失败不重试、伪造证据、越界写字段和重复候选。使用真实LangGraph和本地夹具；未调用真实模型/Java写接口、未新增HTTP持久化或页面。
+
+下一步集中实现Refinement候选持久化和鉴权分析入口，再补人工审核/独立执行创建故事。本轮停止。
+
+## 第五十二轮：Refinement鉴权分析与候选持久化（2026-09-29）
+
+新增refinement_store.py及Python POST /api/meetings/{meeting_id}/refinement/analyze，Java先校验角色/会议再按当前调用者请求编号查询，恢复已有结果时不读取故事或再调模型。新结果经Java持久化确认后返回。复用有界传输与相同载荷至多一次保存重试；结果不确定时保留原请求号。
+
+新增RefinementAnalysisDtos/Service/Controller和refinement-analyses.sql，注册application.yml。独立meeting_refinement_analyses保存原文、完整候选及保存时用于同名检查的基础故事目录快照（id/title/status/sprint/owner_id，最多1000条）；不是模型分析时完整内容快照。支持保存、列表、详情及当前用户请求查询。新增故事无目标ID；稳定顺序读取并锁定目录核对标题，保存不创建故事或故事日志。
+
+Java重新验证严格类型、create_story动作、显式可空字段、引用、重复编号及同名冲突。未知内容不使用StoryIn默认值。标题Java使用strip+Locale.ROOT小写，Python用casefold，特殊Unicode折叠并非完全等价；精确同名检查不代表同义去重。会议行锁及唯一键保证同用户同请求幂等，同编号异载荷409，恢复保留原快照。后续批准/执行仍须重新检查冲突并人工处理必需字段。
+
+新增test_refinement_api.py六项，Python192项通过；RefinementAnalysisStorageTest七项加Retro16/Review17/Planning14/Daily25，共79项通过，Java21 BUILD SUCCESS。覆盖权限/归属、无默认填充、严格字段、空候选、非法后续提案整批拒绝、原记录恢复及并发只保存一次。测试使用本地HTTP夹具与隔离H2事务/MockMvc，无真实Refinement模型/MySQL/浏览器联调。git diff --check通过。
+
+下一步集中实现Refinement人工补齐/修改审核及批准后创建故事：批准载荷独立保存、执行前同名复查、故事创建和审计同事务、重复执行返回首次结果。本轮停止。
+
+## 第五十三轮：Refinement人工补齐审核与创建故事（2026-09-30）
+
+新增RefinementProposalReviewService/Controller和RefinementProposalExecutionService/Controller，分别提供proposal-reviews与proposal-executions GET/POST。admin/owner审核执行，登录用户可读。支持接受/拒绝/修改后接受；批准要求title/description/acceptance非空、priority及Sprint/activity有效，未知字段须人工补齐，不套用默认值。修改需改变内容并说明原因，原提案和批准载荷分别保存；相同审核人同载荷可重试，既有决定不可覆盖。
+
+批准不创建故事。独立执行仅接受proposal_id，读取已存批准载荷，再次核对必需字段和已有同名标题。复用IdAllocator分配US编号，故事初始status=0/owner_id=null；在同一事务内创建故事、create日志（detail保存批准提案）、执行记录及审核执行状态。重复执行返回首次结果，包括后续故事已编辑的情况。新增refinement-proposal-reviews.sql和refinement-proposal-executions.sql并注册application.yml。
+
+扩展RefinementAnalysisStorageTest夹具，新增RefinementProposalFlowTest八项，含继承存储共15项，加Retro16/Review17/Planning14/Daily25，共87项通过，Java21 BUILD SUCCESS。上轮测试停在H2不支持的批量ALTER，本轮改逐列ALTER后重新运行通过。验证补齐/直接批准/拒绝、权限、原记录不变、执行越权字段、同名复查、故障回滚、并发重复只创建一次及查询归属。使用真实事务与IdAllocator，其Mapper读以同一隔离H2实现；未运行真实MyBatis/MySQL或浏览器联调、未迁移日常业务库。
+
+编号器沿用既有并发主键冲突409机制，不能据本轮测试宣称所有业务入口无编号冲突或具备全局同名唯一约束。同名检查不等于同义去重。Python未修改，沿用192项；git diff --check通过。下一步集中接Refinement前端分析、人工补齐审核、创建执行和故事审计，再进行真实服务联调。本轮停止。
+
+## 第五十四轮：Refinement前端闭环与真实服务联调（2026-09-30）
+
+新增refinementAnalysis.js/refinementAnalyses.js和五个Refinement组件，通过MeetingPanel接入已保存会议。支持分析、按原请求恢复不确定结果、查看原文证据/未知字段、人工补齐六项故事字段、接受/修改后接受/拒绝、批准后独立执行。缺失字段不套默认值，直接接受不完整提案会阻断；修改需实质变化和原因。原始与批准内容分开展示，权限沿用成员可分析、管理员/负责人审核执行。严格核对执行返回的分析/提案/故事/日志/执行人/时间后才确认成功，执行后刷新故事看板和日志。
+
+新增e2e-status/refinement-flow.spec.js六项，覆盖完整补齐执行与刷新审计、不完整批准阻断和拒绝、畸形确认、成员/只读权限、跨刷新同请求重试。浏览器全量61/61通过，npm run build成功。Java21重新打包成功，未修改后端业务逻辑；本轮未重跑Java87/Python192单元测试，保留上轮结果。
+
+扩展qa/run_daily_live.py --suite refinement，新增e2e-live/refinement-flow.spec.js。真实隔离MySQL8.0.31、MyBatis/IdAllocator、Java/JWT、Python、Vite/Edge闭环1/1通过；批准不创建故事，执行新增待办且未分配负责人的故事，字段与人工批准一致，创建日志保留批准载荷。原故事、任务和成员列表不变，分析原始记录不变；两个并发重复执行返回同一结果，无新增故事/日志。分析重试复用原ID，固定HTTP模型仅调用1次。匿名401、只读审核/执行/分析403；刷新后审计仍可见，故事地图出现新卡片。
+
+证据qa/.daily-live/9c18c665ff514c1cbfc25e7987af2b9f/result.json，counts依次为分析/审核/执行/create日志/目标故事数，均1。未改日常数据库或真实模型配置。固定模型验证业务链路，不代表真实模型需求理解已验收；原有编号跨入口并发冲突及同义重复限制仍保留。README、qa/DAILY_LIVE.md与.agent-collab/CURRENT.md已更新。
+
+下一步进行Refinement真实模型有限样本验收，重点检查未采纳讨论不创建、未知字段不编造、同名已有故事不重复提案及证据可追溯。本轮停止继续开发。
+
+## 第五十五轮：Refinement真实模型基线、修正与复验（2026-09-30）
+
+新增refinement_evaluation.py、refinement_quality.json十二例、refinement_semantics.json五例及test_refinement_evaluation.py五项。评测先离线验证Oracle，再逐例调用生产Skill；检查数量、明确/未知字段、枚举排期、支持片段与追问，文本由人工逐条复核。固定合成输入，不访问真实会议和业务写接口；失败候选可保留，供应商故障停止，输出文件不可覆盖。
+
+deepseek-v4-flash首轮12/12自动通过，四个新增正例保留，建议/否定/条件/冲突/重复/已有修改/注入均无新增。人工发现冲突观点丢失来源、重复追问已知预算、已有修改决定与系统执行边界混淆。refinement-create-v2定向收紧来源、已知事实和流程边界；五例复验自动5/5通过，新增正例未丢失，冲突来源和预算追问改善。仍有条件句含混和“人工确认”指代不清，记录待办，不宣称全部语义通过或继续反复调词。
+
+真实调用共17次，无业务写入，无密钥输出。原报告保存在.refinement-quality忽略目录，逐例结果、SHA256、限制及复现命令见evals/REFINEMENT_QUALITY_REVIEW.md。新增5项离线测试，最终Python197/197通过；首次既有Review API夹具503，第二次停滞中断，第三次带40秒堆栈诊断全量通过（10.318秒），原因未定位，不宣称修复测试稳定性。未改Java/前端，不重复其上轮验证。README及协作状态已更新。
+
+下一步优先梳理现有五类会议入口的统一试用验收与操作指引，并在既定范围内补实际使用阻塞点；残余模型措辞问题保留可追踪待办，不因有界评测通过取消人工审核。本轮停止。
+
+## 第五十六轮：五类会议统一试用验收与指引（2026-09-30）
+
+顺序执行现有Daily/Planning/Review/Retro/Refinement真实服务live套件，5/5通过，每套独立MySQL8.0.31、真实Java/MyBatis/JWT/Python/Vite/Edge，固定HTTP模型各调用1次。验证分析/审核不越过独立执行、幂等写入、权限和刷新审计；各套具体计数、运行目录见qa/DAILY_LIVE.md统一验收表。使用已打包当前Java产物，未改日常库，未调用真实模型，无新增业务阻塞。
+
+新增docs/会议Agent_五类会议试用指南.md：启动服务、backend/.env三项模型配置仅加载到Python进程、页面五类入口和当前动作范围、样例前置、角色权限、未知字段和审核约束、重试与冲突处理、真实业务联调与模型质量边界。修正根README旧会议入口说明，更新ai-service/README和qa/README导航及DAILY_LIVE标题/Refinement命令。未改业务逻辑。PowerShell示例语法解析及git diff --check通过；未据语法验证宣称手工启动步骤已全部实跑。
+
+下一步建议将已核实的Python启动步骤做成可复用启动入口并提供基础就绪检查，减少每次手动加载配置及误用旧服务；不扩展或重设计已定会议业务。本轮停止。
+
+## 第五十七轮：Python服务启动入口与基础检查（2026-09-30）
+
+新增ai-service/start_service.py，默认按脚本所在目录定位backend/.env，仅加载AICAP_LLM_API_KEY/BASE_URL/MODEL三项；文件中的值覆盖当前进程同名配置，不插值、不打印密钥。支持--env-file、--environment-only、--java-url、--port及--check-only；指定文件缺失明确失败，默认文件不存在可使用现有进程环境。
+
+启动前导入服务依赖、使用生产ModelSettings/ChatModelClient验证配置格式、以无代理/不跟重定向/3秒超时/4KiB响应上限检查Java健康，以及尝试独占127.0.0.1监听端口。启动时将已绑定socket直接交给Uvicorn，避免先检查再绑定的端口竞争；不关闭现有进程、不自动安装或调用模型。前台运行，用户Ctrl+C停止。基础检查明确不验证密钥有效性、模型余额、数据库迁移或鉴权分析链路。
+
+新增tests/test_start_service.py六项，覆盖配置白名单/字面值、Java健康与错误地址、端口占用、缺密钥、不调用模型的check-only、从不同工作目录实际启动Uvicorn子进程并读取/health且不输出密钥。测试使用本地Java健康夹具和假模型配置，不访问真实模型/业务库。定向6/6、Python全量203/203通过（14.743秒），全量附60秒堆栈超时保护未触发；git diff --check通过。
+
+更新ai-service/README及五类会议试用指南，以两条启动/检查命令替换手工加载配置片段。Java/前端业务无改动，本轮不重跑五类live。下一步可选择一类会议，在隔离数据库验证真实模型→页面人工审核→执行的整条链路，将此前模型只读评测与固定模型业务联调接起来。本轮停止。
+
+## 第五十八轮：Refinement真实模型至业务执行端到端验收（2026-10-01归档）
+
+qa/run_daily_live.py新增显式--real-model（仅Refinement）和--env-file，默认仍固定模型。真实模式通过本地单次预算网关调用生产ChatModelClient，转发生产Skill消息，仅发送合成会议及隔离种子故事；最多一次供应商尝试，失败不重试，第二次网关请求429。配置不写进报告，供应商异常不回显。启动Python改用start_service.py --environment-only；真实密钥仅供网关，子进程使用本地配置。
+
+frontend/e2e-live/refinement-flow.spec.js按保存结果读取proposal_id，真实模式使用明确标题/未知字段的合成文本；保留原始模型候选、持久化分析及审核/执行/故事/日志JSON。自动化脚本通过人工审核界面填写预设补充字段，不代表模型自动批准或真实用户现场验收。
+
+真实deepseek-v4-flash调用1次，浏览器1/1通过。模型提案保留五项null、证据来自S1；审核前后故事不变，独立执行创建US38（待办、无负责人）和日志#1；并发重复执行、分析恢复、权限、刷新审计和看板均通过。MySQL8.0.31 counts为1/1/1/1/1，证据qa/.daily-live/77fda1eea578435089ab528b0d8ffa09/，原始生成时间不改写，文件SHA256及逐项复核见qa/DAILY_LIVE.md。
+
+新增qa/test_live_model_gate.py两项本地测试，成功/失败均只允许一次调用、错误脱敏，2/2通过。默认模型首次回归中断、无完成报告，不计为通过；恢复后重跑1/1通过，证据qa/.daily-live/d03c3e36049141238dde24e6e8809835/。未再次调用真实供应商、未改业务库或业务服务逻辑，git diff --check通过。未重跑Python203、Java87、浏览器61全量，沿用前轮记录。单次正例不覆盖复杂语义和稳定性，已有语义待办保留。
+
+下一步建议检查会议删除与新增分析/审核/执行记录的关联边界，避免旧删除入口与五类新记录不一致；先核对既定记录保留规则，再做最小修复和验证。本轮停止。
+
+## 第五十九轮：会议删除与五类分析审计一致性（2026-10-01）
+
+检查发现MeetingService旧清理链路遗漏五类分析表，删除有分析的会议会因现有外键失败，前端仍提示可删除。沿用现有外键保护结果而非新增级联删除：新增MeetingDeletionGuard，MANDATORY加入外层删除事务，先对会议FOR UPDATE，再用锁定读检查status/planning/review/retro/refinement分析；任一存在立即409，发生在录音/旧建议等任何清理之前。与五类保存的会议锁顺序一致。包括无变更/拒绝/未执行分析；无分析会议仍可按原流程删除。没有改表结构、没有删除现有记录或业务成果。
+
+修改MeetingService接入保护、MeetingController说明、MeetingPanel删除确认文案。删除冲突保留当前会议和提案，未新增强制删除入口。更新试用指南说明保留边界。
+
+新增MeetingDeletionGuardTest八项，合并五类原回归共95/95通过，Java21打包成功；包括存在检查、404、保存先提交和删除先提交后的结果。H2并发用例不能替代所有MySQL竞争场景。新增浏览器409反馈与状态保留测试，Refinement定向7/7通过；其余前端全量未重跑。五套live增加公共删除断言，在待审及执行后检查409与原记录/业务列表不变，另外验证无分析会议200删除及读取404。真实MySQL运行证据见qa/DAILY_LIVE.md本轮章节。
+
+下一步回到既定路线，梳理Assignment Engine最小切片的现有成员画像、任务估时与容量输入，优先只读建议和人工审核边界；不重复打磨本轮已通过的链路。
+
+本轮最终结果：Java95/95、浏览器定向7/7、五类真实MySQL闭环5/5均通过，git diff --check通过。五类live证据目录已归档到qa/DAILY_LIVE.md。到此停止继续开发。
+
+## 第六十轮：Assignment数据准备、候选规则及鉴权接口（2026-10-01）
+
+原共享链接本轮读取失败，本地缺少具体分配公式，先推进可独立的数据准备。用户随后明确授权“原对话已丢失，请自行决定吧”，据此确定assignment-skills-v1，不将新规则称为原对话既定算法。
+
+新增assignment_context.py，复用PlanningContextReader及三个已鉴权Java GET投影，输出选定故事、成员画像/关联故事/活动任务/目标Sprint任务、完整原始任务及缺口。保留六周容量和两种Task工时原义；故事估时/Sprint可用及剩余工时均未知，Sprint4任务排期不可用用null，非原子读取明确标记。悬空负责人/看板关联及空画像有诊断，不猜测修复。
+
+新增assignment_engine.py，针对一个故事接收人工明确技能要求（维度/名称/最低等级），只按名称精确归一化匹配，逐项等权，按满足数量排序，同分并列、ID仅稳定显示；年限/姓名不打分。viewer排除，其余角色均仍需人工核对；缺技能记录是null而非真实能力为零。空要求不排名，无匹配明确说明。所有候选容量unknown、requires_human_review，不自动决定负责人。
+
+api.py新增POST /api/meetings/{id}/assignment/context及/assignment/recommendations；admin/owner/member可用，viewer403。Java授权会议后读取，不调用模型、不保存、不写业务数据，越权字段及未知目标拒绝。尚无前端入口、建议持久化、审核执行和容量可行性算法。文档docs/会议Agent_AssignmentEngine规则与接口.md记录新规则来源、数据映射、输入样例和限制，ai-service/README加入入口。
+
+新增test_assignment_context.py十一项、test_assignment_engine.py六项。首轮5项因冻结契约不允许原位修改rank报错，改为复制新候选后Python全量220/220通过（15.315秒），未放宽断言。验证数据/规则/权限/无写与本地HTTP适配器；未运行真实Java/MySQL、浏览器或模型评测。git diff --check通过。
+
+下一步接Assignment候选页面：选择故事、人工输入要求、查看逐项匹配/现有负载/未知容量，同分和无匹配明确展示；随后再推进持久化与人工审核后的独立执行，不把只读建议直接写入负责人。本轮停止。
+
+## 第六十一轮：Assignment候选页面与浏览器验证（2026-10-01）
+
+新增frontend/src/components/ai/AssignmentPanel.vue及frontend/src/api/assignment.js，在MeetingPanel增加“打开分配候选”入口。admin/owner/member可选择故事、目标Sprint及1–20项明确技能要求，查看并列排名、逐项画像等级、关联故事、未完成任务及容量缺口。六周容量与Sprint容量分开说明；未匹配不表述为成员无能力。viewer不可提交。
+
+接口响应校验会议/故事/Sprint归属、规则版本、候选成员及逐项阈值依据。修改条件清空结果；切换会议或收起组件使迟到响应失效；请求失败保留输入，故事目录失败支持重试。不调用模型，不持久化候选，不修改负责人，无新助手派工。
+
+新增frontend/e2e-status/assignment-flow.spec.js八项浏览器测试。全量首次69/70通过，唯一失败为目录故障夹具早于页面初始化，影响了应用初次加载；增加页面就绪等待后，该项定向重跑1/1通过。合计70个用例均已通过验证（不是修正后再次全量运行）。npm run build通过，git diff --check通过。未修改后端逻辑，未重新运行Python/Java单测或真实MySQL联调。同步更新规则接口、试用指南、ai-service/README和临时分工记录。
+
+下一步优先完成Assignment建议快照持久化及人工选择/审核，再接独立执行和业务快照冲突检查，形成分配闭环。本轮停止。
+
+## 第六十二轮：Assignment建议持久化与人工选择审核后端（2026-10-01）
+
+新增Java AssignmentSuggestionService/Controller及db/assignment-analyses.sql，application.yml纳入启动建表。快照保留input/result、提交人、时间、请求号和不可覆盖审核决定。保存锁定会议并检查故事id/title/status/sprint/owner_id；同会议/提交人/请求号并发收敛为一条，完全相同重试恢复原记录，载荷不同409。列表与详情按会议隔离，请求恢复按提交人隔离。
+
+admin/owner/member可保存，所有登录角色可读，admin/owner可审核。批准必须明确选择已保存候选、给出理由并知悉容量未验证，重新检查成员角色及故事快照；可选择非首位或无匹配记录的候选。拒绝保留理由，不要求故事仍存在。同审核人相同决定幂等，其他决定409；不修改故事、不产生故事日志，无分配执行端点。capacity_acknowledged不表示容量已核实。
+
+新增Python assignment_store.py和POST /assignment/suggestions入口：只接收技能要求和请求号，读取事实重新计算后保存；恢复请求检查输入一致性，保存响应按快照重算候选校验。沿用有界HTTP和JWT转发，瞬时故障最多同载荷重试一次，未知保存结果显式报错。原只读接口和页面保持原行为，保存及审核页面下一轮接入。
+
+MeetingDeletionGuard扩展Assignment保留边界，已保存建议的会议返回409；增加对应删除测试、更新MeetingPanel提示和Refinement浏览器断言。规则/API文档、试用指南、ai-service/README和临时分工记录同步。正式代码仍由主AI维护，无新助手派工。
+
+本轮文件：新增ai-service/meeting_agent/assignment_store.py、ai-service/tests/test_assignment_store.py、java-backend/src/main/java/com/aicap/controller/AssignmentSuggestionController.java、service/AssignmentSuggestionService.java、src/main/resources/db/assignment-analyses.sql、src/test/java/com/aicap/contract/AssignmentSuggestionTest.java；修改Python api.py及共享HTTP测试夹具test_api.py、Java application.yml/MeetingDeletionGuard.java/MeetingDeletionGuardTest.java、前端MeetingPanel.vue/refinement-flow.spec.js及上述文档。
+
+验证：Python最终225/225（15.584秒），新增5项；初次230项包含测试类导入导致的5项重复发现，改用模块导入后重新验证。Java AssignmentSuggestionTest新增9项、删除保护增加1项，与五类流程隔离回归共105/105；真实H2事务验证并发、幂等、权限、非法载荷、过期故事/成员、拒绝与无业务写入。Java首次无筛选测试触发旧MySQL集成用例，本地数据库连接失败，该完整套件未通过；随后仅运行隔离回归，不宣称真实MySQL验收。Java21 package成功，前端构建成功，删除提示浏览器定向1/1。未调用真实模型，未重启或迁移日常数据库。git diff --check通过。
+
+下一步接入Assignment页面保存、历史恢复及人工选择审核，继续复用现有界面模式；之后补独立执行与冲突检查。本轮到此停止。
+
+## 第六十三轮：Assignment页面保存审核与独立执行闭环（2026-10-01）
+
+用户允许本轮多完成任务，本轮完成页面保存、历史恢复、人工审核、负责人独立执行和审计展示。AssignmentPanel增加保存入口，完整请求按用户/会议保存在sessionStorage，保存未确认时保持原请求编号和条件；存储不可用不发出保存。保存重新计算候选，不把只读查询显示值直接入库。AssignmentHistory展示保存时技能与任务负载快照，支持历史选择、刷新、人工选人和理由/容量未知确认、拒绝与独立执行。member/viewer只有对应读取/提交权限，审核执行仍需admin/owner。
+
+assignment.js校验保存记录归属和原输入、审核决定、执行审计字段，缺日志等无效响应不显示成功。迟到响应不污染新会议，确认执行后刷新看板；刷新失败单独重试读取。服务端成功但响应丢失时可刷新历史恢复真实执行状态，避免再建建议或再写业务。尚未实现跨浏览器保存意图恢复；历史记录可查询已成功保存的请求。
+
+Java AssignmentSuggestionService/Controller新增POST /assignment-suggestions/{id}/execute，仅接收空对象，目标与负责人只读已保存审核。建议行锁串行化同建议执行；执行前检查成员角色和故事title/status/sprint/owner_id，过期、未审核/拒绝或无负责人变化均拒绝。负责人更新、edit故事日志、review_json追加execution审计同事务；输入和审核人/时间不覆盖。重复执行返回同一审计，不重复写日志。此切片只变更故事负责人，不改变Sprint/状态或关联任务，也不推算未知容量；画像与任务仍是供人工参考的保存时快照。
+
+本轮文件：frontend/src/api/assignment.js、frontend/src/components/ai/AssignmentPanel.vue、新增AssignmentHistory.vue与frontend/e2e-status/assignment-lifecycle.spec.js；Java AssignmentSuggestionService.java、AssignmentSuggestionController.java、AssignmentSuggestionTest.java；规则/API文档、试用指南、ai-service/README及本进度/临时分工文档。未新增表结构，执行审计存于原建议review_json。未修改Python逻辑、未操作日常数据库、未提交或推送Git。
+
+验证：Java新增执行5项，Assignment共14项；合并会议删除与五类流程共110/110通过，Java21 package成功。浏览器先全量78/78通过，随后补充审核负载展示及响应丢失恢复、sessionStorage失败测试，最终定向10/10通过，累计80个独立用例已验证。最终npm run build、git diff --check通过。Python沿用前轮225项，没有重复运行。本轮为H2事务/MockMvc及浏览器HTTP夹具，尚未完成Assignment真实Java/Python/MySQL联合验收，不等同于生产验收。
+
+下一步优先进行Assignment隔离真实服务联调，验证真实JWT、MyBatis/MySQL、Python持久化及页面审核执行，并纳入现有QA脚本；通过后按既定路线推进上传录音与STT/Diarization。暂不需要助手派工，本轮停止。
+
+## 第六十四轮：Assignment真实联调及转写音频输入准备（2026-10-01）
+
+qa/run_daily_live.py新增assignment套件，frontend/e2e-live/assignment-flow.spec.js走真实JWT登录、会议保存、Python技能计算、Java/MySQL快照持久化、页面人工审核和独立负责人执行。验证任务/成员画像不变、重复/并发执行幂等、Python请求恢复、权限和会议删除保护、刷新审计；另保存拒绝建议、批准后真实修改故事制造冲突，确认不能执行。最终3条建议：1执行/1拒绝/1冲突未执行，仅1条分配日志，模型调用0。
+
+首轮205a521bdf004b2a8b5e7b048d46dbcf失败：测试对整个面板toContainText，拼接的按钮和标题提前匹配“分配建议已保存”，未等待实际保存；已改为精确成功提示，并同步修正assignment-lifecycle夹具断言。修正后56d17b170f5c469ab670159900aac7f5真实Assignment通过1/1。此问题为测试时序，未修改分配业务逻辑。
+
+继续进入既定STT路线的首个输入切片，新增ai-service/meeting_agent/audio_tool.py及POST /transcription/prepare。复用现有Java音频上传/存储/回放API，按当前用户角色、会议音频目录核对归属，固定Java地址下载，不采用元数据URL。音频25MiB和元数据256KiB上限、超时、禁止重定向、audio/mpeg、字节大小及两处SHA-256校验；仅返回元数据和verified_bytes/not_started状态，不返回音频内容或令牌，不修改原文。时长保留上传声明并标记未验证，不假称解码时长；没有STT/说话人区分引擎、没有新外部调用。
+
+新增test_audio_tool.py九项，Python全量234/234（18.431秒），QA网关2/2通过。扩展同一真实套件，上传2048字节合成MP3头/帧同步夹具到Java，再由Python读取校验，核对匿名/只读/未归属ID拒绝。最终真实MySQL8.0.31联调 **237afe831f7a4fcbb75b374baf67e110** 浏览器1/1、counts3/1/1/1、model_calls0、退出码0；不能据此声称语音识别已完成或音频可解码。运行自动停止本轮服务，日常库未改。
+
+本轮变更：qa/run_daily_live.py、frontend/e2e-live/assignment-flow.spec.js、frontend/e2e-status/assignment-lifecycle.spec.js；新增audio_tool.py/test_audio_tool.py、修改api.py注册音频准备入口；新增docs/会议Agent_音频输入与转写接入.md，更新Assignment规则、QA说明/证据、ai-service/README及进度/分工。Java和前端产品代码未改，沿用前轮打包与110项Java/80个浏览器用例基线，不重复跑全套；git diff --check通过。无Git提交推送，无助手新派工。
+
+下一步接实际转写引擎和音频解码，形成带时间戳/匿名说话人标签的结果；验证真实语音，再保存可人工核对的转写版本并衔接会议Agent。既有会议原文及审核审计不得静默覆盖。本轮停止。
+
+## 第六十五轮：本地语音转写、时间戳草稿及真实页面验收（2026-10-02）
+
+复用成熟faster-whisper 1.2.1及多语言base模型，本机CPU int8推理，PyAV解码MP3。新增可选requirements-stt.txt及prepare_stt.py，显式安装/下载并记录模型revision；服务请求只读本地模型，禁用在线下载，不向外部语言模型发送音频。模型和临时产物不入Git。当前本机已完成安装及下载。
+
+Python新增transcription.py、transcription_worker.py和POST /transcription/run，复用前轮鉴权音频读取。校验实际解码时长不超过10分钟、文本16000字符以内、片段ID/时间范围/全文一致；每服务进程一个转写子进程，CPU4线程、180秒超时及临时文件清理，忙碌明确429。结果是未保存的draft/no_speech，speaker_id=null及diarization_status=not_available；没有用成员身份或任意匿名标签冒充说话人分离结果。
+
+前端新增api/transcription.js及AudioTranscription.vue，RecorderPanel每条音频接入语言选择、开始转写、忙碌/错误反馈、时间戳片段和可复制全文。响应绑定音频/会议/hash，切换会议隔离迟到结果；viewer无发起入口。页面明确草稿需核对、刷新丢失，不自动覆盖原文。尚未实现保存版本与人工编辑确认，也尚未实际区分说话人。
+
+新增test_transcription.py八项及transcription.spec.js七项；Python242/242、pip check通过。浏览器全量86/87，一条Retro入口超时，之后定向Retro8/8通过，累计87个独立用例通过；未声称单次全绿。前端构建及差异检查通过。qa/run_stt_local.py以Windows中英文语音生成MP3并实际执行模型，两例有文本/时间戳，约4.7/2.7秒；中文“登录”误识别为“登陆”，仅作为清晰合成音频链路验证，不代表真实会议准确率。
+
+qa/run_daily_live.py加入transcription套件和--stt-audio，新增真实浏览器transcription-flow.spec.js；上传→鉴权读取→实际转写→页面展示→原文不变→刷新不留草稿，最终930570f8a9c540c49235e5514ba98520真实MySQL/Java/Python/Vite/Edge1/1通过、退出0，音频/分析/故事日志1/0/0，LLM调用0、成功转写1。前两次分别因SQL表名拼写错误、Java音频读取503失败，完整记录见qa/DAILY_LIVE.md；后者顺序重跑未复现，根因未确认。live Playwright产物改到各运行专属子目录。
+
+文档更新：音频指南、主/AI服务README、QA说明/证据及本进度和临时协作记录。Java代码本轮未改，日常数据库未动，未Git提交推送。下一步优先实现独立转写版本保存及人工核对，再明确选择文本进入既有会议分析；说话人分离需另行实现与样本验收。暂不需要助手派工，本轮停止。
+
+## 第六十六轮：转写版本保存、人工核对及分析衔接（2026-10-02）
+
+新增Java TranscriptVersionController/Service及db/transcript-versions.sql，保存用户提交的不可变草稿，严格核对音频归属/hash、片段/全文和未知说话人约束。返回caller_submitted来源，不把客户端传入的模型草稿当作服务器认证的模型输出。按用户/会议/请求号幂等；前端按完整草稿内容生成稳定编号，重复保存不增行。
+
+人工核对允许admin/owner/member，必须明确acknowledged=true。保留原始片段，单独保存校对文本、确认人和时间；同事务创建独立会议并保存analysis_meeting_id，相同确认幂等，不同内容/确认人冲突。新会议复用五类分析入口，原会议文本及历史分析不覆盖。当前每版本只确认一次，不支持确认后的多轮修订或撤销；可手动新建会议继续整理。说话人分离仍未接入。
+
+前端新增TranscriptVersions.vue、api/transcriptVersions.js，AudioTranscription接入保存、历史选择/恢复、原始片段查看、核对文本及显式确认。响应未确认时冻结原提交并允许原样重试/刷新恢复；切换会议隔离迟到结果。打开分析会议单独触发，不自动调用模型。MeetingDeletionGuard扩展版本关联保护，MeetingAudioService将音频外键删除冲突明确返回409；原音频、原会议和派生分析会议均保留。
+
+本轮文件清单：新增Java controller/TranscriptVersionController.java、service/TranscriptVersionService.java、resources/db/transcript-versions.sql、test/.../TranscriptVersionTest.java；修改application.yml、MeetingDeletionGuard.java、MeetingAudioService.java、MeetingDeletionGuardTest.java。前端新增src/api/transcriptVersions.js、src/components/ai/TranscriptVersions.vue、e2e-status/transcript-versions.spec.js；修改AudioTranscription.vue、MeetingPanel.vue、e2e-status/refinement-flow.spec.js、e2e-live/transcription-flow.spec.js。QA修改run_daily_live.py、DAILY_LIVE.md；更新主/AI服务README、音频指南、本进度及.agent-collab/CURRENT.md。Python生产逻辑不变。
+
+验证：新增Java7+1项，相关14类178/178通过，Java21 package通过；浏览器转写/版本13与Refinement/删除7，共20/20定向通过，前端build及差异检查通过。真实服务首轮因刷新默认选择最新会议，测试寻找原音频按钮超时，明确选择原会议后最终 **3288200b0caf4747988047d9c5d8d866** 1/1通过、退出0。真实语音模型1次、固定文本模型1次；音频/分析/故事日志/版本/已确认版本1/1/0/1/1，分析快照为核对文本，原文不变且无提案执行。详情及限制见qa/DAILY_LIVE.md。
+
+下一步优先实际说话人分离与多人音频验收，保留无法识别身份的明确状态；随后再评估确认文本多轮修订和时间片段校对体验。不重做已完成五类会议及Assignment方案。无需新增助手派工；未修改日常库、未Git提交推送，本轮停止。
+
+## 第六十七轮：本地匿名说话人时间段及公开多人样本验收（2026-10-02）
+
+接入sherpa-onnx 1.13.8离线CPU说话人分离。新增requirements-diarization.txt、prepare_diarization.py、diarization.py/worker；下载模型和manifest置于忽略目录，生产请求不联网。POST /diarization/run复用Java音频鉴权和完整性读取，支持自动估计或1–8人提示，返回SPK1起匿名时间段、明确identity_status=anonymous_only/not_saved/human_review。与STT共用单进程槽，限制10分钟、180秒；不识别成员姓名、不写入转写版本、不自动绑定文字。
+
+新增前端diarization.js与SpeakerDiarization.vue，展示人数提示、匿名时间段、重叠/人工核对说明和明确错误；切换会议丢弃迟到结果。AudioTranscription中并列展示转写版本和分离预览。新增Python3项及浏览器5项，Python245/245、相关浏览器18/18、build、pip check与差异检查通过。
+
+qa/run_diarization_local.py用官方公开四人中文样本验收：指定4人正确给出4个匿名聚类/10段，约12.69秒；自动人数误判为6人/10段，约13.16秒。由此维持“人数已知时手工输入、自动结果仅草稿”的产品边界，不宣称真实多人准确率。真实服务5ebd472958144ce0bbc0faf797fe8cb7以单人合成音频指定1人，页面得到1人/2段，并继续完成既有保存/确认/分析，1/1通过、speech_model_calls2、固定文本模型1、counts1/1/0/1/1。
+
+本轮新增/修改集中于Python分离运行与下载、前端匿名预览、QA脚本/真实套件和文档；Java未改，日常库未动，未Git提交推送。下一步优先开发转写片段与匿名时间段的人工对齐，并在获得授权的真实多人录音上评估DER/文字归属；当前不自动合并两类输出。无新助手派工，本轮停止。
+
+## 第六十八轮：转写片段与匿名时间段人工对齐（2026-10-02）
+
+前端将同音频的STT与分离结果在AudioTranscription父组件汇合，TranscriptVersions按最大时间重叠为每个S片段预填SPK标签。用户可逐项选择其他匿名标签或未知；确认前仍可编辑全文。分离人数改变或会议切换会清空预览，对齐不会沿用旧聚类。刷新保留转写版本和已确认对齐；未确认的分离预览当前不持久化，需重新计算。
+
+Java确认载荷新增可选speaker_alignment，不改表结构。服务端保存引擎、音频哈希、时长、说话人数、完整turn快照和按转写片段顺序的assignments；核对来源音频、持续时间、匿名标签序列、实际标签集合和全部片段覆盖。成员姓名、伪造标签、错误哈希/引擎/片段均422。对齐与确认、新分析会议同事务，原草稿speaker_id继续为null，纯文本确认向后兼容。
+
+新增Java1项对齐契约并扩展前端版本测试；会议相关Java14类179/179、package通过，页面分离+版本12/12。真实链路8799a5209dc5402b8bb1b1cdbd39a43f完成STT、两次实际分离、保存/刷新、人工对齐、确认和Daily分析，1/1通过，counts1/1/0/1/1，speech操作3、文本夹具1，无故事执行。文档及QA证据同步更新。
+
+下一步使用获授权真实多人会议样本评估DER、预填准确率和重叠发言体验，再决定是否持久化未确认分离预览；当前不做成员身份识别。本轮完成后按用户授权整理Git提交并同步远端。

@@ -66,8 +66,8 @@ async function analyze() {
 </script>
 
 <template>
-  <section aria-label="Sprint PlanningPlanning分析">
-    <h3>Sprint PlanningPlanning分析</h3>
+  <section aria-label="Sprint Planning分析">
+    <h3>Sprint Planning分析</h3>
     <p class="small">分析已保存的会议原文并生成故事Sprint提案；提案需经人工审核和执行。</p>
     <template v-if="meeting.maySubmit">
       <label class="field">目标 Sprint（可选）

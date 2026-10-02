@@ -5,6 +5,7 @@ import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
+import AudioTranscription from './AudioTranscription.vue'
 
 /* 爱管理自带录音:麦克风 → MediaRecorder → 客户端 lamejs 编码为真 .mp3 → 提交到会议
    说明:浏览器 MediaRecorder 原生只出 webm/opus 或 mp4/aac,不出 mp3;
@@ -289,6 +290,7 @@ onUnmounted(() => {
         <a v-if="playUrls[a.id]" :href="playUrls[a.id]" :download="a.filename" class="btn-link">下载</a>
         <button v-if="mayDelete" class="danger" @click="remove(a)">删除</button>
       </div>
+      <AudioTranscription :key="meetingId + ':' + a.id" :meeting-id="meetingId" :audio="a" />
     </div>
   </div>
 </template>

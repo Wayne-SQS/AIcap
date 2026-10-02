@@ -1,0 +1,224 @@
+[
+  {
+    "id": "SR-01-demo-not-acceptance",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "US13 的功能我们已经开发好了，今天评审先给大家演示一下效果。\n正式验收还没安排，等测试那边给结论。",
+    "stories": [
+      {
+        "id": "US13",
+        "title": "UML 自动生成",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 3,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": false,
+    "rubric": "原文表示准备演示，不能擅自写为已经演示；开发完成不等于验收，验收还没安排；不补造测试方安排或身份。"
+  },
+  {
+    "id": "SR-02-partial-scope",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "这个 Sprint 我们计划做 5 个故事。\nUS01、US02、US03 三个已经明确验收通过了。\nUS04 还在改，US05 根本没开始。",
+    "stories": [
+      {
+        "id": "US01",
+        "title": "项目与成员管理",
+        "status": 2,
+        "sprint": 1,
+        "owner_id": 1,
+        "description": null,
+        "acceptance": null
+      },
+      {
+        "id": "US02",
+        "title": "角色与权限",
+        "status": 2,
+        "sprint": 1,
+        "owner_id": 2,
+        "description": null,
+        "acceptance": null
+      },
+      {
+        "id": "US03",
+        "title": "史诗/故事/验收条件",
+        "status": 2,
+        "sprint": 1,
+        "owner_id": 2,
+        "description": null,
+        "acceptance": null
+      },
+      {
+        "id": "US04",
+        "title": "用户故事地图",
+        "status": 1,
+        "sprint": 1,
+        "owner_id": 1,
+        "description": null,
+        "acceptance": null
+      },
+      {
+        "id": "US05",
+        "title": "任务拆分/负责人/日期",
+        "status": 0,
+        "sprint": 1,
+        "owner_id": 2,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": false,
+    "rubric": "本 Sprint 计划 5 个故事；3 个明确验收通过；1 个进行中、1 个未开始；把整个 Sprint 说成“已完成/达标”；把 US04/US05 当作已完成或已验收"
+  },
+  {
+    "id": "SR-03-explicit-acceptance",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "US07 昨天已经通过验收，测试同事签字确认了。\n可以标记完成了。",
+    "stories": [
+      {
+        "id": "US07",
+        "title": "基础报表",
+        "status": 1,
+        "sprint": 1,
+        "owner_id": 2,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [
+      [
+        "US07",
+        1,
+        2
+      ]
+    ],
+    "supporting_segments": {
+      "US07": [
+        "S1"
+      ]
+    },
+    "needs_question": false,
+    "rubric": "US07 昨天通过验收并有签字确认；会议明确表示可以标记完成；“昨天”是原文明确时间；声称变更已经执行或已批准；补充原文未提及的验收细节"
+  },
+  {
+    "id": "SR-04-conflict",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "US09 已经验收通过了。\n不对，验收时发现了阻塞问题，还在修，没通过。",
+    "stories": [
+      {
+        "id": "US09",
+        "title": "拖拽/自定义列/WIP",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 1,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": true,
+    "rubric": "两位参会者对 US09 是否验收通过存在未解决的冲突；在冲突未解决时判定 US09 已完成；把冲突的单方陈述当作已澄清结论"
+  },
+  {
+    "id": "SR-05-pending-confirmation",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "US22 的验收标准我们还要跟需求方再确认一下。\n负责人目前也还定不下来。",
+    "stories": [
+      {
+        "id": "US22",
+        "title": "代码/文档/测试质量分析",
+        "status": 1,
+        "sprint": 3,
+        "owner_id": null,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": true,
+    "rubric": "US22 的验收标准待与需求方确认；US22 负责人尚未确定；说需求方也不知道/未定（原文只待确认时间或结论）；为 US22 补造负责人或截止日期"
+  },
+  {
+    "id": "SR-06-demo-only-explicit",
+    "source": "H05-review/examples.json",
+    "source_status": "待决定建议",
+    "current_sprint": null,
+    "transcript": "本次评审主要是把 Sprint 成果做个展示。\n具体验收结论由 QA 后续单独出报告。",
+    "stories": [
+      {
+        "id": "US10",
+        "title": "甘特图/依赖/里程碑",
+        "status": 1,
+        "sprint": 1,
+        "owner_id": 1,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": false,
+    "rubric": "本次会议定位为成果展示；验收结论由 QA 后续单独出具，本次不含验收结论；把本次展示当作验收通过；生成任何完成或验收相关的状态变更"
+  },
+  {
+    "id": "SR-07-negation",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "有同事说这个功能做完了。\n但其实并没有完成，回归测试还没跑完。",
+    "stories": [
+      {
+        "id": "US12",
+        "title": "跨视图联动",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 1,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": false,
+    "rubric": "保留否定与回归测试未跑完；原文没有故事ID，不因快照只有US12就把这个功能断定为US12；不生成完成提案。"
+  },
+  {
+    "id": "SR-08-future-condition",
+    "source": "H05-review/examples.json",
+    "source_status": "既定",
+    "current_sprint": null,
+    "transcript": "如果下周的冒烟测试通过，我们就可以认为这个 Sprint 达标了。",
+    "stories": [
+      {
+        "id": "US15",
+        "title": "筛选/跨迭代/趋势",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 2,
+        "description": null,
+        "acceptance": null
+      }
+    ],
+    "expected_actions": [],
+    "supporting_segments": {},
+    "needs_question": false,
+    "rubric": "Sprint 达标以“下周冒烟测试通过”为条件，属将来条件而非已达成；把条件句当作已验收/已达标；为条件补充原文未给出的日期（如下周=具体日期）"
+  }
+]

@@ -1,4 +1,12 @@
-# 会议 Agent AI 服务（纯文本工作流阶段）
+# 会议 Agent AI 服务
+
+音频入口：`POST /api/meetings/{id}/transcription/prepare` 验证Java音频，`/transcription/run` 执行本地CPU转写，`/diarization/run` 生成录音内匿名说话人时间段。转写需 `requirements-stt.txt` 与 `prepare_stt.py`；分离另需 `requirements-diarization.txt` 与 `prepare_diarization.py`。页面可保存独立转写版本、人工核对后创建分析会议；SPK标签不代表成员身份，尚未自动绑定文字，原会议不覆盖。详见[音频输入与转写接入](../docs/会议Agent_音频输入与转写接入.md)。
+
+Assignment Engine提供只读准备与技能候选排序接口：`POST /api/meetings/{id}/assignment/context`、`POST /api/meetings/{id}/assignment/recommendations`，以及 `POST /api/meetings/{id}/assignment/suggestions` 重新计算并保存快照（需client_request_id）。这些入口均需admin/owner/member，不调用模型，不修改负责人。AI页面已接查询、保存、历史恢复、人工审核与独立执行；Java只允许admin/owner执行已批准分配，同事务保存负责人变更和审计。容量仍未知，规则、请求样例及限制见 [Assignment Engine规则与接口](../docs/会议Agent_AssignmentEngine规则与接口.md)。
+
+当前已接通五类会议的分析、人工审核、执行与审计。初次试用请先看 [五类会议试用指南](../docs/会议Agent_五类会议试用指南.md)，特别注意单独启动Python并加载模型配置。下文保留逐轮实现说明，其中“当前仅Daily”“下一轮”等是当轮历史范围；最新状态以接续文档末尾和各质量报告为准。
+
+推荐启动入口（在本目录执行）：`.venv/Scripts/python.exe start_service.py`。默认读取仓库backend/.env三项模型配置，检查依赖、配置格式、Java健康和本地端口后前台运行；`--check-only`仅检查，`--environment-only`不读文件，`--env-file`指定其他配置，`--java-url`和`--port`覆盖地址/端口。检查不调用模型，也不证明鉴权业务流程已就绪。Ctrl+C停止本次服务。
 
 遵循[已确定的共享方案](https://chatgpt.com/share/6aa60c39-0798-83ec-b24d-87f648047719)：Python / FastAPI / Pydantic / LangGraph；Skill 分析会议，Tool 经 Java 业务接口访问项目，写操作须人工审核。
 
@@ -524,3 +532,172 @@ Java为隔离H2/MySQL模式+MockMvc；Python为HTTP测试夹具+模型fixture。
 下一步直接做Planning真实服务联调（同一合成会议从分析保存到人工审核执行并核对数据库/日志/看板），优先收敛端到端问题，不扩展新会议类型或反复打磨低影响措辞。
 
 最终验证：Planning加入后的完整前端浏览器回归41/41通过（48.4秒），生产构建通过。
+## Sprint Review 分析核心（2026-09-28）
+
+新增 `review_contracts.py`、`review_skill.py`、`review_workflow.py`，使用既有 LangGraph / 模型适配器和 Java 故事只读 Tool。调用 `SprintReviewWorkflow(stories, model).run(meeting_id=..., transcript=..., access_token=..., current_sprint=None)` 前，调用方必须授权分析角色并读取该会议原文；本模块本身不提供 HTTP 鉴权入口。
+
+当前是 Review 的完成提案切片：`meeting_type=sprint_review`，输出 `summary/proposed_actions/open_questions`；复用 `update_story_status`，`changes.status` 仅允许严格整数 2，旧值必须与快照匹配且确实发生变化。既有 0/1/2 状态不扩充。故事读取包括描述和验收标准；标准不等于通过事实。`acceptance_results`、`sprint_goal` 固定为 null，当前 Sprint 不推断。
+
+Skill `review-completion-v1` 要求区分展示、开发完成与验收通过，保留否定、条件、局部范围和未解决冲突，不凭空补负责人/日期或整体达标结论。静态契约只验证结构、快照和连续原文引用，不能证明语义上的验收通过；必须经过模型效果验收和人工审核。
+
+分析核心首轮未包含 HTTP 和保存；后续已接入下节 Review 专属端点，不能将结果提交至仅接收 Daily 类型的旧端点。没有修改 Daily/Planning 对外契约。
+
+验证：`.venv/Scripts/python.exe -B -m unittest discover -s tests -q`（在 ai-service 目录），147 项通过。新增 12 项覆盖真实 LangGraph + 模型 HTTP 夹具、只读 HTTP 投影、错误终止、严格完成状态、证据与快照、无效扩字段、上下文预算、令牌隔离和重复调用隔离。尚未调用真实模型或进行 Review Java/MySQL 联调。
+
+## Sprint Review 分析保存与查询（2026-09-28）
+
+Python `POST /api/meetings/{meeting_id}/review/analyze`，Bearer 认证，请求示例：
+
+```json
+{"meeting_type":"sprint_review","client_request_id":"review-request-1","current_sprint":2}
+```
+
+`current_sprint` 可省略/null，不推断。先通过 Java 验证 admin/owner/member 角色并读取会议，再按当前调用者/会议/请求编号查询已有记录；命中直接返回，不重调模型。响应为 Review 原结果加 `analysis_id/client_request_id/storage_status`，有提案为 pending，无提案为 no_changes。未知保存结果沿用 `storage_outcome_unknown` 和请求编号，重试应复用同编号；自动保存重试至多一次且载荷完全相同。
+
+Java 专属资源 `/api/meetings/{meetingId}/review-analyses` 支持 POST/GET、GET `/{analysisId}`、GET `/by-request/{clientRequestId}`。保存和按请求号恢复要求 writer，列表及详情允许登录读取，沿用现有共享会议权限。新增 `db/review-analyses.sql` 并注册启动初始化，创建 `meeting_review_analyses`，不重置已有数据。Java 保存不可变原文、完整候选结果和目标故事基础快照；快照由数据库读取，未保存整个模型上下文或独立验收事实。
+
+Java 再次严格验证 Review 类型、仅完成状态、证据出处、旧状态、重复与无效变更。同会议加锁串行保存，唯一约束限制同调用者请求；同编号同载荷返回原记录，不同载荷409。保存不修改故事、不写故事日志、不代表批准。人工审核执行接口及前端见下节。
+
+验证：Python全量155项通过；Java ReviewAnalysisStorageTest 10项、Daily/Planning存储各9项，共28项通过（Java21覆盖默认编译版本，H2/MySQL模式、MockMvc、真实JDBC事务）。覆盖并发幂等、原始记录不可变、权限/会议/调用者隔离、旧状态冲突、严格类型、整批拒绝和重试恢复。未运行Review真实MySQL/浏览器联调或真实模型效果验收。
+
+## Sprint Review 人工审核与执行（2026-09-28）
+
+Java `/api/meetings/{meetingId}/review-analyses/{analysisId}/proposal-reviews` 支持 GET/POST；POST 仅 admin/owner 可用，GET 允许登录读取。审核示例：
+
+```json
+{"proposal_id":"p1","decision":"approve","reason":"已核对验收结论"}
+```
+
+拒绝使用 `decision=reject`。修改后接受使用以下格式：
+
+```json
+{"proposal_id":"p1","decision":"modify_and_approve","changes":{"reason":"核对原文后确认该故事整体验收通过"},"reason":"补充提案的验收范围说明"}
+```
+
+本完成提案切片仅允许修订提案理由（`changes.reason`），不修改原证据、故事、expected 或目标状态2。新理由必须非空且不同于原理由；顶层 `reason` 为非空修改说明，两者分别保存。approve/reject 不可携带 changes。若目标故事、证据或完成结论不正确，应拒绝并重新分析；不借 Review 执行其他状态变更。
+
+原提案和批准后的提案分开持久化。审核本身不写故事；同审核人以同载荷重试返回已有决定，修改已审核决定返回409。批准时再次检查故事旧状态，拒绝仍可记录过时提案。
+
+同分析路径 `/proposal-executions` 支持 GET/POST。POST 仅 admin/owner 可用，且只接收 `{"proposal_id":"p1"}`。执行读取持久化批准载荷，依次锁分析/审核/故事并复查旧状态；事务内更新 Story.status、写 move 日志和执行审计，再将审核执行状态标为 succeeded。执行响应包含 previous_status/new_status、story_log_id、executed_by/at。重复执行返回首次结果，不重写故事；日志/审计失败整笔回滚。不会改变 Story.sprint 或 Task。
+
+启动初始化新增 `review-proposal-reviews.sql`、`review-proposal-executions.sql` 两表，未运行现有业务库迁移。验证：ReviewProposalFlowTest 17项（含继承存储10项）、PlanningProposalFlowTest 14项、StatusProposalExecutionTest 25项，共56项通过。使用Java21、隔离H2事务和MockMvc；前端和Review真实MySQL联调仍待下一阶段。
+
+## Sprint Review 前端（2026-09-28）
+
+会议页面点击“打开会议 Sprint Review”，选择已保存会议即可分析；当前Sprint可选，不推断。请求号发送前保存到sessionStorage，按用户/会议/Sprint隔离；未知结果及刷新后的重试沿用原编号。
+
+Review面板展示保存时原文、证据、摘要、待确认问题和处理状态。admin/owner可接受、修改理由后接受、拒绝；修改需要新的提案理由及修改说明，界面明确提示不能改证据/目标故事/完成状态。批准后的理由单独展示，原提案保持可见。批准与执行分开，成功后刷新故事与日志；执行响应必须匹配分析/提案、包含有效审计字段且new_status=2，残缺确认不会显示成功。成员可分析不可审核执行，只读用户仅查看。
+
+新增reviewAnalysis/reviewAnalyses API、ReviewAnalysisForm/Panel、ReviewProposalReviewForm/Execute，MeetingPanel懒加载入口。浏览器用例在frontend/e2e-status/review-flow.spec.js，覆盖修改理由→执行→刷新审计、坏响应、成员/只读权限、拒绝及无效修改、未知分析刷新后同编号重试。浏览器使用mock业务接口，Review真实服务联调为下一步。
+
+## Review 真实模型验收
+
+已完成真实服务业务联调（见qa/DAILY_LIVE.md）。随后新增meeting_agent/review_evaluation.py与evals/review_quality.json，使用H05合成案例做8次真实模型调用。自动动作/契约8/8通过，人工文本复核未通过：SR-06将status=1误解释为未验收；另有冲突追问前提与冗余问题。没有改Skill或覆盖报告。细节及复现命令见evals/REVIEW_QUALITY_REVIEW.md。Python全量158项通过（新增3项评测器离线测试）。
+
+后续定向修正：当前Skill为review-completion-v2，明确状态编码不等于验收结果，并保持争议来源和未来时间口径。新增evals/review_semantics.json四例，与原SR-04/06/08合计7次真实调用全部通过自动检查；逐条复核中目标缺陷未重现，但仍有措辞冗余/轻微概括，未做全套或重复稳定性验收。Python159项通过，旧报告保持不变，详见同一质量复核记录的v2章节。
+
+## Retro 行动项分析核心（2026-09-28）
+
+新增retro_contracts.py、retro_skill.py、retro_workflow.py。`SprintRetroWorkflow(members, model).run(meeting_id=..., transcript=..., access_token=..., current_sprint=None)`要求调用者先验证分析权限并读取会议原文；当前无Retro HTTP入口或持久化。
+
+输入类型`sprint_retrospective`，通过现有MemberReadTool读取成员资料，仅向模型投影user_id/display_name，不发送画像能力或容量。输出summary、带证据的decisions、proposed_actions、open_questions。唯一动作create_action_item，changes含title、description、owner_id、deadline_text；负责人及截止时间必须显式给值或null。deadline_text保留原文连续短语，包括“下周五前”，不是归一化日期，也不能直接作为任务排期字段。
+
+Skill retro-action-v1只提取明确决定跟进的具体改进行动；建议、抱怨、被否决事项、未满足条件和未解决冲突保留原意，不当成确定根因或已采纳决定。人员未定、外部姓名、同名、仅“我”且无可靠说话人映射时保留null并追问；不自动分配或修改成员画像。
+
+校验会议ID、唯一成员/片段/提案、精确重复行动、连续引用；指定负责人必须在成员快照中，姓名唯一且出现在该提案引用中，截止短语须出现在引用中。此检查只证出处，不证明被提及的人已同意负责、日期确属截止时间或建议确已被采纳；仍需模型质量验收及人工审核。语义重复不保证由精确去重发现。
+
+验证：Python全量167项通过，新增8项测试覆盖真实LangGraph与模型/只读夹具、正常候选、未知信息、空结果、类型/证据/负责人错误、同名、重复、工具/供应商失败停止及重复调用隔离。尚无真实模型、Java/MySQL保存或前端。下一步接Retro候选保存与查询，保留与业务ActionItem创建分离的审核执行路径。
+
+## Retro 候选保存与鉴权入口（2026-09-28）
+
+Python提供`POST /api/meetings/{meeting_id}/retro/analyze`，请求为`{"meeting_type":"sprint_retrospective","client_request_id":"retro-request-1","current_sprint":null}`。先由Java校验角色及会议访问，再查询当前调用者已存请求；命中返回原结果，不重调模型。否则读取成员目录、运行Retro工作流并保存，成功返回原结果与analysis_id/client_request_id/storage_status。沿用有界HTTP和原载荷至多一次重试，保存结果不确定时返回storage_outcome_unknown并保留请求号。
+
+Java新增`/api/meetings/{meetingId}/retro-analyses` POST/GET、`/{analysisId}` GET、`/by-request/{clientRequestId}` GET。writer可保存与恢复请求，登录用户可查询会议共享记录。新增meeting_retro_analyses，启动初始化注册retro-analyses.sql；保存原文、完整结果和提案涉及负责人的member_snapshots（user_id/display_name），不保存全量成员画像，不创建业务行动项。
+
+Java重新校验决议/提案证据、唯一编号、精确重复事项和截止短语；指定负责人必须存在、姓名唯一且在对应引用中。需要负责人校验时按ID顺序锁定用户目录；保存后的姓名快照不随后续改名变化。owner_id/deadline_text必须显式为值或null；字段缺失、非法类型、未知字段整批拒绝。同会议提交加锁，数据库唯一键限制请求重复，同编号同载荷返回首次结果，异载荷409。无行动提案标no_changes，但决议仍完整保存。
+
+验证：Python173项通过；RetroAnalysisStorageTest新增8项，连同Review/Planning/Daily事务回归共64项通过（Java21、H2 MySQL模式、MockMvc）。未运行Retro真实MySQL或模型验收，未新增审核执行和页面。下一步补ActionItem实体及人工审核执行，不能把已保存候选视为已落地行动。
+
+## Retro 人工审核与行动项执行（2026-09-28）
+
+Java `/api/meetings/{meetingId}/retro-analyses/{analysisId}/proposal-reviews` 支持 GET/POST。admin/owner 可审核，登录用户可读。接受/拒绝请求分别使用 `approve` / `reject`，例如 `{"proposal_id":"p1","decision":"approve","reason":"已核对会议决定"}`。修改后接受必须提交完整 changes 和非空修改说明：
+
+```json
+{"proposal_id":"p1","decision":"modify_and_approve","changes":{"title":"完善发布检查表","description":"补充回滚检查步骤","owner_id":2,"deadline_text":"下月底前"},"reason":"人工确认负责人和时间"}
+```
+
+人工可修订事项、描述、负责人和截止文本；负责人必须存在，未知负责人/时间仍显式 null。人工修订可以超出原文候选，但与不可变原提案、证据分别存储，不声称是模型从原文提取。直接接受会核对原负责人姓名快照及唯一性；修改后接受按人工指定的用户 ID 确认。相同审核人和载荷可重试，已审核决定不可覆盖。
+
+同分析路径 `/proposal-executions` 支持 GET/POST；POST 仅 admin/owner 可用且只接收 `{"proposal_id":"p1"}`。执行读取已保存批准载荷，负责人改名或删除会阻止首次执行。事务内创建独立 action_items（初始状态 open）、action_item_logs 和执行审计；任一步失败全部回滚。重复执行返回首次 action_item_id/action_item_log_id，不重复创建。不会改 Story/Task/成员画像。
+
+登录用户可通过 `GET /api/meetings/{meetingId}/action-items` 查询业务行动项，通过 `GET /api/meetings/{meetingId}/action-items/{actionItemId}/logs` 查询审计。当前只实现批准后创建和查询，未实现行动项后续编辑/完成状态流转。
+
+新增初始化脚本 retro-proposal-reviews.sql、action-items.sql、retro-proposal-executions.sql，已注册 application.yml。本轮未运行日常业务库迁移。Java21 下 RetroProposalFlowTest 16项（含继承存储8项）加 Review17、Planning14、Daily25，共72项通过；覆盖权限、修改审核、未知字段、负责人变化、并发幂等和审计失败回滚。验证使用隔离 H2 MySQL模式和 MockMvc，Retro 前端、真实 MySQL 联调和真实模型验收仍待完成。
+
+## Retro 前端闭环（2026-09-28）
+
+会议页面新增“打开会议 Sprint Retro”入口，选择已保存会议后可发起分析。请求号按用户、会议和可选Sprint隔离，发送前写入sessionStorage；未知结果和刷新后的重试沿用原编号。展示保存时原文、会议决议及证据、待确认问题、原提案和批准后的行动内容。
+
+admin/owner可接受、拒绝或修改事项/描述/负责人/截止文本后接受。负责人选择显示姓名和ID以区分同名，未确定可保留null；时间留空表示null，不自动换算日期。修改须有实际变化及修改原因；成员目录加载失败可重试，失败期间不能修改后接受。成员可分析不可审核执行，只读用户可查看。
+
+批准后单独执行，只发送proposal_id，检查执行响应的分析/提案归属、行动项ID和审计字段后才显示成功。业务行动项列表在执行后刷新，可查询创建审计及批准载荷；原提案与人工批准内容分别展示，查看行动项不依赖当前分析记录。请求版本与卸载保护避免过期结果覆盖当前选择。
+
+实现位于frontend/src/api/retroAnalysis.js、retroAnalyses.js及components/ai/RetroAnalysisForm、RetroAnalysisPanel、RetroProposalReviewForm、RetroProposalExecute。浏览器验证位于frontend/e2e-status/retro-flow.spec.js，使用Vite/Edge和mock业务接口；本轮不代表Retro真实Python/Java/MySQL服务联调或模型语义验收。下一步进行真实服务联调。
+
+本轮验证：生产构建通过，完整浏览器回归53项通过，随后新增的两个边界用例2/2通过，共55个不同用例（Retro8项）；git diff --check通过。
+
+Retro真实服务联调已通过（2026-09-28运行，2026-09-29核验）：真实Edge/Vite/Python/Java/JWT/MySQL 8.0.31，浏览器1/1通过。覆盖未知负责人/时间的候选、人工修改批准、独立执行创建行动项、审计、并发执行重试、分析恢复、权限和刷新后查询。分析/审核/执行/行动项/创建日志各1条，故事日志0；故事/任务/成员资料不变，模型夹具仅调用1次。命令：`ai-service/.venv/Scripts/python.exe qa/run_daily_live.py --suite retro`（仓库根目录，先按qa/DAILY_LIVE.md打包Java）。模型仍是固定HTTP夹具，真实Retro模型语义验收为下一步。
+
+## Retro 真实模型首轮验收（2026-09-29）
+
+新增retro_evaluation.py、evals/retro_quality.json和3项离线测试；Python全量176项通过。对8个合成案例各调用一次deepseek-v4-flash，自动检查8/8通过，但文本复核未通过：同名案例把“整理发布检查表”改成“整理并发布检查表”，增加原文未决定的动作。原报告保留于忽略目录.retro-quality，逐例结论及哈希见[Retro质量复核](evals/RETRO_QUALITY_REVIEW.md)。本轮没有修改Skill、没有业务写入，也未重跑。下一步定向修正行动范围并补正反案例验证。
+
+后续定向修正：当前Skill为retro-action-v2，保持动词/对象/范围，禁止把对象中的发布/部署扩成新动作，同时保留明确要求的动作。新增retro_semantics.json四例，与原失败/冲突例共6次真实定向调用，自动6/6，逐条复核中目标扩张未重现；Python177项通过。仍有摘要遗漏决定、把成员目录说成参会成员等文本缺陷，记录为待办，不宣称全部质量通过。旧报告未覆盖，下一步按既定路线进入Refinement。
+
+## Refinement 新故事候选核心（2026-09-29）
+
+新增refinement_contracts.py、refinement_skill.py和refinement_workflow.py。`BacklogRefinementWorkflow(stories, model).run(meeting_id=..., transcript=..., access_token=..., current_sprint=None)`要求调用者先校验会议和分析权限。真实LangGraph串联只读故事、一次模型调用和输出校验，令牌不进入图状态/模型，关闭tracing。
+
+输入类型backlog_refinement；`StoryReadTool.get_refinement_stories`复用现有PlanningStorySnapshot字段及固定GET /api/stories，保留描述/验收标准原值，不转成接受结果。唯一候选动作create_story，changes含title及必须显式给值或null的description、acceptance、priority、sprint、activity。缺失信息保留null并追问，不能借用业务API默认Must/Sprint1/活动2，当前Sprint也不等于新增需求排期。不允许模型指定故事ID、负责人、状态、估时或审核结果。这些是本轮最小实现字段，不宣称原共享方案已规定同名底层字段。
+
+Skill refinement-create-v1区分讨论、确认新增和实际创建；已有故事修改/拆分及任务安排不在此切片内。标题/描述/验收要求不得扩展原文范围。校验类型、会议ID、唯一提案、连续引用和已有/本批次归一化同名标题（去首尾空白、casefold）；同义去重和采纳语义依赖后续模型验收及人工审核，不由精确匹配保证。
+
+验证：Python186项通过，新增工作流8项及只读HTTP投影1项。真实LangGraph+模型/只读夹具，不调用真实模型或写数据库；当前没有Refinement HTTP入口、保存、审核执行或页面。下一步接带鉴权的分析入口和候选持久化，再经独立审核执行创建故事；普通POST /api/stories不可直接用于执行未审候选，且缺失字段必须在审核路径处理，不能隐式采用默认值。
+
+## Refinement 鉴权分析与候选保存（2026-09-29）
+
+Python提供`POST /api/meetings/{meeting_id}/refinement/analyze`，请求为`{"meeting_type":"backlog_refinement","client_request_id":"refinement-request-1","current_sprint":null}`。先经Java校验角色/会议，再查询当前调用者已存请求；命中直接返回，不重新读故事或调用模型。新结果通过Java保存后返回analysis_id/client_request_id/storage_status。沿用有界HTTP、原载荷至多一次保存重试，未知结果保留请求编号。
+
+Java提供`/api/meetings/{meetingId}/refinement-analyses`的POST/GET、`/{analysisId}` GET和`/by-request/{clientRequestId}` GET。writer可保存/按本人请求恢复，登录用户可读取会议记录。新建meeting_refinement_analyses独立表，注册refinement-analyses.sql；保存原文、完整候选及保存时用于同名检查的故事基础目录快照（id/title/status/sprint/owner_id，最多1000条），不是模型读到的完整描述/验收快照。
+
+保存再次校验引用、create_story动作、严格字段类型、重复编号和已有/批次内同名标题；Java标题比较采用strip+Locale.ROOT小写，Python候选预检采用casefold，特殊Unicode大小写折叠并非完全等价，不作为同义去重保证。五个可空字段必须显式提供，缺失/越界/未知写字段整批拒绝，不使用StoryIn默认值。同会议加锁、唯一键约束用户请求号，同载荷恢复原结果，异载荷409；恢复不因后续故事改名而覆盖原快照。空候选保存no_changes。
+
+分析保存不创建故事或写故事日志，批准/执行入口及页面尚未实现。未运行日常业务库迁移，真实服务/模型验收待后续进行。下一步实现人工补齐字段与批准后独立创建故事，执行前须重查同名冲突。
+
+验证：新增test_refinement_api.py六项，Python全量192项通过；新增RefinementAnalysisStorageTest七项，连同Retro16/Review17/Planning14/Daily25共79项Java测试通过（Java21，H2 MySQL模式真实事务及MockMvc）。覆盖权限、请求恢复、原载荷重试、严格字段、空候选、证据、重复、并发和无业务变更；git diff --check通过。
+
+## Refinement 人工审核与创建故事（2026-09-30）
+
+Java `/api/meetings/{meetingId}/refinement-analyses/{analysisId}/proposal-reviews` 支持 GET/POST，admin/owner可审核，登录用户可读。接受/拒绝分别使用 `{"proposal_id":"p1","decision":"approve","reason":"已核对"}` 或decision=reject。批准必须具有非空title/description/acceptance、有效priority/Sprint/activity；未知字段不隐式填默认值，应通过修改后接受补齐。完整修改格式：
+
+```json
+{"proposal_id":"p1","decision":"modify_and_approve","changes":{"title":"导出周报CSV","description":"导出本周故事","acceptance":"CSV含本周已完成故事","priority":"Should","sprint":3,"activity":4},"reason":"人工补齐验收和排期"}
+```
+
+修改须改变内容且填写修改原因；原提案/证据和批准内容分开保存，人工补充不冒充原文事实。审核决定不可覆盖，同审核人同载荷可恢复；拒绝无需补齐。批准只保存决定，不创建故事。
+
+同分析路径 `/proposal-executions` 支持GET/POST。POST仅admin/owner且只接受proposal_id；从已存批准载荷创建故事，固定status=0、owner_id=null，复用IdAllocator分配US编号，不扩展负责人或状态选择。事务内创建故事、create日志（detail保留批准提案）、执行记录并更新审核状态；任一步失败全部回滚。重复执行返回首次story_id/story_log_id/executed_by/at，不受故事后续编辑影响。
+
+批准和首次执行各复查已有同名标题；同名新建冲突需要重新分析审核。标题检查不是同义去重；沿用既有编号器的并发冲突409机制，不宣称所有业务创建入口已具备全局唯一标题约束或无冲突编号分配。后续真实MySQL联调仍需验证锁及编号器集成。
+
+新增refinement-proposal-reviews.sql、refinement-proposal-executions.sql并注册application.yml；未运行日常业务库迁移。Refinement前端已接通：AI会议面板选择已保存会议，打开会议Backlog Refinement后分析、补齐未知字段、审核、单独执行及查看故事审计。未知排期和活动不自动选择；拒绝无需补齐字段。原提案与批准内容分别展示，执行成功后刷新看板和日志，保存结果不确定时沿用同一请求编号。
+
+2026-09-30已通过隔离MySQL8.0.31/真实MyBatis/Java/Python/浏览器闭环；运行方式和证据见 `../qa/DAILY_LIVE.md` 的Refinement章节。模型使用固定HTTP响应，真实模型语义验收仍待进行。
+
+验证：RefinementProposalFlowTest新增8项，含继承存储7项共15项，连同Retro16/Review17/Planning14/Daily25共87项通过，Java21 BUILD SUCCESS。测试为隔离H2/MockMvc真实事务；使用真实IdAllocator、以同一测试数据库实现其两个Mapper读方法，尚非真实MyBatis/MySQL联调。首次测试因夹具批量ALTER语法不兼容失败，拆为逐列ALTER后全部通过。Python未改动，沿用上一轮192项。
+
+## Refinement真实模型验收
+
+新增只读评测命令 `python -B -m meeting_agent.refinement_evaluation --env-file ../backend/.env --output .refinement-quality/new-report.json`。仅使用evals/refinement_quality.json的合成案例，不连接业务库，输出必须为新路径；不要传入真实会议或凭据作为案例。
+
+2026-09-30：基线12/12自动通过，人工发现摘要归因与重复追问问题；生产Skill升级refinement-create-v2后，5例定向自动检查通过，残余条件句及人工确认措辞保留待办。共17次真实模型调用，Python197项最终通过。逐例复核、首次测试异常及报告哈希见evals/REFINEMENT_QUALITY_REVIEW.md；不代表全量v2语义已通过。

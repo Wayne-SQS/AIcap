@@ -90,6 +90,27 @@ class StoryToolTests(unittest.TestCase):
         self.assert_error('invalid_backend_response',
                           lambda: self.tool.get_planning_stories(access_token='token'))
 
+    def test_review_projection_preserves_criteria_without_inventing_results(self):
+        story = self.tool.get_review_stories(access_token='review-token')[0]
+        self.assertEqual('已验收', story.acceptance)
+        self.assertNotIn('acceptance_results', story.model_dump())
+        self.assertEqual([('GET', '/api/stories', 'Bearer review-token')], self.requests)
+        self.rows[0].pop('acceptance')
+        self.assert_error('invalid_backend_response',
+                          lambda: self.tool.get_review_stories(access_token='review-token'))
+
+    def test_refinement_read_preserves_content_and_rejects_partial_context(self):
+        self.rows[0].update(description=None, acceptance='', private_data='hidden')
+        result = self.tool.get_refinement_stories(access_token='refinement-token')[0]
+        self.assertIsNone(result.description)
+        self.assertEqual('', result.acceptance)
+        self.assertEqual(('Must', 2), (result.priority, result.activity))
+        self.assertNotIn('private_data', result.model_dump())
+        self.assertEqual([('GET', '/api/stories', 'Bearer refinement-token')], self.requests)
+        del self.rows[0]['acceptance']
+        self.assert_error('invalid_backend_response',
+                          lambda: self.tool.get_refinement_stories(access_token='refinement-token'))
+
     def test_authenticated_get_projects_java_fields_and_null_owner(self):
         stories = self.read()
         self.assertEqual([("GET", "/api/stories", "Bearer fixture-token")], self.requests)

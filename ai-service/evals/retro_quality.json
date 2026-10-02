@@ -1,0 +1,10 @@
+[
+  {"id":"retro-explicit","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：决定由张敏下周五前完善发布检查表。\n张敏：同意，按这个安排执行。","expected_actions":[{"owner_id":1,"deadline_text":"下周五前","supporting_segments":["S1"]}],"needs_question":false,"rubric":"明确决定应有一个完善检查表行动，张敏负责，下周五前；不得补造具体日期或已完成事实。"},
+  {"id":"retro-suggestion","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"张敏：发布总漏步骤，我建议增加自动检查。\n主持人：只是建议，是否采用下次再讨论，本次没有决定。","expected_actions":[],"needs_question":false,"rubric":"抱怨与建议不能变成已采纳决议或行动，不能推断张敏能力差；下次讨论也不应自动创建行动。"},
+  {"id":"retro-rejected","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"张敏：建议重写发布工具。\n主持人：这个方案不采用，也不安排重写，继续使用现有工具。","expected_actions":[],"needs_question":false,"rubric":"保持明确拒绝，不提出重写或无依据改进任务；可记录不采用方案的决议。"},
+  {"id":"retro-condition","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：如果下周预算获批，再考虑让张敏试点新发布工具；目前预算没有获批，也没有决定试点。","expected_actions":[],"needs_question":false,"rubric":"保留未满足条件，不能创建已决定试点行动或追问暗示预算已批。"},
+  {"id":"retro-unknown","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：本次决定补充发布回滚检查表，具体负责人和完成时间还没定。","expected_actions":[{"owner_id":null,"deadline_text":null,"supporting_segments":["S1"]}],"needs_question":true,"rubric":"明确行动应保留，负责人/时间null并追问；不得默认主持人或目录中唯一成员负责。"},
+  {"id":"retro-same-name","members":[{"user_id":1,"display_name":"张敏"},{"user_id":2,"display_name":"张敏"}],"transcript":"主持人：决定由张敏本周五前整理发布检查表，但这里没有注明是哪个组的张敏。","expected_actions":[{"owner_id":null,"deadline_text":"本周五前","supporting_segments":["S1"]}],"needs_question":true,"rubric":"决定和截止时间明确但成员同名，owner必须null，追问身份；不得任选ID。"},
+  {"id":"retro-mentioned-person","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：张敏提出的问题确实存在，本次决定完善发布检查表；负责人还未确定。\n张敏：我只是反馈问题，并没有承诺负责，截止时间也还没定。","expected_actions":[{"owner_id":null,"deadline_text":null,"supporting_segments":["S1"]}],"needs_question":true,"rubric":"姓名被引用不等于承担责任，明确行动保留但负责人时间null；不得把反馈人或拒绝承诺者指派为负责人。"},
+  {"id":"retro-conflict","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"甲：大家已同意让张敏明天前重写发布脚本。\n乙：没有同意，方案还在争论。\n主持人：两种说法尚未核实，本次暂不作决定。","expected_actions":[],"needs_question":true,"rubric":"最终仍未决，不能创建行动或将甲的说法写成确定决议；追问先澄清是否采纳，不默认张敏已负责。"}
+]

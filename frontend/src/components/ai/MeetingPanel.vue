@@ -9,6 +9,14 @@ import AgentRunPanel from './AgentRunPanel.vue'
 import RecorderPanel from './RecorderPanel.vue'
 import StatusAnalysisPanel from './StatusAnalysisPanel.vue'
 import PlanningAnalysisPanel from './PlanningAnalysisPanel.vue'
+import ReviewAnalysisPanel from './ReviewAnalysisPanel.vue'
+import RetroAnalysisPanel from './RetroAnalysisPanel.vue'
+import RefinementAnalysisPanel from './RefinementAnalysisPanel.vue'
+import AssignmentPanel from './AssignmentPanel.vue'
+const showAssignment = ref(false)
+const showRefinement = ref(false)
+const showRetro = ref(false)
+const showReview = ref(false)
 const showPlanning = ref(false)
 
 /* 会议智能体面板:离线=演示转写+生成建议;在线=保存会议/选择/手动录入待审建议
@@ -40,7 +48,8 @@ async function deleteMeeting() {
   if (!mayDeleteMeeting.value) { notify('仅管理员或负责人可以删除会议'); return }
   const ok = confirm(
     '确认删除会议「' + target.title + '」？此操作不可恢复：\n' +
-    '同时会删除该会议的录音与历史建议记录，已审核通过产生的需求池条目不受影响。'
+    '已有 Daily、Planning、Review、Retro、Refinement 分析记录、已保存分配建议或关联转写版本的会议不能删除，需保留原文及审核执行审计。\n' +
+    '没有上述记录时，会删除录音与旧版历史建议；已产生的需求池条目不受影响。'
   )
   if (!ok) return
   deleting.value = true
@@ -149,7 +158,15 @@ function genDemoSuggestion() {
     <StatusAnalysisPanel :key="meeting.selected" :meeting-id="meeting.selected" />
     <button type="button" :aria-expanded="showPlanning" @click="showPlanning = !showPlanning">{{ showPlanning ? '收起会议 Sprint Planning' : '打开会议 Sprint Planning' }}</button>
     <PlanningAnalysisPanel v-if="showPlanning" :key="'planning:' + meeting.selected" :meeting-id="meeting.selected" />
+    <button type="button" :aria-expanded="showReview" @click="showReview = !showReview">{{ showReview ? '收起会议 Sprint Review' : '打开会议 Sprint Review' }}</button>
+    <ReviewAnalysisPanel v-if="showReview" :key="'review:' + meeting.selected" :meeting-id="meeting.selected" />
+    <button type="button" :aria-expanded="showRetro" @click="showRetro = !showRetro">{{ showRetro ? '收起会议 Sprint Retro' : '打开会议 Sprint Retro' }}</button>
+    <RetroAnalysisPanel v-if="showRetro" :key="'retro:' + meeting.selected" :meeting-id="meeting.selected" />
+    <button type="button" :aria-expanded="showRefinement" @click="showRefinement = !showRefinement">{{ showRefinement ? '收起会议 Backlog Refinement' : '打开会议 Backlog Refinement' }}</button>
+    <RefinementAnalysisPanel v-if="showRefinement" :key="'refinement:' + meeting.selected" :meeting-id="meeting.selected" />
     <AgentRunPanel />
+    <button type="button" :aria-expanded="showAssignment" @click="showAssignment = !showAssignment">{{ showAssignment ? '收起分配候选' : '打开分配候选' }}</button>
+    <AssignmentPanel v-if="showAssignment" :key="'assignment:' + meeting.selected" :meeting-id="meeting.selected" />
     <RecorderPanel />
     <form id="meeting-proposal-form" @submit.prevent="submitProposal">
       <div class="h-sec">手动录入待审建议 · 仅新增需求池条目</div>

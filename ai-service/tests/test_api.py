@@ -33,7 +33,8 @@ class ApiTests(unittest.TestCase):
                     "/api/meetings/m1": {"id": "m1", "transcript": fixture.transcript, "created_by": 2},
                     "/api/stories": [{"id": "US13", "title": "登录", "status": 1, "sprint": 2, "owner_id": None}],
                 }
-                if "/status-analyses/by-request/" in self.path or '/planning-analyses/by-request/' in self.path:
+                if any('/' + resource + '/by-request/' in self.path for resource in
+                       ('status-analyses', 'planning-analyses', 'review-analyses', 'retro-analyses', 'refinement-analyses', 'assignment-suggestions')):
                     key = self.path.rsplit("/", 1)[1]
                     default = (200, fixture.records[key]) if key in fixture.records else (404, {})
                 else:
@@ -50,9 +51,22 @@ class ApiTests(unittest.TestCase):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 fixture.calls.append((self.path, self.headers.get("Authorization")))
                 fixture.save_calls.append(payload)
+                if self.path.endswith('/assignment-suggestions'):
+                    record = {'id': 'saved-1', 'meeting_id': 'm1', 'client_request_id': payload['client_request_id'],
+                              'submitted_by': 1, 'created_at': '2026-10-01 12:00:00', 'input': payload['input'],
+                              'result': payload['result'], 'review': None}
+                    if fixture.save_status == 200:
+                        fixture.records[payload['client_request_id']] = record
+                    self.send_response(fixture.save_status)
+                    self.end_headers()
+                    self.wfile.write(json.dumps(record).encode())
+                    return
                 record = {"id": "saved-1", "meeting_id": "m1", "client_request_id": payload["client_request_id"],
                           "submitted_by": 1, "created_at": "2026-09-13 12:00:00", "status": "pending" if payload["result"]["proposed_actions"] else "no_changes",
                           "transcript": fixture.transcript, "result": payload["result"], "story_snapshots": ([{"id": "US13", "title": "登录", "status": 1, "sprint": 2, "owner_id": None}] if payload["result"]["proposed_actions"] else [])}
+                if self.path.endswith('/retro-analyses'):
+                    record.pop('story_snapshots')
+                    record['member_snapshots'] = []
                 if fixture.save_status == 200:
                     fixture.records[payload["client_request_id"]] = record
                 self.send_response(fixture.save_status)

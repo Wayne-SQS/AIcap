@@ -129,9 +129,9 @@ cd D:\AIcap\java-backend; mvn spring-boot:run
 
 ## 会议 Agent（DeepSeek）
 
-已实现文本会议分析、只读项目工具调用、结构化结果和证据校验、后台运行记录、失败重试及自动生成待审需求建议。填入服务端 DeepSeek Key 后，在 AI 助手选择已保存会议并点击“分析会议”。
+五类会议已接入“保存文本 → 分析提案 → 人工审核 → 单独执行 → 审计”闭环：Daily更新状态、Planning调整Sprint、Review标记验收完成、Retro创建行动项、Refinement补齐后创建故事。操作在AI助手的各会议类型面板内进行，旧“分析会议”和AI审核中心仍保留原有用途。
 
-配置和验证边界见 [会议 Agent：DeepSeek 运行与验收](docs/会议Agent_DeepSeek运行与验收.md)。本轮测试使用明确标记的模型夹具；真实模型效果仍需配置密钥后验收。
+先看 **[五类会议试用指南](docs/会议Agent_五类会议试用指南.md)**：除了MySQL、Java与前端，还需启动ai-service Python服务（默认8090），在该进程加载AICAP_LLM配置。缺密钥时新流程会明确报错，不返回规则或演示提案。隔离业务联调及真实模型质量的不同验证边界见 [联调记录](qa/DAILY_LIVE.md) 与 ai-service/evals/ 质量报告。旧入口配置记录保留于 [DeepSeek运行与验收](docs/会议Agent_DeepSeek运行与验收.md)。
 
 ## 成员画像（按角色差异化）
 
@@ -145,6 +145,8 @@ cd D:\AIcap\java-backend; mvn spring-boot:run
 ## 会议录音（麦克风 → MP3）
 
 「AI 助手 → 会议智能体」页内置录音：浏览器调用麦克风（`getUserMedia` + `MediaRecorder`），录音结束后在**浏览器内**解码为 PCM 并用 `lamejs` 编码成**真 .mp3** 后提交到当前会议；同时支持选择本地 `.mp3` 文件提交。音频可回放/下载，删除仅限管理员与负责人。
+
+已支持本地CPU转写和匿名说话人时间段预览：安装可选语音依赖和模型后，可查看带时间戳草稿、SPK1等录音内匿名标签并保存转写版本；人工核对文本后创建独立分析会议，可进入现有五类会议分析。当前限10分钟，匿名标签不代表成员身份且尚未自动绑定文字；未保存结果刷新即失，原会议保持不变。安装步骤见[音频输入与转写接入](docs/会议Agent_音频输入与转写接入.md)。
 
 - 上传：`POST /api/meetings/{id}/audio`（multipart：`file`、`source=recorder|upload`、`duration_ms`）
 - 列表：`GET /api/meetings/{id}/audio`；回放：`GET /api/audio/{id}`（需鉴权，前端取字节转 objectURL）；删除：`DELETE /api/audio/{id}`
@@ -197,7 +199,7 @@ cd D:\AIcap\java-backend; mvn spring-boot:run
 **数据说明**:每人本地运行各自一套数据库(互不互通但完全可用);如需共享数据,由一人当"服务器"运行后端,其余人把前端 API 地址指向其局域网 IP(默认 8080,可用 `VITE_API_BASE` 环境变量或 `frontend/src/api/client.js` 默认值设置)。
 
 **待办(阶段 2+)**:
-- 会议录音的语音转写(ASR)接入;会议 Agent 真实模型评测
+- 转写文字与匿名说话人时间段的人工对齐；扩大真实多人会议音频及会议 Agent 质量评测
 - 任务提交智能体 + GitHub 事件同步
 - 六项 AI 能力接入真实大模型(DeepSeek 等,密钥放服务端)
 - 上线部署:云服务器 + HTTPS,真·多人在线

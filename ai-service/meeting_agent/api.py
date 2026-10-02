@@ -18,8 +18,20 @@ from .workflow import CompletionModel, DailyScrumWorkflow, WorkflowError
 from .planning_context import PlanningContextReader, PlanningContextError
 from .planning_workflow import SprintPlanningWorkflow
 from .planning_store import JavaPlanningStore, PersistedPlanningResult
+from .review_store import JavaReviewStore, PersistedReviewResult
+from .review_workflow import SprintReviewWorkflow
+from .retro_store import JavaRetroStore, PersistedRetroResult
+from .retro_workflow import SprintRetroWorkflow
+from .refinement_store import JavaRefinementStore, PersistedRefinementResult
+from .refinement_workflow import BacklogRefinementWorkflow
 from .member_tool import MemberReadTool, MemberToolError
 from .task_tool import TaskReadTool, TaskToolError
+from .assignment_context import AssignmentContextRequest, AssignmentContextReport, AssignmentContextError, prepare_assignment
+from .assignment_engine import AssignmentRecommendationRequest, AssignmentRecommendations, recommend
+from .assignment_store import AssignmentSaveRequest, StoredAssignment, JavaAssignmentStore
+from .audio_tool import AudioReadTool, AudioReadError, AudioInputRequest, PreparedAudio
+from .transcription import LocalTranscriber, TranscriptionRequest, TranscriptionDraft, TranscriptionError
+from .diarization import LocalDiarizer, DiarizationRequest, DiarizationPreview
 
 
 class AnalyzeRequest(Contract):
@@ -35,6 +47,18 @@ class PlanningAnalyzeRequest(Contract):
     target_sprint: Annotated[int, Field(ge=1, le=4)] | None = None
 
 
+class ReviewAnalyzeRequest(AnalyzeRequest):
+    meeting_type: Literal['sprint_review']
+
+
+class RetroAnalyzeRequest(AnalyzeRequest):
+    meeting_type: Literal['sprint_retrospective']
+
+
+class RefinementAnalyzeRequest(AnalyzeRequest):
+    meeting_type: Literal['backlog_refinement']
+
+
 def create_app(*, backend_origin: str | None = None,
                model_factory: Callable[[], CompletionModel] | None = None) -> FastAPI:
     origin = backend_origin if backend_origin is not None else os.environ.get("AICAP_JAVA_BASE_URL", "http://localhost:8080")
@@ -42,6 +66,14 @@ def create_app(*, backend_origin: str | None = None,
     stories = StoryReadTool(origin)
     store = JavaAnalysisStore(origin)
     planning_store = JavaPlanningStore(origin)
+    review_store = JavaReviewStore(origin)
+    retro_store = JavaRetroStore(origin)
+    refinement_store = JavaRefinementStore(origin)
+    assignment_store = JavaAssignmentStore(origin)
+    audio_reader = AudioReadTool(origin)
+    transcriber = LocalTranscriber()
+    diarizer = LocalDiarizer()
+    members = MemberReadTool(origin)
     planning_reader = PlanningContextReader(stories, MemberReadTool(origin), TaskReadTool(origin))
     make_model = model_factory or (lambda: ChatModelClient(ModelSettings.from_env()))
     app = FastAPI(title="AIcap Meeting Agent", version="0.1.0")
@@ -84,6 +116,11 @@ def create_app(*, backend_origin: str | None = None,
                             status_code=exc.status,
                             headers={"WWW-Authenticate": "Bearer"} if exc.status == 401 else None)
 
+    @app.exception_handler(AudioReadError)
+    @app.exception_handler(TranscriptionError)
+    async def audio_error(request, exc):
+        return error_response(exc.code, exc.status)
+
     @app.exception_handler(WorkflowError)
     async def workflow_error(request, exc):
         return error_response(exc.code, 422 if exc.code == "invalid_meeting_input" else 502)
@@ -97,6 +134,66 @@ def create_app(*, backend_origin: str | None = None,
     @app.get("/health")
     def health():
         return {"status": "ok"}  # Liveness only, not provider/database readiness.
+
+    @app.post('/api/meetings/{meeting_id}/assignment/context', response_model=AssignmentContextReport)
+    def assignment_context(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                           body: AssignmentContextRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        context = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
+            access_token=token, target_sprint=body.target_sprint)
+        try:
+            return prepare_assignment(context, body)
+        except AssignmentContextError as error:
+            return error_response(error.code, 422)
+
+    @app.post('/api/meetings/{meeting_id}/transcription/prepare', response_model=PreparedAudio)
+    def prepare_transcription(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                              body: AudioInputRequest, token: Annotated[str, Depends(current_token)]):
+        prepared, _ = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+        return prepared
+
+    @app.post('/api/meetings/{meeting_id}/diarization/run', response_model=DiarizationPreview)
+    def run_diarization(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                        body: DiarizationRequest, token: Annotated[str, Depends(current_token)]):
+        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+        return diarizer.run(prepared, content, body.num_speakers)
+
+    @app.post('/api/meetings/{meeting_id}/transcription/run', response_model=TranscriptionDraft)
+    def run_transcription(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                          body: TranscriptionRequest, token: Annotated[str, Depends(current_token)]):
+        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+        return transcriber.run(prepared, content, body.language)
+
+    @app.post('/api/meetings/{meeting_id}/assignment/recommendations', response_model=AssignmentRecommendations)
+    def assignment_recommendations(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                                   body: AssignmentRecommendationRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
+            access_token=token, target_sprint=body.target_sprint)
+        try:
+            context = prepare_assignment(source, AssignmentContextRequest(story_ids=body.story_ids, target_sprint=body.target_sprint))
+            return recommend(context, body)
+        except AssignmentContextError as error:
+            return error_response(error.code, 422)
+
+    @app.post('/api/meetings/{meeting_id}/assignment/suggestions', response_model=StoredAssignment)
+    def save_assignment(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                        body: AssignmentSaveRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        request = AssignmentRecommendationRequest.model_validate(body.model_dump(exclude={'client_request_id'}))
+        existing = assignment_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
+        if existing is not None:
+            if existing.input != request:
+                raise StorageError('storage_conflict', 409, body.client_request_id)
+            return existing
+        source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
+            access_token=token, target_sprint=body.target_sprint)
+        try:
+            context = prepare_assignment(source, AssignmentContextRequest(story_ids=body.story_ids, target_sprint=body.target_sprint))
+            result = recommend(context, request)
+        except AssignmentContextError as error:
+            return error_response(error.code, 422)
+        return assignment_store.save_suggestion(token=token, meeting_id=meeting.id, request=body, result=result)
 
     @app.post("/api/meetings/{meeting_id}/analyze", response_model=PersistedResult)
     def analyze(meeting_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,80}$")],
@@ -123,5 +220,41 @@ def create_app(*, backend_origin: str | None = None,
             current_sprint=body.current_sprint, target_sprint=body.target_sprint)
         saved = planning_store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedPlanningResult.from_record(saved)
+
+    @app.post('/api/meetings/{meeting_id}/review/analyze', response_model=PersistedReviewResult)
+    def analyze_review(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                       body: ReviewAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        existing = review_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
+        if existing is not None:
+            return PersistedReviewResult.from_record(existing)
+        result = SprintReviewWorkflow(stories, make_model()).run(meeting_id=meeting.id,
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+        saved = review_store.save(token=token, request_id=body.client_request_id, result=result)
+        return PersistedReviewResult.from_record(saved)
+
+    @app.post('/api/meetings/{meeting_id}/retro/analyze', response_model=PersistedRetroResult)
+    def analyze_retro(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                      body: RetroAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        existing = retro_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
+        if existing is not None:
+            return PersistedRetroResult.from_record(existing)
+        result = SprintRetroWorkflow(members, make_model()).run(meeting_id=meeting.id,
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+        saved = retro_store.save(token=token, request_id=body.client_request_id, result=result)
+        return PersistedRetroResult.from_record(saved)
+
+    @app.post('/api/meetings/{meeting_id}/refinement/analyze', response_model=PersistedRefinementResult)
+    def analyze_refinement(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
+                          body: RefinementAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        existing = refinement_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
+        if existing is not None:
+            return PersistedRefinementResult.from_record(existing)
+        result = BacklogRefinementWorkflow(stories, make_model()).run(meeting_id=meeting.id,
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+        saved = refinement_store.save(token=token, request_id=body.client_request_id, result=result)
+        return PersistedRefinementResult.from_record(saved)
 
     return app

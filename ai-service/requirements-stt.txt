@@ -1,0 +1,2 @@
+# Optional local speech runtime; normal meeting text service does not require it.
+faster-whisper==1.2.1

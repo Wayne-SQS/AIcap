@@ -109,6 +109,12 @@ def validate_daily_result(context: DailyScrumInput, payload: dict) -> DailyScrum
     # Revalidate even model instances: nested lists are not deeply immutable.
     context = DailyScrumInput.model_validate(context.model_dump())
     result = DailyScrumOutput.model_validate(payload)
+    validate_status_provenance(context, result)
+    return result
+
+
+def validate_status_provenance(context, result) -> None:
+    """Shared snapshot/evidence checks after each meeting contract is validated."""
     if result.meeting_id != context.meeting_id:
         raise ResultContractError("meeting_id does not match input", "meeting_mismatch", ("meeting_id",))
     segments = {s.segment_id: s.text for s in context.transcript_segments}
@@ -133,4 +139,3 @@ def validate_daily_result(context: DailyScrumInput, payload: dict) -> DailyScrum
                 field = "segment_id" if text is None else "quote"
                 code = "unknown_segment" if text is None else "quote_mismatch"
                 raise ResultContractError("evidence must quote the referenced segment exactly", code, path + ("evidence", evidence_index, field))
-    return result

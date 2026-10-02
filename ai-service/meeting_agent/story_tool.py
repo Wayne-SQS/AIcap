@@ -14,6 +14,12 @@ from typing import Annotated, Literal, TypeVar
 from .contracts import DailyScrumInput, StorySnapshot, TranscriptSegment
 
 
+class ReviewStorySnapshot(StorySnapshot):
+    """Acceptance criteria are context, not evidence of acceptance passing."""
+    description: str | None
+    acceptance: str | None
+
+
 class PlanningStorySnapshot(StorySnapshot):
     """Planning-only content, preserved verbatim including empty/null values.
 
@@ -90,6 +96,13 @@ class StoryReadTool:
 
     def get_planning_stories(self, *, access_token: str) -> list[PlanningStorySnapshot]:
         return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot)
+
+    def get_refinement_stories(self, *, access_token: str) -> list[PlanningStorySnapshot]:
+        # Same business fields; no new endpoint or write permission.
+        return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot)
+
+    def get_review_stories(self, *, access_token: str) -> list[ReviewStorySnapshot]:
+        return self._read_stories(access_token=access_token, projection=ReviewStorySnapshot)
 
     def _read_stories(self, *, access_token: str,
                       projection: type[StoryProjection]) -> list[StoryProjection]:

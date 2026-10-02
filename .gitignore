@@ -40,6 +40,7 @@ qa/test-results/
 qa/playwright-report/
 
 # 运行时产物(本机日志/PID/临时文件,不进仓库)
+logs/
 *.log
 *.pid
 build_pkg.log

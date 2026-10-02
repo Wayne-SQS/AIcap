@@ -1,3 +1,4 @@
+import { assertMeetingRetained, assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { test, expect } from '@playwright/test'
 
 test('real daily analysis, human review, execution, retry and board consistency', async ({ page, request }) => {
@@ -24,6 +25,8 @@ test('real daily analysis, human review, execution, retry and board consistency'
   const analysisId = await page.getByLabel('状态分析记录').inputValue()
   const recordPath = `/api/meetings/${meetingId}/status-analyses/${analysisId}`
   const original = await (await request.get(base + recordPath, { headers })).json()
+  await assertMeetingRetained(request, base, headers, meetingId, recordPath)
+  await assertEmptyMeetingDeletable(request, base, headers)
   expect(await status()).toBe(0)
   await page.getByRole('form', { name: '审核状态提案' }).getByRole('button', { name: '提交审核决定' }).click()
   await expect(panel.locator('article')).toContainText('已批准 · 未执行')
@@ -33,6 +36,7 @@ test('real daily analysis, human review, execution, retry and board consistency'
   expect(await status()).toBe(1)
   const executions = await (await request.get(base + recordPath + '/proposal-executions', { headers })).json()
   expect(executions).toHaveLength(1)
+  await assertMeetingRetained(request, base, headers, meetingId, recordPath)
   const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: 'p1' } })
   expect(repeat.status()).toBe(200)
   expect(await repeat.json()).toEqual(executions[0])

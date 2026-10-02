@@ -1,2 +1,8 @@
 .venv/
 .env
+.review-quality/
+.retro-quality/
+.refinement-quality/
+.models/
+.stt-work/
+.stt-eval/
