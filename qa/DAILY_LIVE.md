@@ -218,3 +218,15 @@ Java TranscriptVersionTest新增对齐契约，相关会议测试14类合计179/
 speech_model_calls从3降为 **2**（STT一次、分离一次），固定文本模型调用1次；counts继续为音频/状态分析/故事日志/转写版本/确认 **1/1/0/1/1**。Java对新快照执行严格结构、时长、匿名标签和范围校验，确认时拒绝替换已存快照；旧版无diarization的转写版本仍兼容。
 
 验证：TranscriptVersionTest 10/10、Java21 package、前端相关19/19及production build通过。相关浏览器用例完成后Playwright本地WebServer未自行退出，手动终止空闲测试会话；19项结果均为通过。Python生产逻辑未改，未重复运行Python单测。
+
+## 官方四人音频完整页面闭环（2026-10-02，第七十轮）
+
+Transcription真实套件新增`--stt-language`和`--speaker-count`参数，复用同一浏览器用例验证中文多人音频。复现命令：
+
+```powershell
+ai-service/.venv/Scripts/python.exe qa/run_daily_live.py --suite transcription --stt-audio ai-service/.stt-eval/feb3b85c968746538023736e92ff9be0/four-speakers.mp3 --stt-language zh --speaker-count 4
+```
+
+最终证据 **qa/.daily-live/0535c057b46449ff901c0d026ef626e9/**：浏览器1/1、退出0、MySQL8.0.31。56.861秒音频得到12个转写片段；指定4人分离得到10个时间段。页面保存版本并刷新后，12/12片段均恢复非空预填，预填集合完整包含SPK1、SPK2、SPK3、SPK4；确认记录中的assignments逐项等于页面按最大重叠计算的结果，turns等于不可变版本快照。随后人工确认文本进入Daily分析，counts仍为 **1/1/0/1/1**，语音模型操作2次、固定文本夹具1次。
+
+机器可读result.json新增language、requested_speakers、audio_fixture、transcript_segments、suggested_segments和suggested_labels。用例同时保留默认英文/单人参数。前端production build通过；Java和Python生产代码未改。样本没有逐毫秒说话人真值或逐句身份标注，因此12/12只代表预填覆盖率，不代表归属准确率；不能据此计算DER。实际转写文本存在明显中文识别错误，仍必须人工核对。

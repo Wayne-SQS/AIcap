@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 test('real speech version survives reload and confirmed text enters meeting analysis', async ({ page, request }) => {
+  const language = process.env.AICAP_STT_EVAL_LANGUAGE || 'en'
+  const expectedSpeakers = Number(process.env.AICAP_STT_EVAL_SPEAKERS || 1)
+  const audioName = basename(process.env.AICAP_STT_EVAL_AUDIO)
   await page.goto('/#/ai')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
@@ -13,32 +16,34 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await page.locator('#meeting-save-form button').click()
   await expect(page.locator('#saved-transcript')).toHaveText('原会议文本，转写草稿不得覆盖。')
   await page.locator('.recorder input[type=file]').setInputFiles(process.env.AICAP_STT_EVAL_AUDIO)
-  const panel = page.getByRole('region', { name: '音频转写：en.mp3', exact: true })
+  const panel = page.getByRole('region', { name: `音频转写：${audioName}`, exact: true })
   await expect(panel).toBeVisible()
-  await panel.getByLabel('转写语言').selectOption('en')
+  await panel.getByLabel('转写语言').selectOption(language)
   const response = page.waitForResponse(r => r.url().endsWith('/transcription/run') && r.request().method() === 'POST')
   await panel.getByRole('button', { name: '转写此音频' }).click()
   const result = await response
   expect(result.status(), await result.text()).toBe(200)
   const data = await result.json()
   expect(data.status).toBe('draft'); expect(data.segments.length).toBeGreaterThan(0)
-  expect(data.text.toLowerCase()).toContain('login')
-  expect(data.text.toLowerCase()).toContain('human confirmation')
+  if(language === 'en') {
+    expect(data.text.toLowerCase()).toContain('login')
+    expect(data.text.toLowerCase()).toContain('human confirmation')
+  } else expect(data.text.trim().length).toBeGreaterThan(0)
   expect(data.segments.every(s => s.speaker_id === null)).toBe(true)
   await expect(panel.getByRole('textbox')).toHaveValue(data.text)
   await expect(panel).toContainText('说话人未知')
-  const speakerPanel = page.getByRole('region',{name:'说话人分离：en.mp3',exact:true})
-  await speakerPanel.getByLabel('预计人数').selectOption('1')
+  const speakerPanel = page.getByRole('region',{name:`说话人分离：${audioName}`,exact:true})
+  await speakerPanel.getByLabel('预计人数').selectOption(String(expectedSpeakers))
   const speakerResponse = page.waitForResponse(r => r.url().endsWith('/diarization/run') && r.request().method() === 'POST')
   await speakerPanel.getByRole('button',{name:'分析说话人时间段'}).click()
   const speakerResult = await speakerResponse
   expect(speakerResult.status(),await speakerResult.text()).toBe(200)
   const speakerData = await speakerResult.json()
-  expect(speakerData.requested_num_speakers).toBe(1)
-  expect(speakerData.speaker_count).toBe(1)
+  expect(speakerData.requested_num_speakers).toBe(expectedSpeakers)
+  expect(speakerData.speaker_count).toBe(expectedSpeakers)
   expect(speakerData.turns.length).toBeGreaterThan(0)
-  expect(speakerData.turns.every(turn => turn.speaker_id === 'SPK1')).toBe(true)
-  await expect(speakerPanel).toContainText('检测 1 位匿名说话人')
+  expect([...new Set(speakerData.turns.map(turn=>turn.speaker_id))]).toEqual(Array.from({length:expectedSpeakers},(_,i)=>`SPK${i+1}`))
+  await expect(speakerPanel).toContainText(`检测 ${expectedSpeakers} 位匿名说话人`)
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
   const saved = await request.get(`http://127.0.0.1:18180/api/meetings/${meetingId}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -60,7 +65,19 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
   await page.reload()
   await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
-  await expect(panel.getByLabel(/S1/).first()).toHaveValue('SPK1')
+  const expectedAssignments = data.segments.map(segment => {
+    let speakerId=null,bestOverlap=0
+    for(const turn of speakerData.turns) {
+      const overlap=Math.max(0,Math.min(segment.end_ms,turn.end_ms)-Math.max(segment.start_ms,turn.start_ms))
+      if(overlap>bestOverlap) { bestOverlap=overlap; speakerId=turn.speaker_id }
+    }
+    return {segment_id:segment.segment_id,speaker_id:speakerId}
+  })
+  expect(expectedAssignments.every(item=>item.speaker_id)).toBe(true)
+  expect([...new Set(expectedAssignments.map(item=>item.speaker_id))].sort()).toEqual(
+    Array.from({length:expectedSpeakers},(_,i)=>`SPK${i+1}`))
+  for(const assignment of expectedAssignments)
+    await expect(panel.getByLabel(new RegExp(`^${assignment.segment_id} ·`))).toHaveValue(assignment.speaker_id || '')
   // Synthetic human correction exercises the existing Daily fixture, not STT semantic accuracy.
   const corrected = 'US13 今天开始开发。负责人和截止时间仍待确认。'
   await panel.getByLabel('人工核对文本').fill(corrected)
@@ -73,11 +90,11 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(versions[0].draft.text).toBe(data.text)
   expect(confirmation.input.text).toBe(corrected)
   expect(confirmation.input.speaker_alignment.audio_sha256).toBe(data.audio.sha256)
-  expect(confirmation.input.speaker_alignment.speaker_count).toBe(1)
+  expect(confirmation.input.speaker_alignment.speaker_count).toBe(expectedSpeakers)
   expect(versions[0].draft.diarization.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.assignments).toHaveLength(data.segments.length)
-  expect(confirmation.input.speaker_alignment.assignments.every(item => item.speaker_id === 'SPK1')).toBe(true)
+  expect(confirmation.input.speaker_alignment.assignments).toEqual(expectedAssignments)
   expect(await (await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:confirmation.input})).json()).toEqual(versions[0])
   expect((await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:{...confirmation.input,text:'其他文本'}})).status()).toBe(409)
   expect((await request.delete(`http://127.0.0.1:18180/api/audio/${data.audio.audio_id}`,{headers})).status()).toBe(409)
@@ -93,5 +110,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify(speakerData,null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments},null,2))
 })
