@@ -233,6 +233,8 @@ async function playRange(row,range) {
   const player=audioElements.get(row.id)
   if(!player) { error.value='音频回放尚未就绪，请重试。'; return }
   stopRange(row.id)
+  const rate=Number(range.playback_rate)
+  player.playbackRate=[0.75,1,1.25,1.5,2].includes(rate) ? rate : 1
   const endSeconds=range.end_ms/1000
   let closed=false
   const cleanup=()=>{

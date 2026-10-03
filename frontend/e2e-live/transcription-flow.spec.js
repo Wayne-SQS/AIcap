@@ -97,9 +97,11 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const playableWords=data.segments.find(item=>item.segment_id===playable.segment_id).words
     .filter(word=>playable.word_ids.includes(word.word_id))
   const playStart=playableWords[0].start_ms/1000, playEnd=playableWords.at(-1).end_ms/1000
+  await panel.getByLabel('核对播放速度').selectOption('1.25')
   await panel.getByRole('button',{name:`播放 ${playable.assignment_id}`}).click()
   const reviewAudio=page.locator('.audio-row audio')
   await expect(reviewAudio).toBeVisible()
+  await expect.poll(()=>reviewAudio.evaluate(element=>element.playbackRate)).toBe(1.25)
   await expect.poll(()=>reviewAudio.evaluate(element=>element.currentTime),{timeout:10000}).toBeGreaterThan(playStart+0.05)
   await expect.poll(()=>reviewAudio.evaluate(element=>element.paused),{timeout:Math.ceil((playEnd-playStart)*1000)+5000}).toBe(true)
   expect(await reviewAudio.evaluate(element=>element.currentTime)).toBeLessThanOrEqual(playEnd+0.2)
@@ -144,5 +146,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true},null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true,playback_rate:1.25},null,2))
 })

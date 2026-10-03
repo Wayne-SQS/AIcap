@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { nextTick, ref, watch, onBeforeUnmount } from 'vue'
 import { listVersions, saveVersion, confirmVersion } from '@/api/transcriptVersions'
 import { useMeetingStore } from '@/stores/meeting'
 const props = defineProps({ meetingId: String, audio: Object, draft: Object, diarization: Object })
@@ -7,7 +7,7 @@ const emit = defineEmits(['play-range'])
 const meeting = useMeetingStore()
 const rows = ref([]), selected = ref(null), text = ref(''), title = ref(''), acknowledged = ref(false)
 const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
-const assignments = ref([]), splitPositions = ref({}), activeIndex = ref(-1)
+const assignments = ref([]), splitPositions = ref({}), activeIndex = ref(-1), playbackRate = ref(1)
 let generation = 0
 onBeforeUnmount(() => { ++generation })
 function transientPreview() {
@@ -45,13 +45,21 @@ function renumberAssignments() {
 }
 function playAssignment(index) {
   const item=assignments.value[index]
-  if(!item) return
+  if(!item || busy.value) return
   activeIndex.value=index
-  emit('play-range',{assignment_id:item.assignment_id || item.segment_id,start_ms:item.display_start_ms,end_ms:item.display_end_ms})
+  const id=item.assignment_id || item.segment_id
+  emit('play-range',{assignment_id:id,start_ms:item.display_start_ms,end_ms:item.display_end_ms,playback_rate:playbackRate.value})
+  nextTick(()=>document.getElementById(`alignment-${props.audio.id}-${id}`)?.scrollIntoView({block:'nearest',behavior:'smooth'}))
 }
 function movePlayback(offset) {
   const base=activeIndex.value<0 && offset>0 ? -1 : Math.max(0,activeIndex.value)
   playAssignment(Math.max(0,Math.min(assignments.value.length-1,base+offset)))
+}
+function handlePlaybackKey(event) {
+  if(event.target!==event.currentTarget || busy.value || !assignments.value.length) return
+  if(event.key==='ArrowLeft' && activeIndex.value>0) { event.preventDefault(); movePlayback(-1) }
+  else if(event.key==='ArrowRight' && activeIndex.value<assignments.value.length-1) { event.preventDefault(); movePlayback(1) }
+  else if((event.key===' ' || event.key==='Enter')) { event.preventDefault(); playAssignment(activeIndex.value<0 ? 0 : activeIndex.value) }
 }
 function splitOptions(item) {
   const words=wordsFor(item)
@@ -194,12 +202,14 @@ async function openAnalysis() {
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
           <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组，可在词后拆分或与同一原始片段的上一组合并。合并不同主说话人的组后需重新选择。仅供人工核对，可改为未知。</p>
-          <div class="alignment-nav">
+          <div class="alignment-nav" role="group" aria-label="逐段播放控制" aria-keyshortcuts="ArrowLeft Space Enter ArrowRight" tabindex="0" @keydown="handlePlaybackKey">
             <button type="button" :disabled="busy || !assignments.length || activeIndex <= 0" @click="movePlayback(-1)">播放上一子段</button>
             <span role="status">{{ activeIndex < 0 ? '尚未开始逐段核对' : `正在核对 ${activeIndex+1}/${assignments.length}` }}</span>
             <button type="button" :disabled="busy || !assignments.length || activeIndex >= assignments.length-1" @click="movePlayback(1)">{{ activeIndex < 0 ? '开始逐段播放' : '播放下一子段' }}</button>
+            <label>核对播放速度<select v-model.number="playbackRate" aria-label="核对播放速度"><option :value="0.75">0.75×</option><option :value="1">1×</option><option :value="1.25">1.25×</option><option :value="1.5">1.5×</option><option :value="2">2×</option></select></label>
+            <small>聚焦本栏后：← 上一段，空格/回车重播，→ 下一段</small>
           </div>
-          <div v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field alignment-row" :class="{active:index===activeIndex}" :aria-current="index===activeIndex ? 'true' : undefined">
+          <div v-for="(item,index) in assignments" :id="`alignment-${audio.id}-${item.assignment_id || item.segment_id}`" :key="item.assignment_id || item.segment_id" class="field alignment-row" :class="{active:index===activeIndex}" :aria-current="index===activeIndex ? 'true' : undefined">
             <span>{{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}</span>
             <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
             <button type="button" :aria-label="`播放 ${item.assignment_id || item.segment_id}`" :disabled="busy" @click="playAssignment(index)">播放此子段</button>
