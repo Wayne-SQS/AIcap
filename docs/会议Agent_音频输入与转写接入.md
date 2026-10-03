@@ -52,7 +52,7 @@ Assignment隔离真实服务套件附带音频准备验证：通过真实JWT向J
 
 返回字段：audio为输入准备快照（其中not_started表示准备阶段状态）；顶层status为draft或no_speech，duration_ms为解码实测时长，segments含S1起连续编号、start_ms/end_ms/text及始终为null的speaker_id，text为片段按换行连接。顶层diarization_status=not_available、storage_status=not_saved、requires_human_review=true。不把匿名标签或成员姓名伪装成模型已经识别的说话人。
 
-限制：MP3最多25MiB、解码时长最多10分钟；每个Python服务进程同时只运行一个转写子进程，CPU线程4，180秒超时终止，结束清理临时文件。全文最多16000字符、2000片段；无法识别语音返回no_speech，不伪造文本。忙碌返回429，超长413，不可解码422，执行超时504；缺少模型/依赖503。未保存草稿刷新即失，不自动写入会议原文，需人工核对。
+限制：MP3最多25MiB、解码时长最多10分钟；每个Python服务进程同时只运行一个语音子进程，CPU线程有界，600秒超时终止，结束清理临时文件。全文最多16000字符、2000片段；无法识别语音返回no_speech，不伪造文本。忙碌返回429，超长413，不可解码422，执行超时504；缺少模型/依赖503。未保存草稿刷新即失，不自动写入会议原文，需人工核对。子进程只继承运行所需的操作系统变量和离线标记，不继承`AICAP_LLM_API_KEY`等应用配置。
 
 验证：新增Python8项（全量242通过），浏览器7项覆盖结果展示、归属/时间戳拒绝、只读角色、无语音、忙碌重试及切换会议隔离。实际中英文合成语音在本机CPU执行，证据 `.stt-eval/70277e2733e34c408d413b9ab688d9f5/results.json`；耗时约4.7/2.7秒。中文有“登录→登陆”同音误识别。此结果只验证清晰合成语音链路，不代表嘈杂多人会议准确率。真实服务结果见[验收记录](../qa/DAILY_LIVE.md)。
 
@@ -82,7 +82,9 @@ Java新增 `meeting_transcript_versions` 表，随启动的SQL初始化自动建
 
 `prepare_diarization.py`只从sherpa-onnx官方GitHub release和3D-Speaker官方仓库下载，保存到 `.models/diarization`，并写入含来源和SHA-256的manifest；`--proxy URL`可显式配置下载代理，`--sample`额外下载官方公开四人中文样本。生产请求不读取令牌，不下载模型。可用进程环境变量 `AICAP_DIARIZATION_MODEL_DIR` 指定已有目录。
 
-接口：`POST /api/meetings/{meeting_id}/diarization/run`，请求 `{ "audio_id": "...", "num_speakers": 4 }`；num_speakers可为null自动估计，或1–8的严格整数。鉴权、角色、音频归属、25MiB和10分钟限制复用转写边界。转写与分离共用每服务进程一个工作槽；并发忙碌返回429，超时180秒返回504。结果未保存，含duration_ms、speaker_count和按开始时间排列的turns；turn允许重叠，标签只允许SPK1起连续匿名编号。identity_status固定anonymous_only、requires_human_review=true。
+接口：`POST /api/meetings/{meeting_id}/diarization/run`，请求 `{ "audio_id": "...", "num_speakers": 4 }`；num_speakers可为null自动估计，或1–8的严格整数。鉴权、角色、音频归属、25MiB和10分钟限制复用转写边界。转写与分离共用每服务进程一个工作槽；并发忙碌返回429，超时600秒返回504。结果未保存，含duration_ms、speaker_count和按开始时间排列的turns；turn允许重叠，标签只允许SPK1起连续匿名编号。identity_status固定anonymous_only、requires_human_review=true。
+
+接近上限的本地压力复验可在仓库根目录运行：`ai-service/.venv/Scripts/python.exe -B qa/run_speech_stress.py`。脚本将仓库本地留存的公开四人样本重复10次生成约9分29秒MP3，顺序执行真实STT和指定4人分离，检查双方解码时长一致并把产物写入被忽略的`ai-service/.stt-eval/<run>/`。它只验证容量、耗时和恢复边界，不提供准确率真值。
 
 页面每条音频提供预计人数和“分析说话人时间段”。自动人数只是聚类估计；若会议人数已知，应选择1–8。输出与转写分开显示，不把SPK标签写进转写版本，不猜测姓名，不把重叠片段强行分配给一段文字。切换会议会丢弃迟到结果。
 

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from meeting_agent.api import create_app
 from meeting_agent.audio_tool import PreparedAudio, AudioReadError
 from meeting_agent.transcription import LocalTranscriber, TranscriptionDraft, TranscriptionError, _SLOT
+from meeting_agent.speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS
 
 class TranscriptionTests(unittest.TestCase):
     def setUp(self):
@@ -20,10 +21,13 @@ class TranscriptionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         root=Path(self.temp.name); self.root=root
         for name in ('model.bin','config.json','tokenizer.json'): (root/name).write_text('fixture')
-        self.env=patch.dict(os.environ,{'AICAP_STT_MODEL_DIR':str(root)}); self.env.start(); self.addCleanup(self.env.stop)
+        self.env=patch.dict(os.environ,{'AICAP_STT_MODEL_DIR':str(root),'AICAP_LLM_API_KEY':'private-key'}); self.env.start(); self.addCleanup(self.env.stop)
     def worker(self, args, **kwargs):
-        self.assertEqual(180,kwargs['timeout'])
+        self.assertEqual(SPEECH_JOB_TIMEOUT_SECONDS,kwargs['timeout'])
         self.assertEqual('1',kwargs['env']['HF_HUB_OFFLINE'])
+        self.assertEqual('1',kwargs['env']['TRANSFORMERS_OFFLINE'])
+        self.assertEqual('1',kwargs['env']['PYTHONNOUSERSITE'])
+        self.assertNotIn('AICAP_LLM_API_KEY',kwargs['env'])
         self.assertEqual(b'a',Path(args[4]).read_bytes())
         Path(args[5]).write_text(json.dumps(self.data),encoding='utf-8')
         return Mock(returncode=0)
@@ -60,7 +64,7 @@ class TranscriptionTests(unittest.TestCase):
             self.assertEqual('stt_busy',error.exception.code)
         finally: _SLOT.release()
     def test_timeout_cleans_files_and_releases_slot(self):
-        with patch('meeting_agent.transcription.ROOT',self.root), patch('meeting_agent.transcription.subprocess.run',side_effect=subprocess.TimeoutExpired('worker',180)):
+        with patch('meeting_agent.transcription.ROOT',self.root), patch('meeting_agent.transcription.subprocess.run',side_effect=subprocess.TimeoutExpired('worker',SPEECH_JOB_TIMEOUT_SECONDS)):
             with self.assertRaises(TranscriptionError) as error: LocalTranscriber().run(self.meta,b'a')
             self.assertEqual(504,error.exception.status)
         self.assertEqual([],list((self.root/'.stt-work').iterdir()))
@@ -71,6 +75,16 @@ class TranscriptionTests(unittest.TestCase):
             with self.assertRaises(TranscriptionError) as error: self.invoke()
             self.assertEqual(status,error.exception.status)
             self.assertNotIn('private',error.exception.code)
+    def test_non_object_and_invalid_utf8_worker_outputs_are_bounded(self):
+        def output(value):
+            def worker(args,**kwargs):
+                Path(args[5]).write_bytes(value)
+                return Mock(returncode=0)
+            with patch('meeting_agent.transcription.ROOT',self.root), patch('meeting_agent.transcription.subprocess.run',side_effect=worker):
+                with self.assertRaises(TranscriptionError) as error: LocalTranscriber().run(self.meta,b'a')
+                self.assertEqual('invalid_stt_result',error.exception.code)
+        output(b'[]')
+        output(b'\xff')
     def test_api_auth_read_before_inference_and_no_identity_guess(self):
         reader=Mock(); reader.read.return_value=(self.meta,b'a')
         engine=Mock(); engine.run.return_value=TranscriptionDraft(audio=self.meta,**self.data)

@@ -12,6 +12,7 @@ from meeting_agent.api import create_app
 from meeting_agent.audio_tool import PreparedAudio, AudioReadError
 from meeting_agent.diarization import DiarizationPreview, LocalDiarizer
 from meeting_agent.transcription import TranscriptionError, _SLOT
+from meeting_agent.speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS
 
 
 class DiarizationTests(unittest.TestCase):
@@ -22,9 +23,10 @@ class DiarizationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name); model=self.root/'model'; model.mkdir()
         for name in ('segmentation.onnx','embedding.onnx'): (model/name).write_bytes(b'model')
-        self.env=patch.dict(os.environ,{'AICAP_DIARIZATION_MODEL_DIR':str(model)}); self.env.start(); self.addCleanup(self.env.stop)
+        self.env=patch.dict(os.environ,{'AICAP_DIARIZATION_MODEL_DIR':str(model),'AICAP_LLM_API_KEY':'private-key'}); self.env.start(); self.addCleanup(self.env.stop)
     def worker(self,args,**kwargs):
-        self.assertEqual(180,kwargs['timeout']); self.assertEqual(b'a',Path(args[4]).read_bytes())
+        self.assertEqual(SPEECH_JOB_TIMEOUT_SECONDS,kwargs['timeout']); self.assertEqual(b'a',Path(args[4]).read_bytes())
+        self.assertNotIn('AICAP_LLM_API_KEY',kwargs['env'])
         Path(args[5]).write_text(json.dumps(self.data),encoding='utf-8'); return Mock(returncode=0)
     def invoke(self,hint=2):
         with patch('meeting_agent.diarization.ROOT',self.root),patch('meeting_agent.diarization.subprocess.run',side_effect=self.worker):
@@ -46,9 +48,11 @@ class DiarizationTests(unittest.TestCase):
             with self.assertRaises(TranscriptionError) as error: self.invoke()
             self.assertEqual('stt_busy',error.exception.code)
         finally: _SLOT.release()
-        with patch('meeting_agent.diarization.ROOT',self.root),patch('meeting_agent.diarization.subprocess.run',side_effect=subprocess.TimeoutExpired('worker',180)):
+        with patch('meeting_agent.diarization.ROOT',self.root),patch('meeting_agent.diarization.subprocess.run',side_effect=subprocess.TimeoutExpired('worker',SPEECH_JOB_TIMEOUT_SECONDS)):
             with self.assertRaises(TranscriptionError) as error: LocalDiarizer().run(self.meta,b'a')
             self.assertEqual(504,error.exception.status)
+        self.assertEqual([],list((self.root/'.stt-work').iterdir()))
+        self.assertEqual('draft',self.invoke().status)
         self.data={'error':'private-detail'}
         with self.assertRaises(TranscriptionError) as error: self.invoke()
         self.assertEqual('diarization_failed',error.exception.code)

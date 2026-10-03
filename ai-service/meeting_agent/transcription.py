@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 from .contracts import Contract
 from .audio_tool import AudioInputRequest, PreparedAudio
+from .speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS, worker_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DURATION_MS = 600000
@@ -90,24 +91,25 @@ class LocalTranscriber:
                 folder = Path(directory)
                 audio = folder / 'audio.mp3'; output = folder / 'result.json'
                 audio.write_bytes(content)
-                env = os.environ.copy()
-                env.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
                 try:
                     completed = subprocess.run([sys.executable, '-B', '-m', 'meeting_agent.transcription_worker',
-                        str(audio), str(output), str(model), language or 'auto'], cwd=ROOT, env=env,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180,
+                        str(audio), str(output), str(model), language or 'auto'], cwd=ROOT,
+                        env=worker_environment(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=SPEECH_JOB_TIMEOUT_SECONDS,
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 except subprocess.TimeoutExpired:
                     raise TranscriptionError('stt_timeout', 504) from None
                 if completed.returncode or not output.is_file() or output.stat().st_size > 256*1024:
                     raise TranscriptionError('stt_worker_failed', 502)
                 data = json.loads(output.read_text(encoding='utf-8'))
+                if not isinstance(data, dict):
+                    raise ValueError('invalid worker response')
                 if 'error' in data:
                     codes = {'stt_dependency_missing': 503, 'invalid_audio': 422,
                              'audio_duration_exceeded': 413, 'transcript_too_large': 422}
                     raise TranscriptionError(data['error'] if data['error'] in codes else 'stt_failed', codes.get(data['error'], 502))
                 return TranscriptionDraft(audio=prepared, **data)
-        except (ValueError, OSError):
+        except (ValueError, TypeError, OSError, UnicodeError):
             raise TranscriptionError('invalid_stt_result', 502) from None
         finally:
             _SLOT.release()

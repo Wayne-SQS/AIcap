@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from .audio_tool import AudioInputRequest, PreparedAudio
 from .contracts import Contract
 from .transcription import ROOT, _SLOT, TranscriptionError
+from .speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS, worker_environment
 
 
 class DiarizationRequest(AudioInputRequest):
@@ -62,7 +63,8 @@ class LocalDiarizer:
                 audio.write_bytes(content)
                 try:
                     result=subprocess.run([sys.executable,'-B','-m','meeting_agent.diarization_worker',str(audio),str(output),str(model),str(num_speakers or -1)],
-                        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180,
+                        cwd=ROOT, env=worker_environment(), stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, timeout=SPEECH_JOB_TIMEOUT_SECONDS,
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 except subprocess.TimeoutExpired:
                     raise TranscriptionError('diarization_timeout',504) from None
@@ -75,7 +77,7 @@ class LocalDiarizer:
                     code=data['error']
                     raise TranscriptionError(code if isinstance(code,str) and code in codes else 'diarization_failed',codes.get(code,502) if isinstance(code,str) else 502)
                 return DiarizationPreview(audio=prepared,requested_num_speakers=num_speakers,**data)
-        except (ValueError,TypeError,OSError):
+        except (ValueError,TypeError,OSError,UnicodeError):
             raise TranscriptionError('invalid_diarization_result',502) from None
         finally:
             _SLOT.release()
