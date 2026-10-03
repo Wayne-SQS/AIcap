@@ -1,0 +1,17 @@
+{
+  "sample_id": "replace-with-stable-sample-id",
+  "duration_ms": 5000,
+  "text": "请替换为人工逐字核对的完整文本。",
+  "turns": [
+    {
+      "start_ms": 0,
+      "end_ms": 2500,
+      "speaker_id": "PERSON_A"
+    },
+    {
+      "start_ms": 2500,
+      "end_ms": 5000,
+      "speaker_id": "PERSON_B"
+    }
+  ]
+}

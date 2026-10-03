@@ -2,6 +2,8 @@
 
 音频入口：`POST /api/meetings/{id}/transcription/prepare` 验证Java音频，`/transcription/run` 执行本地CPU转写，`/diarization/run` 生成录音内匿名说话人时间段。转写需 `requirements-stt.txt` 与 `prepare_stt.py`；分离另需 `requirements-diarization.txt` 与 `prepare_diarization.py`。页面可保存独立转写版本、人工核对后创建分析会议；SPK标签不代表成员身份，尚未自动绑定文字，原会议不覆盖。详见[音频输入与转写接入](../docs/会议Agent_音频输入与转写接入.md)。
 
+人工标注录音可使用 `evaluate_speech.py` 离线计算 WER、DER 和词级时间戳覆盖率；输入格式、指标口径及当前数据集边界见[语音质量评测](../docs/会议Agent_语音质量评测.md)。没有人工真值的演示录音不得作为准确率结果。
+
 Assignment Engine提供只读准备与技能候选排序接口：`POST /api/meetings/{id}/assignment/context`、`POST /api/meetings/{id}/assignment/recommendations`，以及 `POST /api/meetings/{id}/assignment/suggestions` 重新计算并保存快照（需client_request_id）。这些入口均需admin/owner/member，不调用模型，不修改负责人。AI页面已接查询、保存、历史恢复、人工审核与独立执行；Java只允许admin/owner执行已批准分配，同事务保存负责人变更和审计。容量仍未知，规则、请求样例及限制见 [Assignment Engine规则与接口](../docs/会议Agent_AssignmentEngine规则与接口.md)。
 
 当前已接通五类会议的分析、人工审核、执行与审计。初次试用请先看 [五类会议试用指南](../docs/会议Agent_五类会议试用指南.md)，特别注意单独启动Python并加载模型配置。下文保留逐轮实现说明，其中“当前仅Daily”“下一轮”等是当轮历史范围；最新状态以接续文档末尾和各质量报告为准。
