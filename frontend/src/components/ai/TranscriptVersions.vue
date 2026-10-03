@@ -25,15 +25,28 @@ function overlappingSpeakers(segment,row = selected.value) {
   return speakers
 }
 function supportsWordAlignment(row) { return row?.draft?.segments?.length && row.draft.segments.every(segment=>segment.words?.length) }
+function usesAuditedCorrections(row = selected.value) {
+  const version=row?.confirmation?.input?.speaker_alignment?.alignment_version
+  return version>=4 || (!row?.confirmation && supportsWordAlignment(row) && !!previewFor(row))
+}
+function correctedText(item) { return item.corrected_text ?? item.text ?? '' }
+function composeCorrectedText() {
+  if(!selected.value) return ''
+  const lines=selected.value.draft.segments.map(segment=>assignments.value
+    .filter(item=>item.segment_id===segment.segment_id).map(correctedText).join('')).filter(Boolean)
+  return lines.join('\n')
+}
+function syncCorrectedText() { if(usesAuditedCorrections()) text.value=composeCorrectedText() }
+function updateCorrectedText(index,value) { assignments.value[index].corrected_text=value; syncCorrectedText() }
 function segmentFor(item) { return selected.value?.draft?.segments?.find(segment=>segment.segment_id===item.segment_id) }
 function wordsFor(item) {
   const segment=segmentFor(item)
   return item.word_ids?.map(id=>segment?.words?.find(word=>word.word_id===id)).filter(Boolean) || []
 }
-function wordAssignment(segment,words,speakerId) {
+function wordAssignment(segment,words,speakerId,correction=null) {
   const interval={start_ms:words[0].start_ms,end_ms:words.at(-1).end_ms}, value=words.map(word=>word.text).join('')
   return {segment_id:segment.segment_id,word_ids:words.map(word=>word.word_id),text:value,speaker_id:speakerId,
-    overlapping_speakers:overlappingSpeakers(interval),display_text:value.trim(),display_start_ms:interval.start_ms,display_end_ms:interval.end_ms}
+    corrected_text:correction ?? value,overlapping_speakers:overlappingSpeakers(interval),display_text:value.trim(),display_start_ms:interval.start_ms,display_end_ms:interval.end_ms}
 }
 function renumberAssignments() {
   const counts={}
@@ -42,6 +55,7 @@ function renumberAssignments() {
     : item)
   splitPositions.value={}
   if(activeIndex.value>=assignments.value.length) activeIndex.value=assignments.value.length-1
+  syncCorrectedText()
 }
 function playAssignment(index) {
   const item=assignments.value[index]
@@ -68,7 +82,7 @@ function splitOptions(item) {
 function splitAssignment(index) {
   const item=assignments.value[index], segment=segmentFor(item), words=wordsFor(item)
   const at=Number(splitPositions.value[item.assignment_id] || 1)
-  if(!segment || at<1 || at>=words.length) return
+  if(!segment || at<1 || at>=words.length || correctedText(item)!==item.text) return
   assignments.value.splice(index,1,wordAssignment(segment,words.slice(0,at),item.speaker_id),wordAssignment(segment,words.slice(at),item.speaker_id))
   renumberAssignments()
 }
@@ -80,7 +94,7 @@ function mergePrevious(index) {
   if(!canMergePrevious(index)) return
   const item=assignments.value[index], previous=assignments.value[index-1], segment=segmentFor(item)
   const speakerId=previous.speaker_id===item.speaker_id ? item.speaker_id : null
-  assignments.value.splice(index-1,2,wordAssignment(segment,[...wordsFor(previous),...wordsFor(item)],speakerId))
+  assignments.value.splice(index-1,2,wordAssignment(segment,[...wordsFor(previous),...wordsFor(item)],speakerId,correctedText(previous)+correctedText(item)))
   renumberAssignments()
 }
 function buildAssignments(row) {
@@ -88,7 +102,7 @@ function buildAssignments(row) {
   if(stored) return stored.map(item=>{
     const segment=row.draft.segments.find(value=>value.segment_id===item.segment_id)
     const words=item.word_ids?.map(id=>segment?.words?.find(word=>word.word_id===id)).filter(Boolean) || []
-    return {...item,display_text:(item.text || segment?.text || '').trim(),display_start_ms:words[0]?.start_ms ?? segment?.start_ms,
+    return {...item,corrected_text:item.corrected_text ?? item.text,display_text:(item.text || segment?.text || '').trim(),display_start_ms:words[0]?.start_ms ?? segment?.start_ms,
       display_end_ms:words.at(-1)?.end_ms ?? segment?.end_ms}
   })
   if(!supportsWordAlignment(row)) return row.draft.segments.map(segment=>({segment_id:segment.segment_id,
@@ -103,7 +117,7 @@ function buildAssignments(row) {
       else groups.push({speaker_id:speaker,word_ids:[word.word_id],text:word.text,start_ms:word.start_ms,end_ms:word.end_ms})
     }
     groups.forEach((group,index)=>result.push({assignment_id:`${segment.segment_id}A${index+1}`,segment_id:segment.segment_id,
-      word_ids:group.word_ids,text:group.text,speaker_id:group.speaker_id,overlapping_speakers:overlappingSpeakers(group,row),
+      word_ids:group.word_ids,text:group.text,corrected_text:group.text,speaker_id:group.speaker_id,overlapping_speakers:overlappingSpeakers(group,row),
       display_text:group.text.trim(),display_start_ms:group.start_ms,display_end_ms:group.end_ms}))
   }
   return result
@@ -113,6 +127,7 @@ function choose(row) {
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
   assignments.value = buildAssignments(row); splitPositions.value = {}; activeIndex.value = -1
+  if(!row.confirmation && usesAuditedCorrections(row)) syncCorrectedText()
 }
 function suggestedSpeaker(segment,row = selected.value) {
   const preview = previewFor(row)
@@ -126,7 +141,7 @@ function suggestedSpeaker(segment,row = selected.value) {
 }
 watch(() => props.diarization, value => {
   if (!value || pending.value || selected.value?.confirmation || !selected.value) return
-  assignments.value=buildAssignments(selected.value)
+  assignments.value=buildAssignments(selected.value); syncCorrectedText()
 })
 function put(row) { rows.value = [row, ...rows.value.filter(r => r.id !== row.id)]; choose(row) }
 async function refresh() {
@@ -154,14 +169,15 @@ async function save() {
 }
 async function confirm() {
   if (busy.value || !meeting.maySubmit || !selected.value || selected.value.confirmation) return
+  syncCorrectedText()
   if (!pending.value && (!text.value.trim() || !title.value.trim() || !acknowledged.value)) { error.value = '请填写文本和标题，并确认已核对录音。'; return }
   const preview = previewFor(selected.value)
   const wordAlignment=supportsWordAlignment(selected.value)
   const speaker_alignment = preview
-    ? { alignment_version:wordAlignment ? 3 : 2, engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
+    ? { alignment_version:wordAlignment ? 4 : 2, engine:preview.engine, audio_sha256:selected.value.draft.sha256, duration_ms:preview.duration_ms,
         speaker_count:preview.speaker_count, turns:preview.turns,
         assignments:assignments.value.map(item=>wordAlignment
-          ? {assignment_id:item.assignment_id,segment_id:item.segment_id,word_ids:item.word_ids,text:item.text,
+          ? {assignment_id:item.assignment_id,segment_id:item.segment_id,word_ids:item.word_ids,text:item.text,corrected_text:correctedText(item),
               speaker_id:item.speaker_id || null,overlapping_speakers:item.overlapping_speakers}
           : {segment_id:item.segment_id,speaker_id:item.speaker_id || null,overlapping_speakers:item.overlapping_speakers}) }
     : null
@@ -198,7 +214,7 @@ async function openAnalysis() {
         <p>保留提交的原始草稿；需对照上方音频人工核对，说话人仍未知。确认后新建分析会议，原会议保持不变。</p>
         <details><summary>查看保存的原始片段</summary><ol><li v-for="s in selected.draft.segments" :key="s.segment_id">{{ s.start_ms/1000 }}–{{ s.end_ms/1000 }} 秒：{{ s.text }}</li></ol></details>
         <label class="field">分析会议标题<input v-model="title" maxlength="200" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit"></label>
-        <label class="field">人工核对文本<textarea v-model="text" maxlength="16000" rows="6" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
+        <label class="field">{{ usesAuditedCorrections(selected) ? '人工核对全文（由下方子段修订生成）' : '人工核对文本' }}<textarea v-model="text" maxlength="16000" rows="6" :readonly="usesAuditedCorrections(selected)" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
           <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组，可在词后拆分或与同一原始片段的上一组合并。合并不同主说话人的组后需重新选择。仅供人工核对，可改为未知。</p>
@@ -211,6 +227,8 @@ async function openAnalysis() {
           </div>
           <div v-for="(item,index) in assignments" :id="`alignment-${audio.id}-${item.assignment_id || item.segment_id}`" :key="item.assignment_id || item.segment_id" class="field alignment-row" :class="{active:index===activeIndex}" :aria-current="index===activeIndex ? 'true' : undefined">
             <span>{{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}</span>
+            <label v-if="item.word_ids">人工修订文本<textarea :value="correctedText(item)" rows="2" maxlength="4000" :aria-label="`${item.assignment_id} 人工修订文本`" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" @input="updateCorrectedText(index,$event.target.value)" /></label>
+            <small v-if="item.word_ids && correctedText(item)!==item.text">已修订；原始识别文字继续保留在上方。</small>
             <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
             <button type="button" :aria-label="`播放 ${item.assignment_id || item.segment_id}`" :disabled="busy" @click="playAssignment(index)">播放此子段</button>
             <select v-model="assignments[index].speaker_id" :aria-label="`${item.assignment_id || item.segment_id} · ${item.display_text}`" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
@@ -222,7 +240,7 @@ async function openAnalysis() {
                 <option value="">选择词边界</option>
                 <option v-for="option in splitOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
-              <button v-if="item.word_ids.length > 1" type="button" :aria-label="`${item.assignment_id} 拆分此子段`" :disabled="busy || !!pending || !splitPositions[item.assignment_id]" @click="splitAssignment(index)">拆分此子段</button>
+              <button v-if="item.word_ids.length > 1" type="button" :aria-label="`${item.assignment_id} 拆分此子段`" :title="correctedText(item)!==item.text ? '该子段已有文字修订；恢复原始文字后才能拆分' : ''" :disabled="busy || !!pending || !splitPositions[item.assignment_id] || correctedText(item)!==item.text" @click="splitAssignment(index)">拆分此子段</button>
               <button v-if="canMergePrevious(index)" type="button" :aria-label="`${item.assignment_id} 与上一子段合并`" :disabled="busy || !!pending" @click="mergePrevious(index)">与上一子段合并</button>
             </template>
           </div>

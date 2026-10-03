@@ -63,9 +63,9 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const saveInput = { client_request_id:version.client_request_id, draft:versionDraft }
   expect(await (await request.post(versionPath, { headers, data:saveInput })).json()).toEqual(version)
   await panel.getByRole('button',{name:'刷新转写历史'}).click()
-  await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
+  await expect(panel.getByLabel('人工核对全文（由下方子段修订生成）')).toHaveValue(data.text)
   await page.reload()
-  await expect(panel.getByLabel('人工核对文本')).toHaveValue(data.text)
+  await expect(panel.getByLabel('人工核对全文（由下方子段修订生成）')).toHaveValue(data.text)
   const speakersFor = interval => {
     let speakerId=null,bestOverlap=0; const overlappingSpeakers=[]
     for(const turn of speakerData.turns) {
@@ -115,7 +115,10 @@ test('real speech version survives reload and confirmed text enters meeting anal
     await expect(panel.getByLabel(new RegExp(`^${assignment.assignment_id} ·`))).toHaveValue(assignment.speaker_id || '')
   // Synthetic human correction exercises the existing Daily fixture, not STT semantic accuracy.
   const corrected = 'US13 今天开始开发。负责人和截止时间仍待确认。'
-  await panel.getByLabel('人工核对文本').fill(corrected)
+  for(const assignment of expectedAssignments) await panel.getByLabel(`${assignment.assignment_id} 人工修订文本`).fill('')
+  await panel.getByLabel(`${expectedAssignments[0].assignment_id} 人工修订文本`).fill(corrected)
+  await expect(panel.getByLabel('人工核对全文（由下方子段修订生成）')).toHaveValue(corrected)
+  const confirmedAssignments=expectedAssignments.map((item,index)=>({...item,corrected_text:index===0 ? corrected : ''}))
   await panel.getByLabel('我已对照录音核对文本，理解说话人未识别').check()
   await panel.getByRole('button',{name:'确认并创建分析会议'}).click()
   await expect(panel).toContainText('人工核对已保存，分析会议已创建。')
@@ -125,14 +128,16 @@ test('real speech version survives reload and confirmed text enters meeting anal
   expect(versions[0].draft.text).toBe(data.text)
   expect(confirmation.input.text).toBe(corrected)
   expect(confirmation.input.speaker_alignment.audio_sha256).toBe(data.audio.sha256)
-  expect(confirmation.input.speaker_alignment.alignment_version).toBe(3)
+  expect(confirmation.input.speaker_alignment.alignment_version).toBe(4)
   expect(confirmation.input.speaker_alignment.speaker_count).toBe(expectedSpeakers)
   expect(versions[0].draft.diarization.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.turns).toEqual(speakerData.turns)
   expect(confirmation.input.speaker_alignment.assignments.length).toBeGreaterThanOrEqual(data.segments.length)
-  expect(confirmation.input.speaker_alignment.assignments).toEqual(expectedAssignments)
+  expect(confirmation.input.speaker_alignment.assignments).toEqual(confirmedAssignments)
   expect(await (await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:confirmation.input})).json()).toEqual(versions[0])
-  expect((await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:{...confirmation.input,text:'其他文本'}})).status()).toBe(409)
+  const differentInput=structuredClone(confirmation.input)
+  differentInput.text='其他文本'; differentInput.speaker_alignment.assignments[0].corrected_text='其他文本'
+  expect((await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:differentInput})).status()).toBe(409)
   expect((await request.delete(`http://127.0.0.1:18180/api/audio/${data.audio.audio_id}`,{headers})).status()).toBe(409)
   for (const id of [meetingId,confirmation.analysis_meeting_id]) expect((await request.delete(`http://127.0.0.1:18180/api/meetings/${id}`,{headers})).status()).toBe(409)
   expect((await (await request.get(`http://127.0.0.1:18180/api/meetings/${meetingId}`,{headers})).json()).transcript).toBe('原会议文本，转写草稿不得覆盖。')
@@ -146,5 +151,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true,playback_rate:1.25},null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true,playback_rate:1.25,audited_corrections:{changed:1,cleared:expectedAssignments.length-1}},null,2))
 })

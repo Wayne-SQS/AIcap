@@ -39,7 +39,8 @@ async function save(page) {
   await expect(panel(page).getByRole('status')).toHaveText('转写版本已保存，可刷新恢复。')
 }
 async function prepare(page) {
-  await panel(page).getByLabel('人工核对文本').fill('登录接口已核对。')
+  const editor=panel(page).getByRole('textbox',{name:/人工核对/})
+  if(await editor.isEditable()) await editor.fill('登录接口已核对。')
   await panel(page).getByLabel('我已对照录音核对文本，理解说话人未识别').check()
 }
 test('saved version survives reload and confirmed corrected text opens separate meeting',async({page})=>{
@@ -123,16 +124,23 @@ test('time-overlap suggestion can be changed and persists with diarization snaps
   await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveCount(0)
   await panel(page).getByLabel(/^S1A1 ·/).selectOption('SPK1')
   await panel(page).getByLabel('S1A1 拆分位置').selectOption('1')
+  await panel(page).getByLabel('S1A1 人工修订文本').fill('登录接口已核对。')
+  await expect(panel(page).getByRole('button',{name:'S1A1 拆分此子段'})).toBeDisabled()
+  await panel(page).getByLabel('S1A1 人工修订文本').fill('登陆接口待确认。')
   await panel(page).getByRole('button',{name:'S1A1 拆分此子段'}).click()
   await expect(panel(page).getByLabel(/^S1A1 ·/)).toHaveValue('SPK1')
   await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveValue('SPK1')
+  await panel(page).getByLabel('S1A1 人工修订文本').fill('登录')
+  await panel(page).getByLabel('S1A2 人工修订文本').fill('接口已核对。')
+  await expect(panel(page).getByLabel('人工核对全文（由下方子段修订生成）')).toHaveValue('登录接口已核对。')
+  await expect(panel(page).getByLabel('人工核对全文（由下方子段修订生成）')).toHaveAttribute('readonly','')
   await prepare(page); await panel(page).getByRole('button',{name:'确认并创建分析会议'}).click()
   const alignment=requests.confirms[0].speaker_alignment
   expect(alignment.audio_sha256).toBe('a'.repeat(64)); expect(alignment.turns).toHaveLength(2)
-  expect(alignment.alignment_version).toBe(3)
+  expect(alignment.alignment_version).toBe(4)
   expect(alignment.assignments).toEqual([
-    {assignment_id:'S1A1',segment_id:'S1',word_ids:['S1W1'],text:'登陆',speaker_id:'SPK1',overlapping_speakers:['SPK1','SPK2']},
-    {assignment_id:'S1A2',segment_id:'S1',word_ids:['S1W2'],text:'接口待确认。',speaker_id:'SPK1',overlapping_speakers:['SPK2']}])
+    {assignment_id:'S1A1',segment_id:'S1',word_ids:['S1W1'],text:'登陆',corrected_text:'登录',speaker_id:'SPK1',overlapping_speakers:['SPK1','SPK2']},
+    {assignment_id:'S1A2',segment_id:'S1',word_ids:['S1W2'],text:'接口待确认。',corrected_text:'接口已核对。',speaker_id:'SPK1',overlapping_speakers:['SPK2']}])
   await page.reload(); await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveValue('SPK1')
 })
 test('late save does not leak into another meeting',async({page})=>{

@@ -107,12 +107,12 @@ public class TranscriptVersionService {
         require(overlaps.isArray() && overlaps.size()==expected.size());
         int index=0; for(var label:expected) require(overlaps.get(index++).asText().equals(label));
     }
-    private void validateAlignment(JsonNode alignment, JsonNode draft) {
+    private void validateAlignment(JsonNode alignment, JsonNode draft, JsonNode confirmedText) {
         if (alignment == null || alignment.isNull()) return;
         int version=alignment.has("alignment_version") ? alignment.path("alignment_version").asInt(-1) : 1;
         if(version==1) fields(alignment,"engine","audio_sha256","duration_ms","speaker_count","turns","assignments");
         else {
-            require(version==2 || version==3);
+            require(version==2 || version==3 || version==4);
             fields(alignment,"alignment_version","engine","audio_sha256","duration_ms","speaker_count","turns","assignments");
         }
         require(alignment.path("engine").asText().equals("sherpa-onnx-pyannote3-eres2net"));
@@ -129,15 +129,16 @@ public class TranscriptVersionService {
         }
         var assignments=alignment.path("assignments");
         var segments=draft.path("segments");
-        if(version==3) {
+        if(version==3 || version==4) {
             require(assignments.isArray() && !assignments.isEmpty() && assignments.size()<=20000);
-            int assignmentIndex=0;
+            int assignmentIndex=0; var correctedLines=new ArrayList<String>();
             for(var segment:segments) {
                 var words=segment.path("words"); require(words.isArray() && !words.isEmpty());
-                int wordIndex=0,partIndex=0;
+                int wordIndex=0,partIndex=0; var correctedLine=new StringBuilder();
                 while(assignmentIndex<assignments.size() && assignments.get(assignmentIndex).path("segment_id").equals(segment.path("segment_id"))) {
                     var item=assignments.get(assignmentIndex++);
-                    fields(item,"assignment_id","segment_id","word_ids","text","speaker_id","overlapping_speakers");
+                    if(version==3) fields(item,"assignment_id","segment_id","word_ids","text","speaker_id","overlapping_speakers");
+                    else fields(item,"assignment_id","segment_id","word_ids","text","corrected_text","speaker_id","overlapping_speakers");
                     require(item.path("assignment_id").asText().equals(segment.path("segment_id").asText()+"A"+(++partIndex)));
                     require(item.path("speaker_id").isNull() || (item.path("speaker_id").isTextual() && labels.contains(item.path("speaker_id").asText())));
                     var wordIds=item.path("word_ids"); require(wordIds.isArray() && !wordIds.isEmpty());
@@ -148,11 +149,18 @@ public class TranscriptVersionService {
                         end=word.path("end_ms").asInt(); combined.append(word.path("text").asText());
                     }
                     require(item.path("text").isTextual() && item.path("text").asText().equals(combined.toString()));
+                    if(version==4) {
+                        require(item.path("corrected_text").isTextual() && item.path("corrected_text").asText().length()<=4000);
+                        correctedLine.append(item.path("corrected_text").asText());
+                    }
                     validateOverlaps(item.path("overlapping_speakers"),start,end,alignment.path("turns"));
                 }
                 require(partIndex>0 && wordIndex==words.size());
+                if(version==4 && !correctedLine.isEmpty()) correctedLines.add(correctedLine.toString());
             }
-            require(assignmentIndex==assignments.size()); return;
+            require(assignmentIndex==assignments.size());
+            if(version==4) require(confirmedText.isTextual() && String.join("\n",correctedLines).equals(confirmedText.asText()));
+            return;
         }
         require(assignments.isArray() && assignments.size()==segments.size());
         for(int i=0;i<assignments.size();i++) {
@@ -196,7 +204,7 @@ public class TranscriptVersionService {
         var rows=jdbc.queryForList("SELECT * FROM meeting_transcript_versions WHERE meeting_id=? AND id=? FOR UPDATE",meetingId,id);
         if(rows.isEmpty()) throw ApiException.notFound("转写版本不存在");
         var row=rows.getFirst();
-        validateAlignment(body.get("speaker_alignment"),json(row.get("draft_json")));
+        validateAlignment(body.get("speaker_alignment"),json(row.get("draft_json")),body.path("text"));
         if(row.get("confirmation_json")!=null) {
             var old=json(row.get("confirmation_json"));
             if(old.path("confirmed_by").asInt()!=actor || !old.path("input").equals(body)) throw ApiException.conflict("此版本已经确认；请读取已保存结果");
