@@ -6,7 +6,7 @@ const props = defineProps({ meetingId: String, audio: Object, draft: Object, dia
 const meeting = useMeetingStore()
 const rows = ref([]), selected = ref(null), text = ref(''), title = ref(''), acknowledged = ref(false)
 const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
-const assignments = ref([])
+const assignments = ref([]), splitPositions = ref({})
 let generation = 0
 onBeforeUnmount(() => { ++generation })
 function transientPreview() {
@@ -24,6 +24,45 @@ function overlappingSpeakers(segment,row = selected.value) {
   return speakers
 }
 function supportsWordAlignment(row) { return row?.draft?.segments?.length && row.draft.segments.every(segment=>segment.words?.length) }
+function segmentFor(item) { return selected.value?.draft?.segments?.find(segment=>segment.segment_id===item.segment_id) }
+function wordsFor(item) {
+  const segment=segmentFor(item)
+  return item.word_ids?.map(id=>segment?.words?.find(word=>word.word_id===id)).filter(Boolean) || []
+}
+function wordAssignment(segment,words,speakerId) {
+  const interval={start_ms:words[0].start_ms,end_ms:words.at(-1).end_ms}, value=words.map(word=>word.text).join('')
+  return {segment_id:segment.segment_id,word_ids:words.map(word=>word.word_id),text:value,speaker_id:speakerId,
+    overlapping_speakers:overlappingSpeakers(interval),display_text:value.trim(),display_start_ms:interval.start_ms,display_end_ms:interval.end_ms}
+}
+function renumberAssignments() {
+  const counts={}
+  assignments.value=assignments.value.map(item=>item.word_ids
+    ? {...item,assignment_id:`${item.segment_id}A${counts[item.segment_id]=(counts[item.segment_id] || 0)+1}`}
+    : item)
+  splitPositions.value={}
+}
+function splitOptions(item) {
+  const words=wordsFor(item)
+  return words.slice(0,-1).map((word,index)=>({value:index+1,label:`${word.word_id} 后 · ${word.text.trim() || '空白词'}`}))
+}
+function splitAssignment(index) {
+  const item=assignments.value[index], segment=segmentFor(item), words=wordsFor(item)
+  const at=Number(splitPositions.value[item.assignment_id] || 1)
+  if(!segment || at<1 || at>=words.length) return
+  assignments.value.splice(index,1,wordAssignment(segment,words.slice(0,at),item.speaker_id),wordAssignment(segment,words.slice(at),item.speaker_id))
+  renumberAssignments()
+}
+function canMergePrevious(index) {
+  const item=assignments.value[index], previous=assignments.value[index-1]
+  return !!item?.word_ids?.length && !!previous?.word_ids?.length && item.segment_id===previous.segment_id
+}
+function mergePrevious(index) {
+  if(!canMergePrevious(index)) return
+  const item=assignments.value[index], previous=assignments.value[index-1], segment=segmentFor(item)
+  const speakerId=previous.speaker_id===item.speaker_id ? item.speaker_id : null
+  assignments.value.splice(index-1,2,wordAssignment(segment,[...wordsFor(previous),...wordsFor(item)],speakerId))
+  renumberAssignments()
+}
 function buildAssignments(row) {
   const stored=row.confirmation?.input?.speaker_alignment?.assignments
   if(stored) return stored.map(item=>{
@@ -53,7 +92,7 @@ function choose(row) {
   selected.value = row; text.value = row.confirmation?.input.text || row.draft.text
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
-  assignments.value = buildAssignments(row)
+  assignments.value = buildAssignments(row); splitPositions.value = {}
 }
 function suggestedSpeaker(segment,row = selected.value) {
   const preview = previewFor(row)
@@ -142,15 +181,23 @@ async function openAnalysis() {
         <label class="field">人工核对文本<textarea v-model="text" maxlength="16000" rows="6" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
-          <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组。仅供人工核对，可改为未知。</p>
-          <label v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field">
-            {{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}
+          <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组，可在词后拆分或与同一原始片段的上一组合并。合并不同主说话人的组后需重新选择。仅供人工核对，可改为未知。</p>
+          <div v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field">
+            <span>{{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}</span>
             <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
-            <select v-model="assignments[index].speaker_id" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
-              <option :value="null">未知</option>
+            <select v-model="assignments[index].speaker_id" :aria-label="`${item.assignment_id || item.segment_id} · ${item.display_text}`" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
+              <option value="">未知</option>
               <option v-for="n in (previewFor(selected)?.speaker_count || selected.confirmation?.input?.speaker_alignment?.speaker_count || 0)" :key="n" :value="`SPK${n}`">SPK{{ n }}</option>
             </select>
-          </label>
+            <template v-if="item.word_ids && !selected.confirmation && meeting.maySubmit">
+              <select v-if="item.word_ids.length > 1" v-model="splitPositions[item.assignment_id]" :aria-label="`${item.assignment_id} 拆分位置`" :disabled="busy || !!pending">
+                <option value="">选择词边界</option>
+                <option v-for="option in splitOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+              <button v-if="item.word_ids.length > 1" type="button" :aria-label="`${item.assignment_id} 拆分此子段`" :disabled="busy || !!pending || !splitPositions[item.assignment_id]" @click="splitAssignment(index)">拆分此子段</button>
+              <button v-if="canMergePrevious(index)" type="button" :aria-label="`${item.assignment_id} 与上一子段合并`" :disabled="busy || !!pending" @click="mergePrevious(index)">与上一子段合并</button>
+            </template>
+          </div>
         </fieldset>
         <template v-if="!selected.confirmation && meeting.maySubmit">
           <label><input type="checkbox" v-model="acknowledged" :disabled="busy || !!pending">我已对照录音核对文本，理解说话人未识别</label>

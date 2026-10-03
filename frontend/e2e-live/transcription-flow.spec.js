@@ -92,6 +92,14 @@ test('real speech version survives reload and confirmed text enters meeting anal
     Array.from({length:expectedSpeakers},(_,i)=>`SPK${i+1}`))
   for(const assignment of expectedAssignments)
     await expect(panel.getByLabel(new RegExp(`^${assignment.assignment_id} ·`))).toHaveValue(assignment.speaker_id || '')
+  const adjustable=expectedAssignments.find(item=>item.word_ids.length>1)
+  expect(adjustable).toBeTruthy()
+  await panel.getByLabel(`${adjustable.assignment_id} 拆分位置`).selectOption('1')
+  await panel.getByRole('button',{name:`${adjustable.assignment_id} 拆分此子段`}).click()
+  const insertedId=`${adjustable.segment_id}A${Number(adjustable.assignment_id.split('A').at(-1))+1}`
+  await panel.getByRole('button',{name:`${insertedId} 与上一子段合并`}).click()
+  for(const assignment of expectedAssignments)
+    await expect(panel.getByLabel(new RegExp(`^${assignment.assignment_id} ·`))).toHaveValue(assignment.speaker_id || '')
   // Synthetic human correction exercises the existing Daily fixture, not STT semantic accuracy.
   const corrected = 'US13 今天开始开发。负责人和截止时间仍待确认。'
   await panel.getByLabel('人工核对文本').fill(corrected)
@@ -125,5 +133,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments},null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true},null,2))
 })

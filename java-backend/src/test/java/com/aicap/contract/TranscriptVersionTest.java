@@ -91,6 +91,14 @@ class TranscriptVersionTest {
             {"assignment_id":"S1A2","segment_id":"S1","word_ids":["S1W2"],"text":"草稿","speaker_id":"SPK2","overlapping_speakers":["SPK1","SPK2"]}]}
           """.formatted("a".repeat(64)))); return input;
     }
+    ObjectNode mergedAlignmentV3() throws Exception {
+        var input=confirmation(); input.set("speaker_alignment",mapper.readTree("""
+          {"alignment_version":3,"engine":"sherpa-onnx-pyannote3-eres2net","audio_sha256":"%s","duration_ms":1000,"speaker_count":2,
+          "turns":[{"start_ms":0,"end_ms":600,"speaker_id":"SPK1"},{"start_ms":500,"end_ms":900,"speaker_id":"SPK2"}],
+          "assignments":[
+            {"assignment_id":"S1A1","segment_id":"S1","word_ids":["S1W1","S1W2"],"text":"原始草稿","speaker_id":null,"overlapping_speakers":["SPK1","SPK2"]}]}
+          """.formatted("a".repeat(64)))); return input;
+    }
     @Test void immutableSaveRetryAndMeetingScope() throws Exception {
         var b=body(); var row=service.save("m1",b,1);
         assertEquals(row,service.save("m1",b,1)); assertEquals(1,service.list("m1").size()); assertTrue(service.list("m2").isEmpty());
@@ -184,6 +192,12 @@ class TranscriptVersionTest {
         var second=bodyWithWordsPreview(); second.put("client_request_id","v3-bad"); var secondId=service.save("m1",second,1).path("id").asText();
         var missing=alignedConfirmationV3(); ((ObjectNode)missing.path("speaker_alignment")).withArray("assignments").remove(1);
         assertEquals(422,assertThrows(ApiException.class,()->service.confirm("m1",secondId,missing,1)).getStatus());
+    }
+    @Test void mergedWordAlignmentRemainsCompleteAndOrdered() throws Exception {
+        var body=bodyWithWordsPreview(); body.put("client_request_id","v3-merged"); var id=service.save("m1",body,1).path("id").asText();
+        var result=service.confirm("m1",id,mergedAlignmentV3(),1);
+        var assignment=result.path("confirmation").path("input").path("speaker_alignment").path("assignments").get(0);
+        assertEquals(2,assignment.path("word_ids").size()); assertEquals("原始草稿",assignment.path("text").asText());
     }
     @Test void failedConfirmationRollsBackNewMeeting() throws Exception {
         var id=service.save("m1",body(),1).path("id").asText();

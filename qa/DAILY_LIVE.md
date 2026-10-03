@@ -254,3 +254,11 @@ alignment v3将每个词按与分离turn的最大重叠分配主SPK，再合并�
 最终真实证据 **qa/.daily-live/9d66228b0619435ab48d7745bfe68859/**：浏览器1/1、退出0，12个原始片段、95个词生成13个对齐子段。S10实际拆为`S10A1=这是/SPK1`和`S10A2=我第四次半点度演讲/SPK4`；确认JSON的95个word_id完整且无重复。仍有S3A1自身跨SPK1/SPK2，说明单个Whisper词区间也可能跨分离边界，页面保留双标签提示，不按字符继续猜分。SPK1–4完整覆盖，speech2、文本夹具1、counts **1/1/0/1/1**。
 
 验证：TranscriptVersionTest 12/12、Java21 package、转写/版本浏览器15/15、前端build通过；Python生产逻辑未再修改，沿用本轮前一阶段245/245。result.json新增alignment_units=13，multi_speaker_segments=1按仍含多标签子段的原片段去重计数。
+
+## 人工调整词组边界（2026-10-03，第七十四轮）
+
+词级对齐页面支持在所选词后拆分子段，或将同一原始STT片段中的相邻子段合并。编辑后统一按`SxAy`连续重编号并重算原文、时间和全部重叠SPK；不同主标签合并时清空为未知，避免静默选择其中一方。确认协议保持alignment v3，Java继续要求原始词按序恰好覆盖一次，并新增接受完整合并词组的契约用例。
+
+最终真实证据 **qa/.daily-live/ce9022a7e9884578884a2892abc7c6d1/**：官方四人中文音频浏览器1/1、退出0，真实执行一次多词组拆分并与下一组还原合并，证据`manual_boundary_roundtrip=true`。最终仍为12个原始片段、95词、13个对齐子段，SPK1–4完整覆盖，speech2、文本夹具1、counts **1/1/0/1/1**，确认载荷与自动分组基线完全一致。
+
+验证：TranscriptVersionTest 13/13、转写/分离/版本相关浏览器20/20、前端production build及Java21 package通过。Python和Java生产逻辑未改；本轮不重复运行Python全量测试。
