@@ -3,10 +3,11 @@ import { ref, watch, onBeforeUnmount } from 'vue'
 import { listVersions, saveVersion, confirmVersion } from '@/api/transcriptVersions'
 import { useMeetingStore } from '@/stores/meeting'
 const props = defineProps({ meetingId: String, audio: Object, draft: Object, diarization: Object })
+const emit = defineEmits(['play-range'])
 const meeting = useMeetingStore()
 const rows = ref([]), selected = ref(null), text = ref(''), title = ref(''), acknowledged = ref(false)
 const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
-const assignments = ref([]), splitPositions = ref({})
+const assignments = ref([]), splitPositions = ref({}), activeIndex = ref(-1)
 let generation = 0
 onBeforeUnmount(() => { ++generation })
 function transientPreview() {
@@ -40,6 +41,17 @@ function renumberAssignments() {
     ? {...item,assignment_id:`${item.segment_id}A${counts[item.segment_id]=(counts[item.segment_id] || 0)+1}`}
     : item)
   splitPositions.value={}
+  if(activeIndex.value>=assignments.value.length) activeIndex.value=assignments.value.length-1
+}
+function playAssignment(index) {
+  const item=assignments.value[index]
+  if(!item) return
+  activeIndex.value=index
+  emit('play-range',{assignment_id:item.assignment_id || item.segment_id,start_ms:item.display_start_ms,end_ms:item.display_end_ms})
+}
+function movePlayback(offset) {
+  const base=activeIndex.value<0 && offset>0 ? -1 : Math.max(0,activeIndex.value)
+  playAssignment(Math.max(0,Math.min(assignments.value.length-1,base+offset)))
 }
 function splitOptions(item) {
   const words=wordsFor(item)
@@ -92,7 +104,7 @@ function choose(row) {
   selected.value = row; text.value = row.confirmation?.input.text || row.draft.text
   title.value = row.confirmation?.input.title || `${meeting.selectedMeeting?.title || '会议'} · 核对转写`.slice(0, 200)
   acknowledged.value = false; pending.value = null
-  assignments.value = buildAssignments(row); splitPositions.value = {}
+  assignments.value = buildAssignments(row); splitPositions.value = {}; activeIndex.value = -1
 }
 function suggestedSpeaker(segment,row = selected.value) {
   const preview = previewFor(row)
@@ -182,9 +194,15 @@ async function openAnalysis() {
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
           <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组，可在词后拆分或与同一原始片段的上一组合并。合并不同主说话人的组后需重新选择。仅供人工核对，可改为未知。</p>
-          <div v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field">
+          <div class="alignment-nav">
+            <button type="button" :disabled="busy || !assignments.length || activeIndex <= 0" @click="movePlayback(-1)">播放上一子段</button>
+            <span role="status">{{ activeIndex < 0 ? '尚未开始逐段核对' : `正在核对 ${activeIndex+1}/${assignments.length}` }}</span>
+            <button type="button" :disabled="busy || !assignments.length || activeIndex >= assignments.length-1" @click="movePlayback(1)">{{ activeIndex < 0 ? '开始逐段播放' : '播放下一子段' }}</button>
+          </div>
+          <div v-for="(item,index) in assignments" :key="item.assignment_id || item.segment_id" class="field alignment-row" :class="{active:index===activeIndex}" :aria-current="index===activeIndex ? 'true' : undefined">
             <span>{{ item.assignment_id || item.segment_id }} · {{ item.display_start_ms/1000 }}–{{ item.display_end_ms/1000 }} 秒 · {{ item.display_text }}</span>
             <span v-if="assignments[index].overlapping_speakers.length > 1" role="status">跨说话人时间段：{{ assignments[index].overlapping_speakers.join('、') }}；请选择主说话人</span>
+            <button type="button" :aria-label="`播放 ${item.assignment_id || item.segment_id}`" :disabled="busy" @click="playAssignment(index)">播放此子段</button>
             <select v-model="assignments[index].speaker_id" :aria-label="`${item.assignment_id || item.segment_id} · ${item.display_text}`" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit">
               <option value="">未知</option>
               <option v-for="n in (previewFor(selected)?.speaker_count || selected.confirmation?.input?.speaker_alignment?.speaker_count || 0)" :key="n" :value="`SPK${n}`">SPK{{ n }}</option>
@@ -208,3 +226,8 @@ async function openAnalysis() {
     </template>
   </section>
 </template>
+<style scoped>
+.alignment-nav { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; }
+.alignment-row { border-left:3px solid transparent; padding-left:8px; }
+.alignment-row.active { border-left-color:var(--accent, #2878d0); background:rgba(40,120,208,.08); }
+</style>

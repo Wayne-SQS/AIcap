@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { audioApi } from '@/api/audio'
 import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
@@ -23,6 +23,8 @@ const error = ref('')
 const audios = ref([])
 const clip = ref(null)          // { blob, url, ms, bytes }
 const playUrls = ref({})        // id -> objectURL(鉴权取字节后生成)
+const audioElements = new Map()
+const rangeStops = new Map()
 
 let recorder = null
 let stream = null
@@ -208,11 +210,41 @@ async function refresh() {
 }
 
 async function play(row) {
-  if (playUrls.value[row.id]) return
+  if (playUrls.value[row.id]) return playUrls.value[row.id]
   try {
     const blob = await audioApi.fetchBlob(row.id)
-    playUrls.value = { ...playUrls.value, [row.id]: URL.createObjectURL(blob) }
+    const url=URL.createObjectURL(blob)
+    playUrls.value = { ...playUrls.value, [row.id]: url }
+    return url
   } catch (e) { error.value = e.message }
+}
+function setAudioElement(id,element) {
+  if(element) audioElements.set(id,element)
+  else audioElements.delete(id)
+}
+function stopRange(id) {
+  const stop=rangeStops.get(id)
+  if(stop) stop()
+}
+async function playRange(row,range) {
+  error.value=''
+  if(!playUrls.value[row.id] && !await play(row)) return
+  await nextTick()
+  const player=audioElements.get(row.id)
+  if(!player) { error.value='音频回放尚未就绪，请重试。'; return }
+  stopRange(row.id)
+  const endSeconds=range.end_ms/1000
+  let closed=false
+  const cleanup=()=>{
+    if(closed) return
+    closed=true; player.removeEventListener('timeupdate',atEnd); player.removeEventListener('ended',cleanup); player.removeEventListener('pause',cleanup)
+    if(rangeStops.get(row.id)===cleanup) rangeStops.delete(row.id)
+  }
+  const atEnd=()=>{ if(player.currentTime+0.02>=endSeconds) { player.pause(); cleanup() } }
+  rangeStops.set(row.id,cleanup)
+  player.addEventListener('timeupdate',atEnd); player.addEventListener('ended',cleanup); player.addEventListener('pause',cleanup)
+  try { player.currentTime=range.start_ms/1000; await player.play() }
+  catch(e) { cleanup(); error.value='无法播放核对片段：'+e.message }
 }
 
 async function remove(row) {
@@ -227,6 +259,7 @@ async function remove(row) {
 
 watch(meetingId, () => {
   clearClip()
+  rangeStops.forEach(stop=>stop()); rangeStops.clear(); audioElements.clear()
   Object.values(playUrls.value).forEach(u => URL.revokeObjectURL(u))
   playUrls.value = {}
   refresh()
@@ -235,6 +268,7 @@ watch(meetingId, () => {
 onUnmounted(() => {
   if (recording.value) stop()
   clearClip()
+  rangeStops.forEach(stop=>stop()); rangeStops.clear(); audioElements.clear()
   Object.values(playUrls.value).forEach(u => URL.revokeObjectURL(u))
 })
 </script>
@@ -285,12 +319,12 @@ onUnmounted(() => {
         </span>
       </div>
       <div class="audio-actions">
-        <audio v-if="playUrls[a.id]" :src="playUrls[a.id]" controls preload="metadata"></audio>
+        <audio v-if="playUrls[a.id]" :ref="element => setAudioElement(a.id,element)" :src="playUrls[a.id]" controls preload="metadata"></audio>
         <button v-else @click="play(a)">加载回放</button>
         <a v-if="playUrls[a.id]" :href="playUrls[a.id]" :download="a.filename" class="btn-link">下载</a>
         <button v-if="mayDelete" class="danger" @click="remove(a)">删除</button>
       </div>
-      <AudioTranscription :key="meetingId + ':' + a.id" :meeting-id="meetingId" :audio="a" />
+      <AudioTranscription :key="meetingId + ':' + a.id" :meeting-id="meetingId" :audio="a" @play-range="range => playRange(a,range)" />
     </div>
   </div>
 </template>

@@ -92,6 +92,17 @@ test('real speech version survives reload and confirmed text enters meeting anal
     Array.from({length:expectedSpeakers},(_,i)=>`SPK${i+1}`))
   for(const assignment of expectedAssignments)
     await expect(panel.getByLabel(new RegExp(`^${assignment.assignment_id} ·`))).toHaveValue(assignment.speaker_id || '')
+  const playable=expectedAssignments.filter(item=>item.word_ids.length && item.word_ids[0]!=='S1W1' && item.word_ids.length>1)
+    .sort((a,b)=>(a.word_ids.length-b.word_ids.length))[0] || expectedAssignments[1]
+  const playableWords=data.segments.find(item=>item.segment_id===playable.segment_id).words
+    .filter(word=>playable.word_ids.includes(word.word_id))
+  const playStart=playableWords[0].start_ms/1000, playEnd=playableWords.at(-1).end_ms/1000
+  await panel.getByRole('button',{name:`播放 ${playable.assignment_id}`}).click()
+  const reviewAudio=page.locator('.audio-row audio')
+  await expect(reviewAudio).toBeVisible()
+  await expect.poll(()=>reviewAudio.evaluate(element=>element.currentTime),{timeout:10000}).toBeGreaterThan(playStart+0.05)
+  await expect.poll(()=>reviewAudio.evaluate(element=>element.paused),{timeout:Math.ceil((playEnd-playStart)*1000)+5000}).toBe(true)
+  expect(await reviewAudio.evaluate(element=>element.currentTime)).toBeLessThanOrEqual(playEnd+0.2)
   const adjustable=expectedAssignments.find(item=>item.word_ids.length>1)
   expect(adjustable).toBeTruthy()
   await panel.getByLabel(`${adjustable.assignment_id} 拆分位置`).selectOption('1')
@@ -133,5 +144,5 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
   writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true},null,2))
+  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true},null,2))
 })

@@ -5,6 +5,7 @@ import { useMeetingStore } from '@/stores/meeting'
 import TranscriptVersions from './TranscriptVersions.vue'
 import SpeakerDiarization from './SpeakerDiarization.vue'
 const props = defineProps({ meetingId: String, audio: Object })
+const emit = defineEmits(['play-range'])
 const meeting = useMeetingStore()
 const language = ref(null), busy = ref(false), result = ref(null), diarization = ref(null), error = ref('')
 let version = 0
@@ -19,6 +20,7 @@ async function run() {
   finally { if (attempt === version) busy.value = false }
 }
 const seconds = ms => (ms/1000).toFixed(2)
+function playRange(range) { emit('play-range',range) }
 </script>
 <template>
   <section class="transcription" :aria-label="'音频转写：' + audio.filename">
@@ -36,7 +38,7 @@ const seconds = ms => (ms/1000).toFixed(2)
         <label class="field">转写全文（只读，可选中复制）<textarea :value="result.text" readonly rows="5" /></label>
       </template>
     </div>
-    <TranscriptVersions :meeting-id="meetingId" :audio="audio" :draft="result" :diarization="diarization" />
+    <TranscriptVersions :meeting-id="meetingId" :audio="audio" :draft="result" :diarization="diarization" @play-range="playRange" />
     <SpeakerDiarization :meeting-id="meetingId" :audio="audio" @preview="diarization = $event" />
   </section>
 </template>

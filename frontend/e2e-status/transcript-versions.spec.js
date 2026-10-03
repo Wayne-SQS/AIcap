@@ -5,7 +5,11 @@ const draft = { audio: { meeting_id:'m1', audio_id:'a1', sha256:'a'.repeat(64), 
     words:[{word_id:'S1W1',start_ms:0,end_ms:400,text:'登陆'},{word_id:'S1W2',start_ms:400,end_ms:1900,text:'接口待确认。'}]}] }
 async function setup(page, { role='member', loseConfirmation=false }={}) {
   let version=null, target=null; const saves=[], confirms=[]
-  await page.addInitScript(()=>localStorage.setItem('aiguanli_token','fixture-token'))
+  await page.addInitScript(()=>{
+    localStorage.setItem('aiguanli_token','fixture-token')
+    HTMLMediaElement.prototype.play=function(){ this.dataset.playCount=String(Number(this.dataset.playCount || 0)+1); return Promise.resolve() }
+    HTMLMediaElement.prototype.pause=function(){ this.dataset.pauseCount=String(Number(this.dataset.pauseCount || 0)+1) }
+  })
   await page.route('**/meeting-ai/api/**',route=>route.fulfill({json:draft}))
   await page.route('http://127.0.0.1:8080/api/**',async route=>{
     const req=route.request(), path=new URL(req.url()).pathname; let data=[]
@@ -95,6 +99,19 @@ test('time-overlap suggestion can be changed and persists with diarization snaps
   await expect(panel(page).getByLabel(/^S1A1 ·/)).toHaveValue('SPK1')
   await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveValue('SPK2')
   await expect(panel(page)).toContainText('跨说话人时间段：SPK1、SPK2')
+  await panel(page).getByRole('button',{name:'开始逐段播放'}).click()
+  const player=page.locator('.audio-row audio')
+  await expect(player).toHaveAttribute('data-play-count','1')
+  await expect(panel(page)).toContainText('正在核对 1/2')
+  await panel(page).getByRole('button',{name:'播放下一子段'}).click()
+  await expect(player).toHaveAttribute('data-play-count','2')
+  await expect.poll(()=>player.evaluate(element=>element.currentTime)).toBeCloseTo(0.4,1)
+  await player.evaluate(element=>{ element.currentTime=2; element.dispatchEvent(new Event('timeupdate')) })
+  await expect(player).toHaveAttribute('data-pause-count','1')
+  await expect(panel(page)).toContainText('正在核对 2/2')
+  await panel(page).getByRole('button',{name:'播放上一子段'}).click()
+  await expect(player).toHaveAttribute('data-play-count','3')
+  await expect(panel(page)).toContainText('正在核对 1/2')
   await panel(page).getByRole('button',{name:'S1A2 与上一子段合并'}).click()
   await expect(panel(page).getByLabel(/^S1A1 ·/)).toHaveValue('')
   await expect(panel(page).getByLabel(/^S1A2 ·/)).toHaveCount(0)
