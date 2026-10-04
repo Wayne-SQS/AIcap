@@ -64,6 +64,10 @@ class StartupTests(unittest.TestCase):
             with self.assertRaises(start_service.StartupError):
                 start_service.reserve_port(sock.getsockname()[1])
 
+    def test_container_listener_must_be_explicit(self):
+        with start_service.reserve_port(self.free_port(), '0.0.0.0') as sock:
+            self.assertEqual('0.0.0.0', sock.getsockname()[0])
+
     def test_missing_secret_blocks_without_leaking_config(self):
         output = io.StringIO()
         with patch.dict(os.environ, {'AICAP_LLM_API_KEY': ''}), contextlib.redirect_stderr(output):

@@ -61,12 +61,12 @@ def check_java(origin):
         raise StartupError('Java health check failed; start Java or correct --java-url. No service was stopped.') from None
 
 
-def reserve_port(port):
+def reserve_port(port, host='127.0.0.1'):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        sock.bind(('127.0.0.1', port))
+        sock.bind((host, port))
         sock.listen(128)
         return sock
     except OSError:
@@ -80,6 +80,8 @@ def main(argv=None):
     source.add_argument('--env-file', type=Path, help='Explicit file overrides the three model environment values.')
     source.add_argument('--environment-only', action='store_true', help='Do not read any config file.')
     parser.add_argument('--java-url', default=os.environ.get('AICAP_JAVA_BASE_URL', 'http://127.0.0.1:8080'))
+    parser.add_argument('--host', choices=('127.0.0.1', '0.0.0.0'), default='127.0.0.1',
+                        help='Listen address; 0.0.0.0 is intended for an isolated container network.')
     parser.add_argument('--port', type=int, default=8090)
     parser.add_argument('--check-only', action='store_true', help='Validate startup prerequisites without serving or model calls.')
     args = parser.parse_args(argv)
@@ -101,13 +103,13 @@ def main(argv=None):
             raise StartupError('Model configuration missing or invalid; check AICAP_LLM_API_KEY/BASE_URL/MODEL and restart.') from None
         check_java(args.java_url)
         app = api.create_app(backend_origin=args.java_url.rstrip('/'))
-        with reserve_port(args.port) as sock:
+        with reserve_port(args.port, args.host) as sock:
             print('Preflight passed: dependencies, model configuration format, Java health, local port.', flush=True)
             print('Model credentials and authenticated analysis are NOT verified; no model request was made.', flush=True)
             if args.check_only:
                 return 0
-            print(f'Starting at http://127.0.0.1:{args.port}; wait for Uvicorn startup confirmation. Ctrl+C stops this service.', flush=True)
-            server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=args.port))
+            print(f'Starting at http://{args.host}:{args.port}; wait for Uvicorn startup confirmation. Ctrl+C stops this service.', flush=True)
+            server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port))
             server.run(sockets=[sock])
             return 0 if server.started else 1
     except StartupError as error:

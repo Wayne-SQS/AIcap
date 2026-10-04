@@ -1,0 +1,100 @@
+name: aicap
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in deploy/.env}
+      MYSQL_DATABASE: AIcap
+      MYSQL_USER: aicap
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "127.0.0.1:${AICAP_DB_HOST_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  java:
+    build:
+      context: ..
+      dockerfile: deploy/java.Dockerfile
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/AIcap?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USER: aicap
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
+      AICAP_SEED_ON_START: ${AICAP_SEED_ON_START:-true}
+      AICAP_AUDIO_DIR: /data/audio
+      AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
+      AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
+      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-v4-flash}
+      PROFILE_LLM_API_KEY: ${PROFILE_LLM_API_KEY:-}
+      PROFILE_LLM_BASE_URL: ${PROFILE_LLM_BASE_URL:-https://api.deepseek.com}
+      PROFILE_LLM_MODEL: ${PROFILE_LLM_MODEL:-deepseek-v4-flash}
+      AICAP_AGENT_WORKER_ENABLED: ${AICAP_AGENT_WORKER_ENABLED:-true}
+    volumes:
+      - audio-data:/data/audio
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health | grep -q '\"status\":\"ok\".*\"db\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  ai:
+    build:
+      context: ..
+      dockerfile: deploy/ai.Dockerfile
+    restart: unless-stopped
+    environment:
+      AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
+      AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
+      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-v4-flash}
+      AICAP_STT_MODEL_DIR: /models/stt
+      AICAP_DIARIZATION_MODEL_DIR: /models/diarization
+    volumes:
+      - ../ai-service/.models/faster-whisper-base:/models/stt:ro
+      - ../ai-service/.models/diarization:/models/diarization:ro
+    depends_on:
+      java:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3))['status']=='ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${AICAP_BIND_ADDRESS:-127.0.0.1}:${AICAP_HTTP_PORT:-8088}:80"
+    depends_on:
+      java:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  mysql-data:
+  audio-data:

@@ -1,0 +1,15 @@
+.git
+.agent-collab
+**/.venv
+**/__pycache__
+**/node_modules
+**/dist
+**/target
+backend/mysql-data
+java-backend/data
+logs
+qa/.daily-live
+ai-service/.stt-eval
+ai-service/.models
+*.log
+*.pid

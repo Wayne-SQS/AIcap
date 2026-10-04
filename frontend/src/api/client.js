@@ -1,11 +1,13 @@
 /* fetch 封装:行为 1:1 对齐旧版 index.html api()(L1266-1274)
    baseURL 三级解析:window.__AICAP_API_BASE__(E2E / addInitScript 注入点) > VITE_API_BASE > 默认
    —— index.html 已不再硬编码该全局(见该文件注释,ENV-D02),故 VITE_API_BASE 现在真正生效
-   默认指向现行 Spring Boot 后端(java-backend/,8080);FastAPI 版(8000)已归档至 backend/ */
+   开发环境默认指向Spring Boot 8080；生产构建默认使用同源/api反向代理。 */
 import { TOKEN_KEY } from '@/constants'
 
 export function apiBase() {
-  return window.__AICAP_API_BASE__ || import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
+  if (window.__AICAP_API_BASE__) return window.__AICAP_API_BASE__
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE
+  return import.meta.env.PROD ? '' : 'http://127.0.0.1:8080'
 }
 
 export function getAuthToken() {

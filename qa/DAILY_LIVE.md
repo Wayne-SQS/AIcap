@@ -306,3 +306,9 @@ alignment v3将每个词按与分离turn的最大重叠分配主SPK，再合并�
 新增严格的长格式TextGrid与RTTM适配器、固定下载校验的AISHELL-4运行器和多报告计数汇总器。真实运行测试集录音`L_R003S01C02`的0–300、600–900、1200–1500秒三窗，共900秒；本地原始数据与逐字产物位于忽略目录`ai-service/.stt-eval/`，仓库只保存不含文本的`ai-service/evals/aishell4_speech_baseline.json`。
 
 三个窗口WER分别41.60%/64.93%/66.77%，DER分别7.73%/30.77%/7.86%；按原始错误计数汇总WER **57.96%**、DER **16.16%**。1952个模型词的时间戳覆盖率100%，与说话人时间段重合率99.80%。这是单个会话三个窗口的基线，且单流WER会惩罚AISHELL-4重叠发言，暂不设发布阈值。运行时暴露的Whisper等起止词时间戳已在片段内安全归一为1 ms，反向时间继续拒绝。定向27项与三次真实模型执行、汇总均通过。
+
+## 容器化生产形态与上线前验证（2026-10-04，第八十一轮）
+
+新增MySQL、Java、Python会议Agent和Nginx前端网关的Compose编排。生产前端默认使用同源`/api`，Nginx将`/meeting-ai`去前缀转发到Python；Java/Python/数据库不发布公网端口，HTTP网关默认仅绑定宿主机127.0.0.1，留给HTTPS终止层。Java镜像用JDK 21兼容参数构建并以非root UID运行，Python模型从宿主机只读挂载，MySQL和会议音频使用独立命名卷。
+
+`deploy/verify.py`在启动前检查真实配置文件、密钥最低强度、模型和构建文件，启动后检查首页、Java/数据库与Python三条路由；错误不回显密钥。Python启动器新增显式`--host 0.0.0.0`容器模式，本地默认仍为127.0.0.1。验证结果：Python全量265/265、部署检查器3/3、启动器7/7、前端状态/会议浏览器100/100、production build、Java 21 package、Compose config及差异检查通过；生产assets中无固定Java回环地址。开发机Docker Engine未运行，因此不把未执行的容器启动写成通过；部署机必须补跑live验证。
