@@ -312,3 +312,9 @@ alignment v3将每个词按与分离turn的最大重叠分配主SPK，再合并�
 新增MySQL、Java、Python会议Agent和Nginx前端网关的Compose编排。生产前端默认使用同源`/api`，Nginx将`/meeting-ai`去前缀转发到Python；Java/Python/数据库不发布公网端口，HTTP网关默认仅绑定宿主机127.0.0.1，留给HTTPS终止层。Java镜像用JDK 21兼容参数构建并以非root UID运行，Python模型从宿主机只读挂载，MySQL和会议音频使用独立命名卷。
 
 `deploy/verify.py`在启动前检查真实配置文件、密钥最低强度、模型和构建文件，启动后检查首页、Java/数据库与Python三条路由；错误不回显密钥。Python启动器新增显式`--host 0.0.0.0`容器模式，本地默认仍为127.0.0.1。验证结果：Python全量265/265、部署检查器3/3、启动器7/7、前端状态/会议浏览器100/100、production build、Java 21 package、Compose config及差异检查通过；生产assets中无固定Java回环地址。开发机Docker Engine未运行，因此不把未执行的容器启动写成通过；部署机必须补跑live验证。
+
+## 真实容器启动与备份恢复演练（2026-10-04，第八十二轮）
+
+启动Docker Desktop 29.7.2后，使用隔离的空客户端配置绕过本机不可读Docker登录配置，匿名拉取官方镜像并真实构建`aicap-web/aicap-java/aicap-ai`。首次启动发现旧MySQL占用宿主机3307，据此移除生产MySQL不必要的宿主机端口；第二次启动四服务全部healthy：MySQL 8.0.46、Java 21、Python会议Agent及Nginx 1.27.5，唯一入口为`127.0.0.1:8088`。live验证通过首页、Java+数据库和Python，追加只读登录冒烟后还验证JWT当前用户与会议列表。
+
+新增`deploy/data_backup.py`，原子生成数据库SQL、音频tar.gz及SHA-256 manifest；恢复要求显式`--confirm-data-loss`，停止应用、重建AIcap库、清空音频卷、恢复并重启。真实备份位于忽略目录`deploy/backups/live-smoke-20261004/`，SQL 77,565字节、空音频归档99字节。备份后写入`restore_probe`表和音频探针文件，真实恢复后两者均消失，四服务再次healthy且认证只读冒烟通过。归档验证额外拒绝绝对路径、`..`、链接及设备成员，避免恢复时路径穿越。

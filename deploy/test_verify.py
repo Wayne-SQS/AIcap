@@ -63,6 +63,32 @@ class DeploymentVerificationTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
+    def test_authenticated_smoke_uses_token_for_read_only_routes(self):
+        seen = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                seen.append((self.path, body, self.headers.get('Authorization')))
+                self.send_response(200); self.end_headers()
+                self.wfile.write(b'{"access_token":"fixture-token"}')
+            def do_GET(self):
+                seen.append((self.path, None, self.headers.get('Authorization')))
+                body = (b'{"id":1,"role":"admin"}' if self.path.endswith('/auth/me')
+                        else b'[]')
+                self.send_response(200); self.end_headers(); self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        try:
+            verify.authenticated_smoke(
+                f'http://127.0.0.1:{server.server_port}', 'fixture-user', 'fixture-password')
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+        self.assertEqual(['/api/auth/login', '/api/auth/me', '/api/meetings'],
+                         [request[0] for request in seen])
+        self.assertEqual('Bearer fixture-token', seen[1][2])
+
 
 if __name__ == '__main__':
     unittest.main()

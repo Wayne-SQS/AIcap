@@ -15,6 +15,7 @@ Thumbs.db
 # python / backend
 backend/.env
 deploy/.env
+deploy/backups/
 backend/mysql-data/
 backend/backup_*.sql
 __pycache__/
