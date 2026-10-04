@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import unicodedata
 
@@ -279,12 +280,135 @@ def evaluate(reference: dict, transcription: dict, diarization: dict) -> dict:
     hypothesis_turns = _turns(diarization.get('turns'), duration_ms, 'hypothesis')
     return {
         'schema_version': 1,
+        'data_classification': 'explicit_ground_truth',
         'sample_id': sample_id,
         'duration_ms': duration_ms,
         'wer': word_error_rate(reference_text, hypothesis_text),
         'der': diarization_error_rate(reference_turns, hypothesis_turns, duration_ms),
         'word_alignment': word_alignment_coverage(transcription, hypothesis_turns, duration_ms),
     }
+
+
+def aggregate_reports(reports: list[dict]) -> dict:
+    """Aggregate additive speech metrics without averaging per-sample percentages."""
+    if not isinstance(reports, list) or not reports:
+        raise SpeechEvaluationError('reports_must_be_nonempty_array')
+    sample_ids, samples = set(), []
+    provenance = None
+    totals = {
+        'duration_ms': 0, 'substitutions': 0, 'deletions': 0, 'insertions': 0,
+        'reference_token_count': 0, 'hypothesis_token_count': 0,
+        'miss_ms': 0, 'false_alarm_ms': 0, 'confusion_ms': 0,
+        'scored_reference_speaker_ms': 0, 'word_count': 0,
+        'valid_timestamp_word_count': 0, 'audio_time_covered_ms': 0,
+        'words_overlapping_speaker_turns': 0,
+    }
+    tokenization = None
+    for report in reports:
+        try:
+            sample_id = report['sample_id']
+            duration_ms = report['duration_ms']
+            wer, der, alignment = report['wer'], report['der'], report['word_alignment']
+            if (report.get('schema_version') != 1
+                    or report.get('data_classification') not in (None, 'explicit_ground_truth')
+                    or not isinstance(sample_id, str) or not sample_id.strip()
+                    or sample_id in sample_ids or type(duration_ms) is not int or duration_ms <= 0):
+                raise ValueError()
+            current_tokenization = wer['tokenization']
+            if tokenization is None:
+                tokenization = current_tokenization
+            if (current_tokenization != tokenization or der['collar_ms'] != 0
+                    or der['overlap_scored'] is not True):
+                raise ValueError()
+            fields = {
+                'substitutions': wer['substitutions'], 'deletions': wer['deletions'],
+                'insertions': wer['insertions'],
+                'reference_token_count': wer['reference_token_count'],
+                'hypothesis_token_count': wer['hypothesis_token_count'],
+                'miss_ms': der['miss_ms'], 'false_alarm_ms': der['false_alarm_ms'],
+                'confusion_ms': der['confusion_ms'],
+                'scored_reference_speaker_ms': der['scored_reference_speaker_ms'],
+                'word_count': alignment['word_count'],
+                'valid_timestamp_word_count': alignment['valid_timestamp_word_count'],
+                'audio_time_covered_ms': alignment['audio_time_covered_ms'],
+                'words_overlapping_speaker_turns': alignment['words_overlapping_speaker_turns'],
+            }
+            if any(type(value) is not int or value < 0 for value in fields.values()):
+                raise ValueError()
+            if (fields['reference_token_count'] == 0
+                    or fields['scored_reference_speaker_ms'] == 0
+                    or fields['valid_timestamp_word_count'] > fields['word_count']
+                    or fields['words_overlapping_speaker_turns'] > fields['word_count']
+                    or fields['audio_time_covered_ms'] > duration_ms):
+                raise ValueError()
+            expected_wer = (fields['substitutions'] + fields['deletions']
+                            + fields['insertions']) / fields['reference_token_count']
+            expected_der = (fields['miss_ms'] + fields['false_alarm_ms']
+                            + fields['confusion_ms']) / fields['scored_reference_speaker_ms']
+            if (not isinstance(wer['error_rate'], (int, float))
+                    or not isinstance(der['error_rate'], (int, float))
+                    or not math.isfinite(wer['error_rate']) or not math.isfinite(der['error_rate'])
+                    or not math.isclose(wer['error_rate'], expected_wer, rel_tol=1e-12)
+                    or not math.isclose(der['error_rate'], expected_der, rel_tol=1e-12)):
+                raise ValueError()
+            current_provenance = tuple(report.get(name) for name in (
+                'dataset', 'dataset_license', 'dataset_source', 'recording_id'))
+            if provenance is None:
+                provenance = current_provenance
+            elif current_provenance != provenance:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise SpeechEvaluationError('speech_report_invalid') from None
+        sample_ids.add(sample_id)
+        totals['duration_ms'] += duration_ms
+        for name, value in fields.items():
+            totals[name] += value
+        sample = {'sample_id': sample_id, 'duration_ms': duration_ms,
+                  'wer': wer['error_rate'], 'der': der['error_rate']}
+        if isinstance(report.get('source_clip'), dict):
+            sample['source_clip'] = report['source_clip']
+        samples.append(sample)
+    edits = totals['substitutions'] + totals['deletions'] + totals['insertions']
+    diarization_errors = totals['miss_ms'] + totals['false_alarm_ms'] + totals['confusion_ms']
+    word_count = totals['word_count']
+    result = {
+        'schema_version': 1,
+        'data_classification': 'explicit_ground_truth_suite',
+        'sample_count': len(samples),
+        'duration_ms': totals['duration_ms'],
+        'samples': samples,
+        'wer': {
+            'error_rate': edits / totals['reference_token_count'],
+            'substitutions': totals['substitutions'], 'deletions': totals['deletions'],
+            'insertions': totals['insertions'],
+            'reference_token_count': totals['reference_token_count'],
+            'hypothesis_token_count': totals['hypothesis_token_count'],
+            'tokenization': tokenization,
+        },
+        'der': {
+            'error_rate': diarization_errors / totals['scored_reference_speaker_ms'],
+            'miss_ms': totals['miss_ms'], 'false_alarm_ms': totals['false_alarm_ms'],
+            'confusion_ms': totals['confusion_ms'],
+            'scored_reference_speaker_ms': totals['scored_reference_speaker_ms'],
+            'collar_ms': 0, 'overlap_scored': True,
+        },
+        'word_alignment': {
+            'word_count': word_count,
+            'valid_timestamp_word_count': totals['valid_timestamp_word_count'],
+            'word_timestamp_coverage': (totals['valid_timestamp_word_count'] / word_count
+                                        if word_count else 0.0),
+            'audio_time_covered_ms': totals['audio_time_covered_ms'],
+            'audio_time_coverage': totals['audio_time_covered_ms'] / totals['duration_ms'],
+            'words_overlapping_speaker_turns': totals['words_overlapping_speaker_turns'],
+            'speaker_overlap_coverage': (totals['words_overlapping_speaker_turns'] / word_count
+                                         if word_count else 0.0),
+        },
+    }
+    if provenance and all(value is not None for value in provenance):
+        for name, value in zip(
+                ('dataset', 'dataset_license', 'dataset_source', 'recording_id'), provenance):
+            result[name] = value
+    return result
 
 
 def _read_object(path: Path) -> dict:
@@ -310,7 +434,6 @@ def main(argv=None) -> int:
     except SpeechEvaluationError as error:
         parser.error(str(error))
     report['created_at'] = datetime.now(timezone.utc).isoformat()
-    report['data_classification'] = 'explicit_ground_truth'
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f"WER={report['wer']['error_rate']:.4f} DER={report['der']['error_rate']:.4f} "

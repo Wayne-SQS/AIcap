@@ -12,6 +12,7 @@ from meeting_agent.api import create_app
 from meeting_agent.audio_tool import PreparedAudio, AudioReadError
 from meeting_agent.transcription import LocalTranscriber, TranscriptionDraft, TranscriptionError, _SLOT
 from meeting_agent.speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS
+from meeting_agent.transcription_worker import word_interval
 
 class TranscriptionTests(unittest.TestCase):
     def setUp(self):
@@ -85,6 +86,11 @@ class TranscriptionTests(unittest.TestCase):
                 self.assertEqual('invalid_stt_result',error.exception.code)
         output(b'[]')
         output(b'\xff')
+    def test_sub_millisecond_word_interval_is_preserved_inside_segment(self):
+        self.assertEqual((8150,8151),word_interval(8.15,8.15,7510,8450))
+        self.assertEqual((8449,8450),word_interval(8.45,8.45,7510,8450))
+        with self.assertRaises(ValueError): word_interval(8.2,8.1,7510,8450)
+        with self.assertRaises(ValueError): word_interval(9.0,9.1,7510,8450)
     def test_api_auth_read_before_inference_and_no_identity_guess(self):
         reader=Mock(); reader.read.return_value=(self.meta,b'a')
         engine=Mock(); engine.run.return_value=TranscriptionDraft(audio=self.meta,**self.data)

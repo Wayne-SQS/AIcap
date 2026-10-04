@@ -5,6 +5,7 @@ import unittest
 
 from meeting_agent.speech_evaluation import (
     SpeechEvaluationError,
+    aggregate_reports,
     diarization_error_rate,
     evaluate,
     main,
@@ -128,6 +129,42 @@ class SpeechEvaluationTest(unittest.TestCase):
             self.assertEqual('explicit_ground_truth', report['data_classification'])
             self.assertEqual('fixture-two-speakers', report['sample_id'])
             self.assertIn('created_at', report)
+
+    def test_suite_uses_additive_counts_instead_of_mean_percentages(self):
+        reference, transcription, diarization = self.artifacts()
+        first = evaluate(reference, transcription, diarization)
+        first.update(dataset='licensed-fixture', dataset_license='CC0',
+                     dataset_source='https://example.invalid/', recording_id='recording-1',
+                     source_clip={'start_ms': 0, 'end_ms': 4000})
+        second = json.loads(json.dumps(first))
+        second['sample_id'] = 'second'
+        second['wer'].update(substitutions=1, reference_token_count=1,
+                             hypothesis_token_count=1, error_rate=1.0)
+        second['der'].update(miss_ms=1000, false_alarm_ms=0, confusion_ms=0,
+                             scored_reference_speaker_ms=1000, error_rate=1.0)
+        result = aggregate_reports([first, second])
+        self.assertEqual(2, result['sample_count'])
+        self.assertEqual(1 / 5, result['wer']['error_rate'])
+        self.assertEqual(1 / 5, result['der']['error_rate'])
+        self.assertEqual(1.0, result['word_alignment']['word_timestamp_coverage'])
+        self.assertEqual('licensed-fixture', result['dataset'])
+        self.assertEqual({'start_ms': 0, 'end_ms': 4000}, result['samples'][0]['source_clip'])
+
+    def test_suite_rejects_duplicate_or_incompatible_reports(self):
+        reference, transcription, diarization = self.artifacts()
+        report = evaluate(reference, transcription, diarization)
+        with self.assertRaisesRegex(SpeechEvaluationError, 'speech_report_invalid'):
+            aggregate_reports([report, report])
+        report['der']['collar_ms'] = 250
+        with self.assertRaisesRegex(SpeechEvaluationError, 'speech_report_invalid'):
+            aggregate_reports([report])
+
+    def test_suite_rejects_inconsistent_reported_rate(self):
+        reference, transcription, diarization = self.artifacts()
+        report = evaluate(reference, transcription, diarization)
+        report['wer']['error_rate'] = 0.5
+        with self.assertRaisesRegex(SpeechEvaluationError, 'speech_report_invalid'):
+            aggregate_reports([report])
 
 
 if __name__ == '__main__':

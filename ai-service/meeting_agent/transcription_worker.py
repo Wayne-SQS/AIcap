@@ -1,7 +1,26 @@
 """One process per job bounds native decoder/model lifetime; stdout/stderr are not API output."""
 import json
+import math
 from pathlib import Path
 import sys
+
+
+def word_interval(start_seconds, end_seconds, segment_start_ms, segment_end_ms):
+    """Quantize Whisper seconds while preserving sub-millisecond/equal boundaries."""
+    if (not math.isfinite(start_seconds) or not math.isfinite(end_seconds)
+            or end_seconds < start_seconds or segment_end_ms <= segment_start_ms):
+        raise ValueError('invalid word interval')
+    raw_start, raw_end = round(start_seconds * 1000), round(end_seconds * 1000)
+    if raw_end < segment_start_ms or raw_start > segment_end_ms:
+        raise ValueError('word interval outside segment')
+    start = max(segment_start_ms, min(segment_end_ms - 1, raw_start))
+    end = max(segment_start_ms + 1, min(segment_end_ms, raw_end))
+    if end <= start:
+        if start < segment_end_ms:
+            end = start + 1
+        else:
+            start, end = segment_end_ms - 1, segment_end_ms
+    return start, end
 
 
 def transcribe(path, model_path, language):
@@ -42,8 +61,10 @@ def transcribe(path, model_path, language):
             segment_id=f'S{len(rows)+1}'; words=[]
             for word in segment.words or []:
                 if not word.word.strip(): continue
-                word_start=max(start,round(word.start*1000)); word_end=min(end,round(word.end*1000))
-                if word_end<=word_start: return {'error':'stt_failed'}
+                try:
+                    word_start,word_end=word_interval(word.start,word.end,start,end)
+                except (TypeError,ValueError):
+                    return {'error':'stt_failed'}
                 words.append(dict(word_id=f'{segment_id}W{len(words)+1}',start_ms=word_start,end_ms=word_end,text=word.word))
             if not words or ''.join(word['text'] for word in words).strip()!=text: return {'error':'stt_failed'}
             length += len(text)+1
