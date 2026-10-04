@@ -1,8 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+
 test('real speech version survives reload and confirmed text enters meeting analysis', async ({ page, request }) => {
+  const artifactDir = process.env.AICAP_LIVE_ARTIFACT_DIR || 'test-results/live'
+  mkdirSync(artifactDir, { recursive: true })
   const language = process.env.AICAP_STT_EVAL_LANGUAGE || 'en'
   const expectedSpeakers = Number(process.env.AICAP_STT_EVAL_SPEAKERS || 1)
   const audioName = basename(process.env.AICAP_STT_EVAL_AUDIO)
@@ -47,12 +51,12 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await expect(speakerPanel).toContainText(`检测 ${expectedSpeakers} 位匿名说话人`)
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
-  const saved = await request.get(`http://127.0.0.1:18180/api/meetings/${meetingId}`, { headers: { Authorization: `Bearer ${token}` } })
+  const saved = await request.get(`${javaBase}/api/meetings/${meetingId}`, { headers: { Authorization: `Bearer ${token}` } })
   expect((await saved.json()).transcript).toBe('原会议文本，转写草稿不得覆盖。')
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR, 'transcription-draft.json'), JSON.stringify(data, null, 2))
+  writeFileSync(join(artifactDir, 'transcription-draft.json'), JSON.stringify(data, null, 2))
   await panel.getByRole('button',{name:'保存转写版本'}).click()
   await expect(panel).toContainText('转写版本已保存，可刷新恢复。')
-  const versionPath = `http://127.0.0.1:18180/api/meetings/${meetingId}/transcript-versions`
+  const versionPath = `${javaBase}/api/meetings/${meetingId}/transcript-versions`
   const headers = { Authorization: `Bearer ${token}` }
   const versionDraft = { audio_id:data.audio.audio_id, sha256:data.audio.sha256, duration_ms:data.duration_ms, language:data.language, text:data.text, segments:data.segments,
     diarization:{engine:speakerData.engine,duration_ms:speakerData.duration_ms,requested_num_speakers:speakerData.requested_num_speakers,
@@ -138,9 +142,9 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const differentInput=structuredClone(confirmation.input)
   differentInput.text='其他文本'; differentInput.speaker_alignment.assignments[0].corrected_text='其他文本'
   expect((await request.post(`${versionPath}/${version.id}/confirm`,{headers,data:differentInput})).status()).toBe(409)
-  expect((await request.delete(`http://127.0.0.1:18180/api/audio/${data.audio.audio_id}`,{headers})).status()).toBe(409)
-  for (const id of [meetingId,confirmation.analysis_meeting_id]) expect((await request.delete(`http://127.0.0.1:18180/api/meetings/${id}`,{headers})).status()).toBe(409)
-  expect((await (await request.get(`http://127.0.0.1:18180/api/meetings/${meetingId}`,{headers})).json()).transcript).toBe('原会议文本，转写草稿不得覆盖。')
+  expect((await request.delete(`${javaBase}/api/audio/${data.audio.audio_id}`,{headers})).status()).toBe(409)
+  for (const id of [meetingId,confirmation.analysis_meeting_id]) expect((await request.delete(`${javaBase}/api/meetings/${id}`,{headers})).status()).toBe(409)
+  expect((await (await request.get(`${javaBase}/api/meetings/${meetingId}`,{headers})).json()).transcript).toBe('原会议文本，转写草稿不得覆盖。')
   await page.reload()
   await page.locator('#meeting-select').selectOption(meetingId)
   await panel.getByRole('button',{name:'打开分析会议'}).click()
@@ -148,8 +152,8 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await page.getByRole('button',{name:'分析每日站会',exact:true}).click()
   await expect(page.getByRole('region',{name:'每日站会状态分析'}).getByRole('status')).toContainText('分析已保存',{timeout:20000})
   const analysisId = await page.getByLabel('状态分析记录').inputValue()
-  const analysis = await (await request.get(`http://127.0.0.1:18180/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
+  const analysis = await (await request.get(`${javaBase}/api/meetings/${confirmation.analysis_meeting_id}/status-analyses/${analysisId}`,{headers})).json()
   expect(analysis.transcript).toBe(corrected)
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
-  writeFileSync(join(process.env.AICAP_LIVE_ARTIFACT_DIR,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true,playback_rate:1.25,audited_corrections:{changed:1,cleared:expectedAssignments.length-1}},null,2))
+  writeFileSync(join(artifactDir,'transcript-version.json'),JSON.stringify({version:versions[0],analysis},null,2))
+  writeFileSync(join(artifactDir,'diarization-preview.json'),JSON.stringify({...speakerData,expected_assignments:expectedAssignments,manual_boundary_roundtrip:true,range_playback_roundtrip:true,playback_rate:1.25,audited_corrections:{changed:1,cleared:expectedAssignments.length-1}},null,2))
 })

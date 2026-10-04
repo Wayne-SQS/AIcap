@@ -1,6 +1,9 @@
 import { assertMeetingRetained, assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { test, expect } from '@playwright/test'
 
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
+
 test('real Planning modified approval, execution, retries and persisted audit', async ({ page, request }) => {
   await page.goto('/#/ai')
   await page.locator('#login-user').fill('李锐铭')
@@ -14,7 +17,7 @@ test('real Planning modified approval, execution, retries and persisted audit', 
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
   const headers = { Authorization: `Bearer ${token}` }
-  const base = 'http://127.0.0.1:18180'
+  const base = javaBase
   const read = async path => {
     const response = await request.get(base + path, { headers })
     expect(response.status()).toBe(200)
@@ -51,7 +54,7 @@ test('real Planning modified approval, execution, retries and persisted audit', 
   const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: 'p1' } })
   expect(repeat.status()).toBe(200)
   expect(await repeat.json()).toEqual(executions[0])
-  const analyzePath = `http://127.0.0.1:18190/api/meetings/${meetingId}/planning/analyze`
+  const analyzePath = `${aiBase}/api/meetings/${meetingId}/planning/analyze`
   const retry = await request.post(analyzePath, { headers, data: {
     client_request_id: original.client_request_id, meeting_type: 'sprint_planning', target_sprint: 3
   } })

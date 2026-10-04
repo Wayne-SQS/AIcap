@@ -1,5 +1,8 @@
 import { assertMeetingRetained, assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { test, expect } from '@playwright/test'
+
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -18,7 +21,7 @@ test('real Refinement completion creates one story with durable audit', async ({
   await expect(page.locator('#saved-transcript')).toHaveText(transcript)
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
-  const headers = { Authorization: `Bearer ${token}` }, base = 'http://127.0.0.1:18180'
+  const headers = { Authorization: `Bearer ${token}` }, base = javaBase
   const read = async path => {
     const response = await request.get(base + path, { headers })
     expect(response.status()).toBe(200)
@@ -67,7 +70,7 @@ test('real Refinement completion creates one story with durable audit', async ({
   }
   expect(await read('/api/stories')).toEqual(after)
   expect((await read('/api/stories/logs')).filter(log => log.story_id === id)).toEqual(logs)
-  const analyzePath = `http://127.0.0.1:18190/api/meetings/${meetingId}/refinement/analyze`
+  const analyzePath = `${aiBase}/api/meetings/${meetingId}/refinement/analyze`
   const retry = await request.post(analyzePath, { headers, data: { client_request_id: original.client_request_id, meeting_type: 'backlog_refinement' } })
   expect(retry.status()).toBe(200)
   expect((await retry.json()).analysis_id).toBe(analysisId)

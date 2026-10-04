@@ -2,6 +2,9 @@ import { test, expect } from '@playwright/test'
 import { assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { createHash } from 'node:crypto'
 
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
+
 test('real Assignment save review execute, conflicts, retries and durable audit', async ({ page, request }) => {
   await page.goto('/#/ai')
   await page.locator('#login-user').fill('李锐铭')
@@ -14,7 +17,7 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   await expect(page.locator('#saved-transcript')).toHaveText('讨论US13分工，技能和容量由人工核对。')
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
-  const headers = { Authorization: `Bearer ${token}` }, base = 'http://127.0.0.1:18180'
+  const headers = { Authorization: `Bearer ${token}` }, base = javaBase
   const path = `/api/meetings/${meetingId}/assignment-suggestions`
   const read = async p => { const r = await request.get(base + p, { headers }); expect(r.status()).toBe(200); return r.json() }
   const before = await read('/api/stories'), tasks = await read('/api/tasks'), profiles = await read('/api/members/profiles')
@@ -41,7 +44,7 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   })
   expect(uploaded.status()).toBe(200)
   const meta = await uploaded.json()
-  const preparePath = `http://127.0.0.1:18190/api/meetings/${meetingId}/transcription/prepare`
+  const preparePath = `${aiBase}/api/meetings/${meetingId}/transcription/prepare`
   const prepared = await request.post(preparePath, { headers, data: { audio_id: meta.id } })
   expect(prepared.status()).toBe(200)
   expect(await prepared.json()).toMatchObject({ audio_id: meta.id, meeting_id: meetingId, byte_size: audio.length,
@@ -64,7 +67,7 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   expect(await read('/api/members/profiles')).toEqual(profiles)
   const repeats = await Promise.all([1, 2].map(() => request.post(base + recordPath + '/execute', { headers, data: {} })))
   for (const r of repeats) { expect(r.status()).toBe(200); expect(await r.json()).toEqual(execution) }
-  const retry = await request.post(`http://127.0.0.1:18190/api/meetings/${meetingId}/assignment/suggestions`, { headers, data: { ...saved.input, client_request_id: saved.client_request_id } })
+  const retry = await request.post(`${aiBase}/api/meetings/${meetingId}/assignment/suggestions`, { headers, data: { ...saved.input, client_request_id: saved.client_request_id } })
   expect(retry.status()).toBe(200); expect((await retry.json()).id).toBe(saved.id)
   expect((await read(recordPath)).result).toEqual(saved.result)
   const logs = (await read('/api/stories/logs')).filter(l => l.detail.includes('会议分配建议执行'))
@@ -75,14 +78,14 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   expect((await request.post(preparePath, { headers: viewer, data: { audio_id: meta.id } })).status()).toBe(403)
   expect((await request.post(base + recordPath + '/execute', { headers: viewer, data: {} })).status()).toBe(403)
   expect((await request.post(base + recordPath + '/review', { headers: viewer, data: done.review.input })).status()).toBe(403)
-  expect((await request.post(`http://127.0.0.1:18190/api/meetings/${meetingId}/assignment/suggestions`, { headers: viewer, data: { ...saved.input, client_request_id: 'viewer-denied' } })).status()).toBe(403)
+  expect((await request.post(`${aiBase}/api/meetings/${meetingId}/assignment/suggestions`, { headers: viewer, data: { ...saved.input, client_request_id: 'viewer-denied' } })).status()).toBe(403)
   await page.reload(); await page.getByRole('button', { name: '打开分配候选' }).click()
   await expect(history).toContainText(`故事日志 #${execution.story_log_id}`)
   await expect(history.getByRole('button', { name: '执行已批准分配' })).toHaveCount(0)
 
   // Additional saved intents verify rejection and a real business change after approval.
   const create = async key => {
-    const r = await request.post(`http://127.0.0.1:18190/api/meetings/${meetingId}/assignment/suggestions`, { headers, data: { ...saved.input, story_ids: ['US14'], client_request_id: key } })
+    const r = await request.post(`${aiBase}/api/meetings/${meetingId}/assignment/suggestions`, { headers, data: { ...saved.input, story_ids: ['US14'], client_request_id: key } })
     expect(r.status()).toBe(200); return r.json()
   }
   const rejected = await create('reject-intent')

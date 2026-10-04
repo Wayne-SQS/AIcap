@@ -48,6 +48,32 @@ ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
 Remove-Item Env:AICAP_SMOKE_USERNAME,Env:AICAP_SMOKE_PASSWORD
 ```
 
+### 真实浏览器闭环（验收环境）
+
+live 用例默认仍连接 `qa/run_daily_live.py` 启动的隔离服务，也可以通过环境变量改为验证当前容器的 Nginx 同源入口。用例会创建会议并修改演示故事，因此只应对可恢复的验收数据运行；每个用例前从同一份已验证备份恢复基线。
+
+```powershell
+$env:AICAP_LIVE_WEB_BASE='http://127.0.0.1:8088'
+$env:AICAP_LIVE_JAVA_BASE='http://127.0.0.1:8088'
+$env:AICAP_LIVE_AI_BASE='http://127.0.0.1:8088/meeting-ai'
+Push-Location frontend
+npx.cmd playwright test --config=playwright.live.config.js assignment-flow.spec.js
+npx.cmd playwright test --config=playwright.live.config.js daily-flow.spec.js
+Pop-Location
+```
+
+转写版本闭环还需要指定本机音频、语言和预期说话人数：
+
+```powershell
+$env:AICAP_STT_EVAL_AUDIO=(Resolve-Path 'ai-service/.stt-eval/feb3b85c968746538023736e92ff9be0/four-speakers.mp3').Path
+$env:AICAP_STT_EVAL_LANGUAGE='zh'
+$env:AICAP_STT_EVAL_SPEAKERS='4'
+Push-Location frontend
+npx.cmd playwright test --config=playwright.live.config.js transcription-flow.spec.js
+Pop-Location
+Remove-Item Env:AICAP_LIVE_WEB_BASE,Env:AICAP_LIVE_JAVA_BASE,Env:AICAP_LIVE_AI_BASE,Env:AICAP_STT_EVAL_AUDIO,Env:AICAP_STT_EVAL_LANGUAGE,Env:AICAP_STT_EVAL_SPEAKERS
+```
+
 查看日志及停止：
 
 ```powershell
@@ -84,4 +110,4 @@ ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
 
 ## 当前验证边界
 
-仓库验证覆盖Dockerfile/Compose引用、密钥强度、模型文件存在、生产前端构建、Java 21字节码构建和三条线上路由。由于开发机Docker Engine未运行，本轮没有声称容器已在该机器实际启动；在部署机上必须以`verify.py --live-url`成功作为上线完成证据。
+当前开发机已实际构建并启动四容器编排，完成首页、Java/数据库、会议 Agent、登录读链路验证，并在 Nginx 同源入口上通过 Assignment、真实模型 Daily 和四人中文音频转写版本三条浏览器闭环。该结果证明当前本机配置可运行，不替代目标部署机的模型文件、密钥、持久卷备份恢复及 `verify.py --live-url` 验收。

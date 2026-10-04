@@ -1,6 +1,9 @@
 import { assertMeetingRetained, assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { test, expect } from '@playwright/test'
 
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
+
 test('real Retro modified approval creates one action with durable audit', async ({ page, request }) => {
   await page.goto('/#/ai')
   await page.locator('#login-user').fill('李锐铭')
@@ -13,7 +16,7 @@ test('real Retro modified approval creates one action with durable audit', async
   await expect(page.locator('#saved-transcript')).toHaveText('决定完善发布检查表，负责人和截止时间待确认。')
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
-  const headers = { Authorization: `Bearer ${token}` }, base = 'http://127.0.0.1:18180'
+  const headers = { Authorization: `Bearer ${token}` }, base = javaBase
   const read = async path => {
     const response = await request.get(base + path, { headers })
     expect(response.status()).toBe(200)
@@ -62,7 +65,7 @@ test('real Retro modified approval creates one action with durable audit', async
   for (const response of repeats) { expect(response.status()).toBe(200); expect(await response.json()).toEqual(executions[0]) }
   expect(await read(actionsPath)).toEqual(actions)
   expect(await read(logsPath)).toEqual(logs)
-  const analyzePath = `http://127.0.0.1:18190/api/meetings/${meetingId}/retro/analyze`
+  const analyzePath = `${aiBase}/api/meetings/${meetingId}/retro/analyze`
   const retry = await request.post(analyzePath, { headers, data: { client_request_id: original.client_request_id, meeting_type: 'sprint_retrospective' } })
   expect(retry.status()).toBe(200)
   expect((await retry.json()).analysis_id).toBe(analysisId)

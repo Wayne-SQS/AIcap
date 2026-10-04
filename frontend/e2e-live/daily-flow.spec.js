@@ -1,6 +1,9 @@
 import { assertMeetingRetained, assertEmptyMeetingDeletable } from './meeting-deletion-check'
 import { test, expect } from '@playwright/test'
 
+const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
+const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
+
 test('real daily analysis, human review, execution, retry and board consistency', async ({ page, request }) => {
 
   await page.goto('/#/ai')
@@ -15,7 +18,7 @@ test('real daily analysis, human review, execution, retry and board consistency'
   const meetingId = await page.locator('#meeting-select').inputValue()
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
   const headers = { Authorization: `Bearer ${token}` }
-  const base = 'http://127.0.0.1:18180'
+  const base = javaBase
   const status = async () => (await (await request.get(base + '/api/stories', { headers })).json()).find(s => s.id === 'US13').status
   expect(await status()).toBe(0)
   await page.getByRole('button', { name: '分析每日站会', exact: true }).click()
@@ -25,6 +28,7 @@ test('real daily analysis, human review, execution, retry and board consistency'
   const analysisId = await page.getByLabel('状态分析记录').inputValue()
   const recordPath = `/api/meetings/${meetingId}/status-analyses/${analysisId}`
   const original = await (await request.get(base + recordPath, { headers })).json()
+  const proposalId = original.result.proposed_actions[0].proposal_id
   await assertMeetingRetained(request, base, headers, meetingId, recordPath)
   await assertEmptyMeetingDeletable(request, base, headers)
   expect(await status()).toBe(0)
@@ -37,10 +41,10 @@ test('real daily analysis, human review, execution, retry and board consistency'
   const executions = await (await request.get(base + recordPath + '/proposal-executions', { headers })).json()
   expect(executions).toHaveLength(1)
   await assertMeetingRetained(request, base, headers, meetingId, recordPath)
-  const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: 'p1' } })
+  const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: proposalId } })
   expect(repeat.status()).toBe(200)
   expect(await repeat.json()).toEqual(executions[0])
-  const savedRetry = await request.post('http://127.0.0.1:18190' + `/api/meetings/${meetingId}/analyze`, {
+  const savedRetry = await request.post(aiBase + `/api/meetings/${meetingId}/analyze`, {
     headers, data: { client_request_id: original.client_request_id, meeting_type: 'daily_scrum', current_sprint: null }
   })
   expect(savedRetry.status()).toBe(200)
@@ -48,11 +52,11 @@ test('real daily analysis, human review, execution, retry and board consistency'
   expect(await (await request.get(base + recordPath, { headers })).json()).toEqual(original)
   const logs = await (await request.get(base + '/api/stories/logs', { headers })).json()
   expect(logs.filter(log => log.story_id === 'US13' && log.log_type === 'move')).toHaveLength(1)
-  expect((await request.post(base + recordPath + '/proposal-executions', { data: { proposal_id: 'p1' } })).status()).toBe(401)
+  expect((await request.post(base + recordPath + '/proposal-executions', { data: { proposal_id: proposalId } })).status()).toBe(401)
   const viewerLogin = await request.post(base + '/api/auth/login', { data: { username: '成员5', password: '123456' } })
   const viewer = { Authorization: `Bearer ${(await viewerLogin.json()).access_token}` }
-  expect((await request.post(base + recordPath + '/proposal-executions', { headers: viewer, data: { proposal_id: 'p1' } })).status()).toBe(403)
-  expect((await request.post('http://127.0.0.1:18190' + `/api/meetings/${meetingId}/analyze`, { headers: viewer,
+  expect((await request.post(base + recordPath + '/proposal-executions', { headers: viewer, data: { proposal_id: proposalId } })).status()).toBe(403)
+  expect((await request.post(aiBase + `/api/meetings/${meetingId}/analyze`, { headers: viewer,
     data: { client_request_id: 'viewer-denied', meeting_type: 'daily_scrum' } })).status()).toBe(403)
   await page.evaluate(() => window.go('board'))
   await expect(page.locator('.mapcard[data-id="US13"]')).toContainText('进行中')
