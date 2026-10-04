@@ -57,9 +57,16 @@ $env:AICAP_LIVE_WEB_BASE='http://127.0.0.1:8088'
 $env:AICAP_LIVE_JAVA_BASE='http://127.0.0.1:8088'
 $env:AICAP_LIVE_AI_BASE='http://127.0.0.1:8088/meeting-ai'
 Push-Location frontend
+# 每次只运行一个，并在下一项前重新恢复同一份基线备份。
 npx.cmd playwright test --config=playwright.live.config.js assignment-flow.spec.js
-npx.cmd playwright test --config=playwright.live.config.js daily-flow.spec.js
+# 其余会议闭环：daily、planning、review、retro、refinement、transcription
 Pop-Location
+```
+
+Refinement 的真实模型验收原文会明确哪些字段未讨论，以检查模型保持未知值；运行该项时再设置：
+
+```powershell
+$env:AICAP_LIVE_REAL_MODEL='1'
 ```
 
 转写版本闭环还需要指定本机音频、语言和预期说话人数：
@@ -71,7 +78,7 @@ $env:AICAP_STT_EVAL_SPEAKERS='4'
 Push-Location frontend
 npx.cmd playwright test --config=playwright.live.config.js transcription-flow.spec.js
 Pop-Location
-Remove-Item Env:AICAP_LIVE_WEB_BASE,Env:AICAP_LIVE_JAVA_BASE,Env:AICAP_LIVE_AI_BASE,Env:AICAP_STT_EVAL_AUDIO,Env:AICAP_STT_EVAL_LANGUAGE,Env:AICAP_STT_EVAL_SPEAKERS
+Remove-Item Env:AICAP_LIVE_WEB_BASE,Env:AICAP_LIVE_JAVA_BASE,Env:AICAP_LIVE_AI_BASE,Env:AICAP_LIVE_REAL_MODEL,Env:AICAP_STT_EVAL_AUDIO,Env:AICAP_STT_EVAL_LANGUAGE,Env:AICAP_STT_EVAL_SPEAKERS -ErrorAction SilentlyContinue
 ```
 
 查看日志及停止：
@@ -110,4 +117,4 @@ ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
 
 ## 当前验证边界
 
-当前开发机已实际构建并启动四容器编排，完成首页、Java/数据库、会议 Agent、登录读链路验证，并在 Nginx 同源入口上通过 Assignment、真实模型 Daily 和四人中文音频转写版本三条浏览器闭环。该结果证明当前本机配置可运行，不替代目标部署机的模型文件、密钥、持久卷备份恢复及 `verify.py --live-url` 验收。
+当前开发机已实际构建并启动四容器编排，完成首页、Java/数据库、会议 Agent、登录读链路验证，并在 Nginx 同源入口上通过 Assignment、Daily、Planning、Review、Retro、Refinement 和四人中文音频转写版本七条浏览器闭环。除 Assignment 外的会议分析均调用当前真实模型配置。该结果证明当前本机配置可运行，不替代目标部署机的模型文件、密钥、持久卷备份恢复及 `verify.py --live-url` 验收。

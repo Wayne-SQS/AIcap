@@ -35,6 +35,7 @@ test('real Planning modified approval, execution, retries and persisted audit', 
   const analysisId = await panel.getByLabel('Planning分析记录').inputValue()
   const recordPath = `/api/meetings/${meetingId}/planning-analyses/${analysisId}`
   const original = await read(recordPath)
+  const proposalId = original.result.proposed_actions[0].proposal_id
   await assertMeetingRetained(request, base, headers, meetingId, recordPath)
   await assertEmptyMeetingDeletable(request, base, headers)
   expect(await story()).toEqual(before)
@@ -51,7 +52,7 @@ test('real Planning modified approval, execution, retries and persisted audit', 
   const executions = await read(recordPath + '/proposal-executions')
   expect(executions).toHaveLength(1)
   await assertMeetingRetained(request, base, headers, meetingId, recordPath)
-  const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: 'p1' } })
+  const repeat = await request.post(base + recordPath + '/proposal-executions', { headers, data: { proposal_id: proposalId } })
   expect(repeat.status()).toBe(200)
   expect(await repeat.json()).toEqual(executions[0])
   const analyzePath = `${aiBase}/api/meetings/${meetingId}/planning/analyze`
@@ -64,11 +65,11 @@ test('real Planning modified approval, execution, retries and persisted audit', 
   const logs = (await read('/api/stories/logs')).filter(log => log.story_id === 'US13' && log.log_type === 'edit')
   expect(logs).toHaveLength(1)
   expect(logs[0].id).toBe(executions[0].story_log_id)
-  expect((await request.post(base + recordPath + '/proposal-executions', { data: { proposal_id: 'p1' } })).status()).toBe(401)
+  expect((await request.post(base + recordPath + '/proposal-executions', { data: { proposal_id: proposalId } })).status()).toBe(401)
   const login = await request.post(base + '/api/auth/login', { data: { username: '成员5', password: '123456' } })
   expect(login.status()).toBe(200)
   const viewer = { Authorization: `Bearer ${(await login.json()).access_token}` }
-  expect((await request.post(base + recordPath + '/proposal-executions', { headers: viewer, data: { proposal_id: 'p1' } })).status()).toBe(403)
+  expect((await request.post(base + recordPath + '/proposal-executions', { headers: viewer, data: { proposal_id: proposalId } })).status()).toBe(403)
   expect((await request.post(analyzePath, { headers: viewer, data: { client_request_id: 'viewer-denied', meeting_type: 'sprint_planning' } })).status()).toBe(403)
   await page.reload()
   await page.getByRole('button', { name: '打开会议 Sprint Planning' }).click()
