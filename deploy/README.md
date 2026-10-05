@@ -52,6 +52,17 @@ Remove-Item Env:AICAP_SMOKE_USERNAME,Env:AICAP_SMOKE_PASSWORD
 
 live 用例默认仍连接 `qa/run_daily_live.py` 启动的隔离服务，也可以通过环境变量改为验证当前容器的 Nginx 同源入口。用例会创建会议并修改演示故事，因此只应对可恢复的验收数据运行；每个用例前从同一份已验证备份恢复基线。
 
+推荐使用编排器一次运行全部七条闭环。它会先校验备份，在每条用例前恢复基线，并在成功、失败或中断后再次恢复；结果保存在已忽略的 `deploy/acceptance-runs/`：
+
+```powershell
+ai-service/.venv/Scripts/python.exe -B deploy/run_live_acceptance.py `
+  --backup deploy/backups/2026-10-04 --confirm-data-loss
+```
+
+可重复传入 `--suite` 只运行部分流程，例如 `--suite assignment --suite daily`。默认转写样本是仓库本机缓存中的四人中文 MP3，也可用 `--stt-audio`、`--stt-language`和`--speaker-count`替换。命令退出码非零表示至少一项失败或最终基线恢复失败，具体结果见 `report.json` 和各套件的 `browser.log`。
+
+需要单独排查某条流程时，也可以手动设置入口：
+
 ```powershell
 $env:AICAP_LIVE_WEB_BASE='http://127.0.0.1:8088'
 $env:AICAP_LIVE_JAVA_BASE='http://127.0.0.1:8088'
