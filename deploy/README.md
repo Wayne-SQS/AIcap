@@ -4,14 +4,18 @@
 
 ## 准备
 
-需要 Docker Engine 与 Compose v2。先在仓库根目录准备离线语音模型：
+需要 Docker Engine、Compose v2 和 Python 3.12。克隆后先在仓库根目录建立用于模型准备与部署检查的虚拟环境，并安装语音模型准备依赖：
 
 ```powershell
-cd ai-service
+py -3.12 -m venv ai-service/.venv
+ai-service/.venv/Scripts/python.exe -m pip install -r ai-service/requirements.txt -r ai-service/requirements-stt.txt -r ai-service/requirements-diarization.txt
+Push-Location ai-service
 .venv/Scripts/python.exe prepare_stt.py
 .venv/Scripts/python.exe prepare_diarization.py
-cd ..
+Pop-Location
 ```
+
+模型文件保存在 `ai-service/.models/`，不会提交到 Git。准备模型需要能访问 Hugging Face 与模型发布站点；如果已有符合检查器所需文件的模型目录，可以按下文 `--model-root` 指向该目录。
 
 复制配置模板并替换全部占位值：
 
