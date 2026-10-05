@@ -1,8 +1,23 @@
 """Review protocol: distinguish demonstration, development and acceptance."""
 import json
+import re
 from dataclasses import dataclass
 
 from .review_contracts import SprintReviewInput, SprintReviewOutput
+
+
+STORY_REFERENCE = re.compile(r'(?<![A-Za-z0-9_])US[0-9]+(?![A-Za-z0-9_])')
+
+
+def prioritize_mentioned_stories(context: SprintReviewInput) -> SprintReviewInput:
+    """Move explicitly mentioned stories first without dropping or changing rows."""
+    transcript = '\n'.join(segment.text for segment in context.transcript_segments)
+    rank = {story_id: index for index, story_id in enumerate(
+        dict.fromkeys(STORY_REFERENCE.findall(transcript)))}
+    stories = sorted(context.stories, key=lambda story: (0, rank[story.id])
+                     if story.id in rank else (1, 0))
+    return SprintReviewInput.model_validate({**context.model_dump(),
+        'stories': [story.model_dump() for story in stories]})
 
 
 @dataclass(frozen=True)
@@ -17,7 +32,8 @@ class SprintReviewSkill:
     max_context_bytes: int = 128000
 
     def messages(self, context: SprintReviewInput) -> list[dict[str, str]]:
-        context = SprintReviewInput.model_validate(context.model_dump())
+        context = prioritize_mentioned_stories(
+            SprintReviewInput.model_validate(context.model_dump()))
         data = context.model_dump_json()
         if len(data.encode('utf-8')) > self.max_context_bytes:
             raise ValueError('review_context_too_large')

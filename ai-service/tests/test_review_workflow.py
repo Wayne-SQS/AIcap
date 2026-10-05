@@ -59,6 +59,22 @@ class ReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn('model-secret', body)
         self.stories.get_review_stories.assert_called_once_with(access_token='business-secret')
 
+    def test_transcript_story_references_are_first_without_filtering_or_mutation(self):
+        rows = [
+            ReviewStorySnapshot(**{**self.story, 'id': 'US01', 'title': '项目范围'}),
+            ReviewStorySnapshot(**self.story),
+            ReviewStorySnapshot(**{**self.story, 'id': 'US14', 'title': '需求拆解'}),
+        ]
+        self.stories.get_review_stories.return_value = rows
+        transcript = 'US14仅作展示。\nUS13已验收通过。\nUS130不是有效的US13引用。'
+        self.payload['proposed_actions'][0]['evidence'][0].update(
+            segment_id='S2', quote='US13已验收通过。')
+        self.run_flow(transcript=transcript)
+        context = self.context()
+        self.assertEqual(['US14', 'US13', 'US01'], [row['id'] for row in context['stories']])
+        expected = {row.id: row.model_dump() for row in rows}
+        self.assertEqual(expected, {row['id']: row for row in context['stories']})
+
     def test_empty_proposals_are_valid_and_no_sprint_is_inferred(self):
         self.payload.update(summary='演示不代表验收。', proposed_actions=[], open_questions=['验收结论是什么？'])
         result = self.run_flow(transcript='US13已演示。')
