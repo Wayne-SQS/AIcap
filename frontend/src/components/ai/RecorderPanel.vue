@@ -236,16 +236,27 @@ async function playRange(row,range) {
   const rate=Number(range.playback_rate)
   player.playbackRate=[0.75,1,1.25,1.5,2].includes(rate) ? rate : 1
   const endSeconds=range.end_ms/1000
-  let closed=false
+  let closed=false, timer=null
   const cleanup=()=>{
     if(closed) return
-    closed=true; player.removeEventListener('timeupdate',atEnd); player.removeEventListener('ended',cleanup); player.removeEventListener('pause',cleanup)
+    closed=true; if(timer!==null) clearTimeout(timer)
+    player.removeEventListener('timeupdate',atEnd); player.removeEventListener('ended',cleanup); player.removeEventListener('pause',cleanup)
     if(rangeStops.get(row.id)===cleanup) rangeStops.delete(row.id)
   }
-  const atEnd=()=>{ if(player.currentTime+0.02>=endSeconds) { player.pause(); cleanup() } }
+  const finish=()=>{
+    if(closed) return
+    player.pause()
+    player.currentTime=endSeconds
+    cleanup()
+  }
+  const atEnd=()=>{ if(player.currentTime+0.02>=endSeconds) finish() }
   rangeStops.set(row.id,cleanup)
   player.addEventListener('timeupdate',atEnd); player.addEventListener('ended',cleanup); player.addEventListener('pause',cleanup)
-  try { player.currentTime=range.start_ms/1000; await player.play() }
+  try {
+    player.currentTime=range.start_ms/1000
+    await player.play()
+    timer=setTimeout(finish,Math.max(0,(endSeconds-player.currentTime)/player.playbackRate*1000))
+  }
   catch(e) { cleanup(); error.value='无法播放核对片段：'+e.message }
 }
 

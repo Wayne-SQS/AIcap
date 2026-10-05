@@ -59,6 +59,13 @@ class LiveAcceptanceTests(unittest.TestCase):
                 acceptance.execute(self.args(root, backup, env_file, confirm_data_loss=False),
                     restore=lambda *_: self.fail('restore must not run'))
 
+    def test_console_output_replaces_unsupported_playwright_characters(self):
+        binary = io.BytesIO()
+        stream = io.TextIOWrapper(binary, encoding='ascii')
+        acceptance.write_console('review passed ›', stream)
+        stream.flush()
+        self.assertEqual(['review passed ?'], binary.getvalue().decode('ascii').splitlines())
+
     @patch('run_live_acceptance.shutil.which', return_value='node')
     def test_restore_error_marks_report_failed_before_propagating(self, _which):
         with tempfile.TemporaryDirectory() as directory:

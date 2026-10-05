@@ -61,6 +61,17 @@ def write_report(path: Path, report: dict) -> None:
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
+def write_console(value: str, stream=None) -> None:
+    """Print captured UTF-8 logs without depending on the Windows code page."""
+    stream = stream or sys.stdout
+    encoding = getattr(stream, 'encoding', None) or 'utf-8'
+    safe = value.encode(encoding, errors='replace').decode(encoding)
+    stream.write(safe)
+    if not safe.endswith('\n'):
+        stream.write('\n')
+    stream.flush()
+
+
 def execute(args, *, restore=restore_backup, runner=run_command) -> tuple[int, Path]:
     if not args.confirm_data_loss:
         raise AcceptanceError('confirm_data_loss_required')
@@ -125,7 +136,7 @@ def execute(args, *, restore=restore_backup, runner=run_command) -> tuple[int, P
             report['suites'].append(result)
             if code:
                 exit_code = 1
-            print(log, end='' if log.endswith('\n') else '\n', flush=True)
+            write_console(log)
             print(f'[{suite}] {result["status"]} in {elapsed:.3f}s', flush=True)
             write_report(report_path, report)
     except BaseException:
