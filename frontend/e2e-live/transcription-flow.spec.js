@@ -10,7 +10,7 @@ test('real speech version survives reload and confirmed text enters meeting anal
   const language = process.env.AICAP_STT_EVAL_LANGUAGE || 'en'
   const expectedSpeakers = Number(process.env.AICAP_STT_EVAL_SPEAKERS || 1)
   const audioName = basename(process.env.AICAP_STT_EVAL_AUDIO)
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
@@ -19,7 +19,8 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await page.locator('#meeting-save-form textarea').fill('原会议文本，转写草稿不得覆盖。')
   await page.locator('#meeting-save-form button').click()
   await expect(page.locator('#saved-transcript')).toHaveText('原会议文本，转写草稿不得覆盖。')
-  await page.locator('.recorder input[type=file]').setInputFiles(process.env.AICAP_STT_EVAL_AUDIO)
+  await page.getByRole('tab', { name: '语音会议' }).click()
+  await page.locator('#meeting-recorder input[type=file]').setInputFiles(process.env.AICAP_STT_EVAL_AUDIO)
   const panel = page.getByRole('region', { name: `音频转写：${audioName}`, exact: true })
   await expect(panel).toBeVisible()
   await panel.getByLabel('转写语言').selectOption(language)

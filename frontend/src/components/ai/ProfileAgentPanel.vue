@@ -143,7 +143,7 @@ async function submitRisks() {
   if (!risks.value.length) { notify('当前时间范围内没有团队风险'); return }
   try {
     const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value)
-    notify(`已提交 ${ids.length} 条风险建议至「AI 审核中心」`)
+    notify(`已提交 ${ids.length} 条风险建议至「提案审核中心」`)
   } catch (e) {
     notify(e.message || '提交失败')
   }

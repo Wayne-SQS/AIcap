@@ -5,7 +5,7 @@ const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
 const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
 
 test('real Retro modified approval creates one action with durable audit', async ({ page, request }) => {
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
@@ -26,7 +26,7 @@ test('real Retro modified approval creates one action with durable audit', async
   const owner = profiles.find(member => member.role === 'owner')
   expect(owner).toBeTruthy()
   const actionsPath = `/api/meetings/${meetingId}/action-items`
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
+  await page.getByLabel('会议分析类型').selectOption('retro')
   const panel = page.getByRole('region', { name: 'Retro行动提案', exact: true })
   await panel.getByRole('button', { name: '分析Sprint Retro', exact: true }).click()
   await expect(panel).toContainText('原始事项：完善发布检查表', { timeout: 20000 })
@@ -83,7 +83,7 @@ test('real Retro modified approval creates one action with durable audit', async
   expect((await request.post(analyzePath, { headers: viewer, data: { client_request_id: 'viewer-denied', meeting_type: 'sprint_retrospective' } })).status()).toBe(403)
   expect((await request.get(base + actionsPath, { headers: viewer })).status()).toBe(200)
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
+  await page.getByLabel('会议分析类型').selectOption('retro')
   await expect(panel).toContainText(`审计 #${executions[0].action_item_log_id}`)
   const business = panel.getByRole('region', { name: '已创建行动项' })
   await expect(business).toContainText('完善发布和回滚检查表')

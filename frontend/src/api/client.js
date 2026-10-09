@@ -47,7 +47,9 @@ export async function api(path, opts = {}, base = apiBase()) {
   if (!res.ok) {
     let msg = '请求失败 (' + res.status + ')'
     try { const j = await res.json(); msg = (typeof j.detail === 'string') ? j.detail : msg } catch (e) { /* ignore */ }
-    throw new Error(msg)
+    const error = new Error(msg)
+    error.status = res.status
+    throw error
   }
   if (res.status === 204) return null
   return res.json()

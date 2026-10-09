@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "e2e:verify": "playwright test --config=playwright.verify.config.js"
+    "e2e:verify": "playwright test --config=playwright.verify.config.js",
+    "e2e:smoke": "playwright test --config=playwright.verify.config.js --grep=\"离线演示|AI 工作台|跨来源队列|来源会议返回|来源分析深链|语音来源链|提案队列只读权限|会议流程状态\""
   },
   "dependencies": {
     "lamejs": "^1.2.1",

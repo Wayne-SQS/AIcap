@@ -1,14 +1,16 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { refinementAnalysesApi } from '@/api/refinementAnalyses'
+import { executionStatusName } from '@/api/workflowLabels'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
+import WorkflowPermissionNote from './WorkflowPermissionNote.vue'
 import RefinementProposalReviewForm from './RefinementProposalReviewForm.vue'
 import RefinementProposalExecute from './RefinementProposalExecute.vue'
 import RefinementAnalysisForm from './RefinementAnalysisForm.vue'
 import RefinementStoryFields from './RefinementStoryFields.vue'
 
-const props = defineProps({ meetingId: { type: String, required: true } })
+const props = defineProps({ meetingId: { type: String, required: true }, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
 const project = useProjectStore()
 const projectError = ref('')
@@ -29,7 +31,7 @@ let detailVersion = 0
 const analysis = computed(() => analyses.value.find(item => item.id === selected.value))
 const reviewName = value => ({ pending: '待审核', approved: '已批准', rejected: '已拒绝' })[value] ?? '未知审核状态'
 const progressName = value => ({ pending: '待审核', partially_reviewed: '部分已审核', reviewed: '全部已审核', no_changes: '无新故事提案' })[value] ?? '未知状态'
-const executionName = value => ({ not_started: '未执行', not_applicable: '不适用', succeeded: '执行成功' })[value] ?? '未知执行状态'
+const executionName = executionStatusName
 const decisionName = value => ({ approve: '接受', modify_and_approve: '修改后接受', reject: '拒绝' })[value] ?? value
 const execution = proposalId => confirmedExecutions.value.find(item => item.proposal_id === proposalId) || executions.value.find(item => item.proposal_id === proposalId)
 
@@ -57,7 +59,7 @@ async function loadDetails() {
 
 async function refresh(preferredId = null) {
   const version = ++listVersion
-  const previous = typeof preferredId === 'string' ? preferredId : selected.value
+  const previous = typeof preferredId === 'string' ? preferredId : selected.value || props.initialAnalysisId
   selected.value = ''
   ++detailVersion
   reviews.value = null
@@ -140,6 +142,7 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
         </div>
         <template v-else-if="reviews">
           <p role="status">审核进度：{{ progressName(reviews.review_status) }}</p>
+          <WorkflowPermissionNote :proposals="reviews.proposals" />
           <article v-for="item in reviews.proposals" :key="item.proposal_id" class="proposal-card">
             <h4>{{ item.original_proposal.changes.title }}</h4>
             <p class="small">提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(execution(item.proposal_id) ? 'succeeded' : item.execution_status) }}</p>

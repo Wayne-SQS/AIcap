@@ -6,7 +6,7 @@ const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
 const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
 
 test('real Assignment save review execute, conflicts, retries and durable audit', async ({ page, request }) => {
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
@@ -22,7 +22,7 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   const read = async p => { const r = await request.get(base + p, { headers }); expect(r.status()).toBe(200); return r.json() }
   const before = await read('/api/stories'), tasks = await read('/api/tasks'), profiles = await read('/api/members/profiles')
   const original = before.find(s => s.id === 'US13')
-  await page.getByRole('button', { name: '打开分配候选' }).click()
+  await page.locator('details').filter({ hasText: 'Assignment 分配建议' }).locator('summary').click()
   const panel = page.getByRole('region', { name: 'Assignment分配候选', exact: true })
   const history = page.getByRole('region', { name: '分配建议历史与审核', exact: true })
   await panel.getByLabel('待分配故事').selectOption('US13')
@@ -79,7 +79,7 @@ test('real Assignment save review execute, conflicts, retries and durable audit'
   expect((await request.post(base + recordPath + '/execute', { headers: viewer, data: {} })).status()).toBe(403)
   expect((await request.post(base + recordPath + '/review', { headers: viewer, data: done.review.input })).status()).toBe(403)
   expect((await request.post(`${aiBase}/api/meetings/${meetingId}/assignment/suggestions`, { headers: viewer, data: { ...saved.input, client_request_id: 'viewer-denied' } })).status()).toBe(403)
-  await page.reload(); await page.getByRole('button', { name: '打开分配候选' }).click()
+  await page.reload(); await page.locator('details').filter({ hasText: 'Assignment 分配建议' }).locator('summary').click()
   await expect(history).toContainText(`故事日志 #${execution.story_log_id}`)
   await expect(history.getByRole('button', { name: '执行已批准分配' })).toHaveCount(0)
 

@@ -5,7 +5,7 @@ const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
 const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
 
 test('real Review modified approval, execution, retries and persisted audit', async ({ page, request }) => {
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
@@ -28,7 +28,7 @@ test('real Review modified approval, execution, retries and persisted audit', as
   const tasks = await read('/api/tasks')
   expect(before.sprint).toBe(2)
   expect(before.status).toBe(0)
-  await page.getByRole('button', { name: '打开会议 Sprint Review' }).click()
+  await page.getByLabel('会议分析类型').selectOption('review')
   const panel = page.getByRole('region', { name: 'Review完成提案', exact: true })
 
   await panel.getByLabel('本次 Sprint（可选）').selectOption('2')
@@ -74,7 +74,7 @@ test('real Review modified approval, execution, retries and persisted audit', as
   expect((await request.post(base + recordPath + '/proposal-executions', { headers: viewer, data: { proposal_id: proposalId } })).status()).toBe(403)
   expect((await request.post(analyzePath, { headers: viewer, data: { client_request_id: 'viewer-denied', meeting_type: 'sprint_review' } })).status()).toBe(403)
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Review' }).click()
+  await page.getByLabel('会议分析类型').selectOption('review')
   await expect(panel).toContainText(`故事日志 #${executions[0].story_log_id}`)
   await expect(panel).toContainText('执行结果：待办 → 已完成')
   await page.evaluate(() => window.go('board'))

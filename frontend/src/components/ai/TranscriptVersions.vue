@@ -1,10 +1,15 @@
 <script setup>
-import { nextTick, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, watch, onBeforeUnmount } from 'vue'
 import { listVersions, saveVersion, confirmVersion } from '@/api/transcriptVersions'
 import { useMeetingStore } from '@/stores/meeting'
 const props = defineProps({ meetingId: String, audio: Object, draft: Object, diarization: Object })
 const emit = defineEmits(['play-range'])
 const meeting = useMeetingStore()
+const sourceMeeting = computed(() => meeting.meetings.find(row => row.id === props.meetingId) || null)
+const analysisMeeting = computed(() => {
+  const id = selected.value?.confirmation?.analysis_meeting_id
+  return meeting.meetings.find(row => row.id === id) || null
+})
 const rows = ref([]), selected = ref(null), text = ref(''), title = ref(''), acknowledged = ref(false)
 const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
 const assignments = ref([]), splitPositions = ref({}), activeIndex = ref(-1), playbackRate = ref(1)
@@ -212,6 +217,17 @@ async function openAnalysis() {
       <label>已保存转写版本<select :value="selected?.id" :disabled="busy || !!pending" @change="choose(rows.find(r => r.id === $event.target.value))"><option v-for="row in rows" :key="row.id" :value="row.id">{{ row.created_at }} · {{ row.confirmation ? '已人工确认' : '待核对' }} · {{ row.id.slice(0, 8) }}</option></select></label>
       <template v-if="selected">
         <p>保留提交的原始草稿；需对照上方音频人工核对，说话人仍未知。确认后新建分析会议，原会议保持不变。</p>
+        <section class="provenance-chain" aria-label="语音会议来源链">
+          <h4>来源与产物</h4>
+          <ol>
+            <li><b>原会议</b><span>{{ sourceMeeting?.title || '当前已选会议' }} · <code>{{ meetingId }}</code></span></li>
+            <li><b>录音</b><span>{{ audio.filename || '会议音频' }} · <code>{{ audio.id }}</code> · SHA-256 {{ (audio.sha256 || '').slice(0, 12) }}…</span></li>
+            <li><b>转写版本</b><span><code>{{ selected.id }}</code> · {{ selected.created_at }} · {{ selected.confirmation ? '已确认' : '待人工核对' }}</span></li>
+            <li><b>人工核对</b><span v-if="selected.confirmation">确认人 #{{ selected.confirmation.confirmed_by }} · {{ selected.confirmation.confirmed_at }}</span><span v-else>尚未确认；确认后会创建独立分析会议。</span></li>
+            <li><b>分析会议</b><span v-if="selected.confirmation">{{ analysisMeeting?.title || '分析会议记录' }} · <code>{{ selected.confirmation.analysis_meeting_id }}</code> <button type="button" :disabled="busy" @click="openAnalysis">打开分析会议</button></span><span v-else>确认转写前尚未创建。</span></li>
+          </ol>
+          <p class="small">分析会议会保留为独立记录，原会议、录音和转写版本不会被覆盖。</p>
+        </section>
         <details><summary>查看保存的原始片段</summary><ol><li v-for="s in selected.draft.segments" :key="s.segment_id">{{ s.start_ms/1000 }}–{{ s.end_ms/1000 }} 秒：{{ s.text }}</li></ol></details>
         <label class="field">分析会议标题<input v-model="title" maxlength="200" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit"></label>
         <label class="field">{{ usesAuditedCorrections(selected) ? '人工核对全文（由下方子段修订生成）' : '人工核对文本' }}<textarea v-model="text" maxlength="16000" rows="6" :readonly="usesAuditedCorrections(selected)" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
@@ -249,7 +265,6 @@ async function openAnalysis() {
           <label><input type="checkbox" v-model="acknowledged" :disabled="busy || !!pending">我已对照录音核对文本，理解说话人未识别</label>
           <button :disabled="busy" @click="confirm">{{ pending ? '重试原确认提交' : '确认并创建分析会议' }}</button>
         </template>
-        <template v-if="selected.confirmation"><p>确认人 #{{ selected.confirmation.confirmed_by }} · {{ selected.confirmation.confirmed_at }}</p><button :disabled="busy" @click="openAnalysis">打开分析会议</button></template>
       </template>
     </template>
   </section>
@@ -258,4 +273,5 @@ async function openAnalysis() {
 .alignment-nav { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; }
 .alignment-row { border-left:3px solid transparent; padding-left:8px; }
 .alignment-row.active { border-left-color:var(--accent, #2878d0); background:rgba(40,120,208,.08); }
+.provenance-chain{margin:14px 0;padding:12px;border:1px solid var(--line,#ddd);border-radius:8px}.provenance-chain h4{margin:0 0 8px}.provenance-chain ol{display:grid;gap:8px;margin:0;padding-left:22px}.provenance-chain li{padding-left:3px}.provenance-chain li b{display:block}.provenance-chain li span{display:block;overflow-wrap:anywhere}.provenance-chain code{font-size:12px}
 </style>

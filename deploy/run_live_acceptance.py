@@ -18,7 +18,7 @@ from data_backup import BackupError, restore_backup, verify_backup
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / 'frontend'
-SUITES = ('assignment', 'daily', 'planning', 'review', 'retro', 'refinement', 'transcription')
+SUITES = ('assignment', 'daily', 'planning', 'review', 'retro', 'refinement', 'transcription', 'role-matrix', 'review-queue-page')
 DEFAULT_AUDIO = ROOT / 'ai-service/.stt-eval/feb3b85c968746538023736e92ff9be0/four-speakers.mp3'
 
 
@@ -161,7 +161,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument('--env-file', type=Path, default=ROOT / 'deploy/.env')
     result.add_argument('--backup', type=Path, required=True)
     result.add_argument('--suite', action='append', choices=SUITES,
-                        help='Repeat to select suites; omission runs all seven.')
+                        help='Repeat to select suites; omission runs all nine.')
     result.add_argument('--origin', default='http://127.0.0.1:8088')
     result.add_argument('--output', type=Path)
     result.add_argument('--stt-audio', type=Path, default=DEFAULT_AUDIO)

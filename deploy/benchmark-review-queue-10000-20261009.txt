@@ -1,0 +1,27 @@
+10000
+-> Limit: 51 row(s)  (actual time=84.8..84.8 rows=51 loops=1)
+    -> Sort: sort_time DESC, `cast(a.id as char charset binary)` DESC, q.proposal_index DESC, limit input to 51 row(s) per chunk  (actual time=84.8..84.8 rows=51 loops=1)
+        -> Stream results  (actual time=0.0976..77.9 rows=20000 loops=1)
+            -> Filter: ((case when (r.decision is null) then 'pending' when (r.decision = 'reject') then 'rejected' else 'approved' end) = 'pending')  (actual time=0.0778..43.7 rows=20000 loops=1)
+                -> Left hash join (<hash>(r.analysis_id)=<hash>(a.id)), (r.proposal_index = (jt.ordinal - 1)), extra conditions: (r.analysis_id = a.id)  (actual time=0.076..41.6 rows=20000 loops=1)
+                    -> Nested loop inner join  (actual time=0.0546..35.9 rows=20000 loops=1)
+                        -> Filter: (a.meeting_id = m.id)  (cost=1001 rows=10000) (actual time=0.0288..12.3 rows=10000 loops=1)
+                            -> Inner hash join (<hash>(a.meeting_id)=<hash>(m.id))  (cost=1001 rows=10000) (actual time=0.0279..10.1 rows=10000 loops=1)
+                                -> Table scan on a  (cost=1000 rows=10000) (actual time=0.00845..7.14 rows=10000 loops=1)
+                                -> Hash
+                                    -> Table scan on m  (cost=0.35 rows=1) (actual time=0.00695..0.00892 rows=1 loops=1)
+                        -> Materialize table function  (actual time=0.00198..0.00218 rows=2 loops=10000)
+                    -> Hash
+                        -> Table scan on r  (cost=888e-6 rows=1) (actual time=0.0147..0.0147 rows=0 loops=1)
+
+-> Aggregate: sum((case when (((case when (r.decision is null) then 'pending' when (r.decision = 'reject') then 'rejected' else 'approved' end) = 'approved') and (coalesce(r.execution_status,'not_started') = 'not_started')) then 1 else 0 end)), sum((case when ((case when (r.decision is null) then 'pending' when (r.decision = 'reject') then 'rejected' else 'approved' end) = 'pending') then 1 else 0 end))  (cost=0 rows=1) (actual time=37.3..37.3 rows=1 loops=1)
+    -> Left hash join (<hash>(r.analysis_id)=<hash>(a.id)), (r.proposal_index = (jt.ordinal - 1)), extra conditions: (r.analysis_id = a.id)  (actual time=0.0871..34.1 rows=20000 loops=1)
+        -> Nested loop inner join  (actual time=0.057..29.4 rows=20000 loops=1)
+            -> Filter: (a.meeting_id = m.id)  (cost=1001 rows=10000) (actual time=0.0353..9.83 rows=10000 loops=1)
+                -> Inner hash join (<hash>(a.meeting_id)=<hash>(m.id))  (cost=1001 rows=10000) (actual time=0.0338..7.8 rows=10000 loops=1)
+                    -> Table scan on a  (cost=1000 rows=10000) (actual time=0.0104..5.28 rows=10000 loops=1)
+                    -> Hash
+                        -> Covering index scan on m using created_by  (cost=0.35 rows=1) (actual time=0.0128..0.0163 rows=1 loops=1)
+            -> Materialize table function  (actual time=0.00166..0.0018 rows=2 loops=10000)
+        -> Hash
+            -> Table scan on r  (cost=116e-6 rows=1) (actual time=0.0237..0.0237 rows=0 loops=1)

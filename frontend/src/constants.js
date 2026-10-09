@@ -17,8 +17,8 @@ export const VIEW_NAMES = {
   members: '成员任务图',
   profiles: '成员画像',
   uml: 'UML 图',
-  ai: 'AI 助手',
-  review: 'AI 审核中心'
+  ai: 'AI 工作台',
+  review: '提案审核中心'
 }
 
 export function esc(s) {

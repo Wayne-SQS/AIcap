@@ -156,15 +156,26 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
 
     @Test
     void compareStats_includeTestCount() {
-        ApiResponse r = get("/api/profile-agent/analysis/compare?prevStart=2026-08-01&prevEnd=2026-08-24&start=2026-08-25&end=2026-09-15",
+        // Give this comparison its own activity so it does not depend on JUnit method order.
+        ApiResponse activity = post("/api/profile-agent/activities", token(USER_MEMBER), json(map(
+                "user_id", MEMBER_ID,
+                "activity_type", "test",
+                "title", "对比周期测试活动",
+                "module", "契约测试",
+                "happened_at", "2025-01-06 10:00:00")));
+        assertStatus(activity, 200);
+        ApiResponse r = get("/api/profile-agent/analysis/compare?prevStart=2025-01-01&prevEnd=2025-01-05&start=2025-01-06&end=2025-01-10",
                 token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode list = r.json().path("comparisons");
         assertTrue(list.isArray() && list.size() > 0, r.body());
         boolean sawTestCount = false, sawTestChange = false;
         for (JsonNode c : list) {
+            if (c.path("user_id").asInt() != MEMBER_ID) continue;
             if (c.path("current_period").has("test_count")) sawTestCount = true;
             if (c.path("changes").toString().contains("测试活动")) sawTestChange = true;
+            assertTrue(c.path("current_period").path("test_count").asInt()
+                    > c.path("previous_period").path("test_count").asInt(), r.body());
         }
         assertTrue(sawTestCount, "对比周期统计应含 test_count -> " + r.body());
         assertTrue(sawTestChange, "对比 changes 应含测试活动项 -> " + r.body());

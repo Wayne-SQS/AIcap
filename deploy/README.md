@@ -56,7 +56,7 @@ Remove-Item Env:AICAP_SMOKE_USERNAME,Env:AICAP_SMOKE_PASSWORD
 
 live 用例默认仍连接 `qa/run_daily_live.py` 启动的隔离服务，也可以通过环境变量改为验证当前容器的 Nginx 同源入口。用例会创建会议并修改演示故事，因此只应对可恢复的验收数据运行；每个用例前从同一份已验证备份恢复基线。
 
-推荐使用编排器一次运行全部七条闭环。它会先校验备份，在每条用例前恢复基线，并在成功、失败或中断后再次恢复；结果保存在已忽略的 `deploy/acceptance-runs/`：
+推荐使用编排器一次运行全部八条闭环（六类会议提案、转写版本、四角色审核队列）。它会先校验备份，在每条用例前恢复基线，并在成功、失败或中断后再次恢复；结果保存在已忽略的 `deploy/acceptance-runs/`：
 
 ```powershell
 ai-service/.venv/Scripts/python.exe -B deploy/run_live_acceptance.py `
@@ -74,7 +74,7 @@ $env:AICAP_LIVE_AI_BASE='http://127.0.0.1:8088/meeting-ai'
 Push-Location frontend
 # 每次只运行一个，并在下一项前重新恢复同一份基线备份。
 npx.cmd playwright test --config=playwright.live.config.js assignment-flow.spec.js
-# 其余会议闭环：daily、planning、review、retro、refinement、transcription
+# 其余闭环：daily、planning、review、retro、refinement、transcription、role-matrix
 Pop-Location
 ```
 
@@ -132,4 +132,4 @@ ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
 
 ## 当前验证边界
 
-当前开发机已实际构建并启动四容器编排，完成首页、Java/数据库、会议 Agent、登录读链路验证，并在 Nginx 同源入口上通过 Assignment、Daily、Planning、Review、Retro、Refinement 和四人中文音频转写版本七条浏览器闭环。除 Assignment 外的会议分析均调用当前真实模型配置。该结果证明当前本机配置可运行，不替代目标部署机的模型文件、密钥、持久卷备份恢复及 `verify.py --live-url` 验收。
+当前开发机已实际构建并启动四容器编排，完成首页、Java/数据库、会议 Agent、登录读链路验证，并在 Nginx 同源入口上通过 Assignment、Daily、Planning、Review、Retro、Refinement、四人中文音频转写版本及 Admin/Owner/Member/Viewer 审核队列八条浏览器闭环。除 Assignment 外的会议分析均调用当前真实模型配置。角色矩阵用例创建独立待审建议，验证各角色的列表、来源跳转、权限提示及负责人审核；每项完成后恢复测试前快照。该结果证明当前本机配置可运行，不替代目标部署机的模型文件、密钥、持久卷备份恢复及 `verify.py --live-url` 验收。

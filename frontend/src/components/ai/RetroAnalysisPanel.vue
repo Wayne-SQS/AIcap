@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { retroAnalysesApi as api } from '@/api/retroAnalyses'
+import { executionStatusName } from '@/api/workflowLabels'
 import { membersApi } from '@/api/members'
 import { useMeetingStore } from '@/stores/meeting'
+import WorkflowPermissionNote from './WorkflowPermissionNote.vue'
 import RetroAnalysisForm from './RetroAnalysisForm.vue'
 import RetroProposalReviewForm from './RetroProposalReviewForm.vue'
 import RetroProposalExecute from './RetroProposalExecute.vue'
-const props = defineProps({ meetingId: String })
+const props = defineProps({ meetingId: String, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
 const analyses = ref([]), selected = ref(''), reviews = ref(null), executions = ref([]), confirmed = ref([])
 const loading = ref(false), error = ref(''), detailError = ref(''), detailLoading = ref(false), notice = ref('')
@@ -17,6 +19,7 @@ const logVersions = new Map()
 const analysis = computed(() => analyses.value.find(item => item.id === selected.value))
 const reviewName = state => ({ pending: '待审核', approved: '已批准', rejected: '已拒绝' })[state] || state
 const progressName = state => ({ pending: '待审核', partially_reviewed: '部分已审核', reviewed: '全部已审核', no_changes: '无行动提案' })[state] || state
+const executionName = item => executionStatusName(execution(item.proposal_id) ? 'succeeded' : item.status === 'rejected' ? 'not_applicable' : item.execution_status)
 const ownerName = id => id == null ? '未确定' : `${analysis.value?.member_snapshots?.find(m => m.user_id === id)?.display_name || '成员'} #${id}`
 const execution = id => confirmed.value.find(item => item.proposal_id === id) || executions.value.find(item => item.proposal_id === id)
 async function loadDetails() {
@@ -31,7 +34,7 @@ async function loadDetails() {
   finally { if (version === detailVersion) detailLoading.value = false }
 }
 async function refresh(preferredId) {
-  const version = ++listVersion, previous = typeof preferredId === 'string' ? preferredId : selected.value
+  const version = ++listVersion, previous = typeof preferredId === 'string' ? preferredId : selected.value || props.initialAnalysisId
   selected.value = ''; ++detailVersion; reviews.value = null; executions.value = []; analyses.value = []; error.value = ''; loading.value = !!props.meetingId
   if (!props.meetingId) return
   try {
@@ -97,9 +100,10 @@ onBeforeUnmount(() => { alive = false; ++listVersion; ++detailVersion; ++actionV
       <div v-else-if="detailError" role="alert">{{ detailError }} <button type="button" @click="loadDetails">重试加载处理状态</button></div>
       <template v-else-if="reviews">
         <p role="status">审核进度：{{ progressName(reviews.review_status) }}</p>
+        <WorkflowPermissionNote :proposals="reviews.proposals" />
         <article v-for="item in reviews.proposals" :key="selected + ':' + item.proposal_id" class="proposal-card">
           <h4>{{ item.original_proposal.changes.title }}</h4>
-          <p>提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ execution(item.proposal_id) ? '执行成功' : item.status === 'rejected' ? '不适用' : '未执行' }}</p>
+          <p>提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(item) }}</p>
           <p class="preserve">原始事项：{{ item.original_proposal.changes.title }}<br>{{ item.original_proposal.changes.description }}<br>负责人：{{ ownerName(item.original_proposal.changes.owner_id) }} · 截止时间：{{ item.original_proposal.changes.deadline_text ?? '未确定' }}</p>
           <p v-if="item.approved_proposal" class="preserve">批准后的事项：{{ item.approved_proposal.changes.title }}<br>{{ item.approved_proposal.changes.description }}<br>批准负责人：{{ item.approved_proposal.changes.owner_id == null ? '未确定' : `${item.approved_owner_name || '成员'} #${item.approved_proposal.changes.owner_id}` }} · 批准截止时间：{{ item.approved_proposal.changes.deadline_text ?? '未确定' }}</p>
           <p class="preserve">提案原因：{{ item.original_proposal.reason }}</p>

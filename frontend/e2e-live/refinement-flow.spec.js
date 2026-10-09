@@ -10,7 +10,7 @@ test('real Refinement completion creates one story with durable audit', async ({
   const transcript = process.env.AICAP_LIVE_REAL_MODEL === '1'
     ? '主持人：确认新增一个独立需求，标题为“导出周报CSV”。描述、验收标准、优先级、Sprint和业务活动编号本次均未讨论，请保留待确认，不补默认值。'
     : '决定新增周报导出需求，验收标准和排期待确认。'
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
@@ -28,7 +28,7 @@ test('real Refinement completion creates one story with durable audit', async ({
     return response.json()
   }
   const stories = await read('/api/stories'), tasks = await read('/api/tasks'), profiles = await read('/api/members/profiles')
-  await page.getByRole('button', { name: '打开会议 Backlog Refinement' }).click()
+  await page.getByLabel('会议分析类型').selectOption('refinement')
   const panel = page.getByRole('region', { name: 'Refinement新故事提案', exact: true })
   await panel.getByRole('button', { name: '分析Backlog Refinement', exact: true }).click()
   await expect(panel).toContainText('原提案待补齐', { timeout: 60000 })
@@ -85,7 +85,7 @@ test('real Refinement completion creates one story with durable audit', async ({
   expect((await request.post(base + recordPath + '/proposal-reviews', { headers: viewer, data: { proposal_id: proposalId, decision: 'approve', reason: '' } })).status()).toBe(403)
   expect((await request.post(analyzePath, { headers: viewer, data: { client_request_id: 'viewer-denied', meeting_type: 'backlog_refinement' } })).status()).toBe(403)
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Backlog Refinement' }).click()
+  await page.getByLabel('会议分析类型').selectOption('refinement')
   await expect(panel).toContainText(`已创建故事：${id}`)
   await expect(panel).toContainText(`故事日志 #${logs[0].id}`)
   await expect(panel.getByRole('button', { name: '执行已批准变更' })).toHaveCount(0)

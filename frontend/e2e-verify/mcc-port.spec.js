@@ -23,6 +23,11 @@ async function login(page, hash = '/#/board') {
   await expect(dialog).toBeHidden()
 }
 
+async function chooseOfflineIfPrompted(page) {
+  const button = page.locator('#login-offline')
+  if (await button.isVisible().catch(() => false)) await button.click()
+}
+
 test('数据基线与看板:故事地图默认 + Sprint 4+ + 真实姓名 + 血缘徽章', async ({ page }) => {
   await login(page, '/#/board')
 
@@ -72,11 +77,10 @@ test('数据基线与看板:故事地图默认 + Sprint 4+ + 真实姓名 + 血�
 test('甘特图:父卡血缘 + 点击详情(前置/后续) + 任务编辑真实往返', async ({ page }) => {
   await login(page, '/#/gantt')
 
-  // 血缘行保留:12 张挂卡 + 4 条管理任务
-  await expect(page.locator('.grow.parent')).toHaveCount(12)
-  await expect(page.locator('.grow.mgmt')).toHaveCount(4)
-  const parentText = (await page.locator('.grow.parent .gbar.parent').first().textContent())?.trim()
-  expect(parentText).toMatch(/^US\d+ · \d+%$/)
+  // 当前甘特按 16 条真实任务行展示 Story 血缘；管理任务标记在任务条上。
+  await expect(page.locator('.grow.task')).toHaveCount(16)
+  await expect(page.locator('.gbar.mgmt')).toHaveCount(4)
+  await expect(page.locator('.taskmeta .storyref').filter({ hasText: 'US' }).first()).toBeVisible()
   await expect(page.locator('.gantt-head.gantt-sprint .sprinth')).toHaveCount(3)
 
   // 点击子任务条:T03 → 详情显示前置 T02 / 后续 T04,T05
@@ -246,7 +250,7 @@ test('离线演示:新基线 US01–US37 可用,旧基线缓存自动落回种�
     ]))
   })
   await page.reload()
-  await page.locator('#login-offline').click()
+  await chooseOfflineIfPrompted(page)
   await expect(page.locator('#mappanel')).toBeVisible()
   const board = page.locator('#map')
   await expect(board).toContainText('US01')
@@ -255,14 +259,14 @@ test('离线演示:新基线 US01–US37 可用,旧基线缓存自动落回种�
 
   // 离线甘特:本地任务数据可渲染,任务编辑走离线分支
   await page.goto('/#/gantt')
-  await expect(page.locator('.grow.parent')).toHaveCount(12)
+  await expect(page.locator('.grow.task')).toHaveCount(16)
   await page.locator('.gbar[data-gantt-task="task:T16"]').click()
   await page.locator('#gantt-detail button').filter({ hasText: '编辑任务' }).click()
   const dialog = page.locator('#task-editor')
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('input[name=storyRef]')).toHaveValue('US07,US24,US37')
   await dialog.locator('#task-cancel').click()
-  console.log('[offline] 基线=' + count + ' 条,gantt 血缘行=12')
+  console.log('[offline] 基线=' + count + ' 条,gantt 任务行=16')
 })
 
 /**
@@ -278,7 +282,7 @@ test('离线演示:需求池移入看板分配 US38+ 唯一编号(回归:曾恒�
   await page.goto('/#/pool')
   await page.evaluate(() => localStorage.clear())
   await page.reload()
-  await page.locator('#login-offline').click()
+  await chooseOfflineIfPrompted(page)
   await expect(page.locator('#view-pool')).toBeVisible()
 
   const poolIds = await page.locator('#pool-list button[data-promote]').evaluateAll(

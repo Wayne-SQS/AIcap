@@ -6,7 +6,7 @@ const aiBase = process.env.AICAP_LIVE_AI_BASE || 'http://127.0.0.1:18190'
 
 test('real daily analysis, human review, execution, retry and board consistency', async ({ page, request }) => {
 
-  await page.goto('/#/ai')
+  await page.goto('/#/meetings')
   await page.locator('#login-user').fill('李锐铭')
   await page.locator('#login-pass').fill('123456')
   await page.locator('#login-form').getByRole('button', { name: '登录', exact: true }).click()
