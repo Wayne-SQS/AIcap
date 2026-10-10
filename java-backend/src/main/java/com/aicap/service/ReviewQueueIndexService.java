@@ -36,7 +36,7 @@ public class ReviewQueueIndexService {
     public record Summary(long pendingCount, long executionCount, Item latest, RecentMeeting recentMeeting) {}
     private record Cursor(long sortTime, String source, String analysisId, int proposalIndex) {}
 
-    private Map<String, String> sql() {
+    Map<String, String> sql() {
         Map<String, String> parts = new LinkedHashMap<>();
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String table = "meeting_" + source + "_analyses";

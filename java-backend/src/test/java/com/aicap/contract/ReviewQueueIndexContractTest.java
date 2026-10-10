@@ -1,6 +1,7 @@
 package com.aicap.contract;
 
 import com.aicap.service.ReviewQueueIndexService;
+import com.aicap.service.ReviewQueueShadowIndexService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ReviewQueueIndexContractTest extends ContractTestSupport {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ReviewQueueIndexService index;
+    @Autowired private ReviewQueueShadowIndexService shadow;
     private final String meetingId = UUID.randomUUID().toString();
     private final List<String> analysisIds = new ArrayList<>();
     private final String suggestionId = "S" + (100000 + Math.abs(meetingId.hashCode() % 800000));
@@ -33,6 +35,7 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
 
     @AfterEach
     void cleanup() {
+        jdbc.update("DELETE FROM review_queue_proposals WHERE meeting_id=?", meetingId);
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String table = "meeting_" + source + "_analyses";
             String reviewTable = "meeting_" + source + "_proposal_reviews";
@@ -97,6 +100,18 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         ReviewQueueIndexService.Summary summary = index.summary();
         assertEquals(before.pendingCount() + 5, summary.pendingCount());
         assertEquals(before.executionCount() + 1, summary.executionCount());
+        assertEquals(7, shadow.backfillMissing());
+        assertEquals(summary.pendingCount(), shadow.counts().pending());
+        assertEquals(summary.executionCount(), shadow.counts().execution());
+        assertEquals(0, shadow.backfillMissing(), "重复回填不得覆盖已有索引行");
+        var pending = index.page("pending", "all", null, null, null, null, 50).items();
+        var indexedPending = shadow.pendingFirst(50);
+        assertEquals(pending.size(), indexedPending.size());
+        for (int i = 0; i < pending.size(); i++) {
+            assertEquals(pending.get(i).source(), indexedPending.get(i).get("source"));
+            assertEquals(pending.get(i).analysisId(), indexedPending.get(i).get("analysis_id"));
+            assertEquals(pending.get(i).proposalIndex(), ((Number) indexedPending.get(i).get("proposal_index")).intValue());
+        }
         assertNotNull(summary.latest());
         assertNotNull(summary.recentMeeting());
         assertThrows(RuntimeException.class, () -> index.page("all", "all", null, null, null, "invalid", 20));

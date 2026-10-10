@@ -1,6 +1,7 @@
 package com.aicap.contract;
 
 import com.aicap.service.ReviewQueueIndexService;
+import com.aicap.service.ReviewQueueShadowIndexService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ReviewQueueCapacityBenchmark {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ReviewQueueIndexService index;
+    @Autowired private ReviewQueueShadowIndexService shadow;
 
     @Test
     @Transactional
@@ -76,5 +78,28 @@ class ReviewQueueCapacityBenchmark {
         assertEquals(pendingBefore + 12L * perSource, summary.pendingCount());
         System.out.printf("SEVEN_SOURCE_BENCHMARK rows_per_source=%d proposals=%d page_ms=%d summary_ms=%d%n",
                 perSource, 12 * perSource, pageMillis, summaryMillis);
+
+        start = System.nanoTime();
+        long inserted = shadow.backfillMissing();
+        long backfillMillis = (System.nanoTime() - start) / 1_000_000;
+        start = System.nanoTime();
+        var indexedPage = shadow.pendingFirst(50);
+        long indexedPageMillis = (System.nanoTime() - start) / 1_000_000;
+        start = System.nanoTime();
+        var indexedCounts = shadow.counts();
+        long indexedCountMillis = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(inserted >= 12L * perSource, "回填还会纳入测试库原有提案");
+        assertEquals(summary.pendingCount(), indexedCounts.pending());
+        assertEquals(summary.executionCount(), indexedCounts.execution());
+        assertEquals(page.items().size(), indexedPage.size());
+        for (int i = 0; i < page.items().size(); i++) {
+            assertEquals(page.items().get(i).source(), indexedPage.get(i).get("source"));
+            assertEquals(page.items().get(i).analysisId(), indexedPage.get(i).get("analysis_id"));
+            assertEquals(page.items().get(i).proposalIndex(), ((Number) indexedPage.get(i).get("proposal_index")).intValue());
+        }
+        assertEquals(0, shadow.backfillMissing());
+        System.out.printf("SEVEN_SOURCE_SHADOW_INDEX rows_per_source=%d inserted=%d backfill_ms=%d " +
+                        "page_ms=%d count_ms=%d%n", perSource, inserted, backfillMillis,
+                indexedPageMillis, indexedCountMillis);
     }
 }
