@@ -91,7 +91,23 @@ public class ReviewQueueIndexService {
     @Transactional(readOnly = true)
     public Summary summary() {
         long pending = 0, execution = 0;
-        for (String sourceSql : sql().values()) {
+        for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
+            String analyses = "meeting_" + source + "_analyses";
+            String reviews = "meeting_" + source + "_proposal_reviews";
+            Map<String, Object> counts = jdbc.queryForMap("SELECT " +
+                    "COALESCE(SUM(COALESCE(JSON_LENGTH(a.result_json,'$.proposed_actions'),0)" +
+                    "-COALESCE(r.reviewed_count,0)),0) AS pending_count," +
+                    "COALESCE(SUM(COALESCE(r.execution_count,0)),0) AS execution_count " +
+                    "FROM " + analyses + " a JOIN meetings m ON m.id=a.meeting_id " +
+                    "LEFT JOIN (SELECT analysis_id,COUNT(*) AS reviewed_count," +
+                    "SUM(CASE WHEN decision<>'reject' AND execution_status='not_started' THEN 1 ELSE 0 END)" +
+                    " AS execution_count FROM " + reviews + " GROUP BY analysis_id) r ON r.analysis_id=a.id");
+            pending += ((Number) counts.get("pending_count")).longValue();
+            execution += ((Number) counts.get("execution_count")).longValue();
+        }
+        Map<String, String> parts = sql();
+        for (String source : List.of("assignment", "general")) {
+            String sourceSql = parts.get(source);
             Map<String, Object> counts = jdbc.queryForMap("SELECT " +
                     "COALESCE(SUM(CASE WHEN q.status='pending' THEN 1 ELSE 0 END),0) AS pending_count," +
                     "COALESCE(SUM(CASE WHEN q.status='approved' AND q.execution_status='not_started' THEN 1 ELSE 0 END),0) AS execution_count " +

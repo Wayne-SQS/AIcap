@@ -115,6 +115,29 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
     }
 
     @Test
+    void summaryCountsRemainingProposalsAndApprovedExecutions() {
+        ReviewQueueIndexService.Summary before = index.summary();
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+                meetingId, "多提案汇总测试", "测试原文", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,2,10,0)));
+        String analysisId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, meetingId, 1, "queue-multi-proposal", "completed", "测试原文",
+                "{\"proposed_actions\":[{\"proposal_id\":\"one\"},{\"proposal_id\":\"two\"},{\"proposal_id\":\"three\"}]}",
+                "[]", Timestamp.valueOf(LocalDateTime.of(2025,1,2,10,1)));
+        jdbc.update("INSERT INTO meeting_status_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, 0, "one", "approve", "confirmed", 1, "{}", "{}", "not_started");
+        jdbc.update("INSERT INTO meeting_status_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, 1, "two", "reject", "rejected", 1, "{}", null, "not_applicable");
+
+        ReviewQueueIndexService.Summary summary = index.summary();
+        assertEquals(before.pendingCount() + 1, summary.pendingCount());
+        assertEquals(before.executionCount() + 1, summary.executionCount());
+        assertEquals(1, index.page("pending", "daily", null, null, null, null, 10).items().size());
+        jdbc.update("UPDATE meeting_status_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=0", analysisId);
+        assertEquals(before.executionCount(), index.summary().executionCount());
+    }
+
+    @Test
     void cursorUsesBinaryOrderForMixedCaseIdsAtTheSameTimestamp() {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
                 meetingId, "同秒游标测试", "测试", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,0)));
