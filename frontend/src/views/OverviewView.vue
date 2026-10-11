@@ -90,7 +90,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     <div class="quick">
       <button class="quickcard" @click="go('board')"><span class="ic">▦</span><b>故事看板</b><span>拖拽更新状态、编辑与导出</span></button>
       <button class="quickcard" @click="go('gantt')"><span class="ic">▤</span><b>甘特图</b><span>6 周排期与里程碑</span></button>
-      <button class="quickcard" @click="go('ai')"><span class="ic">✦</span><b>AI 助手</b><span>六项智能能力演示</span></button>
+      <button class="quickcard" @click="go('ai')"><span class="ic">✦</span><b>AI 工作台</b><span>浏览智能能力与最近工作</span></button>
     </div>
   </section>
 </template>

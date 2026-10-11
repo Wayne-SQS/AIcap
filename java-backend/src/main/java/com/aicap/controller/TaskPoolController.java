@@ -16,6 +16,7 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
 import com.aicap.service.IdAllocator;
+import com.aicap.service.ProjectPlanningActionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
@@ -58,6 +59,7 @@ public class TaskPoolController {
     private final UserMapper userMapper;
     /** 编号分配:本类原有的 nextStoryId()/nextPoolId() 与 StoryController 逐字重复,已集中 */
     private final IdAllocator idAllocator;
+    private final ProjectPlanningActionService planningActions;
 
     // ---------- 工具 ----------
 
@@ -207,7 +209,7 @@ public class TaskPoolController {
     @Transactional
     public TaskDtos.TaskOut patchTask(@PathVariable String taskId,
                                       @RequestBody JsonNode body) {
-        Roles.writer();
+        User actor = Roles.writer();
         Task task = taskMapper.selectById(taskId);
         if (task == null) {
             throw ApiException.notFound("任务不存在");
@@ -226,6 +228,10 @@ public class TaskPoolController {
             throw ApiException.unprocessable("字段 task_type: 仅支持 feature/management");
         }
         NullableField<String> dependsOn = textField(body, "depends_on", 100, false);
+        NullableField<String> priority = textField(body, "priority", 10, false);
+        if (priority.present() && !Set.of("Must", "Should", "Could").contains(priority.value())) {
+            throw ApiException.unprocessable("字段 priority: 仅支持 Must/Should/Could");
+        }
         NullableField<Integer> status = intField(body, "status", 0, 3);
         NullableField<Integer> progress = intField(body, "progress", 0, 100);
         NullableField<Boolean> blocked = boolField(body, "blocked");
@@ -301,7 +307,12 @@ public class TaskPoolController {
             changed = true;
         }
         if (ownerId.present()) {
-            task.setOwnerId(ownerId.value());
+            if (!changed) {
+                planningActions.updateTaskOwner(taskId, ownerId.value(), actor);
+                task = taskMapper.selectById(taskId);
+            } else {
+                task.setOwnerId(ownerId.value());
+            }
             changed = true;
         }
         if (hours.present()) {
@@ -331,6 +342,10 @@ public class TaskPoolController {
         }
         if (body.has("depends_on")) {
             task.setDependsOn(normalizedDependsOn);
+            changed = true;
+        }
+        if (priority.present()) {
+            task.setPriority(priority.value());
             changed = true;
         }
         if (finalStatus != null) {

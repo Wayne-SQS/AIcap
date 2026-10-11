@@ -5,8 +5,15 @@
 >
 > 现行实现:前端 `frontend/`(Vue3 + Vite) + 后端 `java-backend/`(Spring Boot 3.5,MySQL 8)。后端在线 = 真多人协作;后端不可用自动回退「离线演示」,用本机浏览器数据。Vue 改造前的旧版单文件前端归档于 `legacy/`。
 
+## 当前推荐运行与验证入口
+
+当前完整运行方式是 `deploy/compose.yaml`：Nginx、Java 后端、会议 Agent 与 MySQL 组成四容器服务。新成员克隆后的依赖准备、密钥配置、启动、健康检查、数据备份与七类会议浏览器验收，请按 **[`deploy/README.md`](deploy/README.md)** 操作；克隆快速入口见 **[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md)**。不要用归档 FastAPI 目录中的 Compose 文件代替生产编排。
+
+当前仓库使用的测试结果和边界以部署指南中的“当前验证边界”、各模块测试文档及最近一次 CI/本机验收记录为准。下文的 v3 用例数量、旧式本机启动命令和阶段说明属于历史记录，保留作追溯参考，不是当前发布入口。
+
 **目录**
 
+- [当前推荐运行与验证入口](#当前推荐运行与验证入口)
 - [一、业务逻辑(先读这一节)](#一业务逻辑)
 - [二、界面与视图](#二界面与视图)
 - [三、把系统跑起来](#三把系统跑起来)
@@ -175,6 +182,8 @@
 
 **队友首次上手**(克隆后怎么起 MySQL + 后端 + 前端)见 **[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md)**。仓库内还提供了 `java-backend/启动后端.ps1`,一键注入环境变量并后台启动后端(见 §4.4)。
 
+以下方式面向单独调试 Vue/Java 开发环境,不包含容器化会议 Agent 与生产同源网关。首次运行或完整体验会议流程请使用上面的部署指南。
+
 ```bash
 # 只开前端(离线演示,数据在本机浏览器)
 cd frontend && npm install && npm run dev   # 后端不可用时自动回退离线演示
@@ -257,7 +266,9 @@ java -jar target\aicap-java-backend.jar
 |---|---|
 | `frontend/` | 现行前端:Vue3 + Vite(8 视图,像素风;后端在线走 API,离线自动回退) |
 | `java-backend/` | 现行后端:Spring Boot 3.5 + MyBatis-Plus(默认 8080,连 MySQL 3307 `AIcap` 库) |
-| `backend/` | 历史归档:FastAPI 后端 + SQLAlchemy + pytest(参考实现);其 `docker-compose.yml` 仍是启动 MySQL 8.0 的现行方式(库 `AIcap`,端口 3307) |
+| `backend/` | 历史归档:FastAPI 后端 + SQLAlchemy + pytest(参考实现);其 `docker-compose.yml` 只服务旧开发环境(库 `AIcap`,端口 3307),现行编排见 `deploy/` |
+| `ai-service/` | 会议 Agent 与离线语音转写/说话人分离服务 |
+| `deploy/` | 当前 Docker Compose 部署、配置模板、验证与备份工具 |
 | `legacy/` | 历史归档:Vue 改造前的旧版单文件前端 |
 | `docs/`、`docs/superpowers/` | 设计规格、实施计划与各能力说明 |
 | `qa/` | 前后端测试用例、执行记录与报告 |
@@ -288,6 +299,10 @@ java -jar target\aicap-java-backend.jar
 
 **画像智能体的三层口径**(避免"AI 说话没依据"):客观事实(`objective` / `work_items`)→ 规则引擎底座(可量化指标)→ LLM 只**叠加白名单字段**(缺失字段保留规则值,不会渲染成 `undefined`),并把 `generated_by` 标成 `llm` 还是 `rules_fallback`。
 
+**五类会议闭环**(合并自 `main`):Daily 更新状态、Planning 调整 Sprint、Review 标记验收完成、Retro 创建行动项、Refinement 补齐后创建故事,均为「保存文本 → 分析提案 → 人工审核 → 单独执行 → 审计」同一形态。审核中心通过前端 adapter 读取每种既有来源记录,**不复制审核决定**;跨来源的审核与执行按钮深链回来源会议;部分来源加载失败时队列会提示结果可能不完整;离线模式只显示本机演示数据,不形成服务器审核或模型结论。
+
+会议工作区除 MySQL / Java / 前端外还需启动 `ai-service` Python 服务(默认 8090,`AICAP_LLM` 配置加载在该进程)。缺密钥时新流程**明确报错**,不返回规则或演示提案。隔离业务联调与真实模型质量的不同验证边界见 [`qa/DAILY_LIVE.md`](qa/DAILY_LIVE.md) 与 `ai-service/evals/` 质量报告;试用步骤见 [`docs/会议Agent_五类会议试用指南.md`](docs/会议Agent_五类会议试用指南.md),旧入口配置记录保留于 [`docs/会议Agent_DeepSeek运行与验收.md`](docs/会议Agent_DeepSeek运行与验收.md)。
+
 ## 5.5 各能力实现要点
 
 - **会议录音(麦克风 → MP3)**:浏览器 `getUserMedia` + `MediaRecorder` → 浏览器内解码 PCM 并用 `lamejs`(MIT) 编码成真 `.mp3` → 提交到当前会议。上传 `POST /api/meetings/{id}/audio`(multipart:`file`、`source=recorder|upload`、`duration_ms`)、列表 `GET /api/meetings/{id}/audio`、回放 `GET /api/audio/{id}`(需鉴权,前端取字节转 objectURL)、删除 `DELETE /api/audio/{id}`(仅 admin/owner)。校验:扩展名 + 魔数双校验、单文件默认 25MB(`AICAP_AUDIO_MAX_BYTES`);落盘 `java-backend/data/audio`(`AICAP_AUDIO_DIR`)。**为什么不用 ffmpeg**:`MediaRecorder` 原生只出 webm/opus 或 mp4/aac,不出 mp3;客户端转码让服务端零依赖。
@@ -311,7 +326,11 @@ java -jar target\aicap-java-backend.jar
 
 # 六、测试与质量
 
-前后端功能测试的用例设计、执行记录与报告位于 [`qa/`](qa/),**当前基线为 v3**(基于 `main`:Vue3 前端 + `java-backend`):
+容器化生产形态（同源Nginx网关、Java、会议Agent、MySQL、持久化卷及上线验证）见 **[`deploy/README.md`](deploy/README.md)**。
+
+## 测试交付物
+
+前后端历史功能测试的用例设计、执行记录与报告位于 [`qa/`](qa/)。其中 v3 数量和 `qa/run-all.ps1` 编排反映旧本机测试基线，不代表当前部署验收范围：
 
 | 文档 | 内容 |
 |---|---|

@@ -6,28 +6,55 @@ import { useAgentRefresh, completingTaskId } from '@/composables/useAgentRefresh
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MILESTONES } from '@/data/seed'
 import { memberLabel } from '@/data/memberIdentity'
+import { useProjectActions } from '@/composables/useProjectActions'
+import { useToast } from '@/composables/useToast'
 import GanttRow from '@/components/gantt/GanttRow.vue'
 import TaskEditorDialog from '@/components/gantt/TaskEditorDialog.vue'
+import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
+import { useCanvasZoom } from '@/composables/useCanvasZoom'
+import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
-/* 甘特图(融合方案)
-   - 保留 v2 血缘:父行=看板卡(起止=子任务周并集、工时加权进度),子行缩进,管理任务虚线,独立任务区
-   - 引入 legacy 新版内容:Sprint 分带表头、行内任务细节(负责人/工时/Sprint/关联 Story/看板卡)、
-     可点击任务条(选中高亮 + 前置/后续任务高亮)、任务详情面板、任务编辑弹窗(真实 PATCH /api/tasks/{id})
-   - 交互按 Vue 重写:选中状态由 selection 持有,父条=故事卡(编辑走故事弹窗),子条=任务(编辑走任务弹窗) */
+/* 甘特图任务视图:
+   - 每个任务占一行，Story 血缘保留在任务元数据与详情面板中
+   - Sprint 分带表头、任务排期条、依赖高亮、任务详情和真实编辑能力保持不变
+   - 任务排期拖拽继续走影响分析与风险确认流程 */
 const project = useProjectStore()
 const session = useSessionStore()
 const sprintLabel = ['', 'S1', 'S1', 'S2', 'S2', 'S3', 'S3']
 const sprintOf = w => Math.ceil(w / 2)
 /* 只读账号(viewer)的编辑入口保持可见但禁用,title 说明原因 */
 const viewerTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
-/* 在当前(选中)任务上标记完成 → 触发任务提交智能体,见 useAgentRefresh */
+/* 任务完成触发画像智能体；排期调整保留影响分析与确认。 */
 const { completeTask } = useAgentRefresh()
 const doneTitle = computed(() => (session.isViewer ? READONLY_TITLE : '标记完成并触发任务提交智能体'))
+const { updateTaskSchedule, analyzeTaskSchedule, isSaving } = useProjectActions()
+const { notify } = useToast()
 
 const selection = ref(null)          // { type:'task'|'story', id }
 const taskEditorRef = ref(null)
+const riskDialogRef = ref(null)
 const storyEditorRef = ref(null)
+const pendingRisk = ref(null)
+const schedulePreview = ref(null)
+const ganttViewport = ref(null)
+const ganttShell = ref(null)
+const ganttCanvas = ref(null)
+const { zoom, zoomMode, minZoom, maxZoom, canvasStyle, shellStyle, zoomIn, zoomOut, setZoomPercent, resetZoom, fitToCanvas: fitGanttCanvas } = useCanvasZoom({
+  viewport: ganttViewport,
+  canvas: ganttCanvas,
+  shell: ganttShell,
+  fillViewportWidth: true,
+  minContentWidth: 1040,
+  fitMinZoom: 0.2,
+  fitPadding: 0,
+  fitAlign: 'start',
+  initialMode: 'manual'
+})
+
+function fitToCanvas() {
+  fitGanttCanvas()
+}
 
 const selectedTaskId = computed(() => (selection.value?.type === 'task' ? selection.value.id : null))
 const selectedStoryId = computed(() => (selection.value?.type === 'story' ? selection.value.id : null))
@@ -53,15 +80,18 @@ function selectTask(id) { selection.value = { type: 'task', id } }
 
 /* 任务条:计划起止范围(长度=周数,不按工时比例);状态/进度写在 title 里 */
 function barOf(t, key) {
-  const span = t.w[1] - t.w[0] + 1
-  const cross = sprintOf(t.w[0]) !== sprintOf(t.w[1])
+  const preview = schedulePreview.value?.taskId === t.id ? schedulePreview.value : null
+  const start = preview?.start ?? t.w[0]
+  const end = preview?.end ?? t.w[1]
+  const span = end - start + 1
+  const cross = sprintOf(start) !== sprintOf(end)
   const relation = relationOf(t.id)
   const cls = [`o${t.owner}`]
   if (t.type === 'management') cls.push('mgmt')
   else if (t.status === 2 || t.progress >= 100) cls.push('task-done')
   if (relation) cls.push(relation)
   return {
-    left: ((t.w[0] - 1) / 6 * 100).toFixed(2),
+    left: ((start - 1) / 6 * 100).toFixed(2),
     width: (span / 6 * 100).toFixed(2),
     title: `${t.id} ${t.name} · ${t.h}h · ${project.memberName(t.owner)} · ${project.taskSprintText(t)} · ${project.taskStatusText(t)}（进度 ${t.progress || 0}%）${cross ? ' · 跨迭代实施(横跨两个 Sprint)' : ''}`,
     cls: cls.join(' '),
@@ -74,54 +104,37 @@ function barOf(t, key) {
 }
 
 function metaOf(t) {
+  const stories = taskRefs(t.story)
+  const storySummary = stories.length > 1 ? `${stories[0]} +${stories.length - 1}` : (stories[0] || '未关联')
   return [
     { text: t.id, cls: 'taskid' },
-    { text: '· ' + project.memberName(t.owner), cls: 'ownerref' },
-    { text: '· ' + t.h + 'h' },
-    { text: '· ' + project.taskSprintText(t) },
-    { text: '· ' + (t.story || '未关联 Story'), cls: 'storyref', title: t.story || '未关联 Story' },
-    { text: '· ' + (t.card || '管理任务') },
-    { text: '· ' + project.taskStatusText(t) }
+    { text: project.memberName(t.owner), cls: 'ownerref' },
+    { text: t.h + 'h' },
+    { text: project.taskSprintText(t) },
+    { text: storySummary, cls: 'storyref', title: t.story || '未关联 Story' }
   ]
 }
 
-/* 开发任务按看板卡分组:父行(卡+加权进度) + 子行;管理任务独立虚线;独立任务解绑可见 */
-const groups = computed(() => {
-  const g = {}
-  project.tasks.filter(t => t.type !== 'management' && t.card).forEach(t => { (g[t.card] ??= []).push(t) })
-  return g
-})
-const mgmts = computed(() => project.tasks.filter(t => t.type === 'management'))
-const orphans = computed(() => project.tasks.filter(t => t.type !== 'management' && !t.card))
+const taskRows = computed(() => [...project.tasks].sort((a, b) =>
+  String(a.id).localeCompare(String(b.id), undefined, { numeric: true })
+))
 
-const groupRows = computed(() => Object.entries(groups.value).map(([cardId, subs]) => {
-  const s = project.stories.find(x => x.id === cardId)
-  const w0 = Math.min(...subs.map(t => t.w[0])), w1 = Math.max(...subs.map(t => t.w[1]))
-  const pct = Math.round(project.cardPct(s || { status: 0, id: cardId }) * 100)
-  const eh = subs.reduce((a, t) => a + (t.eh || t.h), 0)
-  return {
-    cardId,
-    parent: {
-      title: cardId + ' ' + (s ? s.title : ''),
-      sub: `父卡 · ${subs.length} 子任务 · ${eh}h · 加权 ${pct}%`,
-      bar: {
-        left: ((w0 - 1) / 6 * 100).toFixed(2),
-        width: ((w1 - w0 + 1) / 6 * 100).toFixed(2),
-        title: `看板卡 ${cardId} · ${s ? s.title : ''} · ${subs.length} 条子任务 · ${eh}h · 工时加权进度 ${pct}%（点击查看该卡血缘）`,
-        cls: 'parent',
-        label: `${cardId} · ${pct}%`,
-        pct,
-        key: `story:${cardId}`,
-        selected: selectedStoryId.value === cardId,
-        relation: ''
-      }
-    },
-    children: subs.map(t => ({ task: t, title: t.name, meta: metaOf(t), bar: barOf(t, `task:${t.id}`) }))
-  }
+const milestoneLayout = computed(() => {
+  const lanesByWeek = new Map()
+  return project.milestones.map(milestone => {
+    const week = Math.min(6, Math.max(1, Number(milestone.week) || 1))
+    const lane = lanesByWeek.get(week) || 0
+    lanesByWeek.set(week, lane + 1)
+    return { ...milestone, week, lane }
+  })
+})
+const milestoneLaneCount = computed(() => Math.max(
+  1,
+  ...milestoneLayout.value.map(milestone => milestone.lane + 1)
+))
+const milestoneTrackStyle = computed(() => ({
+  '--milestone-lanes': milestoneLaneCount.value
 }))
-const orphanChildren = computed(() => orphans.value.map(t => ({
-  task: t, title: t.name, meta: metaOf(t), bar: barOf(t, `task:${t.id}`)
-})))
 
 /* 子任务所属 Story 的 Sprint(详情面板用) */
 const storySprintText = computed(() => {
@@ -141,6 +154,89 @@ const cardProgressOf = computed(() => {
   return { card: t.card, title: s ? s.title : '', pct: Math.round(project.cardPct(s || { status: 0, id: t.card }) * 100) }
 })
 const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(selectedStoryId.value) : []))
+
+function hoursByWeek(task, start, end) {
+  const out = Array(6).fill(0), count = end - start + 1, base = Math.floor(task.h / count)
+  let remainder = task.h - base * count
+  for (let w = start; w <= end; w++) out[w - 1] = base + (remainder-- > 0 ? 1 : 0)
+  return out
+}
+function scheduleWarnings(task, start, end) {
+  const warnings = []
+  project.predecessorsOf(task.id).forEach(id => {
+    const predecessor = project.taskById(id)
+    if (predecessor && predecessor.w[1] > start) warnings.push(`${id} 在 W${predecessor.w[1]} 结束，晚于新开始周 W${start}`)
+  })
+  project.dependentsOf(task.id).forEach(id => {
+    const dependent = project.taskById(id)
+    if (dependent && dependent.w[0] < end) warnings.push(`${id} 在 W${dependent.w[0]} 开始，早于新结束周 W${end}`)
+  })
+  const sprints = new Set(project.taskSprintList({ ...task, w: [start, end], sprints: [] }))
+  if (project.storiesForTask(task).some(story => !sprints.has(story.sprint))) warnings.push('新排期与关联 Story Sprint 不完全一致')
+  const other = project.tasks.filter(t => t.owner === task.owner && t.id !== task.id)
+  const proposed = hoursByWeek(task, start, end)
+  const weeklyCapacity = project.capacityHours(task.owner) / 6
+  for (let week = 1; week <= 6; week++) {
+    const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
+    if (weeklyCapacity && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
+  }
+  return [...new Set(warnings)]
+}
+function groupScheduleWarnings(warnings) {
+  const grouped = {
+    dependency: { type: 'dependency', title: '任务依赖冲突', items: [] },
+    load: { type: 'load', title: '成员负载超限', items: [] },
+    sprint: { type: 'sprint', title: 'Sprint 边界冲突', items: [] },
+    other: { type: 'other', title: '其他影响', items: [] }
+  }
+  warnings.forEach(warning => {
+    if (/^W\d+ 预计/.test(warning)) grouped.load.items.push(warning)
+    else if (warning.includes('Story Sprint')) grouped.sprint.items.push(warning)
+    else if (/^T\d+ 在 W\d+/.test(warning)) grouped.dependency.items.push(warning)
+    else grouped.other.items.push(warning)
+  })
+  return Object.values(grouped).filter(group => group.items.length)
+}
+async function confirmRiskSave() {
+  const pending = pendingRisk.value
+  pendingRisk.value = null
+  if (!pending) {
+    schedulePreview.value = null
+    return
+  }
+  try {
+    await updateTaskSchedule(pending.taskId, { weekStart: pending.start, weekEnd: pending.end })
+  } finally {
+    schedulePreview.value = null
+  }
+}
+function cancelRiskSave() {
+  pendingRisk.value = null
+  schedulePreview.value = null
+}
+async function onScheduleChange({ key, mode, deltaWeeks }) {
+  const [, taskId] = key.split(':')
+  const task = project.taskById(taskId)
+  if (!task || session.isViewer) return
+  let start = task.w[0], end = task.w[1]
+  if (mode === 'move') { start += deltaWeeks; end += deltaWeeks }
+  else if (mode === 'resize-start') start += deltaWeeks
+  else end += deltaWeeks
+  if (start < 1 || end > 6 || start > end) {
+    notify('不能放置：任务排期必须位于 W1-W6，且至少持续一周')
+    return
+  }
+  schedulePreview.value = { taskId, start, end }
+  try {
+    const analysis = await analyzeTaskSchedule(taskId, start, end)
+    const warnings = analysis.warnings
+    pendingRisk.value = { taskId, start, end, groups: analysis.groups, total: warnings.length }
+    riskDialogRef.value?.open(pendingRisk.value)
+  } catch (error) {
+    schedulePreview.value = null
+    notify(error?.message || '排期影响分析失败，未保存调整')
+  }
+}
 </script>
 
 <template>
@@ -149,12 +245,16 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
       <div>
         <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
         <h1>甘特图</h1>
-        <p>开发任务强制挂载看板卡 · 管理任务独立虚线。</p>
+        <p>任务按计划周展示，保留 Story 血缘、负责人、优先级与管理任务语义；点击任务条可查看依赖并编辑排期。</p>
       </div>
       <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
     </div>
-    <div class="gantt-wrap">
-      <div class="gantt" id="gantt">
+    <CanvasZoomControls :zoom="zoom" :min-zoom="minZoom" :max-zoom="maxZoom" :zoom-mode="zoomMode"
+      :reset-zoom="resetZoom" :fit-to-canvas="fitToCanvas" :zoom-in="zoomIn" :zoom-out="zoomOut"
+      :set-zoom-percent="setZoomPercent" />
+    <div ref="ganttViewport" class="gantt-wrap">
+      <div ref="ganttShell" class="gantt-zoom-shell" :style="shellStyle">
+        <div ref="ganttCanvas" class="gantt" id="gantt" :style="canvasStyle">
         <div class="gantt-head gantt-sprint">
           <div class="taskh">执行任务 / 关联 Story</div>
           <div class="sprinth s1">Sprint 1 · 基础闭环</div>
@@ -165,22 +265,34 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
           <div class="taskh">计划窗口（W1–W6）</div>
           <div v-for="w in 6" :key="w" class="wk">W{{ w }}<small>{{ sprintLabel[w] }}</small></div>
         </div>
-        <template v-for="g in groupRows" :key="g.cardId">
-          <GanttRow variant="parent" :title="g.parent.title" :sub="g.parent.sub" :bar="g.parent.bar" @select="select" />
-          <GanttRow v-for="c in g.children" :key="c.task.id" variant="child" :title="c.title" :meta="c.meta" :bar="c.bar" @select="select" />
-        </template>
-        <GanttRow v-for="t in mgmts" :key="'mgmt-' + t.id" variant="mgmt" :title="t.name" :sub="`${t.id} · 管理 · ${t.h}h`" :meta="metaOf(t)" :bar="barOf(t, `task:${t.id}`)" @select="select" />
-        <template v-if="orphans.length">
-          <GanttRow variant="group" title="独立任务" :sub="`已解绑/未挂卡的开发任务 · ${orphans.length} 条`" :bar="null" />
-          <GanttRow v-for="c in orphanChildren" :key="'orphan-' + c.task.id" variant="child" :title="c.title" :meta="c.meta" :bar="c.bar" @select="select" />
-        </template>
+        <GanttRow
+          v-for="t in taskRows"
+          :key="t.id"
+          variant="task"
+          :title="t.name"
+          :meta="metaOf(t)"
+          :bar="barOf(t, `task:${t.id}`)"
+          :draggable="!session.isViewer"
+          :saving="isSaving(`task:${t.id}`)"
+          @select="select"
+          @schedule-change="onScheduleChange"
+        />
         <div class="mile-row">
           <div class="mile-title">◆ 项目里程碑</div>
-          <div class="mile-track">
-            <div v-for="m in MILESTONES" :key="m.id" class="milestone" :title="m.desc" :style="{ left: ((m.week - 0.5) / 6 * 100).toFixed(2) + '%' }">
+          <div class="mile-track" :style="milestoneTrackStyle">
+            <div
+              v-for="m in milestoneLayout"
+              :key="m.id"
+              class="milestone"
+              :data-milestone-id="m.id"
+              :data-week="m.week"
+              :title="m.desc"
+              :style="{ gridColumn: m.week, gridRow: m.lane + 1 }"
+            >
               <span class="diamond"></span><span>{{ m.id }} {{ m.name }}</span>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -191,15 +303,15 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
       </span>
       <span class="chip"><span class="sw" style="background:var(--paper-2);border:1px dashed var(--muted)"></span>◇ 管理任务</span>
       <span class="chip"><span class="diamond-key"></span>菱形 = 里程碑</span>
-      <span class="chip note">子任务条 = 计划起止范围（不按工时比例）</span>
-      <span class="chip note">父卡条 = 子任务周并集，填充 = 工时加权进度</span>
+      <span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span>
+      <span class="chip note">任务条 = 计划起止范围（不按工时比例）</span>
       <span class="chip note">点击任务条查看前置 / 后续任务</span>
     </div>
 
-    <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;选中父卡 → 故事血缘 + 编辑故事 -->
+    <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;从任务详情可继续查看 Story -->
     <div class="gantt-detail" :class="{ empty: !selection }" id="gantt-detail">
       <template v-if="!selection">
-        点击任务条可查看关联故事、前置任务与后续任务；点击父卡条可查看该看板卡的子任务血缘。
+        点击任务条可查看关联故事、前置任务与后续任务。任务条表示计划起止时间范围，不按工时比例绘制。
       </template>
 
       <template v-else-if="selectedTask">
@@ -221,6 +333,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
         </div>
         <div class="detail-grid">
           <div><b>负责人 / 工时</b><span>{{ project.memberName(selectedTask.owner) }} · {{ selectedTask.h }}h</span></div>
+          <div><b>优先级</b><span>{{ selectedTask.priority || 'Should' }}</span></div>
           <div><b>执行排期 / Sprint</b><span>W{{ selectedTask.w[0] }}–W{{ selectedTask.w[1] }} · {{ project.taskSprintText(selectedTask) }}</span></div>
           <div><b>看板血缘 / 类型</b><span>{{ selectedTask.card || '不挂卡' }} · {{ selectedTask.type }}</span></div>
           <div><b>状态 / 进度</b><span>{{ project.taskStatusText(selectedTask) }} · {{ selectedTask.progress || 0 }}%</span></div>
@@ -259,6 +372,7 @@ const storySubs = computed(() => (selectedStoryId.value ? project.subTasksOf(sel
     </div>
 
     <TaskEditorDialog ref="taskEditorRef" />
+    <RiskConfirmDialog ref="riskDialogRef" @cancel="cancelRiskSave" @confirm="confirmRiskSave" />
     <StoryEditorDialog ref="storyEditorRef" :in-scope="() => true" />
   </section>
 </template>

@@ -25,6 +25,8 @@ export function installWindowBridge({ router, app }) {
   /* spec 直接 evaluate 访问全局 stories/tasks(旧版顶层 const 在全局词法环境),Vue 版以 getter 等效暴露 */
   Object.defineProperty(window, 'stories', { get: () => useProjectStore().stories })
   Object.defineProperty(window, 'tasks', { get: () => useProjectStore().tasks })
+  /* 自动化验收可切换只读/在线状态；仅暴露既有 Pinia 实例，不复制业务数据。 */
+  Object.defineProperty(window, 'sessionStore', { get: () => useSessionStore() })
   /* 旧版 render() 手动重绘在 Vue 响应式下为 no-op,仅为兼容 spec 调用序列 */
   window.render = () => {}
 }

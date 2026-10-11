@@ -1,5 +1,6 @@
 package com.aicap.controller;
 
+import com.aicap.agent.AgentWorker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +15,7 @@ import java.util.Map;
 public class HealthController {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AgentWorker agentWorker;
 
     @GetMapping("/api/health")
     public Map<String, Object> health() {
@@ -27,6 +29,7 @@ public class HealthController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", dbOk ? "ok" : "db_error");
         body.put("db", dbOk);
+        body.put("workers", agentWorker.healthSnapshot());
         return body;
     }
 }

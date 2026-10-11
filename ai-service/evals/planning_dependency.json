@@ -1,0 +1,254 @@
+[
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "US61依赖还没满足，暂时不调整Sprint，条件满足后再讨论。",
+    "id": "unspecified-dependency",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "只称依赖，不能加外部/内部；未说明负责人不等于负责人未定，允许不带预设地询问。",
+    "expected_actions": [],
+    "target_sprint": 3,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "US61依赖外部供应商华东平台的文档。提供方已确定，联系人是李工，只需确认交付时间；时间确认前不调整Sprint。",
+    "id": "explicit-external-provider",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "保留明确外部属性及已知提供方/联系人；仅交付时间待确认，不能扩大为身份或责任不明。",
+    "expected_actions": [],
+    "target_sprint": 3,
+    "supporting_segments": {},
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "US61依赖的内部测试环境已恢复，负责人王工确认条件已满足。决定将US61从Sprint 2移至Sprint 3。",
+    "id": "internal-dependency-resolved",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "内部依赖已解决且明确决定迁移，应提2到3；不得因曾有依赖全弃权，不编造外部供应商。",
+    "expected_actions": [
+      [
+        "US61",
+        2,
+        3
+      ]
+    ],
+    "target_sprint": 3,
+    "supporting_segments": {
+      "US61": [
+        "S1"
+      ]
+    },
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  },
+  {
+    "current_sprint": 2,
+    "stories": [
+      {
+        "sprint": 2,
+        "title": "合成登录故事",
+        "owner_id": 7,
+        "id": "US61",
+        "description": "登录范围",
+        "activity": 2,
+        "acceptance": "登录用例通过",
+        "status": 0,
+        "priority": "Must"
+      }
+    ],
+    "transcript": "外部供应商华东平台已交付US61需要的文档，李工确认依赖已满足。决定将US61从Sprint 2移至Sprint 4。",
+    "id": "external-dependency-resolved",
+    "tasks": [
+      {
+        "owner_id": 7,
+        "depends_on": null,
+        "status": 0,
+        "week_start": 3,
+        "progress": 0,
+        "estimated_hours": 13,
+        "id": "T61",
+        "name": "合成登录任务",
+        "task_type": "feature",
+        "sprints": [
+          2
+        ],
+        "hours": 8,
+        "story_ref": "US61",
+        "blocked": false,
+        "week_end": 4,
+        "kanban_card_id": "US61"
+      }
+    ],
+    "rubric": "保留明确外部来源及已交付，提2到4；不得写成交付时间或提供方仍未知。",
+    "expected_actions": [
+      [
+        "US61",
+        2,
+        4
+      ]
+    ],
+    "target_sprint": 3,
+    "supporting_segments": {
+      "US61": [
+        "S1"
+      ]
+    },
+    "members": [
+      {
+        "display_name": "合成成员",
+        "user_id": 7,
+        "capabilities": [],
+        "six_week_capacity_hours": 60,
+        "summary": "",
+        "years_experience": 0,
+        "title": "",
+        "tech_stack": [],
+        "role": "member",
+        "process_domains": []
+      }
+    ],
+    "needs_question": false
+  }
+]

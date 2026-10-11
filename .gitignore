@@ -16,6 +16,9 @@ Thumbs.db
 
 # python / backend
 backend/.env
+deploy/.env
+deploy/backups/
+deploy/acceptance-runs/
 backend/mysql-data/
 # Qdrant 数据目录(本地容器运行时生成):与 mysql-data 同理,是运行时状态不是源码
 backend/qdrant-data/
@@ -48,6 +51,7 @@ qa/test-results/
 qa/playwright-report/
 
 # 运行时产物(本机日志/PID/临时文件,不进仓库)
+logs/
 *.log
 *.pid
 build_pkg.log
@@ -56,3 +60,13 @@ sync_result.json
 
 # WorkBuddy 本地工作区数据(记忆与会话记录,不进仓库)
 .workbuddy/
+
+# Disposable live integration database and logs
+qa/.daily-live/
+
+# Synthetic model quality run outputs
+qa/.daily-quality/
+ai-service/.planning-quality/
+
+# Temporary AI collaboration messages; durable decisions belong in docs/
+.agent-collab/

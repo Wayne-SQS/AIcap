@@ -86,6 +86,7 @@ async function submit() {
       })
       if (keepEh) t.eh = payload.hours
       project.addlog('edit', t.id, t.name + ' · 排期 W' + weekStart + '–W' + weekEnd)
+      project.persistTasks()
       project.checkConsistency()
     }
     close()

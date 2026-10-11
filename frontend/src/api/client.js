@@ -1,11 +1,13 @@
 /* fetch 封装:行为 1:1 对齐旧版 index.html api()(L1266-1274)
    baseURL 三级解析:window.__AICAP_API_BASE__(E2E / addInitScript 注入点) > VITE_API_BASE > 默认
    —— index.html 已不再硬编码该全局(见该文件注释,ENV-D02),故 VITE_API_BASE 现在真正生效
-   默认指向现行 Spring Boot 后端(java-backend/,8080);FastAPI 版(8000)已归档至 backend/ */
+   开发环境默认指向Spring Boot 8080；生产构建默认使用同源/api反向代理。 */
 import { TOKEN_KEY } from '@/constants'
 
 export function apiBase() {
-  return window.__AICAP_API_BASE__ || import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
+  if (window.__AICAP_API_BASE__) return window.__AICAP_API_BASE__
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE
+  return import.meta.env.PROD ? '' : 'http://127.0.0.1:8080'
 }
 
 export function getAuthToken() {
@@ -26,11 +28,11 @@ function isLoginPath(path) {
   return String(path).split('?')[0].replace(/\/+$/, '') === '/api/auth/login'
 }
 
-export async function api(path, opts = {}) {
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {})
+export async function api(path, opts = {}, base = apiBase()) {
+  const headers = Object.assign({}, opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, opts.headers || {})
   const token = getAuthToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
-  const res = await fetch(apiBase() + path, Object.assign({}, opts, { headers }))
+  const res = await fetch(base + path, Object.assign({}, opts, { headers }))
   if (res.status === 401) {
     /* 先解析响应体拿后端真实原因(登录失败时是「用户名或密码错误」),解析不到才退回「未登录」 */
     let msg = '未登录'
@@ -45,7 +47,9 @@ export async function api(path, opts = {}) {
   if (!res.ok) {
     let msg = '请求失败 (' + res.status + ')'
     try { const j = await res.json(); msg = (typeof j.detail === 'string') ? j.detail : msg } catch (e) { /* ignore */ }
-    throw new Error(msg)
+    const error = new Error(msg)
+    error.status = res.status
+    throw error
   }
   if (res.status === 204) return null
   return res.json()

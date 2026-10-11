@@ -61,6 +61,8 @@ public class MeetingService {
     private final ObjectMapper objectMapper;
     /** 显式事务模板:用于同类自调用场景(见 submitSuggestionIdempotent) */
     private final TransactionTemplate tx;
+    private final MeetingDeletionGuard deletionGuard;
+    private final ReviewQueueShadowIndexService shadow;
 
     // ---------- meetings ----------
 
@@ -87,7 +89,8 @@ public class MeetingService {
     }
 
     /**
-     * 删除会议并级联清理其全部从属数据(FE-D03)。
+     * 无五类会议分析时删除会议并清理旧从属数据(FE-D03)。已有分析时先返回409，
+     * 保持既有外键保护的原文、审核与执行记录，不清理录音或独立业务成果。
      * <p>schema 里这些外键都没有 ON DELETE CASCADE,因此必须手工按依赖反序清理,否则直接删会议会报外键错误:
      * <ol>
      *   <li>{@code meeting_agent_events}(按该会议 runs 的 run_id)</li>
@@ -105,6 +108,7 @@ public class MeetingService {
      */
     @Transactional
     public MeetingDeletion deleteMeeting(String meetingId) {
+        deletionGuard.check(meetingId);
         Meeting meeting = meetingMapper.selectById(meetingId);
         if (meeting == null) throw ApiException.notFound("会议不存在");
 
@@ -137,6 +141,7 @@ public class MeetingService {
         if (!suggestionIds.isEmpty()) {
             payloadMapper.delete(new QueryWrapper<MeetingApprovalPayload>().in("suggestion_id", suggestionIds));
         }
+        shadow.removeMeeting(meetingId);
         recordMapper.delete(new QueryWrapper<MeetingSuggestionRecord>().eq("meeting_id", meetingId));
         if (!suggestionIds.isEmpty()) {
             suggestionMapper.delete(new QueryWrapper<Suggestion>().in("id", suggestionIds));
@@ -207,6 +212,7 @@ public class MeetingService {
         record.setExecutionStatus("not_started");
         record.setReason("");
         recordMapper.insert(record);
+        shadow.sync("general", suggestion.getId());
         return new SuggestionOutHolder(suggestion, record);
     }
 
@@ -318,6 +324,7 @@ public class MeetingService {
             record.setExecutionStatus("not_needed");
         }
         recordMapper.updateById(record);
+        shadow.sync("general", suggestionId);
         return new SuggestionOutHolder(suggestion, record);
     }
 

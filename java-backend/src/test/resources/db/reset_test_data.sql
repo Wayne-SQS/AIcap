@@ -21,6 +21,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE retrieval_logs;
 TRUNCATE TABLE knowledge_vectors;
 TRUNCATE TABLE knowledge_chunks;
+TRUNCATE TABLE review_queue_proposals;
 TRUNCATE TABLE meeting_audio;
 TRUNCATE TABLE meeting_agent_events;
 TRUNCATE TABLE meeting_agent_runs;

@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
-import { useProjectStore } from '@/stores/project'
+import { useProjectStore, taskRefs } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
+import { useProjectActions } from '@/composables/useProjectActions'
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
@@ -14,6 +15,7 @@ import StoryCard from '@/components/board/StoryCard.vue'
 import StoryMapGrid from '@/components/board/StoryMapGrid.vue'
 import ChangeLogPanel from '@/components/board/ChangeLogPanel.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
+import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 
 /* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
    本次移植 legacy 新版:默认进入「故事地图」、Sprint 4+ 筛选、负责人显示真实姓名 */
@@ -21,12 +23,15 @@ const project = useProjectStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
+const { updateStoryPlacement, analyzeStorySprint } = useProjectActions()
 
 const boardView = ref('map')
 const search = ref('')
 const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
+const riskDialogRef = ref(null)
+const pendingStoryMove = ref(null)
 
 /* 地图呈现层(纯展示,不落到任何数据):
    density 详细/总览 —— 总览把 37 张 148px 卡压成 22px 小矩形,四个切片一屏看全;
@@ -65,10 +70,11 @@ function openEditor(id = null, status = 0) {
 
 /* ==================== 拖拽换状态 ==================== */
 const dragOverCol = ref(-1)
+const dragId = ref('')
 function onDrop(i) {
   dragOverCol.value = -1
-  const id = dragId
-  dragId = ''
+  const id = dragId.value
+  dragId.value = ''
   const s = project.stories.find(s => s.id === id)
   if (!s || s.status === i) return
   if (guard('拖拽修改状态')) return
@@ -83,53 +89,33 @@ function onDrop(i) {
     notify(`${s.id} → ${statuses[s.status]}${project.storageOK ? '' : ' · 暂未保存到本机'}`)
   }
 }
-let dragId = ''
 function onCardDragStart(id, e) {
-  dragId = id
+  dragId.value = id
   e.dataTransfer.setData('text/plain', id)
   e.dataTransfer.effectAllowed = 'move'
 }
-
-/* ==================== 故事地图:拖动改「骨干活动 / 发布切片」 ====================
-   地图的每个格子 = 骨干活动 × 发布切片,所以一次落位可同时表达两件事:
-     · 纵向(跨切片行)→ 改 story.sprint,并按 project.sprintShiftOf 级联挪未完成子任务
-     · 横向(跨活动列)→ 改 story.activity。横轴是**用户流程顺序**(叙事骨架),不是优先级,
-       项目管理上必须让人意识到这一点,所以横向一律确认,避免被误读成"调优先级"
-   确认策略:横向一定确认;纵向只在**会级联改写执行层数据**(有未完成子任务)时确认 ——
-   没有子任务的卡片保持拖拽该有的流畅感。 */
-async function onMapMove(target) {
-  const plan = project.storyMovePlan(target.id, target)
-  if (!plan || (!plan.activityChanged && !plan.sprintChanged)) return
-  if (guard('拖动故事改切片')) return
-
-  const moves = []
-  if (plan.sprintChanged) {
-    moves.push(plan.undone.length
-      ? `· 迭代 S${plan.from.sprint} → S${plan.to.sprint}:级联挪动 ${plan.undone.length} 条未完成子任务${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周;已完成的 ${plan.kept.length} 条保留原记录`
-      : `· 迭代 S${plan.from.sprint} → S${plan.to.sprint}`)
-  }
-  if (plan.activityChanged) {
-    moves.push(`· 骨干活动 A${plan.from.activity} ${activities[plan.from.activity - 1]} → A${plan.to.activity} ${activities[plan.to.activity - 1]}(横轴是用户流程顺序,移位会改变叙事位置)`)
-  }
-  if ((plan.activityChanged || plan.undone.length) &&
-      !confirm(`将 ${plan.id} 移到 A${plan.to.activity} × Sprint ${plan.to.sprint}:\n${moves.join('\n')}\n确认?`)) return
-
-  const label = `${plan.id} → A${plan.to.activity} × Sprint ${plan.to.sprint}`
-  if (session.apiMode) {
-    try {
-      await storiesApi.patch(plan.id, { activity: plan.to.activity, sprint: plan.to.sprint })
-      for (const t of plan.undone) {
-        const [ws, we] = project.shiftWeek(t.w, plan.shift)
-        await tasksApi.patch(t.id, { week_start: ws, week_end: we })
-      }
-      await project.loadAll()
-      notify(label + ' · 已同步到服务器')
-    } catch (err) { notify(err.message) }
-  } else {
-    project.applyStoryMoveLocal(plan)
-    notify(label + (project.storageOK ? '' : ' · 暂未保存到本机'))
-  }
+function onCardDragEnd() {
+  dragId.value = ''
+  dragOverCol.value = -1
 }
+
+async function onMapMove({ storyId, sprint: nextSprint, activity }) {
+  const analysis = await analyzeStorySprint(storyId, nextSprint)
+  pendingStoryMove.value = { storyId, sprint: nextSprint, activity }
+  riskDialogRef.value?.open({ taskId: storyId, title: `移动 ${storyId} 到 Sprint ${nextSprint} 的影响分析`, groups: analysis.groups, total: analysis.warnings.length })
+}
+async function applyStoryMove({ storyId, sprint: nextSprint, activity }) {
+  const result = await updateStoryPlacement(storyId, { sprint: nextSprint, activity })
+  if (!result.ok || result.unchanged) return
+  const conflicts = project.tasks.filter(t => taskRefs(t.story).includes(storyId) && !project.taskSprintList(t).includes(nextSprint))
+  if (conflicts.length) notify(`已更新；${conflicts.map(t => t.id).join('、')} 的执行 Sprint 与故事不同，请在甘特图复核`)
+}
+async function confirmStoryMove() {
+  const pending = pendingStoryMove.value
+  pendingStoryMove.value = null
+  if (pending) await applyStoryMove(pending)
+}
+function cancelStoryMove() { pendingStoryMove.value = null }
 
 /* ==================== 导出 / 恢复演示 ==================== */
 function dl(name, blob) {
@@ -191,18 +177,22 @@ async function resetDemo() {
       <div class="board" id="board">
         <section
           v-for="(name, i) in statuses" :key="name"
-          class="column" :class="{ dragover: dragOverCol === i }"
+          class="column"
           :data-status="i" :aria-label="name"
-          @dragover.prevent="dragOverCol = i"
-          @dragleave="dragOverCol = -1"
+          @dragover.prevent="dragId && (dragOverCol = i)"
+          @dragleave.self="dragOverCol = -1"
           @drop.prevent="onDrop(i)"
         >
           <div class="colhead"><span>{{ ['□', '▣', '■'][i] }} {{ name }}</span><span class="count">{{ data.filter(s => s.status === i).length }}</span></div>
           <div class="colnote">{{ ['准备好后，就开始吧', '专注当前，逐一推进', '每一步完成，都算数'][i] }}</div>
           <div class="cards">
             <template v-for="s in data.filter(s => s.status === i)" :key="s.id">
-              <StoryCard :story="s" @open="openEditor($event)" @dragstart="onCardDragStart(s.id, $event)" />
+              <StoryCard
+                :story="s" :class="{ 'is-dragging': dragId === s.id }"
+                @open="openEditor($event)" @dragstart="onCardDragStart(s.id, $event)" @dragend="onCardDragEnd"
+              />
             </template>
+            <div v-if="dragOverCol === i && dragId" class="drop-indicator" aria-hidden="true"></div>
             <div v-if="!data.filter(s => s.status === i).length" class="empty">此列暂无故事</div>
           </div>
           <button class="addcol" :data-new="i" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor(null, i)">＋ 添加故事</button>
@@ -230,5 +220,6 @@ async function resetDemo() {
 
     <ChangeLogPanel />
     <StoryEditorDialog ref="editorRef" :in-scope="inScope" />
+    <RiskConfirmDialog ref="riskDialogRef" @cancel="cancelStoryMove" @confirm="confirmStoryMove" />
   </section>
 </template>

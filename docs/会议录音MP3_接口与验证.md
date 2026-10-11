@@ -68,7 +68,7 @@ Select-String -Path headers.txt -Pattern 'X-Audio-Sha256'           # 与服务�
 Invoke-RestMethod "$base/api/audio/<audioId>" -Method Delete -Headers @{ Authorization = "Bearer $tok" }
 ```
 
-> 只想在页面里试:`cd frontend; npm run dev` → 浏览器打开 `http://localhost:5173` → 登录 → 「AI 助手 → 会议智能体」→ 保存一个会议 → 「开始录音」(需允许麦克风)或「选择本地 .mp3」→ 提交 → 加载回放 / 下载 / 删除。
+> 只想在页面里试:`cd frontend; npm run dev` → 浏览器打开 `http://localhost:5173` → 登录 → 「AI 工作台 → 会议工作区 → 语音会议」→ 选择会议 → 「开始录音」(需允许麦克风)或「选择本地 .mp3」→ 提交 → 加载回放 / 下载 / 删除。
 
 ## 4. 校验规则与错误码
 

@@ -87,6 +87,14 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, "编号已被占用（并发创建冲突），请重试");
     }
 
+    /** 并发写入触发数据库死锁时，事务已回滚；客户端可重新提交请求。 */
+    @ExceptionHandler(org.springframework.dao.DeadlockLoserDataAccessException.class)
+    public ResponseEntity<Map<String, String>> handleDeadlock(
+            org.springframework.dao.DeadlockLoserDataAccessException e) {
+        log.warn("数据库并发死锁,已返回 409: {}", e.getClass().getName());
+        return error(HttpStatus.CONFLICT, "并发操作冲突，请重试");
+    }
+
     /** 未预期的异常 → 500。
      *
      *  <p>**必须记日志 + 不回显内部消息**:原先直接把 {@code e.getMessage()} 当作 detail 返回,

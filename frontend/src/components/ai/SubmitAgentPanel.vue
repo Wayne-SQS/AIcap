@@ -11,7 +11,7 @@ import { profileAgentApi } from '@/api/profileAgent'
    - GitHub 同步:状态 + 手动触发(与画像智能体面板共用同一后端服务)
    - 成员工作状态(事实):从真实活动按成员聚合,不编造
    - 推断与风险:来自画像分析(AI 推断,带证据)
-   - 生成协调建议 → 送审:真实调用后端,进入「AI 审核中心」走人工审核 */
+   - 生成协调建议 → 送审:真实调用后端,进入「提案审核中心」走人工审核 */
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -168,7 +168,7 @@ async function submitSuggestions() {
   submitting.value = true
   try {
     const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value, '任务提交智能体')
-    notify(`已生成 ${ids.length} 条协调建议并送审,前往「AI 审核中心」处理`)
+    notify(`已生成 ${ids.length} 条协调建议并送审,前往「提案审核中心」处理`)
   } catch (e) {
     notify(e.message || '提交失败')
   } finally {
@@ -315,10 +315,10 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
     <!-- 生成协调建议 → 送审(真实闭环) -->
     <div style="display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap">
       <button class="primary" id="submit-gen" :disabled="submitting" @click="submitSuggestions">
-        {{ submitting ? '提交中…' : '⚖ 生成协调建议 → 送审(进入 AI 审核中心)' }}
+        {{ submitting ? '提交中…' : '⚖ 生成协调建议 → 送审(进入提案审核中心)' }}
       </button>
       <span class="small" style="opacity:.75">
-        送审前将重新计算当前时间范围的团队风险,建议送审后前往「AI 审核中心」人工确认
+        送审前将重新计算当前时间范围的团队风险,建议送审后前往「提案审核中心」人工确认
       </span>
     </div>
   </div>

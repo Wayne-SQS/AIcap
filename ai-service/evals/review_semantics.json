@@ -1,0 +1,30 @@
+[
+  {
+    "id": "review-state-not-acceptance", "current_sprint": null,
+    "transcript": "US13今天只展示界面效果。",
+    "stories": [{"id":"US13","title":"界面","status":1,"sprint":2,"owner_id":null,"description":null,"acceptance":null}],
+    "expected_actions": [], "supporting_segments": {}, "needs_question": false,
+    "rubric": "只保留展示事实；status1是进行中，不证明未验收或验收失败；不能补造尚未安排验收，也不能产生完成动作。"
+  },
+  {
+    "id": "review-explicit-not-accepted", "current_sprint": null,
+    "transcript": "US13今天只展示界面效果，正式验收还没有进行。",
+    "stories": [{"id":"US13","title":"界面","status":1,"sprint":2,"owner_id":null,"description":null,"acceptance":null}],
+    "expected_actions": [], "supporting_segments": {}, "needs_question": false,
+    "rubric": "必须保留原文明说的正式验收尚未进行，而不是把一切验收信息都说成未知；不产生完成动作。"
+  },
+  {
+    "id": "review-disputed-blocker", "current_sprint": null,
+    "transcript": "甲：US13已验收通过。\n乙：没有通过，存在阻塞问题。\n主持人：这两个说法仍未核实，本次先不下结论。",
+    "stories": [{"id":"US13","title":"界面","status":1,"sprint":2,"owner_id":null,"description":null,"acceptance":null}],
+    "expected_actions": [], "supporting_segments": {}, "needs_question": true,
+    "rubric": "保留甲乙争议及未核实；追问不得默认阻塞确实存在、还在修复，先核对验收结论；不产生完成动作。"
+  },
+  {
+    "id": "review-resolved-acceptance", "current_sprint": null,
+    "transcript": "甲：US13已验收通过。\n乙：没有通过，存在阻塞问题。\n主持人：刚核对了正式验收报告，乙说的是旧版本；US13当前版本已整体验收通过。\n乙：确认，我说的是旧版本，当前版本确实已整体验收通过。",
+    "stories": [{"id":"US13","title":"界面","status":1,"sprint":2,"owner_id":null,"description":null,"acceptance":null}],
+    "expected_actions": [["US13",1,2]], "supporting_segments": {"US13":["S3","S4"]}, "needs_question": false,
+    "rubric": "保留最终澄清，不把旧版本阻塞说成当前事实；提出完成候选，证据包括澄清结论，不将明确澄清继续列为未决冲突。"
+  }
+]

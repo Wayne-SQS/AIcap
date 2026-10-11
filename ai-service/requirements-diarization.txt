@@ -1,0 +1,2 @@
+# Optional offline CPU diarization; install requirements-stt.txt first.
+sherpa-onnx==1.13.8

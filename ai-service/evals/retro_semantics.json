@@ -1,0 +1,6 @@
+[
+  {"id":"retro-object-noun","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：决定由张敏本周五前整理发布检查表。","expected_actions":[{"owner_id":1,"deadline_text":"本周五前","supporting_segments":["S1"]}],"needs_question":false,"rubric":"一个整理发布检查表行动。发布检查表为整理对象，标题/描述/决议不得新增发布、发送或上线步骤。"},
+  {"id":"retro-explicit-publish","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：决定由张敏本周五前整理并发布检查表，这两步作为同一个行动项跟进。","expected_actions":[{"owner_id":1,"deadline_text":"本周五前","supporting_segments":["S1"]}],"needs_question":false,"rubric":"一个行动项必须保留整理与发布两个明确动作，不能修复成仅整理，也不能拆成两个行动项。"},
+  {"id":"retro-deployment-doc","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"主持人：决定由张敏下周一前完善部署文档。","expected_actions":[{"owner_id":1,"deadline_text":"下周一前","supporting_segments":["S1"]}],"needs_question":false,"rubric":"完善的对象为部署文档；不能增加实际部署、发布系统或通知成员步骤。检验对象边界修正能迁移到其他名词。"},
+  {"id":"retro-publish-not-adopted","members":[{"user_id":1,"display_name":"张敏"}],"transcript":"张敏：建议整理并发布检查表。\n主持人：只是建议，是否采用仍未决定。","expected_actions":[],"needs_question":false,"rubric":"虽有整理和发布两个动词但只是建议，无已决定行动或采纳决议，防止正例规则覆盖采纳前提。"}
+]

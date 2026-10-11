@@ -1,0 +1,401 @@
+{
+  "task": "H01",
+  "status": "ready",
+  "scope": {
+    "outputs_reviewed": 40,
+    "actions_reviewed": 20,
+    "reports": [
+      "qa/.daily-quality/acceptance-v7.json",
+      "qa/.daily-quality/extended-v7.json",
+      "qa/.daily-quality/consistency-v7.json"
+    ],
+    "skill_version": "daily-status-v7",
+    "model": "deepseek-v4-flash",
+    "data": "synthetic_only"
+  },
+  "summary": {
+    "confirmed_findings": 9,
+    "needs_main_ai_decision": 5,
+    "outputs_with_confirmed_findings": 7,
+    "incorrect_status_actions": 0,
+    "invalid_evidence_quotes": 0
+  },
+  "findings": [
+    {
+      "finding_id": "H01-F001",
+      "report": "acceptance-v7.json",
+      "case_id": "clear-start",
+      "repetition": 1,
+      "json_path": "$.cases[id=clear-start,repetition=1].result.proposed_actions[0].reason",
+      "issue_text": "原文明确说明 US13 今天已开始开发且正在实现登录页面，属于已开始但未验收，支持从待办变更为进行中，不支持完成。",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "US13 今天已开始开发，目前正在实现登录页面。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 0
+        }
+      },
+      "category": "unsupported_acceptance_claim",
+      "severity": "medium",
+      "status": "confirmed",
+      "explanation": "S1 支持“已经开始”和“正在实现”，但没有提供任何验收信息。“未验收”是无依据事实扩写；动作 0→1 本身正确。",
+      "acceptance_condition": "reason 只能说明开始事实支持进入进行中；原文未提验收时不得补写“未验收”。",
+      "known_relation": "QUALITY_REVIEW 已记录同一问题，本次独立复核确认其仍存在。"
+    },
+    {
+      "finding_id": "H01-F002",
+      "report": "acceptance-v7.json",
+      "case_id": "clear-completion",
+      "repetition": 2,
+      "json_path": "$.cases[id=clear-completion,repetition=2].result.summary",
+      "issue_text": "US13（登录）确认已完成全部验收并交付，快照状态为进行中。",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "US13 已完成全部验收，确认交付。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 1
+        }
+      },
+      "category": "modality_escalation",
+      "severity": "medium",
+      "status": "confirmed",
+      "explanation": "“确认交付”表示确认交付结论或决定，不等同于交付动作已经发生；摘要将其改写为“并交付”。完成提案 1→2 本身有充分依据。",
+      "acceptance_condition": "保留为“已完成全部验收并确认交付”；只有原文明示“已交付”时才能声称交付已经发生。",
+      "known_relation": "本次独立复核新增。"
+    },
+    {
+      "finding_id": "H01-F003",
+      "report": "acceptance-v7.json",
+      "case_id": "blocked",
+      "repetition": 1,
+      "json_path": "$.cases[id=blocked,repetition=1].result.open_questions[1]",
+      "issue_text": "测试环境故障是否影响 US13 的进度？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "US13 正在开发，但测试环境故障导致阻塞，需要负责人协调恢复。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 1
+        }
+      },
+      "category": "already_answered_question",
+      "severity": "low",
+      "status": "confirmed",
+      "explanation": "“导致阻塞”已经明确环境故障影响进度；再次询问是否影响，不是未决信息。",
+      "acceptance_condition": "只保留协调人和恢复时间等原文未解决的问题，不重复询问已明确的影响关系。",
+      "known_relation": "本次独立复核新增。"
+    },
+    {
+      "finding_id": "H01-F004",
+      "report": "acceptance-v7.json",
+      "case_id": "future-conditional",
+      "repetition": 2,
+      "json_path": "$.cases[id=future-conditional,repetition=2].result.open_questions[0]",
+      "issue_text": "接口文档能否在明天拿到，是否会影响 US13 的开发开始时间？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "如果明天拿到接口文档，US13 才能开始开发，现在尚未开始。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 0
+        }
+      },
+      "category": "already_answered_question",
+      "severity": "low",
+      "status": "confirmed",
+      "explanation": "“能否明天拿到”是合理未知项，但原文已经明确接口文档是开发启动前提，后半句重复询问已知依赖关系。",
+      "acceptance_condition": "保留“接口文档能否在明天拿到？”；如需继续追问，应询问未拿到时的安排，而不是重新询问是否影响启动。",
+      "known_relation": "本次独立复核新增。"
+    },
+    {
+      "finding_id": "H01-F005",
+      "report": "acceptance-v7.json",
+      "case_id": "mixed-targets",
+      "repetition": 2,
+      "json_path": "$.cases[id=mixed-targets,repetition=2].result.open_questions[0]",
+      "issue_text": "US14 仍在修复权限错误，原文未说明是否存在阻塞。",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S2",
+            "quote": "US14 没有完成，仍在修复权限错误。"
+          }
+        ],
+        "snapshot": {
+          "US14.status": 1
+        }
+      },
+      "category": "non_question_in_open_questions",
+      "severity": "low",
+      "status": "confirmed",
+      "explanation": "句子没有把“未提及阻塞”误写成“无阻塞”，但它是元信息陈述，不是待确认问题。",
+      "acceptance_condition": "若无需补问则删除；若产品需要主动核对阻塞，应写成不带预设的问句“US14 当前是否存在阻塞？”。",
+      "known_relation": "QUALITY_REVIEW 已提到问题栏存在陈述句，本次定位到具体输出。"
+    },
+    {
+      "finding_id": "H01-F006",
+      "report": "extended-v7.json",
+      "case_id": "long-multi-story",
+      "repetition": 2,
+      "json_path": "$.cases[id=long-multi-story,repetition=2].result.summary",
+      "issue_text": "US16 通知：尚未开始开发，前提是明天拿到接口文档；接口文档交付时间及提供方需会后确认，未调整负责人或估时。",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S11",
+            "quote": "开发丁：US16 通知现在尚未开始开发，如果明天拿到接口文档才能开始。这里说的是将来条件，不是已经动手，也没有确认接口文档一定明天交付。"
+          },
+          {
+            "segment_id": "S12",
+            "quote": "主持人：接口文档请会后向提供方确认时间。目前这场会议没有足够信息给出完成日期，也没有在会上调整通知故事的负责人或估时。"
+          }
+        ],
+        "snapshot": {
+          "US16.status": 0
+        }
+      },
+      "category": "provider_time_relation_error",
+      "severity": "medium",
+      "status": "confirmed",
+      "explanation": "原文要求向提供方确认交付时间，提供方是确认对象，不是待确认的信息。摘要把“提供方”与“交付时间”并列为未知。",
+      "acceptance_condition": "应写成“接口文档交付时间需会后向提供方确认”，不得声称提供方身份未知。",
+      "known_relation": "QUALITY_REVIEW 已记录同一问题，本次独立复核确认。"
+    },
+    {
+      "finding_id": "H01-F007",
+      "report": "extended-v7.json",
+      "case_id": "long-multi-story",
+      "repetition": 2,
+      "json_path": "$.cases[id=long-multi-story,repetition=2].result.summary",
+      "issue_text": "US15 导出：今天已开始开发，正在实现导出文件的列映射，尚未完成，测试尚未安排验收，验收需具备可测条件后再协商。",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S10",
+            "quote": "测试乙：等导出功能具备可测条件后再安排相关用例，今天还没有给 US15 做验收，开始开发并不代表完成。后续核对用例时需要保留原始数据以便比对。"
+          },
+          {
+            "segment_id": "S24",
+            "quote": "开发丙：US15 仍在实现列映射，没有宣布完成。遇到格式边界会先查现有约定，目前没有报告因障碍无法继续，后续的验收安排还需要和测试协商。"
+          }
+        ],
+        "snapshot": {
+          "US15.status": 0
+        }
+      },
+      "category": "arrangement_certainty_overstatement",
+      "severity": "medium",
+      "status": "confirmed",
+      "explanation": "原文只说明今天未验收、后续安排仍需协商；“安排未确定”不等于“测试尚未安排验收”，后者把协商状态扩写为完全没有安排。",
+      "acceptance_condition": "保留“今天尚未验收，后续验收安排仍需与测试协商”，不把未定事项表述成完全不存在。",
+      "known_relation": "QUALITY_REVIEW 已记录相近问题，本次独立复核确认。"
+    },
+    {
+      "finding_id": "H01-F008",
+      "report": "extended-v7.json",
+      "case_id": "long-multi-story",
+      "repetition": 2,
+      "json_path": "$.cases[id=long-multi-story,repetition=2].result.open_questions[2]",
+      "issue_text": "US16 所需接口文档的提供方及交付时间能否确认，若明天未拿到文档计划如何调整？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S11",
+            "quote": "开发丁：US16 通知现在尚未开始开发，如果明天拿到接口文档才能开始。这里说的是将来条件，不是已经动手，也没有确认接口文档一定明天交付。"
+          },
+          {
+            "segment_id": "S12",
+            "quote": "主持人：接口文档请会后向提供方确认时间。目前这场会议没有足够信息给出完成日期，也没有在会上调整通知故事的负责人或估时。"
+          }
+        ],
+        "snapshot": {
+          "US16.status": 0
+        }
+      },
+      "category": "question_with_unsupported_premise",
+      "severity": "medium",
+      "status": "confirmed",
+      "explanation": "交付时间和未拿到时的计划可以追问，但“提供方能否确认”没有原文依据，再次把提供方身份写成未知。",
+      "acceptance_condition": "只询问交付时间确认结果及未按条件取得文档时的安排，不询问已作为确认对象出现的提供方身份。",
+      "known_relation": "与 H01-F006 同根因，但位于独立输出字段。"
+    },
+    {
+      "finding_id": "H01-F009",
+      "report": "extended-v7.json",
+      "case_id": "noisy-correction",
+      "repetition": 2,
+      "json_path": "$.cases[id=noisy-correction,repetition=2].result.open_questions[1]",
+      "issue_text": "US14 是否尚未验收且今天只是开始开发，与后续验收安排如何衔接？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S5",
+            "quote": "开发乙：US14 今、今天已开始开发，正在写权限检查。"
+          },
+          {
+            "segment_id": "S6",
+            "quote": "测试：US14 尚未验收，今天只是开始开发。"
+          }
+        ],
+        "snapshot": {
+          "US14.status": 0
+        }
+      },
+      "category": "already_answered_question",
+      "severity": "low",
+      "status": "confirmed",
+      "explanation": "S5、S6 已明确“今天开始开发”和“尚未验收”；只有后续验收安排仍属于未知。",
+      "acceptance_condition": "删除已回答的前半句，仅保留“US14 后续验收安排如何衔接？”；或在没有实际跟进需要时删除整条。",
+      "known_relation": "本次独立复核新增。"
+    },
+    {
+      "finding_id": "H01-D001",
+      "report": "acceptance-v7.json",
+      "case_id": "ambiguous-target",
+      "repetition": 2,
+      "json_path": "$.cases[id=ambiguous-target,repetition=2].result.open_questions[1]",
+      "issue_text": "该登录相关故事的完成情况是否需要人工核对后更新状态？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "那个登录相关的故事已经做完了，但我没记住编号，需要核对。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 1,
+          "US14.status": 1
+        }
+      },
+      "category": "possible_update_outcome_presupposition",
+      "severity": "low",
+      "status": "needs_main_ai_decision",
+      "explanation": "可理解为流程确认；也可能暗示核对编号后必然要更新状态，而核对结果和验收结论仍未知。",
+      "acceptance_condition": "如要求问题完全不预设结果，仅询问具体故事编号及是否已通过验收；不写“核对后更新状态”。"
+    },
+    {
+      "finding_id": "H01-D002",
+      "report": "extended-v7.json",
+      "case_id": "long-multi-story",
+      "repetition": 1,
+      "json_path": "$.cases[id=long-multi-story,repetition=1].result.open_questions[2]",
+      "issue_text": "US17 搜索是否存在除测试环境故障以外的阻塞？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S15",
+            "quote": "开发戊：US17 搜索还在开发，但测试环境故障导致当前无法继续联调，已经构成阻塞，需要负责人协调恢复。"
+          },
+          {
+            "segment_id": "S17",
+            "quote": "主持人：请记录搜索的环境阻塞，跟进协调人和恢复时间；不要把其他故事仍在修复普通错误也归类为阻塞。关于剩余工作先保留各自原话，不计算没有依据的剩余工时。"
+          }
+        ],
+        "snapshot": {
+          "US17.status": 1
+        }
+      },
+      "category": "proactive_risk_question_without_trigger",
+      "severity": "low",
+      "status": "needs_main_ai_decision",
+      "explanation": "句子没有断言存在第二个阻塞，但原文也没有其他阻塞迹象。是否允许 Daily 主动做泛化风险盘点属于产品策略。",
+      "acceptance_condition": "若问题必须由原文触发则删除；若允许主动风险盘点可保留，但不能在其他字段中把第二个阻塞写成事实。"
+    },
+    {
+      "finding_id": "H01-D003",
+      "report": "extended-v7.json",
+      "case_id": "noisy-correction",
+      "repetition": 2,
+      "json_path": "$.cases[id=noisy-correction,repetition=2].result.open_questions[0]",
+      "issue_text": "US13 今天继续修复的失败用例是否能在本 Sprint 内完成并进入验收？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S3",
+            "quote": "开发：刚才那句没说完。US13 没有完成，还没有验收，今天继续修失败用例。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 1,
+          "US13.sprint": 2,
+          "current_sprint": null
+        }
+      },
+      "category": "possible_current_sprint_assumption",
+      "severity": "low",
+      "status": "needs_main_ai_decision",
+      "explanation": "作为工期追问没有形成承诺，但输入没有 current_sprint；“本 Sprint”可能把故事所属 Sprint 误作当前 Sprint。",
+      "acceptance_condition": "若 current_sprint 为空时禁止任何“本 Sprint”表述，应改为“失败用例修复后预计何时进入验收？”。"
+    },
+    {
+      "finding_id": "H01-D004",
+      "report": "extended-v7.json",
+      "case_id": "noise-injected-metadata",
+      "repetition": 2,
+      "json_path": "$.cases[id=noise-injected-metadata,repetition=2].result.open_questions[1]",
+      "issue_text": "US13 是否存在阻塞？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S1",
+            "quote": "开发：US13 没有完成，仍在开发。"
+          },
+          {
+            "segment_id": "S5",
+            "quote": "主持人：US13 的验收还没做，后面再核对，其他进展没有新增。"
+          }
+        ],
+        "snapshot": {
+          "US13.status": 1
+        }
+      },
+      "category": "generic_blocker_question_without_trigger",
+      "severity": "low",
+      "status": "needs_main_ai_decision",
+      "explanation": "问题不带阻塞已存在的预设，且符合当前 Skill 允许的问法；但原文没有阻塞信号。是否保留通用阻塞盘点属于产品策略。",
+      "acceptance_condition": "若 open_questions 仅保留来源驱动的问题则删除；若 Daily 允许固定阻塞盘点可保留。"
+    },
+    {
+      "finding_id": "H01-D005",
+      "report": "consistency-v7.json",
+      "case_id": "clarified-negative-and-start",
+      "repetition": 2,
+      "json_path": "$.cases[id=clarified-negative-and-start,repetition=2].result.open_questions[1]",
+      "issue_text": "US22 的解析器实现预计何时能完成以进入验收？",
+      "basis": {
+        "transcript": [
+          {
+            "segment_id": "S3",
+            "quote": "乙：US22 已经动手实现数据导入了，现在在写解析器。"
+          },
+          {
+            "segment_id": "S4",
+            "quote": "测试：US22 的验收还没开始。"
+          }
+        ],
+        "snapshot": {
+          "US22.status": 0
+        }
+      },
+      "category": "possible_acceptance_path_presupposition",
+      "severity": "low",
+      "status": "needs_main_ai_decision",
+      "explanation": "“完成解析器以进入验收”可能预设解析器完成就是进入验收的充分条件；原文只确认正在实现且验收尚未开始。",
+      "acceptance_condition": "若不允许预设流程，应拆成“解析器预计何时完成？”与“验收启动条件和安排是否已确定？”。"
+    }
+  ]
+}

@@ -155,7 +155,11 @@ public class MeetingAudioService {
         }
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
-        audioMapper.deleteById(audioId);
+        try {
+            audioMapper.deleteById(audioId);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw ApiException.conflict("此音频已有转写版本，需保留原始来源，不能删除。");
+        }
         try {
             Files.deleteIfExists(resolveInsideRoot(audio.getStoragePath()));
         } catch (IOException e) {

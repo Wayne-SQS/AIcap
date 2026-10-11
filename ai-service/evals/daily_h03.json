@@ -1,0 +1,336 @@
+[
+  {
+    "id": "h03-clear-start-no-acceptance",
+    "transcript": "开发：US41 今天已经着手实现审计日志筛选，目前正在写查询条件。",
+    "stories": [
+      {
+        "id": "US41",
+        "title": "审计日志筛选",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": null
+      }
+    ],
+    "expected_actions": [
+      [
+        "US41",
+        0,
+        1
+      ]
+    ],
+    "supporting_segments": {
+      "US41": [
+        "S1"
+      ]
+    },
+    "rubric": "明确已经开始，应提出US41从待办到进行中。原文没有谈验收，summary和reason不得补成“尚未验收”“未完成验收”或其他验收结论。",
+    "source_issue": "F001；v8中未重现，作为换编号和措辞后的回归正例",
+    "novelty": "用“着手实现/正在写查询条件”替代既有“开始开发/实现页面”，专门区分未提及验收与明确未验收。",
+    "manual_checks": [
+      "reason只需依据已经着手实现，不增加验收状态。",
+      "不得声称状态已经执行或批准。"
+    ]
+  },
+  {
+    "id": "h03-explicit-not-accepted-start",
+    "transcript": "开发：US42 已经开始改造权限缓存，现在在补失效逻辑。\n测试：US42 目前还没有验收，等改造结束后再测。",
+    "stories": [
+      {
+        "id": "US42",
+        "title": "权限缓存改造",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": 2
+      }
+    ],
+    "expected_actions": [
+      [
+        "US42",
+        0,
+        1
+      ]
+    ],
+    "supporting_segments": {
+      "US42": [
+        "S1"
+      ]
+    },
+    "rubric": "已开始且快照为待办，应提出进行中；显式未验收只限制完成，不否定开始事实。摘要可保留未验收，但不能据此漏提0→1。",
+    "source_issue": "F001与daily_consistency开始正例的对照扩展",
+    "novelty": "与上一例成对：一例未提验收，一例明确未验收，二者动作相同但可陈述事实范围不同。",
+    "manual_checks": [
+      "不得提出完成。",
+      "不得把等待验收写成当前阻塞。"
+    ]
+  },
+  {
+    "id": "h03-corrected-target-id",
+    "transcript": "开发：US45 报表导出已经完成验收。\n开发：抱歉，刚才编号说错了，完成验收的是 US46；US45 仍在开发。\n测试：确认 US46 的全部用例通过，可以交付。",
+    "stories": [
+      {
+        "id": "US45",
+        "title": "报表导出",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 2
+      },
+      {
+        "id": "US46",
+        "title": "报表订阅",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 3
+      }
+    ],
+    "expected_actions": [
+      [
+        "US46",
+        1,
+        2
+      ]
+    ],
+    "supporting_segments": {
+      "US46": [
+        "S2",
+        "S3"
+      ]
+    },
+    "rubric": "以后续明确纠正为准，只提出US46完成。不得保留已被纠正的US45完成动作，也不得跨故事使用US46的测试结论。",
+    "source_issue": "确认目标与纠正语义；延伸F002的保守完成结论",
+    "novelty": "不是编号听不清，而是说话者明确撤回先前编号并由测试再次确认目标。",
+    "manual_checks": [
+      "摘要须保留US45仍在开发与US46已通过验收的对象对应关系。",
+      "US46的reason应支持状态2，不包含否定自身动作的结论。"
+    ]
+  },
+  {
+    "id": "h03-partial-completion-failed-acceptance",
+    "transcript": "开发：US47 的查询主流程做完了，但批量导出仍然报错。\n测试：US47 验收没有通过，失败用例还要修，不能标记完成。",
+    "stories": [
+      {
+        "id": "US47",
+        "title": "查询与批量导出",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 4
+      }
+    ],
+    "expected_actions": [],
+    "rubric": "部分范围完成且验收失败不等于故事完成；不得提出1→2。应保留主流程完成、批量导出报错和验收未通过，不能只摘取“做完了”。",
+    "source_issue": "not-accepted场景的换范围反例",
+    "novelty": "同一句包含子范围完成和剩余失败，检查是否错误抽取局部完成词。",
+    "manual_checks": [
+      "不得把普通失败用例自动称为阻塞。",
+      "允许不带预设地询问是否存在阻塞，但不要求必须提问。"
+    ]
+  },
+  {
+    "id": "h03-resolved-defect-confirmed-complete",
+    "transcript": "测试：US48 昨天复测时还有两个失败用例。\n测试：更新结论，刚才两个用例都已修复并复测通过，US48 现已完成全部验收，可以交付。",
+    "stories": [
+      {
+        "id": "US48",
+        "title": "消息重试",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 4
+      }
+    ],
+    "expected_actions": [
+      [
+        "US48",
+        1,
+        2
+      ]
+    ],
+    "supporting_segments": {
+      "US48": [
+        "S2"
+      ]
+    },
+    "rubric": "最新完整结论明确旧缺陷已修复并通过全部验收，应提出完成；不得因早先失败记录而全弃权。",
+    "source_issue": "D005及resolved-old-defect正例的改写",
+    "novelty": "使用同一测试角色的时间顺序更新，避免把不同角色冲突误当澄清。",
+    "manual_checks": [
+      "reason须说明最新复测通过，而非把旧失败写成仍未解决。",
+      "不得扩写未提及的具体修复方式。"
+    ]
+  },
+  {
+    "id": "h03-action-reason-contradiction",
+    "transcript": "开发：US49 还没有做完，继续排查分页错误，不要改成已完成。\n测试：US50 已通过全部验收，确认完成并可以交付。",
+    "stories": [
+      {
+        "id": "US49",
+        "title": "分页修复",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 2
+      },
+      {
+        "id": "US50",
+        "title": "导入校验",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 3
+      }
+    ],
+    "expected_actions": [
+      [
+        "US50",
+        1,
+        2
+      ]
+    ],
+    "supporting_segments": {
+      "US50": [
+        "S2"
+      ]
+    },
+    "rubric": "只提出US50完成。US49的否定不能生成任何完成动作；尤其不能出现reason写“不应完成”但changes.status=2的自相矛盾提案。",
+    "source_issue": "v6历史动作数字与reason结论矛盾风险；v7/v8未重现",
+    "novelty": "将清晰否定故事与清晰完成故事并列，供fixture重现结构合法但语义错误的额外动作。",
+    "manual_checks": [
+      "自动检查只核对动作三元组，reason与数字是否语义一致仍需人工审查。",
+      "不得把US50证据用于US49。"
+    ]
+  },
+  {
+    "id": "h03-provider-time-scope",
+    "transcript": "开发：US51 还没有开始，需要先拿到华东支付平台的接口文档。\n产品：提供方已经确定是华东支付平台；会后只需要向他们确认文档交付时间。",
+    "stories": [
+      {
+        "id": "US51",
+        "title": "支付对账接入",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": 2
+      }
+    ],
+    "expected_actions": [],
+    "needs_question": true,
+    "rubric": "将来依赖不产生进行中。必须保留“提供方已确定，仅交付时间待确认”的关系；不得写成提供方身份未知、提供方与时间都待确认或平台尚未选定。",
+    "source_issue": "F006与F008；v8中未重现，作为关系保真回归",
+    "novelty": "显式给出已知提供方名称，并用“只需要”限定待确认对象。",
+    "manual_checks": [
+      "可询问交付时间或依赖是否影响进度。",
+      "不能把接口依赖自动断言为当前阻塞；若询问阻塞，应使用不带预设的问法。"
+    ]
+  },
+  {
+    "id": "h03-acceptance-arrangement-scope",
+    "transcript": "开发：US52 的实现已经可以提测，目前仍在进行中。\n测试：后续验收时间还要和安全测试组协商，今天没有给出验收结论。",
+    "stories": [
+      {
+        "id": "US52",
+        "title": "安全审计导出",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 4
+      }
+    ],
+    "expected_actions": [],
+    "needs_question": true,
+    "rubric": "快照已进行中且没有完成结论，不生成动作。保留“验收时间还需协商”，不得扩大成“完全没有验收安排”“测试尚未安排”或“确认无法验收”。",
+    "source_issue": "F007；v8中未重现，作为安排范围保真回归",
+    "novelty": "把协商对象换为安全测试组，并显式区分可提测、仍进行中与尚无验收结论。",
+    "manual_checks": [
+      "可询问协商结果或目标验收时间。",
+      "不得从可提测推断已通过验收。"
+    ]
+  },
+  {
+    "id": "h03-explicit-blocker-follow-up",
+    "transcript": "开发：US53 仍在开发，集成环境证书过期导致现在无法继续联调，已经阻塞。\n主持人：请会后确认环境恢复时间和协调人。",
+    "stories": [
+      {
+        "id": "US53",
+        "title": "单点登录联调",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 3
+      }
+    ],
+    "expected_actions": [],
+    "needs_question": true,
+    "rubric": "阻塞不生成状态3或回退动作；摘要须保留证书过期导致无法联调。应跟进恢复时间/协调人；出现不带额外事实预设的通用阻塞跟进不判错。",
+    "source_issue": "F003与D002/D004",
+    "novelty": "更换为证书过期的明确阻塞，并明确要求两个协调信息。",
+    "manual_checks": [
+      "允许询问“是否还有其他阻塞”等不带虚构事实的跟进，不要求所有问题逐字来自原文。",
+      "不能声称协调人尚未确定，除非原文明确说明；这里只说需要确认。"
+    ]
+  },
+  {
+    "id": "h03-network-retransmission-term",
+    "transcript": "开发：US54 今天已开始实现消息去重，目前正在写幂等键校验。\n开发：US54 今天已开始实现消息去重，目前正在写幂等键校验。\n转写员：刚才第二句是语音网络重传造成的重复，不是新的业务进展。",
+    "stories": [
+      {
+        "id": "US54",
+        "title": "消息去重",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": 2
+      }
+    ],
+    "expected_actions": [
+      [
+        "US54",
+        0,
+        1
+      ]
+    ],
+    "supporting_segments": {
+      "US54": [
+        "S1",
+        "S2"
+      ]
+    },
+    "rubric": "只生成一条US54进行中提案；重复原因的术语必须保真为“网络重传”，不得改写成“网络中继”、代理转发或其他技术机制。",
+    "source_issue": "daily-status-v8残留：repeated-evidence曾将“网络重传”写成“网络中继”",
+    "novelty": "更换业务故事与句式，保留同义易漂移的网络术语作为人工rubric。",
+    "manual_checks": [
+      "自动判分能检查动作去重，不能可靠判断术语是否失真。",
+      "摘要可以省略重复原因；如果提到原因，必须保持“网络重传”。"
+    ]
+  },
+  {
+    "id": "h03-truncated-correction-independent-start",
+    "transcript": "开发甲：US55 这部分已经完……\n[重叠发言，后半句听不清]\n开发甲：刚才没说完，不是已经完成；US55 目前只完成一半，验收也没有通过。\n开发乙：US56 今天已经开始实现离线缓存，现在正在写同步队列。",
+    "stories": [
+      {
+        "id": "US55",
+        "title": "报表缓存",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": 3
+      },
+      {
+        "id": "US56",
+        "title": "离线缓存",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": 4
+      }
+    ],
+    "expected_actions": [
+      [
+        "US56",
+        0,
+        1
+      ]
+    ],
+    "supporting_segments": {
+      "US56": [
+        "S4"
+      ]
+    },
+    "rubric": "截断的“已经完……”不能补成完成，后续完整纠正确认US55未完成；独立的US56开始事实仍须提出0→1，不能因同场噪声而全弃权。",
+    "source_issue": "noisy-correction与v6历史错误的换编号回归",
+    "novelty": "把部分完成、未验收和另一故事明确开始组合，检查逐故事独立判断。",
+    "manual_checks": [
+      "摘要引用截断内容时必须保留省略号，不能修补为“已经完成”。",
+      "US56的reason不得附加原文未提及的验收结论。"
+    ]
+  }
+]

@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -56,6 +58,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MeetingSuggestionReviewContractTest extends ContractTestSupport {
+
+    @Autowired private JdbcTemplate jdbc;
 
     /** 与 @SpringBootTest properties 的 aicap.audio.dir 一致(相对 java-backend 工作目录) */
     private static final String AUDIO_DIR = "target/test-audio";
@@ -117,6 +121,24 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             body.put("changes", map("title", changeTitle, "priority", "Should"));
         }
         return post("/api/suggestions/" + suggestionId + "/review", token(USER_ADMIN), json(body));
+    }
+
+    @Test
+    void shadowIndexTracksGeneralCreationReviewAndDeletion() {
+        String mid = meetingId(createMeetingOk());
+        ApiResponse submitted = submitSuggestion(mid, uniq("shadow"), uniq("影子索引建议"), "Should", null);
+        assertEquals(200, submitted.status(), submitted.body());
+        String sid = submitted.json().path("id").asText();
+        assertEquals("pending", jdbc.queryForObject(
+                "SELECT status FROM review_queue_proposals WHERE source='general' AND analysis_id=?", String.class, sid));
+        assertEquals(200, reviewSuggestion(sid, "reject", null).status());
+        Map<String, Object> reviewed = jdbc.queryForMap(
+                "SELECT status,execution_status FROM review_queue_proposals WHERE source='general' AND analysis_id=?", sid);
+        assertEquals("rejected", reviewed.get("status"));
+        assertEquals("not_needed", reviewed.get("execution_status"));
+        assertEquals(200, delete("/api/meetings/" + mid, token(USER_ADMIN)).status());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM review_queue_proposals WHERE analysis_id=?", Integer.class, sid));
     }
 
     private String cleanupPoolByTitle(String title) {

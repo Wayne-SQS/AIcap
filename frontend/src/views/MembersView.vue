@@ -6,20 +6,26 @@ import { membersApi } from '@/api/members'
 import { profileAgentApi } from '@/api/profileAgent'
 import { useToast } from '@/composables/useToast'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
+import { useProjectActions } from '@/composables/useProjectActions'
 import MemberProfileDialog from '@/components/members/MemberProfileDialog.vue'
 import MemberTaskDrawer from '@/components/members/MemberTaskDrawer.vue'
+import TaskDetailDrawer from '@/components/members/TaskDetailDrawer.vue'
+import OwnerRiskDialog from '@/components/members/OwnerRiskDialog.vue'
+import { useCanvasZoom } from '@/composables/useCanvasZoom'
+import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 import { ROLE_TXT } from '@/data/seed'
 import { memberLabel } from '@/data/memberIdentity'
 
-/* 成员任务图
-   - 成员卡片 / 热力图 / Bandwidth / 开发活动图:5 名后端真实成员,容量取 users.capacity_hours
-   - 点成员卡片 → 右侧任务明细抽屉(状态筛选)
-   - 成员画像板块(技术栈 / 工作能力 / 开发流程领域)为真实后端数据,置于页面顶部
-   - 开发活动图读取真实活动记录(activity_records,含 GitHub 同步),不再使用样例数据 */
+/* 成员任务图同时保留真实画像/GitHub 活动，以及任务负责人调整、影响确认和四个独立缩放画布。 */
 const project = useProjectStore()
 const session = useSessionStore()
+const { updateTaskOwner, analyzeTaskOwner } = useProjectActions()
+const memberDrop = ref(null)
+const drawerTask = ref(null)
+const riskDialog = ref(null)
+const pendingOwner = ref(null)
+const draggingTask = ref('')
 const { notify } = useToast()
-
 const profiles = ref([])
 const profileError = ref('')
 const editing = ref(null)
@@ -30,6 +36,19 @@ const DIMS_OF_PROFILE = [
   { k: 'capabilities', t: '工作能力' },
   { k: 'process_domains', t: '熟悉的开发流程领域' }
 ]
+
+const overviewViewport = ref(null)
+const overviewShell = ref(null)
+const overviewCanvas = ref(null)
+const loadViewport = ref(null)
+const loadShell = ref(null)
+const loadCanvas = ref(null)
+const capacityViewport = ref(null)
+const capacityShell = ref(null)
+const capacityCanvas = ref(null)
+const activityViewport = ref(null)
+const activityShell = ref(null)
+const activityCanvas = ref(null)
 
 async function loadProfiles() {
   if (!online.value) return
@@ -53,6 +72,15 @@ function onSaved(saved) {
   notify('画像已更新')
 }
 
+const { zoom: overviewZoom, zoomMode: overviewZoomMode, minZoom: overviewMinZoom, maxZoom: overviewMaxZoom, canvasStyle: overviewCanvasStyle, shellStyle: overviewShellStyle, zoomIn: overviewZoomIn, zoomOut: overviewZoomOut, setZoomPercent: setOverviewZoomPercent, resetZoom: overviewResetZoom, fitToCanvas: overviewFitToCanvas } =
+  useCanvasZoom({ viewport: overviewViewport, canvas: overviewCanvas, shell: overviewShell, fillViewportWidth: true, minContentWidth: 1040, initialMode: 'manual' })
+const { zoom: loadZoom, zoomMode: loadZoomMode, minZoom: loadMinZoom, maxZoom: loadMaxZoom, canvasStyle: loadCanvasStyle, shellStyle: loadShellStyle, zoomIn: loadZoomIn, zoomOut: loadZoomOut, setZoomPercent: setLoadZoomPercent, resetZoom: loadResetZoom, fitToCanvas: loadFitToCanvas } =
+  useCanvasZoom({ viewport: loadViewport, canvas: loadCanvas, shell: loadShell, fillViewportWidth: true, minContentWidth: 760, initialMode: 'manual' })
+const { zoom: capacityZoom, zoomMode: capacityZoomMode, minZoom: capacityMinZoom, maxZoom: capacityMaxZoom, canvasStyle: capacityCanvasStyle, shellStyle: capacityShellStyle, zoomIn: capacityZoomIn, zoomOut: capacityZoomOut, setZoomPercent: setCapacityZoomPercent, resetZoom: capacityResetZoom, fitToCanvas: capacityFitToCanvas } =
+  useCanvasZoom({ viewport: capacityViewport, canvas: capacityCanvas, shell: capacityShell, fillViewportWidth: true, minContentWidth: 760, initialMode: 'manual' })
+const { zoom: activityZoom, zoomMode: activityZoomMode, minZoom: activityMinZoom, maxZoom: activityMaxZoom, canvasStyle: activityCanvasStyle, shellStyle: activityShellStyle, zoomIn: activityZoomIn, zoomOut: activityZoomOut, setZoomPercent: setActivityZoomPercent, resetZoom: activityResetZoom, fitToCanvas: activityFitToCanvas } =
+  useCanvasZoom({ viewport: activityViewport, canvas: activityCanvas, shell: activityShell, fillViewportWidth: true, minContentWidth: 760, initialMode: 'manual' })
+
 /* ==================== 成员卡片 ==================== */
 const totalAllocated = computed(() => project.tasks.reduce((a, t) => a + Math.max(0, Number(t.h) || 0), 0))
 const memberCards = computed(() => project.members.map(m => {
@@ -66,9 +94,64 @@ const memberCards = computed(() => project.members.map(m => {
     state
   }
 }))
-function openDrawer(id) {
-  drawerMember.value = id
+function openTaskDrawer(id) { drawerTask.value = id }
+function openMemberDrawer(id) { drawerMember.value = id }
+function taskIdFromDrop(event) {
+  return event.dataTransfer?.getData('application/x-aiguanli-task') || event.dataTransfer?.getData('text/plain') || ''
 }
+function weeklyHours(task) {
+  const values = Array(6).fill(0)
+  const start = Math.max(1, task.w[0])
+  const end = Math.min(6, task.w[1])
+  const span = Math.max(1, end - start + 1)
+  const base = Math.floor(task.h / span)
+  let remainder = task.h - base * span
+  for (let week = start; week <= end; week++) values[week - 1] = base + (remainder-- > 0 ? 1 : 0)
+  return values
+}
+function ownerRisks(task, ownerId) {
+  const member = project.memberById(ownerId)
+  const capacity = member ? project.capacityHours(ownerId) / 6 : 0
+  if (!capacity) return []
+  const current = project.memberWeeklyLoad(ownerId)
+  const after = Array(6).fill(0)
+  project.tasks.filter(item => item.owner === ownerId && item.id !== task.id).forEach(item => {
+    weeklyHours(item).forEach((hours, index) => { after[index] += hours })
+  })
+  weeklyHours(task).forEach((hours, index) => { after[index] += hours })
+  return after.flatMap((hours, index) => hours > capacity ? [{ type: 'load', text: `W${index + 1}：当前 ${current[index] || 0}h，调整后 ${hours}h，周容量 ${capacity.toFixed(1)}h` }] : [])
+}
+function startTaskDrag(task, event) {
+  if (session.isViewer) return
+  draggingTask.value = task.id
+  event.dataTransfer.setData('application/x-aiguanli-task', task.id)
+  event.dataTransfer.setData('text/plain', task.id)
+  event.dataTransfer.effectAllowed = 'move'
+}
+function clearTaskDrag() {
+  draggingTask.value = ''
+  memberDrop.value = null
+}
+async function reassignTask({ taskId, ownerId }) {
+  const task = project.taskById(taskId)
+  const member = project.memberById(Number(ownerId))
+  if (!task || !member || task.owner === member.id || session.isViewer) return
+  const analysis = await analyzeTaskOwner(taskId, member.id)
+  const risks = analysis.warnings.map(text => ({ type: 'load', text }))
+  pendingOwner.value = { taskId, ownerId: member.id }
+  riskDialog.value?.open({ taskId, memberName: member.name, risks, groups: analysis.groups })
+}
+function dropOnMember(ownerId, event) {
+  const taskId = taskIdFromDrop(event)
+  clearTaskDrag()
+  if (taskId) reassignTask({ taskId, ownerId })
+}
+async function confirmOwnerChange() {
+  const pending = pendingOwner.value
+  pendingOwner.value = null
+  if (pending) await updateTaskOwner(pending.taskId, pending.ownerId)
+}
+function cancelOwnerChange() { pendingOwner.value = null }
 
 /* ==================== 周负载热力图 ==================== */
 const load = computed(() => project.loadByOwner)
@@ -169,7 +252,7 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
 </script>
 
 <template>
-  <section class="view" id="view-members">
+  <main class="view" id="view-members">
     <div class="hero">
       <div>
         <div class="eyebrow">TEAM LOAD / 成员负载</div>
@@ -177,6 +260,7 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         <p>{{ project.members.length }} 名成员（含只读查看者） · 6 周负载热力图 · 容量与分配 · 点击成员卡片查看任务明细。</p>
       </div>
     </div>
+
 
     <div class="h-sec">成员画像</div>
     <p v-if="!online" class="small">离线演示模式：画像需连接后端读取（在线登录后自动加载）。</p>
@@ -208,13 +292,25 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     </div>
     <MemberProfileDialog v-if="editing" :profile="editing" @close="editing = null" @saved="onSaved" />
 
+    <div class="member-canvas-list" aria-label="成员任务图模块">
+    <section class="member-canvas-section members-overview-section" data-member-canvas="overview" aria-labelledby="members-overview-title">
+      <header class="member-section-header">
+        <h2 id="members-overview-title">成员任务总览</h2>
+        <p>成员任务、负载摘要与当前分配情况；点击任务查看明细，拖动任务可调整负责人。</p>
+      </header>
+      <CanvasZoomControls :zoom="overviewZoom" :min-zoom="overviewMinZoom" :max-zoom="overviewMaxZoom" :zoom-mode="overviewZoomMode"
+        :reset-zoom="overviewResetZoom" :fit-to-canvas="overviewFitToCanvas" :zoom-in="overviewZoomIn" :zoom-out="overviewZoomOut"
+        :set-zoom-percent="setOverviewZoomPercent" />
+      <div ref="overviewViewport" class="member-module-viewport canvas-zoom-viewport overview-viewport">
+        <div ref="overviewShell" class="canvas-zoom-shell" :style="overviewShellStyle">
+          <div ref="overviewCanvas" class="member-module-canvas overview-canvas" :style="overviewCanvasStyle">
     <div class="member-grid" id="member-grid">
       <div
         v-for="c in memberCards" :key="c.m.id"
-        class="mcard clickable" :class="{ selected: drawerMember === c.m.id }"
-        role="button" tabindex="0" :data-member="c.m.id"
-        :aria-label="`查看 ${c.m.name} 的任务明细`"
-        @click="openDrawer(c.m.id)" @keydown.enter.prevent="openDrawer(c.m.id)" @keydown.space.prevent="openDrawer(c.m.id)"
+        class="mcard clickable" :class="{ 'is-drop-target': memberDrop === c.m.id }"
+        :data-member="c.m.id" :data-owner-drop="c.m.id"
+        @dragenter.prevent="memberDrop = c.m.id" @dragover.prevent="memberDrop = c.m.id"
+        @dragleave.self="memberDrop = null" @drop.prevent.stop="dropOnMember(c.m.id, $event)" @click="openMemberDrawer(c.m.id)"
       >
         <div class="head">
           <span class="avatar" :class="'a' + c.m.id">{{ memberLabel(c.m.id) }}</span>
@@ -224,12 +320,39 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         <div class="tagline" style="font-size:12px;color:var(--muted);margin-bottom:12px">{{ c.m.tag }}</div>
         <div class="statline"><span>任务 <b>{{ c.mine }}</b></span><span>工时 <b>{{ c.myH }}h</b></span><span>占比 <b>{{ c.pct }}%</b></span><span>故事 <b>{{ c.myStories }}</b></span></div>
         <div class="track"><i :style="{ width: Math.min(c.pct, 100) + '%', background: `var(--${c.m.accent || 'gray'})` }"></i></div>
+        <div class="member-task-heading">当前任务</div>
+        <div class="member-task-list">
+          <button
+            v-for="task in project.memberTasks(c.m.id)" :key="task.id" type="button"
+            class="member-task-card" :class="{ 'is-dragging': draggingTask === task.id }"
+            :draggable="!session.isViewer"
+            :title="session.isViewer ? '只读角色不可调整负责人' : '拖动到其他成员卡片以调整负责人'"
+            @click.stop="openTaskDrawer(task.id)" @dragstart.stop="startTaskDrag(task, $event)" @dragend="clearTaskDrag"
+          >
+            <span class="member-task-id">{{ task.id }}</span>
+            <span class="member-task-name" :title="task.name">{{ task.name }}</span>
+            <span class="member-task-meta">{{ task.h }}h · Sprint {{ project.taskSprintList(task).join('/') }} · {{ project.taskStatusText(task) }}</span>
+          </button>
+          <div v-if="!project.memberTasks(c.m.id).length" class="member-task-empty">暂无任务</div>
+        </div>
       </div>
     </div>
-    <MemberTaskDrawer v-if="drawerMember !== null" :member-id="drawerMember" @close="drawerMember = null" />
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <div class="h-sec">周负载热力图</div>
-    <p class="load-note">数字表示该成员在该周的计划工时；颜色表示该周负载等级（按周容量占比）。0 表示该周暂无计划工时，悬停可看关联任务。</p>
+    <section class="member-canvas-section workload-heatmap-section" data-member-canvas="load" aria-labelledby="workload-heatmap-title">
+    <header class="member-section-header">
+      <h2 id="workload-heatmap-title">周负载热力图</h2>
+      <p class="load-note">数字表示该成员在该周的计划工时；颜色表示该周负载等级（按周容量占比）。0 表示该周暂无计划工时，悬停可看关联任务。</p>
+    </header>
+    <CanvasZoomControls :zoom="loadZoom" :min-zoom="loadMinZoom" :max-zoom="loadMaxZoom" :zoom-mode="loadZoomMode"
+      :reset-zoom="loadResetZoom" :fit-to-canvas="loadFitToCanvas" :zoom-in="loadZoomIn" :zoom-out="loadZoomOut"
+      :set-zoom-percent="setLoadZoomPercent" />
+    <div ref="loadViewport" class="member-module-viewport canvas-zoom-viewport load-viewport">
+      <div ref="loadShell" class="canvas-zoom-shell" :style="loadShellStyle">
+        <div ref="loadCanvas" class="member-module-canvas load-canvas" :style="loadCanvasStyle">
     <div class="load-legend">
       <span><i class="low"></i>低负载</span><span><i class="normal"></i>正常</span><span><i class="busy"></i>偏忙</span><span><i class="over"></i>超载</span>
     </div>
@@ -242,8 +365,22 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         </div>
       </div>
     </div>
+        </div>
+      </div>
+    </div>
+    </section>
 
-    <div class="h-sec">容量与分配 · Bandwidth</div>
+    <section class="member-canvas-section bandwidth-section" data-member-canvas="capacity" aria-labelledby="bandwidth-title">
+    <header class="member-section-header">
+      <h2 id="bandwidth-title">容量与分配</h2>
+      <p>Bandwidth · 对比每位成员的可用容量、已分配工时与剩余空间。</p>
+    </header>
+    <CanvasZoomControls :zoom="capacityZoom" :min-zoom="capacityMinZoom" :max-zoom="capacityMaxZoom" :zoom-mode="capacityZoomMode"
+      :reset-zoom="capacityResetZoom" :fit-to-canvas="capacityFitToCanvas" :zoom-in="capacityZoomIn" :zoom-out="capacityZoomOut"
+      :set-zoom-percent="setCapacityZoomPercent" />
+    <div ref="capacityViewport" class="member-module-viewport canvas-zoom-viewport capacity-viewport">
+      <div ref="capacityShell" class="canvas-zoom-shell" :style="capacityShellStyle">
+        <div ref="capacityCanvas" class="member-module-canvas capacity-canvas" :style="capacityCanvasStyle">
     <div id="bandwidth">
       <div v-for="b in bandwidthCards" :key="b.m.id" class="mcard">
         <div class="head">
@@ -254,18 +391,32 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: Math.min(b.pct, 100) + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.pct }}%</span></div>
       </div>
     </div>
+        </div>
+      </div>
+    </div>
+    </section>
 
-    <div class="h-sec">成员开发活动图 · 真实数据（最近 6 周）</div>
-    <p v-if="!online" class="small">离线演示模式：活动图需连接后端读取真实活动记录（在线登录后自动加载）。</p>
-    <p v-else-if="contribLoading" class="small">正在加载真实活动数据…</p>
-    <p v-else-if="contribError" class="small" role="alert">活动数据加载失败：{{ contribError }}</p>
-    <div v-else class="contrib-wrap" id="contrib">
+    <section class="member-canvas-section activity-heatmap-section" data-member-canvas="activity" aria-labelledby="activity-heatmap-title">
+    <header class="member-section-header">
+      <h2 id="activity-heatmap-title">成员开发活动图</h2>
+      <p>代码热力图 · 最近 6 个完整自然周 · 真实活动记录（含 GitHub 同步）。</p>
+    </header>
+    <CanvasZoomControls :zoom="activityZoom" :min-zoom="activityMinZoom" :max-zoom="activityMaxZoom" :zoom-mode="activityZoomMode"
+      :reset-zoom="activityResetZoom" :fit-to-canvas="activityFitToCanvas" :zoom-in="activityZoomIn" :zoom-out="activityZoomOut"
+      :set-zoom-percent="setActivityZoomPercent" />
+    <div ref="activityViewport" class="member-module-viewport canvas-zoom-viewport activity-viewport">
+      <div ref="activityShell" class="canvas-zoom-shell" :style="activityShellStyle">
+        <div ref="activityCanvas" class="member-module-canvas activity-canvas" :style="activityCanvasStyle">
+          <p v-if="!online" class="small">离线演示模式：活动图需连接后端读取真实活动记录（在线登录后自动加载）。</p>
+          <p v-else-if="contribLoading" class="small">正在加载真实活动数据…</p>
+          <p v-else-if="contribError" class="small" role="alert">活动数据加载失败：{{ contribError }}</p>
+          <div v-else class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">
           <span class="avatar" :class="'a' + c.m.frontId">{{ memberLabel(c.m.frontId) }}</span>{{ c.m.name }}
           <span class="small mono" style="margin-left:auto">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
         </div>
-        <div class="small" style="margin-bottom:8px;color:var(--muted)">{{ project.memberRoleText(c.m.frontId) }}</div>
+        <div class="contrib-role small">{{ project.memberRoleText(c.m.frontId) }}</div>
         <div class="contrib-grid">
           <span class="grid-corner"></span>
           <span v-for="w in 6" :key="'h' + w" class="week-label" :style="{ gridColumn: w + 1, gridRow: 1 }">W{{ w }}</span>
@@ -290,22 +441,170 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         <span>真实数据 · 来自活动记录（含 GitHub 同步），悬停看日期与活动明细</span>
       </div>
     </div>
-  </section>
+        </div>
+      </div>
+    </div>
+    </section>
+    </div>
+    <MemberTaskDrawer v-if="drawerMember !== null" :member-id="drawerMember" @close="drawerMember = null" @reassign="reassignTask" />
+    <TaskDetailDrawer v-if="drawerTask !== null" :task-id="drawerTask" @close="drawerTask = null" />
+    <OwnerRiskDialog ref="riskDialog" @cancel="cancelOwnerChange" @confirm="confirmOwnerChange" />
+  </main>
 </template>
 
 <style scoped>
-.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-.pcard { border: 1px solid var(--line, #dcdcdc); border-radius: 10px; padding: 12px; background: var(--panel, rgba(255,255,255,.5)); }
-.phead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.phead b { font-size: 15px; }
-.badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: rgba(0,0,0,.08); }
-.phead .edit { margin-left: auto; font-size: 12px; padding: 3px 10px; }
-.ptitle { margin-top: 4px; font-size: 13px; font-weight: 600; }
-.psum { margin: 4px 0 8px; }
-.pdim { margin-top: 8px; }
-.pdim-t { font-size: 12px; opacity: .75; margin-bottom: 4px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.06); }
-.chip .bar { display: inline-block; width: 34px; height: 5px; border-radius: 3px; background: rgba(0,0,0,.15); overflow: hidden; }
-.chip .bar b { display: block; height: 100%; background: var(--green, #2e7d32); }
+/* Each module is a complete canvas unit: heading, toolbar, viewport and content. */
+.member-canvas-list {
+  display: grid;
+  gap: 30px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+.member-canvas-section {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.member-section-header {
+  display: block;
+  margin: 0 0 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px dashed var(--line);
+  background: transparent;
+}
+
+.member-section-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-family: var(--mono);
+  letter-spacing: 1px;
+  line-height: 1.25;
+}
+
+.member-section-header p {
+  max-width: 860px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.member-canvas-section > .canvas-zoom-toolbar {
+  margin-bottom: 8px;
+}
+
+.member-module-viewport {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: auto;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  scrollbar-gutter: stable;
+}
+
+.member-module-viewport > .canvas-zoom-shell {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.member-module-canvas {
+  display: block;
+  box-sizing: border-box;
+  padding: 14px;
+  background: var(--paper);
+}
+
+.overview-viewport {
+  height: clamp(560px, 68vh, 760px);
+}
+
+.load-viewport {
+  height: 390px;
+}
+
+.capacity-viewport {
+  height: clamp(480px, 62vh, 620px);
+}
+
+.activity-viewport {
+  height: clamp(580px, 68vh, 720px);
+}
+
+.members-overview-section .member-grid {
+  gap: 14px;
+}
+
+.workload-heatmap-section .load-legend {
+  margin: 0 0 10px;
+}
+
+.workload-heatmap-section .heat-wrap {
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.bandwidth-section #bandwidth {
+  gap: 10px;
+}
+
+.bandwidth-section .mcard {
+  box-shadow: none;
+}
+
+.activity-heatmap-section .contrib-wrap {
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.activity-heatmap-section .contrib-note {
+  margin-top: 2px;
+  padding: 10px 0 0;
+  border-top: 1px dashed var(--line);
+}
+
+@media (max-width: 720px) {
+  .member-canvas-list {
+    gap: 24px;
+  }
+
+  .member-section-header {
+    margin-bottom: 7px;
+    padding-bottom: 7px;
+  }
+
+  .member-module-canvas {
+    padding: 10px;
+  }
+
+  .overview-viewport,
+  .capacity-viewport,
+  .activity-viewport {
+    height: 560px;
+  }
+
+  .load-viewport {
+    height: 360px;
+  }
+}
 </style>
