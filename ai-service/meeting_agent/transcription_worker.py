@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 import sys
 
+from .speech_runtime import worker_failure
+
 
 def word_interval(start_seconds, end_seconds, segment_start_ms, segment_end_ms):
     """Quantize Whisper seconds while preserving sub-millisecond/equal boundaries."""
@@ -46,8 +48,9 @@ def transcribe(path, model_path, language):
         if samples > 16000*600: return {'error': 'audio_duration_exceeded'}
         audio = np.concatenate(pieces).astype(np.float32) / 32768.0
         duration = round(samples / 16)
-    except Exception:
-        return {'error': 'invalid_audio'}
+    except Exception as error:
+        # Only the decoder rejecting the file proves the caller's audio is bad.
+        return worker_failure(error, context='stt decode')
     try:
         model = WhisperModel(str(model_path), device='cpu', compute_type='int8', cpu_threads=4, local_files_only=True)
         segments, info = model.transcribe(audio, language=None if language == 'auto' else language,
@@ -72,8 +75,9 @@ def transcribe(path, model_path, language):
             rows.append(dict(segment_id=segment_id, start_ms=start, end_ms=end, text=text, speaker_id=None,words=words))
         return dict(language=info.language, duration_ms=duration, segments=rows,
                     text='\n'.join(row['text'] for row in rows), status='draft' if rows else 'no_speech')
-    except Exception:
-        return {'error': 'stt_failed'}
+    except Exception as error:
+        # Decoded audio reaching the model but the run still crashing is ours.
+        return worker_failure(error, context='stt inference')
 
 
 if __name__ == '__main__':

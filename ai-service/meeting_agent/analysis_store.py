@@ -8,6 +8,7 @@ import httpx
 from pydantic import Field
 
 from .contracts import Contract, DailyScrumOutput, Identifier, StorySnapshot
+from .shared_http import shared_client
 from .story_tool import StoryReadTool
 
 
@@ -55,26 +56,27 @@ class JavaAnalysisStore:
 
     def _request(self, method, path, token, key, *, payload=None, missing_ok=False):
         try:
-            with httpx.Client(timeout=10, follow_redirects=False, trust_env=False, transport=self._transport) as client:
-                with client.stream(method, self._origin + path,
-                                   headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-                                   content=payload) as response:
-                    status = response.status_code
-                    if status == 404 and missing_ok:
-                        return _MISSING
-                    if status != 200:
-                        code, outward = {
-                            401: ("authentication_required", 401), 403: ("permission_denied", 403),
-                            404: ("meeting_not_found", 404), 409: ("storage_conflict", 409),
-                            422: ("storage_rejected", 422),
-                        }.get(status, ("storage_unavailable", 503) if status >= 500
-                              else ("storage_http_error", 502))
-                        raise StorageError(code, outward, key)
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > self.MAX_BYTES:
-                            raise StorageError("invalid_storage_response", 502, key)
+            client = shared_client(timeout=10, follow_redirects=False, trust_env=False,
+                                   transport=self._transport)
+            with client.stream(method, self._origin + path,
+                               headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                               content=payload) as response:
+                status = response.status_code
+                if status == 404 and missing_ok:
+                    return _MISSING
+                if status != 200:
+                    code, outward = {
+                        401: ("authentication_required", 401), 403: ("permission_denied", 403),
+                        404: ("meeting_not_found", 404), 409: ("storage_conflict", 409),
+                        422: ("storage_rejected", 422),
+                    }.get(status, ("storage_unavailable", 503) if status >= 500
+                          else ("storage_http_error", 502))
+                    raise StorageError(code, outward, key)
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > self.MAX_BYTES:
+                        raise StorageError("invalid_storage_response", 502, key)
         except httpx.TimeoutException:
             raise StorageError("storage_timeout", 504, key) from None
         except httpx.HTTPError:

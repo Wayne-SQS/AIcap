@@ -9,6 +9,7 @@ import httpx
 from pydantic import Field, model_validator
 
 from .contracts import Contract, NonBlank
+from .shared_http import shared_client
 
 
 class ProfileSkill(Contract):
@@ -81,20 +82,20 @@ class MemberReadTool:
                 or any(not 33 <= ord(c) <= 126 for c in access_token)):
             raise MemberToolError('authentication_required')
         try:
-            with httpx.Client(timeout=self._timeout, follow_redirects=False, trust_env=False,
-                              transport=self._transport) as client:
-                with client.stream('GET', self._url, headers={
-                    'Authorization': 'Bearer ' + access_token, 'Accept': 'application/json',
-                }) as response:
-                    status = response.status_code
-                    if status != 200:
-                        code = {401: 'authentication_required', 403: 'permission_denied'}.get(status)
-                        raise MemberToolError(code or ('backend_redirect' if 300 <= status < 400 else 'backend_http_error'))
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > self.MAX_RESPONSE_BYTES:
-                            raise MemberToolError('response_too_large')
+            client = shared_client(timeout=self._timeout, follow_redirects=False, trust_env=False,
+                                   transport=self._transport)
+            with client.stream('GET', self._url, headers={
+                'Authorization': 'Bearer ' + access_token, 'Accept': 'application/json',
+            }) as response:
+                status = response.status_code
+                if status != 200:
+                    code = {401: 'authentication_required', 403: 'permission_denied'}.get(status)
+                    raise MemberToolError(code or ('backend_redirect' if 300 <= status < 400 else 'backend_http_error'))
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > self.MAX_RESPONSE_BYTES:
+                        raise MemberToolError('response_too_large')
         except httpx.HTTPError:
             raise MemberToolError('backend_unavailable') from None
         try:

@@ -10,7 +10,8 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 from .contracts import Contract
 from .audio_tool import AudioInputRequest, PreparedAudio
-from .speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS, worker_environment
+from .speech_runtime import (SPEECH_JOB_TIMEOUT_SECONDS, log_worker_diagnostic,
+                             worker_environment)
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DURATION_MS = 600000
@@ -106,7 +107,12 @@ class LocalTranscriber:
                     raise ValueError('invalid worker response')
                 if 'error' in data:
                     codes = {'stt_dependency_missing': 503, 'invalid_audio': 422,
-                             'audio_duration_exceeded': 413, 'transcript_too_large': 422}
+                             'audio_duration_exceeded': 413, 'transcript_too_large': 422,
+                             'internal_error': 500}
+                    if data['error'] == 'internal_error':
+                        # A worker crash is our fault, not a bad upload: keep the
+                        # diagnostic in the service log and out of the response.
+                        log_worker_diagnostic('stt worker internal error', data.get('diagnostic'))
                     raise TranscriptionError(data['error'] if data['error'] in codes else 'stt_failed', codes.get(data['error'], 502))
                 return TranscriptionDraft(audio=prepared, **data)
         except (ValueError, TypeError, OSError, UnicodeError):

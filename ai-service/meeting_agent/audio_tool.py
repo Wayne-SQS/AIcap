@@ -6,6 +6,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import Field
 from .contracts import Contract, Identifier
+from .shared_http import shared_client
 from .story_tool import StoryReadTool
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
@@ -40,21 +41,21 @@ class AudioReadTool:
 
     def _get(self, path, token, limit, *, binary=False):
         try:
-            with httpx.Client(timeout=20, trust_env=False, follow_redirects=False, transport=self.transport) as client:
-                with client.stream('GET', self.origin + path, headers={'Authorization': 'Bearer ' + token}) as response:
-                    status = response.status_code
-                    if status in (401, 403, 404):
-                        raise AudioReadError({401: 'authentication_required', 403: 'permission_denied', 404: 'audio_or_meeting_not_found'}[status], status)
-                    if status != 200:
-                        raise AudioReadError('audio_backend_unavailable' if status >= 500 else 'audio_backend_http_error', 503 if status >= 500 else 502)
-                    if binary and response.headers.get('content-type', '').split(';')[0].strip().lower() != 'audio/mpeg':
-                        raise AudioReadError('invalid_audio_content_type', 502)
-                    data = bytearray()
-                    for chunk in response.iter_bytes():
-                        data.extend(chunk)
-                        if len(data) > limit:
-                            raise AudioReadError('audio_response_too_large', 502)
-                    return bytes(data), response.headers.get('x-audio-sha256')
+            client = shared_client(timeout=20, trust_env=False, follow_redirects=False, transport=self.transport)
+            with client.stream('GET', self.origin + path, headers={'Authorization': 'Bearer ' + token}) as response:
+                status = response.status_code
+                if status in (401, 403, 404):
+                    raise AudioReadError({401: 'authentication_required', 403: 'permission_denied', 404: 'audio_or_meeting_not_found'}[status], status)
+                if status != 200:
+                    raise AudioReadError('audio_backend_unavailable' if status >= 500 else 'audio_backend_http_error', 503 if status >= 500 else 502)
+                if binary and response.headers.get('content-type', '').split(';')[0].strip().lower() != 'audio/mpeg':
+                    raise AudioReadError('invalid_audio_content_type', 502)
+                data = bytearray()
+                for chunk in response.iter_bytes():
+                    data.extend(chunk)
+                    if len(data) > limit:
+                        raise AudioReadError('audio_response_too_large', 502)
+                return bytes(data), response.headers.get('x-audio-sha256')
         except httpx.TimeoutException:
             raise AudioReadError('audio_backend_timeout', 504) from None
         except httpx.HTTPError:

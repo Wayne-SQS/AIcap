@@ -56,6 +56,13 @@ class DiarizationTests(unittest.TestCase):
         self.data={'error':'private-detail'}
         with self.assertRaises(TranscriptionError) as error: self.invoke()
         self.assertEqual('diarization_failed',error.exception.code)
+    def test_worker_internal_error_is_not_blamed_on_the_audio(self):
+        self.data={'error':'internal_error','diagnostic':'RuntimeError: clustering crashed'}
+        with self.assertLogs('meeting_agent.speech_runtime',level='ERROR') as logs:
+            with self.assertRaises(TranscriptionError) as error: self.invoke()
+        self.assertEqual('internal_error',error.exception.code)
+        self.assertEqual(500,error.exception.status)
+        self.assertTrue(any('clustering crashed' in line for line in logs.output))
     def test_api_auth_validation_and_read_before_inference(self):
         reader=Mock(); reader.read.return_value=(self.meta,b'a')
         engine=Mock(); engine.run.return_value=DiarizationPreview(audio=self.meta,requested_num_speakers=2,**self.data)

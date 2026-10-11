@@ -76,6 +76,28 @@ class TranscriptionTests(unittest.TestCase):
             with self.assertRaises(TranscriptionError) as error: self.invoke()
             self.assertEqual(status,error.exception.status)
             self.assertNotIn('private',error.exception.code)
+    def test_worker_internal_error_is_not_blamed_on_the_audio(self):
+        self.data={'error':'internal_error','diagnostic':'RuntimeError: decoder wrapper broke'}
+        with self.assertLogs('meeting_agent.speech_runtime',level='ERROR') as logs:
+            with self.assertRaises(TranscriptionError) as error: self.invoke()
+        self.assertEqual('internal_error',error.exception.code)
+        self.assertEqual(500,error.exception.status)
+        self.assertNotIn('broke',error.exception.code)
+        self.assertTrue(any('broke' in line for line in logs.output))
+    def test_worker_internal_error_surfaces_as_500_not_422(self):
+        self.data={'error':'internal_error','diagnostic':'RuntimeError: decoder wrapper broke'}
+        reader=Mock(); reader.read.return_value=(self.meta,b'a')
+        with patch('meeting_agent.api.AudioReadTool',return_value=reader), \
+             patch('meeting_agent.transcription.ROOT',self.root), \
+             patch('meeting_agent.transcription.subprocess.run',side_effect=self.worker), \
+             self.assertLogs('meeting_agent.speech_runtime',level='ERROR'), \
+             TestClient(create_app()) as client:
+            response=client.post('/api/meetings/m1/transcription/run',
+                                 headers={'Authorization':'Bearer fixture-token'},
+                                 json={'audio_id':'a1','language':'zh'})
+        self.assertEqual(500,response.status_code,response.text)
+        self.assertEqual('internal_error',response.json()['detail'])
+        self.assertNotIn('broke',response.text)
     def test_non_object_and_invalid_utf8_worker_outputs_are_bounded(self):
         def output(value):
             def worker(args,**kwargs):

@@ -7,6 +7,7 @@ import httpx
 from pydantic import Field
 
 from .contracts import Contract, Identifier, NonBlank
+from .shared_http import shared_client
 from .story_tool import StoryReadTool
 
 
@@ -28,22 +29,22 @@ class JavaMeetingAccess:
 
     def _get(self, path: str, token: str) -> dict:
         try:
-            with httpx.Client(timeout=10, follow_redirects=False, trust_env=False) as client:
-                with client.stream("GET", self._origin + path,
-                                   headers={"Authorization": "Bearer " + token, "Accept": "application/json"}) as response:
-                    if response.status_code in (401, 403, 404):
-                        codes = {401: "authentication_required", 403: "permission_denied", 404: "meeting_not_found"}
-                        # /auth/me being missing is a deployment error, not a missing meeting.
-                        if response.status_code == 404 and path == "/api/auth/me":
-                            raise AccessError("backend_http_error", 502)
-                        raise AccessError(codes[response.status_code], response.status_code)
-                    if response.status_code != 200:
+            client = shared_client(timeout=10, follow_redirects=False, trust_env=False)
+            with client.stream("GET", self._origin + path,
+                               headers={"Authorization": "Bearer " + token, "Accept": "application/json"}) as response:
+                if response.status_code in (401, 403, 404):
+                    codes = {401: "authentication_required", 403: "permission_denied", 404: "meeting_not_found"}
+                    # /auth/me being missing is a deployment error, not a missing meeting.
+                    if response.status_code == 404 and path == "/api/auth/me":
                         raise AccessError("backend_http_error", 502)
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > 256 * 1024:
-                            raise AccessError("invalid_backend_response", 502)
+                    raise AccessError(codes[response.status_code], response.status_code)
+                if response.status_code != 200:
+                    raise AccessError("backend_http_error", 502)
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 256 * 1024:
+                        raise AccessError("invalid_backend_response", 502)
         except httpx.TimeoutException:
             raise AccessError("backend_timeout", 504) from None
         except httpx.HTTPError:

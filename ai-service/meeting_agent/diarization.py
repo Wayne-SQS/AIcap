@@ -10,7 +10,8 @@ from pydantic import Field, model_validator
 from .audio_tool import AudioInputRequest, PreparedAudio
 from .contracts import Contract
 from .transcription import ROOT, _SLOT, TranscriptionError
-from .speech_runtime import SPEECH_JOB_TIMEOUT_SECONDS, worker_environment
+from .speech_runtime import (SPEECH_JOB_TIMEOUT_SECONDS, log_worker_diagnostic,
+                             worker_environment)
 
 
 class DiarizationRequest(AudioInputRequest):
@@ -73,8 +74,12 @@ class LocalDiarizer:
                 data=json.loads(output.read_text(encoding='utf-8'))
                 if not isinstance(data,dict): raise ValueError('invalid worker response')
                 if 'error' in data:
-                    codes={'diarization_dependency_missing':503,'invalid_audio':422,'audio_duration_exceeded':413,'diarization_result_too_large':422}
+                    codes={'diarization_dependency_missing':503,'invalid_audio':422,'audio_duration_exceeded':413,'diarization_result_too_large':422,'internal_error':500}
                     code=data['error']
+                    if code=='internal_error':
+                        # A worker crash is our fault, not a bad upload: keep the
+                        # diagnostic in the service log and out of the response.
+                        log_worker_diagnostic('diarization worker internal error',data.get('diagnostic'))
                     raise TranscriptionError(code if isinstance(code,str) and code in codes else 'diarization_failed',codes.get(code,502) if isinstance(code,str) else 502)
                 return DiarizationPreview(audio=prepared,requested_num_speakers=num_speakers,**data)
         except (ValueError,TypeError,OSError,UnicodeError):

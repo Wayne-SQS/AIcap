@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .shared_http import shared_client
+
 
 class ModelError(Exception):
     def __init__(self, code: str, *, diagnostic: str | None = None):
@@ -79,17 +81,17 @@ class ChatModelClient:
         if urlsplit(settings.base_url).hostname == "api.deepseek.com":
             body["thinking"] = {"type": "disabled"}
         try:
-            with httpx.Client(timeout=settings.timeout_seconds, follow_redirects=False,
-                              trust_env=False, transport=self._transport) as client:
-                with client.stream("POST", settings.base_url.rstrip("/") + "/chat/completions",
-                                   headers={"Authorization": "Bearer " + settings.api_key}, json=body) as response:
-                    if response.status_code != 200:
-                        raise ModelError("provider_http_error")
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > self.MAX_BYTES:
-                            raise ModelError("provider_response_too_large")
+            client = shared_client(timeout=settings.timeout_seconds, follow_redirects=False,
+                                   trust_env=False, transport=self._transport)
+            with client.stream("POST", settings.base_url.rstrip("/") + "/chat/completions",
+                               headers={"Authorization": "Bearer " + settings.api_key}, json=body) as response:
+                if response.status_code != 200:
+                    raise ModelError("provider_http_error")
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > self.MAX_BYTES:
+                        raise ModelError("provider_response_too_large")
         except httpx.TimeoutException:
             raise ModelError("provider_timeout") from None
         except httpx.HTTPError:

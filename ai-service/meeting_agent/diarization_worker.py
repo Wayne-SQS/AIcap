@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import sys
 
+from .speech_runtime import worker_failure
+
 
 def diarize(path, model_path, num_speakers):
     try:
@@ -28,8 +30,9 @@ def diarize(path, model_path, num_speakers):
         duration=round(samples/16)
     except OverflowError:
         return {'error':'audio_duration_exceeded'}
-    except Exception:
-        return {'error':'invalid_audio'}
+    except Exception as error:
+        # Only the decoder rejecting the file proves the caller's audio is bad.
+        return worker_failure(error, context='diarization decode')
     try:
         config=so.OfflineSpeakerDiarizationConfig(
             segmentation=so.OfflineSpeakerSegmentationModelConfig(
@@ -49,8 +52,9 @@ def diarize(path, model_path, num_speakers):
             if len(labels)>32 or len(turns)>=4000: return {'error':'diarization_result_too_large'}
             turns.append(dict(start_ms=start,end_ms=end,speaker_id=labels[turn.speaker]))
         return dict(duration_ms=duration,speaker_count=len(labels),turns=turns,status='draft' if turns else 'no_speech')
-    except Exception:
-        return {'error':'diarization_failed'}
+    except Exception as error:
+        # Decoded audio reaching the model but the run still crashing is ours.
+        return worker_failure(error, context='diarization inference')
 
 
 if __name__=='__main__':
