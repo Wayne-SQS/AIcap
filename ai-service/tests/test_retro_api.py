@@ -47,7 +47,7 @@ class RetroApiTests(unittest.TestCase):
         self.assertEqual([],self.model_calls)
         self.overrides['/api/members/profiles']=(200,[])
         self.result['proposed_actions'][0]['changes']['owner_id']=999
-        self.assertEqual(502,self.post().status_code)
+        self.assertEqual(422,self.post().status_code)
         self.assertEqual([],self.save_calls)
 
     def test_unknown_outcome_retries_exact_payload(self):

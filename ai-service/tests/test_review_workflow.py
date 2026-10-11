@@ -120,7 +120,12 @@ class ReviewWorkflowTests(unittest.TestCase):
             if mutation == 'action': proposal['action'] = 'update_story_sprint'
             with self.subTest(mutation=mutation), self.assertRaises(WorkflowError) as caught:
                 self.run_flow()
-            self.assertEqual('invalid_model_proposal', caught.exception.code)
+            codes = {'meeting': 'meeting_mismatch', 'type': 'invalid_model_proposal',
+                     'target': 'unknown_story', 'old': 'snapshot_mismatch',
+                     'quote': 'quote_mismatch', 'segment': 'unknown_segment',
+                     'duplicate': 'duplicate_proposal_id', 'approved': 'invalid_model_proposal',
+                     'action': 'invalid_model_proposal'}
+            self.assertEqual(codes[mutation], caught.exception.code)
         self.assertEqual(9, len(self.requests))
 
     def test_only_strict_integer_completion_allowed(self):

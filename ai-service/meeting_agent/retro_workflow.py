@@ -2,7 +2,7 @@
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from .contracts import TranscriptSegment
+from .contracts import ResultContractError, TranscriptSegment
 from .retro_contracts import SprintRetroInput, SprintRetroOutput, validate_retro_result
 from .retro_skill import SprintRetroSkill
 from .member_tool import MemberReadTool
@@ -44,6 +44,8 @@ class SprintRetroWorkflow:
         def validate(state: MeetingState):
             try:
                 result = validate_retro_result(SprintRetroInput.model_validate(state['context']), state['candidate'])
+            except ResultContractError as exc:
+                raise WorkflowError(exc.code) from exc
             except ValueError:
                 raise WorkflowError('invalid_model_proposal') from None
             return {'result': result.model_dump()}

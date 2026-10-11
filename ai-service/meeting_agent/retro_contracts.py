@@ -75,7 +75,9 @@ def validate_retro_result(context: SprintRetroInput, payload: dict) -> SprintRet
             for ei, evidence in enumerate(item.evidence):
                 text = segments.get(evidence.segment_id)
                 if text is None or evidence.quote not in text:
-                    raise ResultContractError('invalid evidence', 'invalid_evidence', path + ('evidence', ei))
+                    field = 'segment_id' if text is None else 'quote'
+                    code = 'unknown_segment' if text is None else 'quote_mismatch'
+                    raise ResultContractError('evidence must quote the referenced segment exactly', code, path + ('evidence', ei, field))
             if group == 'decisions':
                 continue
             if item.proposal_id in ids:

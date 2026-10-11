@@ -51,7 +51,7 @@ class PlanningApiTests(unittest.TestCase):
         self.assertEqual([], self.model_calls)
         self.overrides['/api/tasks'] = (200, [])
         self.result['proposed_actions'][0]['expected']['sprint'] = 1
-        self.assertEqual(502, self.post().status_code)
+        self.assertEqual(422, self.post().status_code)
         self.assertEqual([], self.save_calls)
 
     def test_storage_outcome_unknown_retries_exact_payload_without_new_model(self):

@@ -74,10 +74,10 @@ class ReviewApiTests(unittest.TestCase):
 
     def test_non_completion_and_false_evidence_are_rejected(self):
         self.result['proposed_actions'][0]['changes']['status'] = 0
-        self.assertEqual(502, self.post().status_code)
+        self.assertEqual(422, self.post().status_code)
         self.result['proposed_actions'][0]['changes']['status'] = 2
         self.result['proposed_actions'][0]['evidence'][0]['quote'] = '伪造证据'
-        self.assertEqual(502, self.post().status_code)
+        self.assertEqual(422, self.post().status_code)
         self.assertEqual([], self.save_calls)
 
     def test_unknown_outcome_retries_exact_payload_then_reports_request_id(self):

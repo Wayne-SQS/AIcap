@@ -54,7 +54,10 @@ def validate_refinement_result(context: BacklogRefinementInput, payload: dict) -
             raise ResultContractError('duplicate story title', 'duplicate_story_title', path + ('changes', 'title'))
         proposed_titles.add(title)
         for ei, evidence in enumerate(proposal.evidence):
-            if evidence.segment_id not in segments or evidence.quote not in segments[evidence.segment_id]:
-                raise ResultContractError('invalid evidence', 'invalid_evidence', path + ('evidence', ei))
+            text = segments.get(evidence.segment_id)
+            if text is None or evidence.quote not in text:
+                field = 'segment_id' if text is None else 'quote'
+                code = 'unknown_segment' if text is None else 'quote_mismatch'
+                raise ResultContractError('evidence must quote the referenced segment exactly', code, path + ('evidence', ei, field))
     # Exact-title checks are conservative, not semantic deduplication or approval.
     return result
