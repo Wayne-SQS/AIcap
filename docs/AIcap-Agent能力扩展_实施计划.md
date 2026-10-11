@@ -34,10 +34,10 @@
 | **S1** | `knowledge_chunks` 表 + 切分器 + `EmbeddingModel` + `QdrantVectorStore` + 索引任务 | 知识库页能重建索引，chunk 数正确 | ✅ **已完成**（2026-09-19，实测 239 chunk） |
 | **S2** | `Retriever` 三路 + RRF + Reranker + ACL + `retrieval_logs` | 检索调试台并排看三路结果 | ✅ **已完成**（2026-09-25，`c0625f6`；契约测试双实现各跑一遍） |
 | **S3** | 工具层 REST 暴露（14 只读工具）+ Query Rewrite | 会议 Agent 建议质量提升 | 🟡 **S3.1/S3.2 已完成**（2026-09-25，`49604cc` + 契约测试 15 项）；**S3.3 Query Rewrite 未做** |
-| **S4** | `AgentGraph` + `Checkpointer` + 会议 Agent 重构成图 + interrupt 节点 | kill 进程后重启能续跑 | 🟡 **S4′.1 已完成**（2026-10-11，`agent-orchestrator/` 骨架 + `java_client` + `test_no_db`）；有界循环等见下注 |
+| **S4** | ~~`AgentGraph` + `Checkpointer` + 会议 Agent 重构成图 + interrupt 节点~~ | kill 进程后重启能续跑 | ⛔ **原方案已废弃**：在 ai-service 上 Checkpointer/interrupt 与红线⑤（不持久化会议内容）冲突，且该职责已由《落地方案》的 Python 编排线（`agent-orchestrator/`）接管。进度看 S4′ 线，本行不再更新 |
 | **S5** | `OrchestratorAgent` + `RiskAgent` + `ReviewAgent` | 一句话触发多 Agent 协作 | ⬜ 未开始 |
 | **S6** | **MCP Server** | Claude Desktop 直连查 AIcap 数据 | ⬜ 未开始 |
-| **S7** | Golden Set + 4 类指标 + `baseline.json` | 第一份评测报告 | ⬜ 未开始 |
+| **S7** | Golden Set + 5 类指标 + 路由指标 + `baseline.json`（口径以《落地方案》§7 为准，原"4 类指标"已过时） | 第一份评测报告 | ⬜ 未开始 |
 | **S8** | 流式 + 引用卡片 + 检索调试台前端 | 完整演示 | ⬜ 未开始 |
 
 > ⚠️ **本表的 S3~S8 已被《主管智能体 · 落地方案 v1.0》重新切分**（`docs/主管智能体_落地方案_v1.0.md` §7）：
