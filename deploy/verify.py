@@ -23,6 +23,25 @@ MODEL_FILES = (
 )
 PLACEHOLDER = re.compile(r'(replace|change[-_ ]?me|example|your[-_ ]|xxxx)', re.I)
 
+COMPOSE_FILE = ROOT / 'deploy/compose.yaml'
+NGINX_FILE = ROOT / 'deploy/nginx.conf'
+# Containers the deployment cannot run without. Each must keep a healthcheck, since
+# `depends_on: condition: service_healthy` in the same file has nothing to gate on
+# otherwise. Deleting one of those healthchecks used to pass verification silently.
+COMPOSE_SERVICES = ('mysql', 'java', 'ai')
+# A missing value must stop the stack, never fall back to a weak built-in default.
+FAIL_CLOSED_ENV = ('DB_ROOT_PASSWORD', 'DB_PASSWORD', 'JWT_SECRET', 'AICAP_LLM_API_KEY')
+SEED_SWITCH = 'AICAP_SEED_ON_START'
+# Streaming plumbing nginx needs before any text/event-stream route is proxied through it.
+SSE_MARKERS = ('proxy_buffering off', 'x-accel-buffering', 'text/event-stream')
+STRUCTURE_HINTS = {
+    'compose_service_missing': 'deploy/compose.yaml must define this service',
+    'compose_healthcheck_missing': 'this service must declare a healthcheck',
+    'compose_env_not_fail_closed': 'keep ${VAR:?message} so a missing value refuses to start',
+    'compose_seed_default_true': 'seeded 123456 demo accounts must not be the default',
+    'compose_seed_switch_missing': 'keep the switch visible in deploy/compose.yaml',
+}
+
 
 class VerificationError(ValueError):
     pass
@@ -54,7 +73,87 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def verify_config(values: dict[str, str], model_root: Path) -> None:
+def read_text(path: Path, code: str) -> str:
+    try:
+        return path.read_text(encoding='utf-8-sig')
+    except (OSError, UnicodeError):
+        raise VerificationError(code) from None
+
+
+def indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip(' '))
+
+
+def compose_services(text: str) -> dict[str, str]:
+    """Split the `services:` block into one source chunk per top-level service.
+
+    Deliberately stdlib-only and indentation-based: this checker must stay runnable
+    with a bare Python 3.12 venv, without pulling in a YAML parser.
+    """
+    blocks: dict[str, list[str]] = {}
+    current = None
+    inside = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            if current is not None:
+                blocks[current].append(line)
+            continue
+        depth = indent_of(line)
+        if depth == 0:
+            inside = stripped == 'services:'
+            current = None
+            continue
+        if not inside:
+            continue
+        if depth == 2 and stripped.endswith(':'):
+            current = stripped[:-1].strip()
+            blocks[current] = [line]
+            continue
+        if current is not None:
+            blocks[current].append(line)
+    return {service: '\n'.join(lines) for service, lines in blocks.items()}
+
+
+def verify_compose(text: str) -> None:
+    """Structural assertions on deploy/compose.yaml; offline, no daemon needed."""
+    services = compose_services(text)
+    for service in COMPOSE_SERVICES:
+        if service not in services:
+            raise VerificationError(f'compose_service_missing:{service}')
+        if not re.search(r'^[ ]+healthcheck:', services[service], re.M):
+            raise VerificationError(f'compose_healthcheck_missing:{service}')
+    for key in FAIL_CLOSED_ENV:
+        # Every occurrence must be fail-closed: a single `${VAR:-default}` anywhere
+        # (DB_PASSWORD is used by two services) silently reopens the weak default.
+        if not re.search(rf'\$\{{{key}:\?', text) or re.search(rf'\$\{{{key}:-', text):
+            raise VerificationError(f'compose_env_not_fail_closed:{key}')
+    if re.search(rf'^[ ]*{SEED_SWITCH}:[ ]*["\']?true["\']?[ ]*$', text, re.M):
+        raise VerificationError('compose_seed_default_true')
+    switch = re.search(rf'{SEED_SWITCH}:[ ]*["\']?\$\{{{SEED_SWITCH}:-([^}}]*)\}}', text)
+    if switch is None:
+        raise VerificationError('compose_seed_switch_missing')
+    if switch.group(1).strip().lower() == 'true':
+        raise VerificationError('compose_seed_default_true')
+
+
+def nginx_gaps(text: str) -> list[str]:
+    """Report SSE plumbing as a gap instead of asserting it.
+
+    The only `text/event-stream` endpoint in this repository lives in
+    agent-orchestrator, which this compose does not deploy (the stack is four
+    containers: MySQL, Java, meeting Agent, Nginx). So nginx.conf carries no
+    streaming settings today and none are required yet. It is recorded as a
+    non-fatal gap rather than fixed here: changing nginx behaviour the deployment
+    does not need is a functional change, not a hardening one.
+    """
+    lowered = text.lower()
+    if any(marker in lowered for marker in SSE_MARKERS):
+        return []
+    return ['nginx_sse_not_configured: no proxy_buffering / X-Accel-Buffering / text/event-stream']
+
+
+def verify_config(values: dict[str, str], model_root: Path) -> list[str]:
     rules = {'DB_ROOT_PASSWORD': 16, 'DB_PASSWORD': 16, 'JWT_SECRET': 32,
              'AICAP_LLM_API_KEY': 8}
     for key, minimum in rules.items():
@@ -76,10 +175,13 @@ def verify_config(values: dict[str, str], model_root: Path) -> None:
     for relative in REQUIRED_FILES:
         if not (ROOT / relative).is_file():
             raise VerificationError('deployment_file_missing')
+    verify_compose(read_text(COMPOSE_FILE, 'compose_file_unreadable'))
+    gaps = nginx_gaps(read_text(NGINX_FILE, 'nginx_config_unreadable'))
     for relative in MODEL_FILES:
         path = model_root / relative
         if not path.is_file() or path.stat().st_size == 0:
             raise VerificationError(f'model_file_missing:{relative}')
+    return gaps
 
 
 def get(origin: str, path: str, *, json_response: bool):
@@ -144,6 +246,11 @@ def verify_live(origin: str) -> None:
         raise VerificationError('meeting_ai_unhealthy')
 
 
+def failure_hint(error: VerificationError) -> str:
+    note = STRUCTURE_HINTS.get(str(error).split(':', 1)[0])
+    return f' ({note})' if note else ''
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path, default=ROOT / 'deploy/.env')
@@ -153,7 +260,7 @@ def main(argv=None) -> int:
                         help='Use AICAP_SMOKE_USERNAME/PASSWORD for an authenticated read-only smoke test.')
     args = parser.parse_args(argv)
     try:
-        verify_config(read_env(args.env_file), args.model_root)
+        gaps = verify_config(read_env(args.env_file), args.model_root)
         if args.live_url:
             verify_live(args.live_url)
         if args.smoke_login:
@@ -162,9 +269,11 @@ def main(argv=None) -> int:
             authenticated_smoke(args.live_url, os.environ.get('AICAP_SMOKE_USERNAME', ''),
                                 os.environ.get('AICAP_SMOKE_PASSWORD', ''))
     except VerificationError as error:
-        print(f'Deployment verification failed: {error}', file=sys.stderr)
+        print(f'Deployment verification failed: {error}{failure_hint(error)}', file=sys.stderr)
         return 1
-    checked = 'Deployment verification passed: config, artifacts, models'
+    for gap in gaps:
+        print(f'Deployment verification gap (non-fatal): {gap}')
+    checked = 'Deployment verification passed: config, artifacts, models, compose structure'
     if args.live_url:
         checked += ', frontend, Java/database, meeting AI'
     if args.smoke_login:

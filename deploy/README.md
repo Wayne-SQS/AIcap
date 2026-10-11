@@ -23,7 +23,7 @@ Pop-Location
 Copy-Item deploy/.env.example deploy/.env
 ```
 
-`DB_ROOT_PASSWORD`和`DB_PASSWORD`至少16字符，`JWT_SECRET`至少32字符。`deploy/.env`已被Git忽略。`AICAP_SEED_ON_START=true`会为全新演示库创建默认账号；有正式用户初始化流程后应改为`false`。画像模型密钥可以留空，会议模型密钥不可为空。
+`DB_ROOT_PASSWORD`和`DB_PASSWORD`至少16字符，`JWT_SECRET`至少32字符。`deploy/.env`已被Git忽略。`AICAP_SEED_ON_START`控制播种：`deploy/compose.yaml`里的默认值是`false`，全新生产部署不会创建演示账号；`deploy/.env.example`里显式写了`true`，因为演示与八条浏览器验收闭环依赖预置账号（5 个演示用户／37 个故事／16 个任务），缺了会直接失败。该项为`false`时整个播种流程都跳过，而不只是用户表。画像模型密钥可以留空，会议模型密钥不可为空。
 
 提交构建或启动前先执行不联网、不调用模型的检查：
 

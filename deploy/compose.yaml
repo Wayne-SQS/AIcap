@@ -4,6 +4,15 @@ services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
+    # 内存上限依据:生产编排里只有 java 一个应用连本库,Hikari 默认池 10,常态连接数远低于
+    # 下面 command 里的 --max-connections=500(那是天花板,不是常态);1G 足以容纳 InnoDB
+    # 默认 128MB buffer pool 加上数十条连接的会话缓冲,同时避免 MySQL 按宿主机内存膨胀。
+    # cpus 不省核:只是不让 MySQL 在连接尖峰或大量临时表排序时抢走 STT 子进程的 CPU。
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2"
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in deploy/.env}
       MYSQL_DATABASE: AIcap
@@ -25,12 +34,26 @@ services:
       context: ..
       dockerfile: deploy/java.Dockerfile
     restart: unless-stopped
+    # 内存上限依据:java.Dockerfile:16 的 -XX:MaxRAMPercentage=75 是「按 cgroup 上限取 75%
+    # 作堆」;没有上限时它改按宿主机内存计算,会与 MySQL/Whisper 互相抢。2G 上限即堆约
+    # 1.5G,余下留给 Metaspace/线程栈/直接内存。堆内开销有据:RagProperties.java:43-47 记录
+    # mysql 暴力检索单次最多载入 2 万条 1024 维 float32(约 80MB)候选向量,而默认向量库正是
+    # mysql(application.yml:57),再叠加 Spring Boot/MyBatis/Hikari(10 连接)基线。
+    # cpus 针对同一处:暴力余弦扫描是 CPU 密集突发,限 2 核以免拖住同一宿主上的转写任务。
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2"
     environment:
       DB_URL: jdbc:mysql://mysql:3306/AIcap?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       DB_USER: aicap
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
-      AICAP_SEED_ON_START: ${AICAP_SEED_ON_START:-true}
+      # 默认不播种:DataSeeder 在表为空时插入 5 个密码为 123456 的演示账号
+      # (DataSeeder.java:195/244),全新生产部署不该带弱口令账号。
+      # 演示与验收流程需要在 deploy/.env 里显式设 AICAP_SEED_ON_START=true。
+      AICAP_SEED_ON_START: ${AICAP_SEED_ON_START:-false}
       AICAP_AUDIO_DIR: /data/audio
       AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
       AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
@@ -56,6 +79,21 @@ services:
       context: ..
       dockerfile: deploy/ai.Dockerfile
     restart: unless-stopped
+    # 内存上限依据:语音链路是「常驻父进程 + 每个任务一个一次性子进程」
+    # (transcription_worker.py:1),且 transcription.py:17 的 _SLOT=BoundedSemaphore(1)
+    # 由转写与说话人分离共用(diarization.py:58),同一时刻最多一个原生推理子进程。
+    # 单个子进程要装下:faster-whisper base 的 int8 权重(compute_type='int8')、sherpa-onnx
+    # 的 pyannote-3.0 segmentation + eres2net embedding 两张 onnx(num_threads=2 各一),
+    # 以及最长 600 秒 16kHz 音频解码后的 float32 波形约 38MB(transcription_worker.py:41
+    # 的 16000*600 上限)。因此 3G 是宁可给宽:上限给紧会让子进程被 OOM 杀掉,表现成
+    # stt_failed/diarization_failed,而不是「转写变慢」。模型以只读挂载进容器、不进镜像层,
+    # 但推理时权重与 onnxruntime 竞技场仍会占用容器内存,已一并计入上面的估算。
+    # cpus 与代码自报的线程预算对齐:whisper cpu_threads=4(说话人分离另用 2+2)。
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: "4"
     environment:
       AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
       AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}

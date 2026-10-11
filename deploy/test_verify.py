@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import tempfile
 import threading
 import unittest
@@ -88,6 +89,92 @@ class DeploymentVerificationTests(unittest.TestCase):
         self.assertEqual(['/api/auth/login', '/api/auth/me', '/api/meetings'],
                          [request[0] for request in seen])
         self.assertEqual('Bearer fixture-token', seen[1][2])
+
+
+class ComposeStructureTests(unittest.TestCase):
+    """Structural gates: deleting a healthcheck must fail verification, not pass it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.compose = verify.COMPOSE_FILE.read_text(encoding='utf-8')
+
+    def assertComposeFails(self, text, code):
+        with self.assertRaises(verify.VerificationError) as caught:
+            verify.verify_compose(text)
+        self.assertEqual(code, str(caught.exception))
+
+    def test_repository_compose_satisfies_every_structural_rule(self):
+        verify.verify_compose(self.compose)
+
+    def test_dropping_the_first_healthcheck_fails_with_its_service_name(self):
+        stripped = re.sub(r'^ {4}healthcheck:\n(?:^ {6}.*\n)+', '', self.compose,
+                          count=1, flags=re.M)
+        self.assertNotEqual(self.compose, stripped)
+        self.assertComposeFails(stripped, 'compose_healthcheck_missing:mysql')
+
+    def test_removing_a_required_service_fails_with_its_name(self):
+        stripped = re.sub(r'^ {2}ai:\n(?:^ {4,}.*\n|\n)*', '', self.compose, flags=re.M)
+        self.assertComposeFails(stripped, 'compose_service_missing:ai')
+
+    def test_required_env_with_a_default_is_rejected(self):
+        weakened = self.compose.replace('${JWT_SECRET:?set JWT_SECRET in deploy/.env}',
+                                        '${JWT_SECRET:-dev-secret-fallback}')
+        self.assertNotEqual(self.compose, weakened)
+        self.assertComposeFails(weakened, 'compose_env_not_fail_closed:JWT_SECRET')
+
+    def test_one_defaulted_occurrence_of_a_shared_secret_is_enough_to_fail(self):
+        # DB_PASSWORD is consumed by both mysql and java; weakening only the second
+        # occurrence must still be caught.
+        weakened = self.compose.replace(
+            'DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}',
+            'DB_PASSWORD: ${DB_PASSWORD:-aicap}', 1)
+        self.assertNotEqual(self.compose, weakened)
+        self.assertComposeFails(weakened, 'compose_env_not_fail_closed:DB_PASSWORD')
+
+    def test_seed_switch_defaulting_to_true_is_rejected(self):
+        weakened = self.compose.replace('${AICAP_SEED_ON_START:-false}',
+                                        '${AICAP_SEED_ON_START:-true}')
+        self.assertNotEqual(self.compose, weakened)
+        self.assertComposeFails(weakened, 'compose_seed_default_true')
+
+    def test_hardcoded_seed_true_is_rejected(self):
+        weakened = self.compose.replace(
+            'AICAP_SEED_ON_START: ${AICAP_SEED_ON_START:-false}',
+            'AICAP_SEED_ON_START: true')
+        self.assertComposeFails(weakened, 'compose_seed_default_true')
+
+    def test_removing_the_seed_switch_is_rejected(self):
+        stripped = self.compose.replace(
+            'AICAP_SEED_ON_START: ${AICAP_SEED_ON_START:-false}\n', '')
+        self.assertComposeFails(stripped, 'compose_seed_switch_missing')
+
+    def test_nginx_sse_settings_are_a_reported_gap_never_a_failure(self):
+        self.assertEqual([], verify.nginx_gaps('proxy_buffering off;'))
+        self.assertEqual([], verify.nginx_gaps('add_header X-Accel-Buffering no;'))
+        gaps = verify.nginx_gaps('server { listen 80; }')
+        self.assertEqual(1, len(gaps))
+        self.assertTrue(gaps[0].startswith('nginx_sse_not_configured'),
+                        'the SSE gap must name itself for the report')
+
+    def test_config_verification_reports_the_gap_and_keeps_exit_code_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            models = root / 'models'
+            for relative in verify.MODEL_FILES:
+                path = models / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture')
+            env = root / '.env'
+            env.write_text(
+                'DB_ROOT_PASSWORD=root-password-123456\n'
+                'DB_PASSWORD=app-password-1234567\n'
+                'JWT_SECRET=jwt-secret-value-with-at-least-32-characters\n'
+                'AICAP_LLM_API_KEY=provider-secret-value\n', encoding='utf-8')
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = verify.main(['--env-file', str(env), '--model-root', str(models)])
+            self.assertEqual(0, code)
+            self.assertIn('nginx_sse_not_configured', output.getvalue())
 
 
 if __name__ == '__main__':
