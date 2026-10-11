@@ -15,7 +15,7 @@ import java.util.*;
 /** Immutable submissions. No approval or project mutation lives in this service. */
 @Service
 @RequiredArgsConstructor
-public class StatusAnalysisService {
+public class StatusAnalysisService extends AbstractMeetingAnalysisService {
     private final JdbcTemplate jdbc;
     private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;

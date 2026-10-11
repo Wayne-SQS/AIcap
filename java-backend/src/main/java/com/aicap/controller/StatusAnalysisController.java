@@ -1,38 +1,22 @@
 package com.aicap.controller;
 
-import com.aicap.security.Roles;
 import com.aicap.service.StatusAnalysisService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-import java.util.List;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+/** 状态域分析记录:路径是本域唯一的东西,处理器与权限口径继承自 {@link AbstractMeetingAnalysisController}。 */
 @RestController
-@RequiredArgsConstructor
 @RequestMapping("/api/meetings/{meetingId}/status-analyses")
-public class StatusAnalysisController {
-    private final StatusAnalysisService service;
+public class StatusAnalysisController extends AbstractMeetingAnalysisController {
 
-    @PostMapping
-    public ObjectNode save(@PathVariable String meetingId, @RequestBody JsonNode body) {
-        return service.save(meetingId, body, Roles.writer().getId());
+    private final StatusAnalysisService delegate;
+
+    public StatusAnalysisController(StatusAnalysisService delegate) {
+        this.delegate = delegate;
     }
 
-    @GetMapping
-    public List<ObjectNode> list(@PathVariable String meetingId) {
-        Roles.any();
-        return service.list(meetingId);
-    }
-
-    @GetMapping("/by-request/{clientRequestId}")
-    public ObjectNode findByRequest(@PathVariable String meetingId, @PathVariable String clientRequestId) {
-        return service.findByRequest(meetingId, clientRequestId, Roles.writer().getId());
-    }
-
-    @GetMapping("/{analysisId}")
-    public ObjectNode get(@PathVariable String meetingId, @PathVariable String analysisId) {
-        Roles.any();
-        return service.get(meetingId, analysisId);
+    @Override
+    protected StatusAnalysisService service() {
+        return delegate;
     }
 }
