@@ -38,6 +38,20 @@ public class PlatformToolCatalog {
 
     public static final String SEMANTIC_SEARCH = "semantic_search";
 
+    /**
+     * S5′ 触发型工具(契约 §2.4):只创建 run 落审批队列,**不写业务表**。
+     *
+     * <p>第三枚 {@code start_profile_analysis} **暂缓**:画像域没有后台消费者、
+     * {@code runAnalysis} 是同步的,兑现不了"只建 run 就返回",会吃穿编排层的有界循环预算。
+     * 缺口与两条出路已记进契约 §2.4,待拍板后再加。
+     */
+    public static final String START_MEETING_ANALYSIS = "start_meeting_analysis";
+    public static final String START_PLAN_DRAFT = "start_plan_draft";
+
+    /** 触发型工具的名字集合:PLAT-04 与分派共用一处,避免两处清单分叉 */
+    public static final List<String> TRIGGER_TOOLS =
+            List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT);
+
     public static final String PLATFORM_VERSION = "1.0";
 
     /**
@@ -47,7 +61,7 @@ public class PlatformToolCatalog {
     public static final List<String> LIMITATIONS = List.of(
             "未配置当前 Sprint 日期",
             "任务无状态字段;工时是计划值,不能据此计算完成度或过载",
-            "所有工具只读;写操作一律经审批队列,编排层没有写通道");
+            "读数据只读;触发型工具(start_*)只创建 run 落入审批队列,不写业务数据");
 
     /**
      * 一个工具的能力声明。
@@ -108,6 +122,22 @@ public class PlatformToolCatalog {
                 null,
                 true,
                 true));
+        out.add(new ToolSpec(
+                START_MEETING_ANALYSIS,
+                AGENT_PLATFORM,
+                "触发一次会议分析(产出进会议建议审批队列,需人工确认)。只创建 run,不修改任何业务数据。",
+                objectSchema(Map.of("meeting_id", strField("Meeting id", 1, 36)), "meeting_id"),
+                null,
+                false,
+                false));
+        out.add(new ToolSpec(
+                START_PLAN_DRAFT,
+                AGENT_PLATFORM,
+                "为一句规划请求生成结构化修改草案(草案仍需人工确认后才执行)。只创建 run,不修改任何业务数据。",
+                objectSchema(Map.of("request", strField("Planning request", 1, 2000)), "request"),
+                null,
+                false,
+                false));
         return List.copyOf(out);
     }
 
@@ -164,5 +194,32 @@ public class PlatformToolCatalog {
         required.add("q");
         schema.set("required", required);
         return schema;
+    }
+
+    // ------------------------------------------------------------------
+    // 触发型工具(§2.4)的参数 schema
+    // ------------------------------------------------------------------
+
+    private JsonNode objectSchema(Map<String, JsonNode> props, String... required) {
+        ObjectNode properties = mapper.createObjectNode();
+        props.forEach(properties::set);
+        ObjectNode schema = mapper.createObjectNode();
+        schema.put("type", "object");
+        schema.set("properties", properties);
+        ArrayNode req = mapper.createArrayNode();
+        for (String field : required) {
+            req.add(field);
+        }
+        schema.set("required", req);
+        return schema;
+    }
+
+    private JsonNode strField(String title, int minLength, int maxLength) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("type", "string");
+        node.put("minLength", minLength);
+        node.put("maxLength", maxLength);
+        node.put("title", title);
+        return node;
     }
 }

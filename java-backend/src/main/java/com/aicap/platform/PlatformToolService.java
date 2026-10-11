@@ -2,7 +2,9 @@ package com.aicap.platform;
 
 import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
+import com.aicap.entity.PlanningAgentRun;
 import com.aicap.entity.User;
+import com.aicap.planning.PlanningAgentJobs;
 import com.aicap.profile.ProfileToolRegistry;
 import com.aicap.rag.Hit;
 import com.aicap.rag.RagProperties;
@@ -15,6 +17,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -70,6 +73,18 @@ public class PlatformToolService {
     private final ObjectMapper mapper;
 
     /**
+     * 会议分析的触发面(S5′ 触发型工具)。
+     *
+     * <p>用 {@link ObjectProvider} 而不是直接注入:{@code agent/} 退役后这个 Bean 会消失,
+     * 那时该工具应如实报"不可用",而不是让整个平台工具层装配失败 —— 这正是
+     * {@link MeetingAnalysisTrigger} 存在的理由(平台层不得编译期依赖 {@code agent/})。
+     */
+    private final ObjectProvider<MeetingAnalysisTrigger> meetingTriggers;
+
+    /** 规划草案的触发面。planning 不是 agent 包,可以直接依赖 */
+    private final PlanningAgentJobs planningJobs;
+
+    /**
      * 调用一个工具。
      *
      * @param caller 已经过 {@code Roles.writer()} 校验的调用者;工具内部还会再查一次库,
@@ -117,7 +132,69 @@ public class PlatformToolService {
         if (PlatformToolCatalog.SEMANTIC_SEARCH.equals(toolName)) {
             return semanticSearch(args, caller, started);
         }
+        if (PlatformToolCatalog.START_MEETING_ANALYSIS.equals(toolName)) {
+            return startMeetingAnalysis(args, caller, started);
+        }
+        if (PlatformToolCatalog.START_PLAN_DRAFT.equals(toolName)) {
+            return startPlanDraft(args, caller, started);
+        }
         throw ApiException.notFound("未知工具: " + toolName);
+    }
+
+    /**
+     * 触发一次会议分析(S5′ 触发型工具,契约 §2.4)。**只创建 run**,不写任何业务表。
+     *
+     * <p>幂等口径:底层 {@code meeting_agent_runs} 有 {@code UNIQUE KEY meeting_id} ——
+     * 一个会议只会有一条 run,所以"已存在"就返回它并标 {@code deduplicated=true}
+     * (不论它是 queued/running 还是已终局;要重跑终局的 run 走既有 retry 端点)。
+     */
+    private ToolOutcome startMeetingAnalysis(JsonNode args, User caller, long started) {
+        String tool = PlatformToolCatalog.START_MEETING_ANALYSIS;
+        String meetingId = args.path("meeting_id").asText("").trim();
+        if (meetingId.isEmpty()) {
+            return failure(tool, "invalid_arguments", "meeting_id 必填", started);
+        }
+        MeetingAnalysisTrigger trigger = meetingTriggers.getIfAvailable();
+        if (trigger == null) {
+            return failure(tool, "agent_tool_unavailable",
+                    "会议智能体未启用,无法触发分析", started);
+        }
+        MeetingAnalysisTrigger.Triggered triggered = trigger.trigger(meetingId, caller.getId());
+        return success(tool, triggerJson(triggered.runId(), triggered.status(), triggered.deduplicated()),
+                null, started);
+    }
+
+    /**
+     * 生成一份规划草案(S5′ 触发型工具,契约 §2.4)。**只创建 run**;
+     * 草案仍需人工 confirm 才会写业务数据(见 planning 的 confirm 流程)。
+     *
+     * <p>幂等口径:{@code planning_agent_runs} 没有唯一键,故按"同一 {@code request_text}
+     * 已有未完成 run"判定(含 {@code waiting_confirmation}:草案还在等人确认时再触发无意义)。
+     */
+    private ToolOutcome startPlanDraft(JsonNode args, User caller, long started) {
+        String tool = PlatformToolCatalog.START_PLAN_DRAFT;
+        String request = args.path("request").asText("").trim();
+        if (request.isEmpty()) {
+            return failure(tool, "invalid_arguments", "request 必填", started);
+        }
+        if (request.length() > 2000) {
+            return failure(tool, "invalid_arguments", "request 过长(上限 2000 字符)", started);
+        }
+        PlanningAgentRun existing = planningJobs.findUnfinishedByRequest(request);
+        if (existing != null) {
+            return success(tool, triggerJson(existing.getId(), existing.getStatus(), true), null, started);
+        }
+        PlanningAgentRun run = planningJobs.queue(request, caller.getId());
+        return success(tool, triggerJson(run.getId(), run.getStatus(), false), null, started);
+    }
+
+    /** 触发型工具的统一回执(契约 §2.4):run_id + status + 是否复用了既有 run */
+    private JsonNode triggerJson(String runId, String status, boolean deduplicated) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("run_id", runId);
+        node.put("status", status);
+        node.put("deduplicated", deduplicated);
+        return node;
     }
 
     /**

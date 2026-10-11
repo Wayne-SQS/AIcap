@@ -96,6 +96,23 @@ public class PlanningAgentJobs {
         }
     }
 
+    /**
+     * 触发型工具({@code start_plan_draft})的幂等判定(契约 §2.4):
+     * 同一 {@code request_text} 是否已有未完成 run。
+     *
+     * <p>{@code planning_agent_runs} 没有唯一键,所以"同一请求重复触发"只能这样判;
+     * 未完成含 {@code waiting_confirmation} —— 草案还在等人确认时再触发一次没有意义。
+     */
+    public PlanningAgentRun findUnfinishedByRequest(String requestText) {
+        if (requestText == null || requestText.isBlank()) {
+            return null;
+        }
+        return runs.selectOne(new QueryWrapper<PlanningAgentRun>()
+                .eq("request_text", requestText)
+                .in("status", "queued", "running", "waiting_confirmation")
+                .orderByDesc("created_at").last("LIMIT 1"));
+    }
+
     public boolean runNext() {
         expireRuns();
         PlanningAgentRun run = runs.selectOne(new QueryWrapper<PlanningAgentRun>()

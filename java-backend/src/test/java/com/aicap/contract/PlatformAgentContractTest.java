@@ -7,7 +7,9 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import com.aicap.platform.PlatformToolCatalog;
 import java.util.LinkedHashSet;
+import java.util.UUID;
 import java.util.List;
 import java.util.Set;
 
@@ -111,15 +113,30 @@ class PlatformAgentContractTest extends ContractTestSupport {
         }
     }
 
-    /** PLAT-04:工具层不得暴露任何写通道(编排层没有写库能力,这是结构性保证) */
+    /** PLAT-04:只读红线的新口径 —— 「读数据只读 + 触发型只建 run」(契约 §2.4，2026-10-11 拍板)。
+     *
+     *  <p>原先这里钉的是「所有工具 `read_only` 必须为 true、信封里不得出现 `read_only:false`」。
+     *  S5′ 加了三枚触发型工具后口径放宽为：**除这三枚，任何工具都不得是写工具**；
+     *  而这三枚只创建 run 落审批队列、不写业务表（它们各自有专门的用例）。
+     */
     @Test
-    void plat04_catalog_exposesReadOnlyToolsOnly() {
+    void plat04_catalog_hasNoWriteToolExceptTheThreeTriggers() {
         ApiResponse r = get(CATALOG, token(USER_ADMIN));
+        Set<String> triggers = new LinkedHashSet<>(PlatformToolCatalog.TRIGGER_TOOLS);
+        Set<String> nonReadOnly = new LinkedHashSet<>();
         for (JsonNode tool : r.json().path("tools")) {
-            assertTrue(tool.path("read_only").asBoolean(),
-                    "工具层出现写工具: " + tool.path("name").asText());
+            String name = tool.path("name").asText();
+            if (tool.path("read_only").asBoolean()) {
+                assertFalse(triggers.contains(name),
+                        "触发型工具不该被标成只读: " + name);
+                continue;
+            }
+            assertTrue(triggers.contains(name),
+                    "工具层出现计划外的写工具: " + name);
+            nonReadOnly.add(name);
         }
-        assertFalse(r.body().contains("\"read_only\":false"), "信封里出现写工具: " + r.body());
+        assertEquals(triggers, nonReadOnly,
+                "三枚触发型工具必须都在册且都标为非只读: " + r.body());
     }
 
     /** PLAT-05:能力限制必须随清单下发 —— 主管规划时要带着它们,不能让人以为数据是全的 */
@@ -260,5 +277,53 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertEquals(200, r.status(), r.body());
         assertFalse(r.json().path("ok").asBoolean(), r.body());
         assertEquals("invalid_tool_arguments", r.json().path("error_code").asText(), r.body());
+    }
+
+    // ==================== 触发型工具(S5′，契约 §2.4) ====================
+
+    /** PLAT-18:触发型工具**只建 run**，且同域幂等防重(同一请求再触发返回同一条 run) */
+    @Test
+    void plat18_triggerTools_createRunThenDeduplicate() {
+        // 请求文本带 uuid:测试库若在两次跑之间没被清空,也不会因为历史行而误判"已存在"
+        String body = json(map("request", "把 US01 挪到第 3 个 Sprint " + UUID.randomUUID()));
+
+        ApiResponse first = post(TOOLS + "start_plan_draft", token(USER_ADMIN), body);
+        assertEquals(200, first.status(), first.body());
+        JsonNode firstResult = first.json().path("result");
+        assertTrue(first.json().path("ok").asBoolean(), first.body());
+        String runId = firstResult.path("run_id").asText();
+        assertFalse(runId.isEmpty(), "必须回 run_id: " + first.body());
+        assertEquals("queued", firstResult.path("status").asText(), first.body());
+        assertFalse(firstResult.path("deduplicated").asBoolean(), first.body());
+
+        ApiResponse second = post(TOOLS + "start_plan_draft", token(USER_ADMIN), body);
+        assertEquals(200, second.status(), second.body());
+        JsonNode secondResult = second.json().path("result");
+        assertEquals(runId, secondResult.path("run_id").asText(),
+                "同一请求重复触发必须复用既有 run,不能堆第二条: " + second.body());
+        assertTrue(secondResult.path("deduplicated").asBoolean(),
+                "复用既有 run 时必须标 deduplicated=true: " + second.body());
+    }
+
+    /** PLAT-19:触发型工具缺必填参数 → 200 + ok=false(invalid_arguments)，不是 4xx */
+    @Test
+    void plat19_triggerTools_missingArgsAreOkFalse() {
+        ApiResponse noRequest = post(TOOLS + "start_plan_draft", token(USER_ADMIN), json(map()));
+        assertEquals(200, noRequest.status(), noRequest.body());
+        assertFalse(noRequest.json().path("ok").asBoolean(), noRequest.body());
+        assertEquals("invalid_arguments", noRequest.json().path("error_code").asText(), noRequest.body());
+
+        ApiResponse noMeeting = post(TOOLS + "start_meeting_analysis", token(USER_ADMIN), json(map()));
+        assertEquals(200, noMeeting.status(), noMeeting.body());
+        assertFalse(noMeeting.json().path("ok").asBoolean(), noMeeting.body());
+        assertEquals("invalid_arguments", noMeeting.json().path("error_code").asText(), noMeeting.body());
+    }
+
+    /** PLAT-20:触发型工具**也**受写入门槛约束(viewer 403 / 未登录 401) —— 它毕竟会建 run */
+    @Test
+    void plat20_triggerTools_requireWriterRole() {
+        String body = json(map("request", "把 US02 挪到第 4 个 Sprint " + UUID.randomUUID()));
+        assertStatus(post(TOOLS + "start_plan_draft", token(USER_VIEWER), body), 403);
+        assertStatus(post(TOOLS + "start_plan_draft", null, body), 401);
     }
 }
