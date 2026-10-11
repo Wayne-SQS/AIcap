@@ -32,6 +32,12 @@ AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-v4-flash")
 # 这里是单步上限，防止某一步卡死把整个预算耗光。
 AICAP_LLM_TIMEOUT = float(os.getenv("AICAP_LLM_TIMEOUT", "60"))
 
+# 反问阈值（契约 §5.4 的 `confidence < 0.6` → 反问）。
+# **可配置、写在代码里、不写死在 prompt 里**：prompt 只告诉模型"如实给 confidence"，
+# 由 `orchestrator` 在 Python 里机械比对。环境变量 `AICAP_CLARIFY_CONFIDENCE` 可覆盖，
+# 调它不需要改代码、更不需要重训 prompt。
+CLARIFY_CONFIDENCE = float(os.getenv("AICAP_CLARIFY_CONFIDENCE", "0.6"))
+
 # SSE 心跳间隔（秒，契约 §3.1 建议 15s 防反代断流）。
 # **消费方必须每次循环重新读这个属性**，不要在导入时抄进局部变量 ——
 # 测试靠 monkeypatch 成 0.05 把心跳路径跑快。

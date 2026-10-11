@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 import uuid
 from typing import Any, AsyncIterator
 
@@ -30,10 +32,19 @@ from starlette.background import BackgroundTask
 from . import config
 from . import events
 from . import loop as loop_module
+from . import orchestrator
 from .java_client import JavaClient
 from .model_client import ModelClient, ModelProtocol
 from .runtime import REGISTRY, RunRegistry
-from .schemas import PlatformProtocolError, PlatformUnavailable
+from .schemas import (
+    Catalog,
+    ModelError,
+    PlatformError,
+    PlatformProtocolError,
+    PlatformUnavailable,
+)
+
+_LOG = logging.getLogger(__name__)
 
 # 上游协议错误 → 本层 HTTP 状态。编排层是**代理**：Java 说 404（会话不存在 / 不是你
 # 的），对前端就该是 404。落成 500 会把"查无此会话"说成"服务端坏了"，前端会去重试。
@@ -110,16 +121,213 @@ def _start_seq(request: Request, after_seq: int) -> int:
     return max(candidates)
 
 
-async def _background_run(client: JavaClient, **kwargs: Any) -> None:
+async def _background_run(
+    client: JavaClient,
+    *,
+    session_id: str,
+    run_id: str,
+    utterance: str,
+    jwt: str,
+    registry: RunRegistry,
+    model: ModelProtocol,
+) -> None:
     """后台任务自持一个 `JavaClient`。
 
     `/chat` 里那个 `async with` 的客户端**不能**交给后台任务 —— 请求一返回它就关了，
     循环下一次 `append_event` 直接炸。所以任务自己开一个，自己关。
     """
     try:
-        await loop_module.run(client=client, **kwargs)
+        await loop_module.run(
+            client=client,
+            session_id=session_id,
+            run_id=run_id,
+            utterance=utterance,
+            jwt=jwt,
+            registry=registry,
+            model=model,
+            # 规划相挂在 claim 窗口内（见 loop.run 的 `pre_loop` 说明）：
+            # 它决定这一轮是"反问"还是"派活"，并且是 loop 之前唯一发事件的地方。
+            pre_loop=lambda: _plan_phase(
+                client=client,
+                model=model,
+                registry=registry,
+                session_id=session_id,
+                run_id=run_id,
+                utterance=utterance,
+                jwt=jwt,
+            ),
+        )
     finally:
         await client.aclose()
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+async def _plan_phase(
+    *,
+    client: JavaClient,
+    model: ModelProtocol,
+    registry: RunRegistry,
+    session_id: str,
+    run_id: str,
+    utterance: str,
+    jwt: str,
+) -> bool:
+    """主管规划相：`plan()` → 留痕 → 反问或派活。返回 `True` 表示可以进工具循环。
+
+    主管智能体**只 `plan()`**（契约 §5.4）—— 发事件、留痕、调触发型工具都是**编排层**
+    在这个函数里做的，所以 `orchestrator.py` 里没有 `execute()`，这里也没有"主管在干活"。
+
+    事件顺序（契约 §3.4 第 2 条）：`session.start`（loop 的 on_claim，在本相之前）
+    → `intent.routed` → `agent.dispatched` → 循环里的 `tool.call`。反问那一轮则是
+    `clarify.request` → `run.end`，不进循环；问问题那一轮没有 `agent.dispatched`，
+    照发 `intent.routed{route: null}` 后把话交回循环。
+    """
+    started = time.monotonic()
+
+    async def emit(type_: str, data: dict[str, Any]) -> None:
+        """落一条事件并唤醒 SSE 等待者 —— 顺序不能反（见 loop._emit 的同一条理由）。"""
+        await client.append_event(
+            session_id=session_id, run_id=run_id, type=type_, detail=data, jwt=jwt
+        )
+        registry.notify(session_id)
+
+    async def fail(code: str, message: str) -> bool:
+        await emit(
+            "run.error",
+            {"code": code, "message": message, "steps": 0, "elapsed_ms": _elapsed_ms(started)},
+        )
+        return False
+
+    try:
+        # 清单在同一个 run 里只拉一次：plan() 用它派生路由，本层用它拼留痕的 candidates。
+        catalog = await client.catalog(jwt)
+        decision = await orchestrator.plan(utterance, jwt, model=model, catalog=catalog)
+    except ModelError as error:
+        # 没配密钥（`not_configured`）、模型不可达、返回的不是合法 JSON —— 全部如实上报。
+        # **没有任何兜底路由**：这里绝不会"猜一个 route 让它继续跑"。
+        return await fail(error.code, error.message)
+    except PlatformError as error:
+        return await fail(error.code, error.message)
+
+    logged = await _write_routing_log(
+        client,
+        session_id=session_id,
+        run_id=run_id,
+        utterance=utterance,
+        decision=decision,
+        catalog=catalog,
+        jwt=jwt,
+    )
+
+    if decision.clarify is not None:
+        await emit(
+            "clarify.request",
+            {
+                "question": decision.clarify.get("question") or "",
+                "options": list(decision.clarify.get("options") or []),
+                "logged": logged,
+            },
+        )
+        # 反问也是终局：这轮的答复在下一次 /chat 里进来（契约 §3.4 第 3 条要求
+        # run.end/run.error 是该 run 的最后一条）。
+        await emit(
+            "run.end",
+            {"status": "clarify", "intent": decision.intent, "elapsed_ms": _elapsed_ms(started)},
+        )
+        return False
+
+    # 到这里 route 要么是**本轮 catalog 里真实存在**的触发型工具，要么是 None
+    # （"这一轮不需要子智能体"——交给工具循环自己用只读工具作答，见 apply_rules）。
+    await emit(
+        "intent.routed",
+        {
+            "intent": decision.intent,
+            "route": decision.route,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "logged": logged,
+        },
+    )
+
+    if decision.route is None:
+        # 问问题的回合：交回工具循环。**必须先发 intent.routed** —— 契约 §3.4#2 要求它
+        # 先于任何 `tool.call`，而这一轮循环里很可能就要调只读工具。
+        return True
+
+    route = decision.route
+    try:
+        outcome = await client.call_tool(route, decision.args, jwt)
+    except PlatformError as error:
+        return await fail(error.code, error.message)
+    if outcome.is_failure:
+        # 触发型工具的业务失败也是 200 + ok=false（契约 §2.3）——照实报，
+        # 不假装"已派发"（那会让用户去审批队列里找一个根本不存在的 run）。
+        return await fail(
+            outcome.error_code or "dispatch_failed",
+            outcome.error_message or "触发型工具派发失败",
+        )
+
+    result = outcome.result if isinstance(outcome.result, dict) else {}
+    await emit(
+        "agent.dispatched",
+        {
+            # route 就是触发型工具名（§2.4 的契约），它是"派给谁/派了什么"的唯一无歧义标识
+            "agent": route,
+            "job_id": result.get("run_id"),
+            "mode": "trigger",
+            "status": result.get("status"),
+            # 同域幂等防重：目标对象上已有未完成 run 时返回既有的那一个
+            "deduplicated": bool(result.get("deduplicated")),
+        },
+    )
+    return True
+
+
+async def _write_routing_log(
+    client: JavaClient,
+    *,
+    session_id: str,
+    run_id: str,
+    utterance: str,
+    decision: orchestrator.Plan,
+    catalog: Catalog,
+    jwt: str,
+) -> bool:
+    """写路由留痕（契约 §2.7：`plan()` 之后、派活之前），返回是否真的写进去了。
+
+    写失败**不终止本轮**：路由事实已经落在 `agent_events` 的 `intent.routed` /
+    `clarify.request` 里、没丢，为一次**指标**写失败把用户对话框打断不划算。
+    但降级必须**留痕** —— `logged=false` 会跟着事件流出去，S7 的分母少了一行这件事
+    必须看得见；静默少一行才是真危险。
+    """
+    routes = orchestrator.routes_from_catalog(catalog)
+    try:
+        await client.write_routing_log(
+            session_id=session_id,
+            run_id=run_id,
+            utterance=utterance,  # 隐私：**只**经这个端点落库，别处一律不带
+            intent=decision.intent,
+            route=decision.route,
+            confidence=decision.confidence,
+            reason=decision.reason,
+            asked_clarify=decision.clarify is not None,
+            candidates=orchestrator.candidates(routes, chosen=decision.route),
+            jwt=jwt,
+        )
+    except PlatformError as error:
+        # 只记 code 与 run/session：**不记 error.message，更不记 utterance** ——
+        # 日志是另一条侧路，别让它把用户原话漏出去。
+        _LOG.warning(
+            "routing_log 写入失败（本轮继续，事件里带 logged=false）：code=%s session=%s run=%s",
+            error.code,
+            session_id,
+            run_id,
+        )
+        return False
+    return True
 
 
 async def _background_resume(

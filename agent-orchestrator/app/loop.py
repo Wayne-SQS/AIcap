@@ -124,8 +124,23 @@ async def run(
     model: ModelProtocol,
     system_prompt: str | None = None,
     required_tools: frozenset[str] | set[str] = frozenset(),
+    pre_loop: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
-    """开一个新 run（`POST /chat` 起它，作为独立后台任务）。"""
+    """开一个新 run（`POST /chat` 起它，作为独立后台任务）。
+
+    `pre_loop` 是**唯一**的循环前置钩子（S5′ 加的，默认 `None` 即老语义）：它在
+    `registry.claim` **之内**、`session.start` 与检查点 #0 **之后**执行 —— 主管的规划相
+    （`main._plan_phase`：plan → 留痕 → 反问/派活）挂在这里。为什么非得在这个窗口里：
+
+    - 规划要花一次模型往返（秒级）。放在 `claim` 之前，`/chat` 的 409「同一会话只有一个
+      run」就出现真空窗口，两次点击能同时起两个 run；
+    - `session.start` 必须是这个 run 的第一条事件（`tests/test_chat.py` 与前端都这么认），
+      所以钩子排在它后面。
+
+    返回 `True` 表示可以进工具循环；返回 `False` 表示本轮已经终局（钩子自己发过
+    `run.end` / `run.error`），循环不再跑。**`resume()` 不传这个钩子** —— 崩溃恢复是
+    接着跑，不是重新规划。
+    """
     state = initial_state(
         session_id=session_id,
         run_id=run_id,
@@ -148,7 +163,15 @@ async def run(
         )
         await _save_checkpoint(client, state, jwt)
 
-    await _drive(state=state, jwt=jwt, client=client, registry=registry, model=model, on_claim=on_claim)
+    await _drive(
+        state=state,
+        jwt=jwt,
+        client=client,
+        registry=registry,
+        model=model,
+        on_claim=on_claim,
+        pre_loop=pre_loop,
+    )
 
 
 async def resume(
@@ -175,6 +198,7 @@ async def _drive(
     registry: RunRegistry,
     model: ModelProtocol,
     on_claim: Callable[[], Awaitable[None]] | None = None,
+    pre_loop: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
     session_id = str(state.get("session_id") or "")
     run_id = str(state.get("run_id") or "")
@@ -187,6 +211,10 @@ async def _drive(
     try:
         if on_claim is not None:
             await on_claim()
+        # 规划相（只有新 run 有；`resume` 不传）：过不了就**不进循环** ——
+        # 终局事件由钩子自己发（反问是 run.end，失败是 run.error）。
+        if pre_loop is not None and not await pre_loop():
+            return
         await _run_loop(state=state, jwt=jwt, client=client, registry=registry, model=model)
     except Exception:
         # 后台任务不能把异常抛出去：asyncio 只会在退出时记一句

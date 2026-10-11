@@ -149,11 +149,15 @@ class JavaClient:
         返回 `ToolOutcome` 即**成功到达**了工具层；工具自己失败与否看
         `outcome.is_failure`，那是要喂回模型的观察结果，不是异常。
 
-        **形态是 POST，但语义是读**：`PlatformToolCatalog` 三处 `ToolSpec`
-        的 `readOnly` 字面量全是 `true`，14 个工具无一写业务表（红线①：模型产出
-        一律经审批队列）。所以它走重试路径 —— 工具调用是循环里最频繁的网络往返，
-        不重试等于一次抖动就废掉整个 run。**将来若在这个端点挂上会写库的工具，
-        必须同时把它移出重试路径**。
+        **形态是 POST，但语义是读**：三处只读 `ToolSpec` 的 `readOnly` 字面量是 `true`，
+        14 个只读工具无一写业务表（红线①：模型产出一律经审批队列）。所以它走重试路径
+        —— 工具调用是循环里最频繁的网络往返，不重试等于一次抖动就废掉整个 run。
+
+        **S5′ 的触发型工具（`read_only=false`）也走这条路，是有意的**：它们不写业务表、
+        只创建 run，而同域**幂等防重**（契约 §2.4 第 2 条：目标对象上已有未完成 run 时
+        返回既有 `run_id` + `deduplicated=true`）让"请求已送达但响应丢了"那种重发**不产生
+        第二个 run**。于是这里重试的收益（一次网络抖动不再吃掉一次派活）大于代价。
+        ⚠️ 将来若往这个端点挂上**没有幂等键**的写工具，必须把它移出重试路径。
         """
         response = await self._request_idempotent(
             "POST",
@@ -273,6 +277,54 @@ class JavaClient:
             "GET", "/api/agents/runs/unfinished", jwt=jwt, params={"session_id": session_id}
         )
         return [UnfinishedRun.model_validate(item) for item in response.json()]
+
+    async def write_routing_log(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        utterance: str,
+        intent: str,
+        route: str | None,
+        confidence: float,
+        reason: str,
+        asked_clarify: bool,
+        candidates: list[dict[str, Any]],
+        jwt: str,
+    ) -> int:
+        """`POST /api/agents/routing-logs` —— 落一行路由留痕（契约 §2.7 / §4.3），返回 `id`。
+
+        `plan()` 之后、派活之前调它：反问的样本（`asked_clarify=1`）与派活的样本都要留，
+        否则 S7 的"澄清率"没有分母。
+
+        **写操作，零重试**（走 `_request`，结构上够不到 `_request_idempotent`）：
+        `routing_logs` 是**追加式**表、没有幂等键（`id` 自增，契约 §2.7「同一 run 重放会
+        追加新行、不去重」），所以重发不是"幂等的重复"而是**真的多一行留痕** ——
+        而 S7 的澄清率与 intent 准确率**以行数为分母**，多出来的行会直接把指标算歪，
+        且事后在库里分辨不出哪一行是重试产物。宁可少一行（调用方会把它标成
+        `logged=false` 发进 `intent.routed`，指标缺失**可见**），也不留一行假的。
+
+        ⚠️ `utterance` 是**用户原话（隐私）**：它是本方法唯一的用途，也只允许经这个
+        端点落到 `routing_logs.utterance`（读取限 admin/owner）。**不要**把它捎进
+        日志、事件 detail 或任何异常文本 —— 本方法抛出的异常里也不含它。
+        """
+        response = await self._request(
+            "POST",
+            "/api/agents/routing-logs",
+            jwt=jwt,
+            json={
+                "session_id": session_id,
+                "run_id": run_id,
+                "utterance": utterance,
+                "intent": intent,
+                "route": route,
+                "confidence": confidence,
+                "reason": reason,
+                "asked_clarify": asked_clarify,
+                "candidates": candidates,
+            },
+        )
+        return int(response.json()["id"])
 
     async def health(self) -> bool:
         """探 Java 是否可达。

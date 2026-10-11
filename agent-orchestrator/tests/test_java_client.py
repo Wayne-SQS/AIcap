@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -359,6 +360,21 @@ _WRITES = [
             session_id="s", run_id="r", node_name="loop", state={}, jwt="jwt"
         ),
     ),
+    (
+        "write_routing_log",
+        lambda client: client.write_routing_log(
+            session_id="s",
+            run_id="r",
+            utterance="要开会",
+            intent="start_meeting",
+            route="start_meeting_analysis",
+            confidence=0.92,
+            reason="用户要求分析会议",
+            asked_clarify=False,
+            candidates=[],
+            jwt="jwt",
+        ),
+    ),
 ]
 
 
@@ -369,7 +385,8 @@ async def test_write_endpoints_are_never_retried(invoke):
     `append_event` 重发是**真的多一条事件**（`agent_events.id` 自增主键，
     库里分辨不出重复），前端会看到重复的一帧、seq 凭空跳号；
     `put_checkpoint` 重发会把"恰好晚到的那一发"覆盖成先到的那一发，
-    而检查点是恢复的唯一根据。
+    而检查点是恢复的唯一根据；`write_routing_log` 重发是**真的多一行留痕**，
+    而 S7 的澄清率/intent 准确率以行数为分母 —— 多出来的行直接把指标算歪。
     """
     script = _Script(*[httpx.ConnectError("down") for _ in range(5)])
 
@@ -378,6 +395,79 @@ async def test_write_endpoints_are_never_retried(invoke):
             await invoke(client)
 
     assert script.count == 1, "写操作重试了一次都不行"
+
+
+# ==========================================================================
+# 路由留痕（契约 §2.7 / §4.3）
+# ==========================================================================
+
+
+async def test_routing_log_payload_is_the_contract_body():
+    """body 就是契约 §2.7 列的那九个字段（多一个少一个都不行），返回的 `id` 是行号。"""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        seen["authorization"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 42})
+
+    async with JavaClient(BASE, transport=_transport(handler)) as client:
+        log_id = await client.write_routing_log(
+            session_id="s-1",
+            run_id="r-1",
+            utterance="出个报告",
+            intent="generate_report",
+            route=None,
+            confidence=0.41,
+            reason="报告类型不明确",
+            asked_clarify=True,
+            candidates=[{"route": "start_plan_draft", "required": ["request"], "chosen": False}],
+            jwt="tok-abc",
+        )
+
+    assert log_id == 42
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/agents/routing-logs"
+    assert seen["authorization"] == "Bearer tok-abc"
+    assert seen["body"] == {
+        "session_id": "s-1",
+        "run_id": "r-1",
+        "utterance": "出个报告",
+        "intent": "generate_report",
+        "route": None,
+        "confidence": 0.41,
+        "reason": "报告类型不明确",
+        "asked_clarify": True,
+        "candidates": [{"route": "start_plan_draft", "required": ["request"], "chosen": False}],
+    }
+    # `user_id` 不在 body 里：身份只来自 JWT，Java 自己从令牌与会话归属推
+    assert "user_id" not in seen["body"]
+
+
+async def test_routing_log_write_reports_ownership_failure_without_retrying():
+    """会话不是你的 → 404（Java 侧口径），**一次就报**：重发只会拿到同一个 404。"""
+    script = _Script(*_status(404, {"detail": "会话不存在"}, count=5))
+
+    async with JavaClient(BASE, transport=_transport(script)) as client:
+        with pytest.raises(PlatformProtocolError) as excinfo:
+            await client.write_routing_log(
+                session_id="s",
+                run_id="r",
+                utterance="要开会",
+                intent="start_meeting",
+                route="start_meeting_analysis",
+                confidence=0.9,
+                reason="",
+                asked_clarify=False,
+                candidates=[],
+                jwt="jwt",
+            )
+
+    assert script.count == 1
+    assert excinfo.value.status == 404
+    assert excinfo.value.detail == "会话不存在"
 
 
 async def test_client_error_is_not_retried():

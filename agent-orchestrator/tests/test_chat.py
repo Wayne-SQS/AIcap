@@ -20,7 +20,16 @@ from app import config
 from app.main import create_app
 from app.runtime import RunRegistry
 
-from fake_platform import BlockingModel, FakePlatform, ScriptedModel, UTTERANCE, final, seed_crashed
+from fake_platform import (
+    BlockingModel,
+    FakePlatform,
+    ScriptedModel,
+    UTTERANCE,
+    final,
+    plan_json,
+    plan_reply,
+    seed_crashed,
+)
 
 TOKEN = "tok-ok"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -108,7 +117,8 @@ async def test_chat_503_when_model_not_configured_and_no_side_effects(
 
 async def test_chat_returns_handles_and_drives_the_loop():
     platform = FakePlatform()
-    model = ScriptedModel(final("先看看"), final('{"answer": "ok"}'))
+    # 第一发是**规划相**（S5′）：模型只提案，Python 判要不要反问。
+    model = ScriptedModel(plan_reply(), final("先看看"), final('{"answer": "ok"}'))
     app = _app(platform, model)
 
     async with _client(app) as client:
@@ -121,8 +131,14 @@ async def test_chat_returns_handles_and_drives_the_loop():
 
     run_id = body["run_id"]
     types = platform.event_types(run_id)
-    assert types[0] == "session.start"
+    assert types[0] == "session.start", "规划相挂在 claim 窗口内，session.start 仍是第一条"
     assert types[-1] == "run.end"
+    # 高置信度 + 必填参数齐全 → 派活：route 就是那枚触发型工具，参数原样透传
+    assert types[1] == "intent.routed"
+    assert types.index("intent.routed") < types.index("agent.dispatched")
+    assert platform.calls == [
+        {"name": "start_meeting_analysis", "arguments": {"meeting_id": "m-1"}}
+    ]
     assert platform.checkpoint_state(run_id) is not None, "跑完的 run 也该留下检查点"
 
     # 事件全挂在返回的那个会话上
@@ -131,7 +147,9 @@ async def test_chat_returns_handles_and_drives_the_loop():
 
 async def test_chat_creates_session_when_none_given_and_reuses_it_when_given():
     platform = FakePlatform()
-    model = ScriptedModel(final("a"), final("b"), final("c"), final("d"))
+    model = ScriptedModel(
+        plan_reply(), final("a"), final("b"), plan_reply(), final("c"), final("d")
+    )
     app = _app(platform, model)
 
     async with _client(app) as client:
@@ -171,9 +189,21 @@ async def test_chat_404_for_foreign_session():
 
 
 async def test_chat_409_when_a_run_is_already_active():
-    """同一会话同时只该有一个 run 在跑。"""
+    """同一会话同时只该有一个 run 在跑。
+
+    卡住的是**规划相**那一发模型调用 —— 规划相落在 `registry.claim` 的窗口内
+    （见 `loop.run` 的 `pre_loop`），所以规划期间该会话照样"有 run 在跑"，
+    409 不会出现真空窗口。
+    """
     platform = FakePlatform()
-    model = BlockingModel()
+    model = BlockingModel(
+        plan_json(
+            route=None,
+            confidence=0.41,
+            args={},
+            clarify={"question": "要分析哪一场会议？", "options": ["最近一次周会"]},
+        )
+    )
     app = _app(platform, model)
 
     async with _client(app) as client:

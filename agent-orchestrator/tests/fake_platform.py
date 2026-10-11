@@ -34,6 +34,28 @@ OWNER_ID = 1
 DEFAULT_EVENT_LIMIT = 500
 MAX_EVENT_LIMIT = 1000
 
+# 照抄 `PlatformToolCatalog` 的两枚**现行**触发型工具（`read_only=false`，
+# `agent="platform"`，`args_schema.required` 就是派活时的必填参数）。
+# `start_profile_analysis` 暂缓（画像域无后台消费者），要测它用
+# `FakePlatform.add_trigger_tool()` —— 那也顺便证明"Java 侧加一枚工具，
+# 编排层的路由集合零改动就跟着变"。
+DEFAULT_TRIGGER_TOOLS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "start_meeting_analysis",
+        "agent": "platform",
+        "description": "触发一次会议分析（产出进会议建议审批队列，需人工确认）。只创建 run。",
+        "required": ("meeting_id",),
+        "properties": {"meeting_id": {"type": "string", "minLength": 1, "maxLength": 36}},
+    },
+    {
+        "name": "start_plan_draft",
+        "agent": "platform",
+        "description": "为一句规划请求生成结构化修改草案（草案仍需人工确认）。只创建 run。",
+        "required": ("request",),
+        "properties": {"request": {"type": "string", "minLength": 1, "maxLength": 2000}},
+    },
+)
+
 # 归还一个「没有 pending 回复」的假模型会抛这个 —— 它意味着测试脚本写少了，
 # 不是被测代码的错，所以要能一眼看出来。
 _SCRIPT_EXHAUSTED = "脚本化假模型没有更多回复了（测试脚本给少了）"
@@ -69,7 +91,75 @@ class FakePlatform:
         # 工具调用的**全部**记录：断言"恢复时没重跑已完成的工具调用"靠它
         self.calls: list[dict[str, Any]] = []
         self.tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+        # 路由留痕（`POST /api/agents/routing-logs`）落的行
+        self.routing_logs: list[dict[str, Any]] = []
+        # 想摆出"留痕写不进去"时把它置成 404/500（None = 正常返回 `{"id"}`）
+        self.routing_logs_status: int | None = None
+        # 想让某枚工具**业务失败**（HTTP 200 + ok=false + 平铺 error_code）时登记它
+        self.tool_failures: dict[str, dict[str, Any]] = {}
+        # 请求到达顺序（如 `["POST /api/agents/routing-logs", "POST /api/agents/tools/…"]`）——
+        # 「plan 之后、派活之前留痕」这条顺序只能靠它断言
+        self.trace: list[str] = []
+        # 触发型工具（`read_only=false`）是否出现在 catalog 里，以及额外追加的工具
+        self.include_triggers = True
+        self.extra_tools: list[dict[str, Any]] = []
+        self.trigger_results: dict[str, dict[str, Any]] = {}
         self._next_id = 1
+        for spec in DEFAULT_TRIGGER_TOOLS:
+            self._register_trigger(spec)
+
+    def _register_trigger(self, spec: dict[str, Any]) -> None:
+        """照 `PlatformToolCatalog.objectSchema` 的形状发一份参数 schema。"""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": dict(spec.get("properties") or {}),
+        }
+        required = tuple(spec.get("required") or ())
+        if required:
+            schema["required"] = list(required)
+        self.extra_tools.append(
+            {
+                "name": spec["name"],
+                "agent": spec.get("agent", "platform"),
+                "description": spec.get("description", ""),
+                "args_schema": schema,
+                "args_hint": None,
+                "read_only": False,
+                "uses_retrieval": False,
+            }
+        )
+        name = spec["name"]
+        self.tools.setdefault(name, lambda arguments, _name=name: self.trigger_result(_name))
+
+    def add_trigger_tool(
+        self,
+        name: str,
+        *,
+        required: tuple[str, ...] = (),
+        description: str = "触发型工具",
+        agent: str = "platform",
+    ) -> None:
+        """往 catalog 里添一枚触发型工具。
+
+        编排层**不认识**这枚工具（没有一行代码提到它的名字）—— 只要 Java 侧把它发出来，
+        下一轮 `plan()` 的可用路由里就多一条。这正是"新增工具只改 Java、Python 零改动"。
+        """
+        self._register_trigger(
+            {
+                "name": name,
+                "agent": agent,
+                "description": description,
+                "required": required,
+                "properties": {field: {"type": "string"} for field in required},
+            }
+        )
+
+    def trigger_result(self, name: str) -> dict[str, Any]:
+        """触发型工具的出参（契约 §2.4）：`{run_id, deduplicated, status}`。"""
+        return dict(
+            self.trigger_results.get(name)
+            or {"run_id": f"run-{name}-1", "deduplicated": False, "status": "queued"}
+        )
 
     # ------------------------------------------------------------------
     # 测试用的摆位工具
@@ -121,6 +211,9 @@ class FakePlatform:
         if token != self.jwt:
             return _json(401, {"detail": "未认证"})
 
+        # 过了门禁就记一笔到达顺序 —— 「留痕先于派活」这类顺序断言靠它
+        self.trace.append(f"{request.method} {path}")
+
         if path == "/api/auth/me":
             return _json(200, self.user)
         if path == "/api/agents/catalog":
@@ -133,35 +226,59 @@ class FakePlatform:
             return self._checkpoints(request)
         if path == "/api/agents/runs/unfinished":
             return self._unfinished(request)
+        if path == "/api/agents/routing-logs":
+            return self._routing_logs(request)
         if path.startswith("/api/agents/tools/"):
             return self._tool(request, path.rsplit("/", 1)[-1])
         return _json(404, {"detail": f"未知端点 {path}"})
 
     def _catalog(self) -> dict[str, Any]:
+        tools: list[dict[str, Any]] = [
+            {
+                "name": "query_tasks",
+                "agent": "platform",
+                "description": "查询任务",
+                "args_schema": {"type": "object", "properties": {}},
+                "args_hint": None,
+                "read_only": True,
+                "uses_retrieval": False,
+            },
+            {
+                "name": "query_member_profile",
+                "agent": "profile",
+                "description": "查询成员画像",
+                "args_schema": None,
+                "args_hint": "参数：userId（必填）",
+                "read_only": True,
+                "uses_retrieval": False,
+            },
+        ]
+        if self.include_triggers:
+            tools.extend(copy.deepcopy(self.extra_tools))
         return {
             "platform_version": "1.0",
-            "tools": [
-                {
-                    "name": "query_tasks",
-                    "agent": "platform",
-                    "description": "查询任务",
-                    "args_schema": {"type": "object", "properties": {}},
-                    "args_hint": None,
-                    "read_only": True,
-                    "uses_retrieval": False,
-                },
-                {
-                    "name": "query_member_profile",
-                    "agent": "profile",
-                    "description": "查询成员画像",
-                    "args_schema": None,
-                    "args_hint": "参数：userId（必填）",
-                    "read_only": True,
-                    "uses_retrieval": False,
-                },
-            ],
+            "tools": tools,
             "limitations": list(self.limitations),
         }
+
+    def _routing_logs(self, request: httpx.Request) -> httpx.Response:
+        """`POST /api/agents/routing-logs`（契约 §2.7）：`Roles.any()` + 会话归属。
+
+        归属校验与会话/事件同源：会话不存在**或**不属于调用者一律 **404**。
+        """
+        body = json.loads(request.content or b"{}")
+        if not self._owned(body.get("session_id")):
+            return _json(404, {"detail": "会话不存在"})
+        if self.routing_logs_status is not None:
+            return _json(self.routing_logs_status, {"detail": "留痕服务暂时不可用"})
+        self.routing_logs.append(body)
+        return _json(200, {"id": len(self.routing_logs)})
+
+    def routing_log_for(self, run_id: str) -> dict[str, Any] | None:
+        for row in self.routing_logs:
+            if row.get("run_id") == run_id:
+                return dict(row)
+        return None
 
     def _sessions(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
@@ -259,6 +376,22 @@ class FakePlatform:
     def _tool(self, request: httpx.Request, name: str) -> httpx.Response:
         arguments = json.loads(request.content or b"{}")
         self.calls.append({"name": name, "arguments": arguments})
+        failure = self.tool_failures.get(name)
+        if failure is not None:
+            # 契约 §2.3：业务失败 = HTTP 200 + ok=false + **顶层平铺**的 error_code/error_message
+            return _json(
+                200,
+                {
+                    "tool": name,
+                    "ok": False,
+                    "result": {"error": failure.get("error_message")},
+                    "retrieval": None,
+                    "limitations": [],
+                    "latency_ms": 1,
+                    "error_code": failure.get("error_code"),
+                    "error_message": failure.get("error_message"),
+                },
+            )
         handler = self.tools.get(name)
         result = handler(arguments) if handler else {"items": []}
         return _json(
@@ -320,9 +453,14 @@ class ScriptedModel:
 
 
 class BlockingModel:
-    """卡在 `complete` 里的假模型，用来把"run 正在进行中"这个状态稳定地摆出来。"""
+    """卡在 `complete` 里的假模型，用来把"run 正在进行中"这个状态稳定地摆出来。
 
-    def __init__(self) -> None:
+    `content` 可换：S5′ 之后一次 run 的第一发模型调用是**规划相**，所以想让它别卡在
+    `invalid_response` 上，就得喂一段合法的规划 JSON（见 `plan_json`）。
+    """
+
+    def __init__(self, content: str = '{"answer": "ok"}') -> None:
+        self.content = content
         self.started = None  # 由 __init__ 之后的 _lazy() 建，避免构造时就要求 event loop
         self.release = None
 
@@ -344,7 +482,7 @@ class BlockingModel:
         started, release = self._events()
         started.set()
         await release.wait()
-        return {"role": "assistant", "content": '{"answer": "ok"}'}, {}
+        return {"role": "assistant", "content": self.content}, {}
 
 
 # --------------------------------------------------------------------------
@@ -368,6 +506,53 @@ def tool_call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, A
 
 def final(content: str) -> dict[str, Any]:
     return {"role": "assistant", "content": content}
+
+
+# --------------------------------------------------------------------------
+# 规划相（S5′）的模型回复
+# --------------------------------------------------------------------------
+
+MEETING_ROUTE = "start_meeting_analysis"
+PLAN_DRAFT_ROUTE = "start_plan_draft"
+
+
+def plan_payload(**overrides: Any) -> dict[str, Any]:
+    """一份**合法**的规划提案（契约 §5.4 的六字段）。
+
+    默认是"高置信度派活"：`start_meeting_analysis` + 必填参数齐全。用例只改它关心的
+    那几项（如 `route=None, confidence=0.41` 摆出反问）。
+    """
+    payload: dict[str, Any] = {
+        "intent": "start_meeting",
+        "route": MEETING_ROUTE,
+        "confidence": 0.92,
+        "reason": "用户要求分析这场会议",
+        "args": {"meeting_id": "m-1"},
+        "clarify": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def plan_json(**overrides: Any) -> str:
+    return json.dumps(plan_payload(**overrides), ensure_ascii=False)
+
+
+def plan_reply(**overrides: Any) -> dict[str, Any]:
+    """规划相那一发模型回复（`complete(..., final=True)` 拿到的 message）。"""
+    return final(plan_json(**overrides))
+
+
+def clarify_plan(
+    question: str = "要分析哪一场会议？",
+    options: tuple[str, ...] = ("最近一次周会", "上一次评审会"),
+    **overrides: Any,
+) -> dict[str, Any]:
+    """反问型提案：`route=None` + 低 confidence + 现成的追问。"""
+    base: dict[str, Any] = {"route": None, "confidence": 0.41, "args": {}}
+    base.update(overrides)
+    base["clarify"] = {"question": question, "options": list(options)}
+    return plan_reply(**base)
 
 
 # --------------------------------------------------------------------------
