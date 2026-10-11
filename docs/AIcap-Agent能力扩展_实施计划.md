@@ -239,24 +239,33 @@ MySQL 实现靠 JOIN 实时读角色，但 Qdrant 把 `acl_rank` 存在 payload 
       只保留新用例 → `plat16` 转红并在断言消息里打印出泄露的哈希（证明用例真的咬得住，
       而不是"恰好是绿的"）。注意 `plat13` 覆盖不到这条：它只断言 `members` 是数组。
 
-- [ ] **⚠️ 全量 `mvn -B test` 是红的，且合并前后都红 —— 尚未定位**
-      （2026-10-11 实测，与 `query_members` 修复无关；改动只有一个文件，却整片红）
-      | 树 | 结果 |
-      |---|---|
-      | 合并前 `6a6818b` | **219 项 / 29 失败 / 1 错误** |
-      | 合并后 `11eac48` | **397~424 项 / 57 失败 / 3 错误** |
-      可疑点（按可疑度）：
-      1. **同一棵树的用例总数在多次运行间变化**（157 / 219 / 397 / 424）——
-         上下文加载失败时该类的 N 个用例塌成 1 个 error，总数因此浮动。这是"加载期就炸"的指纹。
-      2. 加载期实测到 `java.sql.SQLException: Table definition has changed`（MySQL 1412，
-         说明**另一个进程在我跑测试时对 `aicap_java_test` 执行了 DDL**）与
-         `stories.owner_id` 外键失败（`users` 被并发 TRUNCATE 空了）。
-      3. 单类/双类隔离跑**全绿**：`KnowledgeIndexMySqlContractTest` 10/10、
-         `AgentContractTest`+`KnowledgeIndexMySqlContractTest` 24/24、
-         `MeetingSuggestionReviewContractTest` 单跑绿（它在全量里有过
-         `expected:<7> but was:<8>` 的差一行，像是并发写入者）。
-      **已排除**的假设：不是连接数耗尽（`max_connections=500`，峰值 11）；
-      不是"worker 线程污染"（把 `agent-worker-enabled=true` 的 `AgentContractTest`
-      与 `KnowledgeIndexMySqlContractTest` 放同一次调用跑，24/24 绿）。
-      **待查**：全量下哪些上下文真的并发存活、是不是有第二个 JVM 同时在跑 `aicap_java_test`。
-      定位前，全量红灯**不能**当作新改动的判据 —— 得先用"隔离跑受影响类"来判。
+- [ ] **`max_connections` 目前靠 `SET GLOBAL` 撑着，容器一重启就回到 151**
+      （2026-10-11）合并后测试套件有 **13 个不同的 Spring 上下文**，每个持 Hikari 10 连接
+      ≈ 130，再加开发后端的连接池就会撞 MySQL 默认 151（实测 `Max_used_connections=152`）。
+      现用 `SET GLOBAL max_connections=500` 临时抬高 —— **这是内存态配置，容器重启即失效**，
+      下次会以同样的面貌重新炸出来。两个落点二选一（或都做）：
+      1. 固化到 `backend/docker-compose.yml` 与 `deploy/compose.yaml` 的 `--max-connections=500`；
+      2. **更该做的**：测试侧把 Hikari 池调小（13 个上下文各 10 条对一个测试套件是浪费）。
+         但现有约定是数据源属性**逐类内联**在 `@SpringBootTest(properties=...)` 里
+         （没有 `application-test.yml`），要在 13 处各加一行；值得先决定要不要给测试加一份
+         共享默认属性，否则这条会被反复"顺手抬高上限"糊过去。
+
+- [x] ~~**全量 `mvn -B test` 一片红，合并前后都红**~~（2026-10-11，**已定位：不是代码问题**）
+      **结论**：安静窗口下 `mvn -B test` = **446 项 / 0 失败 / 0 错误 / 0 跳过，日志零条 `[ERROR]`**。
+      此前的红是**两个会话同时跑同一个 `aicap_java_test`** 造成的假象 —— 与 `query_members`
+      修复、与这次合并都无关（当时的判据被污染的库毁掉了）。
+      污染在数据上的指纹（记下来，下次别再重新推一遍）：
+      1. **同一棵树的用例总数在多次运行间浮动**（157 / 219 / 397 / 424 / 446）——
+         上下文加载失败时该类的 N 个用例塌成 1 个 error，总数随之变化；
+      2. `java.sql.SQLException: Table definition has changed`（MySQL **1412**）——
+         另一个进程在我跑测试时对库执行了 DDL；
+      3. `stories.owner_id` 外键失败（`users` 被并发 TRUNCATE 空了）、
+         `expected:<7> but was:<8>` 的差一行（并发写入者）；
+      4. 单类/双类隔离跑**全绿**（`KnowledgeIndexMySqlContractTest` 10/10；
+         同一个类同一个命令，先跑出 9 败、重跑 0 败）。
+      **我先前一条判断是错的**：我写"已排除连接数耗尽，因为读到 `max_connections=500`"——
+      那个读数是失败运行**之后约 2 分钟**取的，期间上限刚被人从 151 抬上去，
+      属于拿过期读数排除一个当时仍成立的假设。连接数是**并存的第二个风险**（见上一条），
+      只是它不是这次这片红的主因。
+      **留下的规矩**：这份测试库（`aicap_java_test`）**同一时刻只能有一个会话在跑**；
+      见到"全量红但单类绿 + 用例总数还浮动"，先怀疑并发，别先怀疑代码。
