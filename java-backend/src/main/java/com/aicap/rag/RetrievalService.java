@@ -7,6 +7,7 @@ import com.aicap.mapper.RetrievalLogMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -16,6 +17,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 混合检索管线(设计文档 A5/A6/A7 的汇合点):
@@ -44,6 +49,19 @@ public class RetrievalService {
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 三路召回互不依赖,串行执行会让延迟等于三路之和(向量路还要打一次 embedding 上游)。
+     * 用虚拟线程 fan-out:路内是阻塞 I/O,不必为它估线程池大小。
+     * 安全性前提:三路都只读显式传入的 {@link RetrievalContext},不依赖 ThreadLocal
+     * (rag 包内无 AuthContext/SecurityContext 用法),故跨线程不丢身份。
+     */
+    private final ExecutorService routeExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    @PreDestroy
+    void shutdownRouteExecutor() {
+        routeExecutor.shutdown();
+    }
 
     /** 一次混合检索的完整结果;调试台直接把它序列化给前端 */
     public record RetrievalResult(String query,
@@ -83,11 +101,34 @@ public class RetrievalService {
             return notConfigured(query, "未配置 embedding 密钥/模型,无法执行检索");
         }
 
-        List<RouteResult> routes = new ArrayList<>(ROUTE_ORDER.size());
-        List<List<Hit>> rankedLists = new ArrayList<>(ROUTE_ORDER.size());
+        // 先全部提交,再按固定路序取回 —— 结果与串行版逐字一致(不随完成顺序变)
+        List<Retriever> routeImpls = orderedRetrievers();
+        List<Future<List<Hit>>> pending = new ArrayList<>(routeImpls.size());
+        for (Retriever r : routeImpls) {
+            pending.add(routeExecutor.submit(() -> r.retrieve(query, routesTopK, ctx)));
+        }
+        List<RouteResult> routes = new ArrayList<>(routeImpls.size());
+        List<List<Hit>> rankedLists = new ArrayList<>(routeImpls.size());
         String degraded = null;
-        for (Retriever r : orderedRetrievers()) {
-            List<Hit> hits = r.retrieve(query, routesTopK, ctx);
+        RuntimeException failure = null;
+        for (int i = 0; i < routeImpls.size(); i++) {
+            Retriever r = routeImpls.get(i);
+            List<Hit> hits;
+            try {
+                hits = pending.get(i).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("检索被中断", e);
+            } catch (ExecutionException e) {
+                // 与串行版语义相同:某一路抛错则整次检索失败。但要先把三路都取回,
+                // 否则失败返回后仍有召回在后台跑 —— 串行版不存在这种悬挂。
+                Throwable cause = e.getCause();
+                if (failure == null) {
+                    failure = cause instanceof RuntimeException re
+                            ? re : new IllegalStateException("检索失败: " + cause, cause);
+                }
+                continue;
+            }
             routes.add(new RouteResult(r.name(), List.copyOf(hits)));
             rankedLists.add(hits);
             if (hits.isEmpty() && degradationWorthy(r.name())) {
@@ -95,6 +136,9 @@ public class RetrievalService {
                 // 而关键词/图路为空是完全正常的(查询里没那些词)。只有前者算降级。
                 degraded = "向量路召回为空(embedding 上游可能不可用),结果为另外两路";
             }
+        }
+        if (failure != null) {
+            throw failure;
         }
 
         List<Hit> fused = new RrfFuser(props.getRetrieval().getRrfK()).fuse(rankedLists, fuseTopK);
