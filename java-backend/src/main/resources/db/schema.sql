@@ -400,3 +400,40 @@ CREATE TABLE IF NOT EXISTS project_generation_events (
   kind varchar(40) NOT NULL, detail_json longtext NOT NULL, created_at datetime(6) NOT NULL,
   PRIMARY KEY (id), KEY ix_project_generation_events_run_id (run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ 主管智能体：会话、事件流与图检查点（S4′.2，契约 §4.1/§4.2/§4.5）============
+-- 这三张表是"编排层进程无状态、状态在库"的落点：SSE 断线续传靠 agent_events.id 当 seq
+-- （进程重启后计数会回退，所以 seq 绝不能用进程内计数器）；重连时未完成的 run 靠
+-- agent_checkpoints 恢复。agent_sessions 会话归属人：查会话一律 WHERE user_id = 当前用户。
+
+CREATE TABLE IF NOT EXISTS `agent_sessions` (
+  `id`         VARCHAR(36) NOT NULL,
+  `user_id`    INT         NOT NULL,
+  `title`      VARCHAR(120)     NULL,
+  `created_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_updated` (`user_id`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `agent_events` (
+  `id`         BIGINT       NOT NULL AUTO_INCREMENT,
+  `session_id` VARCHAR(36)  NOT NULL,
+  `run_id`     VARCHAR(36)  NOT NULL,
+  `type`       VARCHAR(32)  NOT NULL,
+  `detail_json` JSON        NOT NULL,
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_session_id` (`session_id`, `id`),
+  KEY `idx_run` (`run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `agent_checkpoints` (
+  `id`           BIGINT      NOT NULL AUTO_INCREMENT,
+  `run_id`       VARCHAR(36) NOT NULL,
+  `node_name`    VARCHAR(64) NOT NULL,
+  `state_json`   JSON        NOT NULL,
+  `created_at`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_run_node` (`run_id`, `node_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
