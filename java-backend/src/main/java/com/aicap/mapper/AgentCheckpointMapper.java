@@ -2,10 +2,12 @@ package com.aicap.mapper;
 
 import com.aicap.entity.AgentCheckpoint;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface AgentCheckpointMapper extends BaseMapper<AgentCheckpoint> {
@@ -50,4 +52,26 @@ public interface AgentCheckpointMapper extends BaseMapper<AgentCheckpoint> {
 
     record UnfinishedRunRow(String runId, Long lastEventId) {
     }
+
+    /**
+     * 删掉「已终局且终局时间早于 {@code cutoff}」的 run 的全部检查点。
+     *
+     * <p>终局时间取 {@code agent_events} 里该 run 的 {@code run.end}/{@code run.error}
+     * 事件时间戳,<b>不是</b>检查点自己的 {@code created_at} —— 每步 upsert 都会刷新它,
+     * 按它做保留期等于永不命中(这正是本清理最初被写错的地方)。
+     *
+     * <p>只删<b>已终局</b>的 run:没有终局事件的 run 仍是"未完成、可恢复",
+     * 它的检查点是唯一的恢复现场。
+     */
+    @Delete("""
+            DELETE c FROM `agent_checkpoints` c
+            JOIN (
+                SELECT `run_id`, MAX(`created_at`) AS `finished_at`
+                FROM `agent_events`
+                WHERE `type` IN ('run.end','run.error')
+                GROUP BY `run_id`
+            ) t ON t.`run_id` = c.`run_id`
+            WHERE t.`finished_at` < #{cutoff}
+            """)
+    int deleteFinishedBefore(@Param("cutoff") LocalDateTime cutoff);
 }
