@@ -102,9 +102,12 @@ export const useSessionStore = defineStore('session', {
     },
     onLoginClosed() {
       // 对齐旧版 dialog close 处理:在线但未登录 → 回退离线
+      // 必须与 goOffline() 一致地回填本地演示数据 —— 否则顶栏显示"离线 · 演示数据"
+      // 但 stories/tasks/pool 全空,用户被卡在空视图
       if (this.apiMode && !this.currentUser) {
         this.apiMode = false
         useProjectStoreSafe()?.clearServerData()
+        useProjectStoreSafe()?.restoreLocal()
       }
     }
   }

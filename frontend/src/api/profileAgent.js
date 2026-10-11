@@ -1,11 +1,11 @@
-import { api } from './client'
+import { api, LONG_TIMEOUT_MS } from './client'
 
 /* AI 任务提交与成员能力画像智能体:分析/活动/难度/快照/运行记录 */
 export const profileAgentApi = {
   /** 整包分析(只读预览) */
   analysis: (start, end) => api(`/api/profile-agent/analysis?start=${start}&end=${end}`),
   /** 正式分析(留痕,可重试);传 userId 时只评估这一名成员(只评估某人的提交物) */
-  run: (start, end, userId) => api(`/api/profile-agent/analysis/run?start=${start}&end=${end}${userId != null ? `&userId=${userId}` : ''}`, { method: 'POST' }),
+  run: (start, end, userId) => api(`/api/profile-agent/analysis/run?start=${start}&end=${end}${userId != null ? `&userId=${userId}` : ''}`, { method: 'POST', timeoutMs: LONG_TIMEOUT_MS }),
   /** 运行记录 */
   runs: () => api('/api/profile-agent/runs'),
   /** 活动列表 */
@@ -26,7 +26,7 @@ export const profileAgentApi = {
     api(`/api/profile-agent/difficulty/${taskId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   /** 团队风险 → 送审(统一 AI 建议审核中心);agent 为送审来源标识,默认「画像智能体」 */
   submitRiskSuggestions: (start, end, agent = '画像智能体') =>
-    api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}&agent=${encodeURIComponent(agent)}`, { method: 'POST' }),
+    api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}&agent=${encodeURIComponent(agent)}`, { method: 'POST', timeoutMs: LONG_TIMEOUT_MS }),
   /** 画像快照 */
   snapshots: (userId = null) => api('/api/profile-agent/snapshots' + (userId != null ? `?userId=${userId}` : '')),
   /** 画像快照趋势(变化原因) */
@@ -48,5 +48,5 @@ export const profileAgentApi = {
   /** GitHub 同步状态(US34) */
   githubStatus: () => api('/api/profile-agent/github/status'),
   /** 手动触发 GitHub 活动同步(admin/owner/member;只读查看者 403) */
-  githubSync: (start, end) => api(`/api/profile-agent/github/sync?start=${start}&end=${end}`, { method: 'POST' })
+  githubSync: (start, end) => api(`/api/profile-agent/github/sync?start=${start}&end=${end}`, { method: 'POST', timeoutMs: LONG_TIMEOUT_MS })
 }

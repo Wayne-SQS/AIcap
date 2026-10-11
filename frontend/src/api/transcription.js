@@ -1,7 +1,8 @@
 import { api } from './client'
 export async function transcribeAudio(meetingId, audio, language) {
   const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/transcription/run`, {
-    method: 'POST', body: JSON.stringify({ audio_id: audio.id, language })
+    /* 同步 STT:单条音频上限 10 分钟(见下方 duration_ms 校验),超时必须比它宽 */
+    method: 'POST', body: JSON.stringify({ audio_id: audio.id, language }), timeoutMs: 600000
   }, '/meeting-ai')
   if (result?.audio?.meeting_id !== meetingId || result.audio.audio_id !== audio.id || result.audio.sha256 !== audio.sha256
       || result.audio.byte_size !== audio.byte_size || result.storage_status !== 'not_saved'
