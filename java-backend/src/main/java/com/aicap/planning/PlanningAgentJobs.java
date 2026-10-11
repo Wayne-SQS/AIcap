@@ -1,8 +1,8 @@
 package com.aicap.planning;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentProperties;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.common.AgentError;
 import com.aicap.entity.PlanningAgentEvent;
 import com.aicap.entity.PlanningAgentRun;
 import com.aicap.mapper.PlanningAgentEventMapper;
@@ -27,7 +27,7 @@ public class PlanningAgentJobs {
     private final PlanningAgentRunner runner;
     private final PlanningAgentTools tools;
     private final ModelClient client;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 

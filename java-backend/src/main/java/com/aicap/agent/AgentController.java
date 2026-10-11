@@ -1,6 +1,5 @@
-package com.aicap.controller;
+package com.aicap.agent;
 
-import com.aicap.agent.MeetingAgentService;
 import com.aicap.entity.User;
 import com.aicap.security.Roles;
 import lombok.RequiredArgsConstructor;

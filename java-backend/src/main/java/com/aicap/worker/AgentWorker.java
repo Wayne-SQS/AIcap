@@ -1,33 +1,36 @@
-package com.aicap.agent;
+package com.aicap.worker;
 
+import com.aicap.llm.LlmProperties;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import com.aicap.planning.PlanningAgentJobs;
-import com.aicap.generation.ProjectGenerationJobs;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BooleanSupplier;
 
 /**
- * 会议 Agent 后台工作线程(对齐 FastAPI meeting_agent/jobs.py Worker):
- * 定时消费 queued run;每步之间短暂休眠,DB 故障退避重试,模型/分析错误记录在 run 上而非热循环。
+ * 后台工作线程调度器:定时轮询注册进来的 {@link WorkerTask},每步之间短暂休眠,
+ * DB 故障退避重试,任务自身的错误记录在 run 上而非热循环。
+ *
+ * <p><b>本类不认识任何具体域</b> —— 会议 / planning / project-generation 各自实现
+ * {@link WorkerTask} 并注册成 Bean,这里只按 {@code name()} 起线程、出状态。
+ * 这样 {@code com.aicap.agent} 整体退役时只会少一个任务,
+ * 不会连累另外两条现行功能的后台消费。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AgentWorker {
 
-    private final AgentJobs jobs;
-    private final AgentProperties props;
-    private final PlanningAgentJobs planningJobs;
-    private final ProjectGenerationJobs projectGenerationJobs;
+    private final LlmProperties props;
+    private final List<WorkerTask> tasks;
 
     private volatile boolean running;
     private final Map<String, Thread> threads = new ConcurrentHashMap<>();
@@ -36,27 +39,28 @@ public class AgentWorker {
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void startOnReady() {
         if (!props.isAgentWorkerEnabled()) {
-            log.info("会议 Agent worker 未启用(AICAP_AGENT_WORKER_ENABLED=false);run 将保持 queued");
+            log.info("Agent workers 未启用(AICAP_AGENT_WORKER_ENABLED=false);run 将保持 queued");
             return;
         }
         if (running) return;
         running = true;
-        startWorker("meeting-agent", jobs::runNext);
-        startWorker("planning-agent", planningJobs::runNext);
-        startWorker("project-generation", projectGenerationJobs::runNext);
-        log.info("Agent workers 已启动: meeting-agent, planning-agent, project-generation");
+        for (WorkerTask task : orderedTasks()) {
+            startWorker(task);
+        }
+        log.info("Agent workers 已启动: {}", orderedTasks().stream().map(WorkerTask::name).toList());
     }
 
-    private void startWorker(String name, BooleanSupplier step) {
+    private void startWorker(WorkerTask task) {
+        String name = task.name();
         WorkerState state = new WorkerState();
         states.put(name, state);
-        Thread thread = new Thread(() -> loop(name, step, state), name);
+        Thread thread = new Thread(() -> loop(name, task::runNext, state), name);
         thread.setDaemon(true);
         threads.put(name, thread);
         thread.start();
     }
 
-    private void loop(String name, BooleanSupplier step, WorkerState state) {
+    private void loop(String name, java.util.function.BooleanSupplier step, WorkerState state) {
         state.active = true;
         while (running) {
             boolean worked = false;
@@ -82,7 +86,8 @@ public class AgentWorker {
 
     public Map<String, Object> healthSnapshot() {
         Map<String, Object> workers = new LinkedHashMap<>();
-        for (String name : java.util.List.of("meeting-agent", "planning-agent", "project-generation")) {
+        for (WorkerTask task : orderedTasks()) {
+            String name = task.name();
             WorkerState state = states.get(name);
             Map<String, Object> detail = new LinkedHashMap<>();
             Thread thread = threads.get(name);
@@ -96,6 +101,11 @@ public class AgentWorker {
             workers.put(name, detail);
         }
         return workers;
+    }
+
+    /** 按 name 排序:注入顺序由 Spring 决定,而状态快照的键序应当稳定 */
+    private List<WorkerTask> orderedTasks() {
+        return tasks.stream().sorted(Comparator.comparing(WorkerTask::name)).toList();
     }
 
     @PreDestroy

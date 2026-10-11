@@ -1,8 +1,8 @@
 package com.aicap.rag;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentProperties;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.common.AgentError;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -38,11 +38,11 @@ public class LlmReranker implements Reranker {
     private static final int REASON_MAX_CHARS = 40;
 
     private final ModelClient modelClient;
-    private final AgentProperties agentProps;
+    private final LlmProperties agentProps;
     private final RagProperties ragProps;
     private final ObjectMapper mapper;
 
-    public LlmReranker(ModelClient modelClient, AgentProperties agentProps,
+    public LlmReranker(ModelClient modelClient, LlmProperties agentProps,
                        RagProperties ragProps, ObjectMapper mapper) {
         this.modelClient = modelClient;
         this.agentProps = agentProps;

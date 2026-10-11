@@ -1,6 +1,6 @@
 package com.aicap.contract;
 
-import com.aicap.agent.AgentProperties;
+import com.aicap.llm.LlmProperties;
 import com.aicap.contract.AgentModelFixture.Scenario;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
@@ -31,13 +31,13 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 关键设计:
  * <ul>
  *   <li><b>不调用真实模型</b>:{@link AgentModelFixture} 是一个本地 OpenAI 兼容服务(127.0.0.1:19377),
- *       在 {@code @BeforeAll} 里把 {@link AgentProperties} 指向它。因此"排队→worker 消费→工具循环→
+ *       在 {@code @BeforeAll} 里把 {@link LlmProperties} 指向它。因此"排队→worker 消费→工具循环→
  *       严格校验→建议落库"整条链路都是真实执行的,同时零外网、零费用、结果可复现。</li>
  *   <li><b>worker 真开启</b>({@code aicap.llm.agent-worker-enabled=true}),队列由后台线程消费,
  *       测试通过轮询 {@code GET /api/agent-runs/{id}} 等待终态 —— 与前端 AgentRunPanel 的行为一致。</li>
  *   <li>其余契约测试类原先写的 {@code aicap.agent-worker-enabled=false} 少了 {@code llm.} 前缀,
  *       实际不生效(worker 仍是开启状态);本轮已统一修正为
- *       {@code aicap.llm.agent-worker-enabled}(见 {@code AgentProperties} 的 prefix 定义),
+ *       {@code aicap.llm.agent-worker-enabled}(见 {@code LlmProperties} 的 prefix 定义),
  *       本类则显式写 true,保证只有本类的上下文有 worker 在消费队列。</li>
  * </ul>
  * 隔离:使用独立测试库 {@code aicap_java_test};每个用例用唯一标题,不触碰种子 US01–US37 / T01–T16。
@@ -63,7 +63,7 @@ class AgentContractTest extends ContractTestSupport {
     private final AgentModelFixture fixture = new AgentModelFixture();
 
     @Autowired
-    private AgentProperties agentProps;
+    private LlmProperties agentProps;
 
     // ------------------------------------------------------------------
     // 生命周期

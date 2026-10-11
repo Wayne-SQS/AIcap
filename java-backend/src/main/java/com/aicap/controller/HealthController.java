@@ -1,6 +1,6 @@
 package com.aicap.controller;
 
-import com.aicap.agent.AgentWorker;
+import com.aicap.worker.AgentWorker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -1,6 +1,6 @@
 package com.aicap.planning;
 
-import com.aicap.agent.AgentError;
+import com.aicap.common.AgentError;
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;

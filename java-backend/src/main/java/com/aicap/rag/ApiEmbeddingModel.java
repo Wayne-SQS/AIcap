@@ -21,7 +21,7 @@ import java.util.List;
 /**
  * OpenAI 兼容 {@code /embeddings} 客户端。
  *
- * <p>刻意不引任何 SDK,与 {@link com.aicap.agent.ModelClient} 同一条路子:JDK {@code HttpClient}
+ * <p>刻意不引任何 SDK,与 {@link com.aicap.llm.ModelClient} 同一条路子:JDK {@code HttpClient}
  * 直调,自己解析。少一个依赖,且 REST 契约是自己能讲清的。
  *
  * <p><b>安全约定(继承 ModelClient)</b>:上游非 200 一律不落响应体 —— 响应体可能回显

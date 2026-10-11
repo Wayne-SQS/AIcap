@@ -1,5 +1,6 @@
 package com.aicap.agent;
 
+import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
 import com.aicap.dto.MeetingDtos;
 import com.aicap.entity.Meeting;
@@ -9,6 +10,8 @@ import com.aicap.entity.PoolItem;
 import com.aicap.entity.Story;
 import com.aicap.entity.Suggestion;
 import com.aicap.entity.User;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
 import com.aicap.mapper.MeetingAgentEventMapper;
 import com.aicap.mapper.MeetingAgentRunMapper;
 import com.aicap.mapper.MeetingMapper;
@@ -16,6 +19,7 @@ import com.aicap.mapper.PoolItemMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.SuggestionMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.platform.MeetingTools;
 import com.aicap.service.MeetingService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -58,7 +62,7 @@ public class AgentJobs {
     private final MeetingService meetingService;
     private final AgentRunner runner;
     private final ModelClient client;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 
@@ -94,7 +98,7 @@ public class AgentJobs {
                 .set("requested_by", requesterId)
                 .setSql("attempt = attempt + 1")
                 .set("model", props.getModel())
-                .set("prompt_version", AgentProperties.PROMPT_VERSION)
+                .set("prompt_version", MeetingAgentConstants.PROMPT_VERSION)
                 .set("error_code", null)
                 .set("error_message", null)
                 .set("worker_token", null)
@@ -202,7 +206,7 @@ public class AgentJobs {
             int rows = runMapper.update(null, new UpdateWrapper<MeetingAgentRun>()
                     .set("status", "running")
                     .set("worker_token", token)
-                    .set("lease_until", now.plusSeconds(props.LEASE_SECONDS))
+                    .set("lease_until", now.plusSeconds(MeetingAgentConstants.LEASE_SECONDS))
                     .set("updated_at", now)
                     .eq("id", candidate.getId())
                     .eq("status", "queued"));
@@ -253,7 +257,7 @@ public class AgentJobs {
                 throw new AgentError("interrupted", "分析已中断，可重试");
             }
             User user = userMapper.selectById(run.getRequestedBy());
-            if (user == null || !AgentTools.WRITER_ROLES.contains(user.getRole())) {
+            if (user == null || !MeetingTools.WRITER_ROLES.contains(user.getRole())) {
                 throw new AgentError("permission_changed", "发起人已失去提交权限");
             }
             Set<String> existingTitles = existingTitlePool();
@@ -345,7 +349,7 @@ public class AgentJobs {
         run.setStatus("queued");
         run.setAttempt(attempt);
         run.setModel(props.getModel());
-        run.setPromptVersion(AgentProperties.PROMPT_VERSION);
+        run.setPromptVersion(MeetingAgentConstants.PROMPT_VERSION);
         run.setCreatedAt(now);
         run.setUpdatedAt(now);
         return run;

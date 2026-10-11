@@ -1,8 +1,8 @@
 package com.aicap.generation;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentProperties;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.common.AgentError;
 import com.aicap.entity.ProjectGenerationEvent;
 import com.aicap.entity.ProjectGenerationRun;
 import com.aicap.mapper.ProjectGenerationEventMapper;
@@ -23,7 +23,7 @@ public class ProjectGenerationJobs {
     private final ProjectGenerationRunner runner;
     private final ProjectGenerationValidator validator;
     private final ModelClient client;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
 
     public boolean runNext() {

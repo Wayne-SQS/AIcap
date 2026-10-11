@@ -1,6 +1,6 @@
 package com.aicap.generation;
 
-import com.aicap.agent.AgentProperties;
+import com.aicap.llm.LlmProperties;
 import com.aicap.common.ApiException;
 import com.aicap.entity.ProjectGenerationRun;
 import com.aicap.entity.User;
@@ -34,7 +34,7 @@ class ProjectGenerationServiceTest {
     @Mock private ProjectGenerationValidator validator;
     @Mock private ProjectGenerationImportService importer;
     @Mock private ProjectGenerationExecutionService execution;
-    @Mock private AgentProperties props;
+    @Mock private LlmProperties props;
 
     private ProjectGenerationService service;
     private ProjectGenerationRun run;

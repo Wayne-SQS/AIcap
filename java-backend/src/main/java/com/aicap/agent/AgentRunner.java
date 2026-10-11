@@ -1,6 +1,11 @@
 package com.aicap.agent;
 
-import com.aicap.agent.AnalysisValidator.Segment;
+import com.aicap.common.AgentError;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.platform.MeetingTools;
+import com.aicap.rag.TranscriptSegmenter;
+import com.aicap.rag.TranscriptSegmenter.Segment;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -21,9 +26,10 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AgentRunner {
 
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final AnalysisValidator validator;
-    private final AgentTools tools;
+    private final TranscriptSegmenter segmenter;
+    private final MeetingTools tools;
     private final ObjectMapper mapper;
 
     /** 供 AgentJobs 回灌事件 */
@@ -180,7 +186,7 @@ public class AgentRunner {
     public ObjectNode analyze(String transcript, int userId, ModelClient client,
                               Emitter emit, ActiveCheck ensureActive) throws AgentError {
         long startNanos = System.nanoTime();
-        List<Segment> segments = validator.segmentsFor(transcript);
+        List<Segment> segments = segmenter.segmentsFor(transcript);
         ActiveCheck active = () -> {
             ensureActive.check();
             long elapsed = (System.nanoTime() - startNanos) / 1_000_000_000L;

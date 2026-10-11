@@ -6,7 +6,7 @@ import java.util.Set;
 /**
  * 检索的调用者上下文 —— 决定「谁能看见什么」(设计文档 A7)。
  *
- * <p>存在的理由:现有 {@code AgentTools} 在工具执行前校验 {@code WRITER_ROLES},
+ * <p>存在的理由:现有 {@code MeetingTools} 在工具执行前校验 {@code WRITER_ROLES},
  * {@code ResourceController} 限制非管理员只能看已发布内容。检索层若不校验,
  * 成员就能用一句语义查询<b>绕过</b>这些限制把无权内容捞出来 —— 这是新增能力引入的新攻击面。
  *

@@ -1,9 +1,7 @@
 package com.aicap.rag;
 
-import com.aicap.agent.AnalysisValidator;
 import com.aicap.entity.Meeting;
 import com.aicap.entity.Story;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -27,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ChunkerTest {
 
     private final RagProperties props = new RagProperties();
-    private final Chunker chunker = new Chunker(props, new AnalysisValidator(new ObjectMapper()));
+    private final Chunker chunker = new Chunker(props, new TranscriptSegmenter());
 
     private static Meeting meeting(String id, String title, String transcript) {
         Meeting m = new Meeting();

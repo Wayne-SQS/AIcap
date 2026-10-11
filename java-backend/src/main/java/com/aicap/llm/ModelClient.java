@@ -1,5 +1,6 @@
-package com.aicap.agent;
+package com.aicap.llm;
 
+import com.aicap.common.AgentError;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -19,19 +20,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Chat Completions 直连客户端(无第三方 SDK 依赖;对齐 FastAPI meeting_agent/model_client.py)。
+ * Chat Completions 直连客户端(无第三方 SDK 依赖)。
  * 仅调用 /chat/completions;上游非 200 一律不落库响应体(防凭据/隐私回显)。
+ *
+ * <p>通用传输层:会议 Agent、planning、generation、rag、profile 五个域都经它出网,
+ * 故与 {@link LlmProperties} 同住 {@code com.aicap.llm}。
  */
 @Component
 public class ModelClient {
 
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
     private final HttpClient http;
     /** 每个 worker 可覆盖自己的模型名，避免并行 Agent 互相覆盖。 */
     private final ThreadLocal<String> modelOverride = new ThreadLocal<>();
 
-    public ModelClient(AgentProperties props, ObjectMapper mapper) {
+    public ModelClient(LlmProperties props, ObjectMapper mapper) {
         this.props = props;
         this.mapper = mapper;
         this.http = HttpClient.newBuilder()
@@ -51,7 +55,7 @@ public class ModelClient {
     public record Completion(JsonNode message, Map<String, Integer> usage) {
     }
 
-    /** 对齐 model_client.complete():非 final 时携带 tools + tool_choice=auto;final 时强制 json_object */
+    /** 非 final 时携带 tools + tool_choice=auto;final 时强制 json_object */
     public Completion complete(List<JsonNode> messages, List<JsonNode> tools, boolean finalRound) throws AgentError {
         if (!props.settingsReady()) {
             throw new AgentError("not_configured", "服务端尚未配置模型密钥/模型名称");
@@ -62,7 +66,7 @@ public class ModelClient {
         body.put("model", selectedModel != null ? selectedModel : props.getModel());
         body.set("messages", mapper.valueToTree(messages));
         body.put("stream", false);
-        body.put("max_tokens", AgentProperties.MAX_TOKENS);
+        body.put("max_tokens", LlmProperties.MAX_TOKENS);
         if ("api.deepseek.com".equals(base.getHost())) {
             // DeepSeek 当前默认思考模式;本循环需要非思考响应
             ObjectNode thinking = mapper.createObjectNode();
@@ -171,7 +175,7 @@ public class ModelClient {
         }
     }
 
-    /** 对齐 FastAPI:仅允许 https;http 只对本机(localhost/127.0.0.1)放行 */
+    /** 仅允许 https;http 只对本机(localhost/127.0.0.1)放行 */
     private static URI parseBaseUrl(String raw) throws AgentError {
         try {
             URI uri = URI.create(raw.replaceAll("/+$", ""));

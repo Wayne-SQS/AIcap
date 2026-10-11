@@ -1,8 +1,8 @@
 package com.aicap.planning;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentProperties;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.common.AgentError;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -45,7 +45,7 @@ public class PlanningAgentRunner {
         List<JsonNode> messages = new ArrayList<>();
         messages.add(message("system", PROMPT));
         messages.add(message("user", request));
-        for (int step = 0; step < AgentProperties.MAX_STEPS; step++) {
+        for (int step = 0; step < LlmProperties.MAX_STEPS; step++) {
             ModelClient.Completion completion = client.complete(messages, tools.definitions(), false);
             messages.add(completion.message());
             JsonNode calls = completion.message().path("tool_calls");

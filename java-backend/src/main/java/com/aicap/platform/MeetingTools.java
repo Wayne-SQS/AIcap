@@ -1,5 +1,6 @@
-package com.aicap.agent;
+package com.aicap.platform;
 
+import com.aicap.common.AgentError;
 import com.aicap.entity.PoolItem;
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
@@ -26,7 +27,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class AgentTools {
+public class MeetingTools {
 
     public static final Set<String> WRITER_ROLES = Set.of("admin", "owner", "member");
 

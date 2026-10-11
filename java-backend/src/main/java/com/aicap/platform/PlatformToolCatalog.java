@@ -1,6 +1,5 @@
 package com.aicap.platform;
 
-import com.aicap.agent.AgentTools;
 import com.aicap.profile.ProfileToolRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +16,7 @@ import java.util.Map;
 /**
  * 平台工具清单(S3 工具层)。
  *
- * <p>为什么要有这一层,而不是让编排层直接读 {@link AgentTools} / {@link ProfileToolRegistry}:
+ * <p>为什么要有这一层,而不是让编排层直接读 {@link MeetingTools} / {@link ProfileToolRegistry}:
  * 那两个注册表是<b>进程内</b>的 Java 对象,编排层(独立 Python 进程)看不见。
  * 本类把它们的能力<b>声明</b>成一份可下发的元数据,编排层据此决定调什么工具,
  * 加工具只改 Java,Python 侧零改动。
@@ -66,7 +65,7 @@ public class PlatformToolCatalog {
                            boolean usesRetrieval) {
     }
 
-    private final AgentTools meetingTools;
+    private final MeetingTools meetingTools;
     private final ProfileToolRegistry profileTools;
     private final ObjectMapper mapper;
 

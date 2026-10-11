@@ -145,6 +145,7 @@ F22 在换算时**不能丢**——它是防止模型基于过期快照提状态
 - **五类会议分析**（ai-service 现有能力）：这是**增量**，不是替换对象，不列入基线。
 - **语音链路**（转写 / 说话人分离 / Assignment Engine）：ai-service 独有，老家没有，不属于"不能少"的范围。
 - **平台工具层**：`PlatformToolCatalog` / `PlatformToolService` **直接依赖** `com.aicap.agent.AgentTools` 与 `AgentError`（`PlatformToolCatalog.java:3`、`PlatformToolService.java:3,67`）。那 5 个只读工具是**平台资产**，退役老 agent 时必须**先拆出来**，不能跟着一起删——删了主管自己就没法查数据了。
+> **2026-10-11 已完成**：`agent/AgentTools` → `com.aicap.platform.MeetingTools`、`AgentError` → `com.aicap.common`；同批还把 `AgentProperties`/`ModelClient` → `com.aicap.llm`、切分逻辑 → `com.aicap.rag.TranscriptSegmenter`，并让后台调度器只认 `worker/WorkerTask` 接口。现 `com.aicap.agent` 外无人 import 它（`arch/AgentPackageIsSelfContainedTest` 钉住），删 `agent/` 不再牵动任何现行功能。
 
 ---
 

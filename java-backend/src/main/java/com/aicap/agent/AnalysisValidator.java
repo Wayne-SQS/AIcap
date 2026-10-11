@@ -1,5 +1,7 @@
 package com.aicap.agent;
 
+import com.aicap.common.AgentError;
+import com.aicap.rag.TranscriptSegmenter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -12,19 +14,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
 /**
- * 会议转写切分 + 模型输出严格校验(对齐 FastAPI meeting_agent/runner.py + schemas.py)。
+ * 会议模型输出严格校验(对齐 FastAPI meeting_agent/runner.py + schemas.py)。
  * 模型产出一律视为不可信输入:结构/字段/证据逐字引用/片段全覆盖校验通过前不落任何建议。
+ *
+ * <p>转写切分已拆到 {@link com.aicap.rag.TranscriptSegmenter} —— 它同时服务知识库切块,
+ * 不属于会议专属。
  */
 @Component
 public class AnalysisValidator {
-
-    private static final Pattern SENTENCE_SPLIT =
-            Pattern.compile("(?<=[。！？!?])|[\\r\\n]+");
 
     private final ObjectMapper mapper;
 
@@ -32,29 +33,10 @@ public class AnalysisValidator {
         this.mapper = mapper;
     }
 
-    public record Segment(String id, String text) {
-    }
-
-    // ---------- 切分(与 runner.segments_for 逐行一致) ----------
-
-    public List<Segment> segmentsFor(String transcript) {
-        List<Segment> segments = new ArrayList<>();
-        String[] lines = SENTENCE_SPLIT.split(transcript == null ? "" : transcript, -1);
-        for (String rawLine : lines) {
-            String line = rawLine.trim();
-            if (line.isEmpty()) continue;
-            for (int i = 0; i < line.length(); i += 2000) {
-                int end = Math.min(i + 2000, line.length());
-                segments.add(new Segment("seg-" + (segments.size() + 1), line.substring(i, end)));
-            }
-        }
-        return segments;
-    }
-
     // ---------- 严格校验 ----------
 
     /** 校验通过则返回规范化后的分析对象(顺序与 pydantic model_dump 一致;字符串已 trim) */
-    public ObjectNode validate(String content, List<Segment> segments) throws AgentError {
+    public ObjectNode validate(String content, List<TranscriptSegmenter.Segment> segments) throws AgentError {
         final JsonNode root;
         try {
             root = mapper.readTree(content == null ? "" : content);
@@ -63,7 +45,7 @@ public class AnalysisValidator {
         }
         if (root == null || !root.isObject()) throw invalidOutput();
         Map<String, String> byId = new HashMap<>();
-        for (Segment s : segments) byId.put(s.id, s.text);
+        for (TranscriptSegmenter.Segment s : segments) byId.put(s.id(), s.text());
 
         ObjectNode analysis = mapper.createObjectNode();
         // 必填键缺失 → pydantic ValidationError → invalid_output

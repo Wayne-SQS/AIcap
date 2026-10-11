@@ -1,20 +1,24 @@
-package com.aicap.agent;
+package com.aicap.llm;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * 会议 Agent 运行参数(绑定 application.yml 的 aicap.llm.*)。
+ * LLM 提供方与运行参数(绑定 application.yml 的 aicap.llm.*)。
  * 对齐 FastAPI config.py:无密钥 = 停用(手动建议仍可用)。
+ *
+ * <p>原先住在 {@code com.aicap.agent.AgentProperties},但 generation / planning / rag /
+ * profile 都在用它出网,从来不是会议专属。字段名与前缀逐字未动,故 {@code aicap.llm.*}
+ * 的绑定与 env {@code AICAP_LLM_*} / {@code AICAP_AGENT_WORKER_ENABLED} 完全不变。
  */
 @Data
 @ConfigurationProperties(prefix = "aicap.llm")
-public class AgentProperties {
+public class LlmProperties {
 
-    public static final String PROMPT_VERSION = "meeting-complete-v2";
+    /** 有界工具循环的轮数上限(会议 Agent 与 planning 共用) */
     public static final int MAX_STEPS = 6;
+    /** 有界工具循环的时间预算(秒) */
     public static final int MAX_SECONDS = 180;
-    public static final int LEASE_SECONDS = 300;
     public static final int MAX_TOKENS = 6000;
     public static final int TIMEOUT_SECONDS = 45;
 

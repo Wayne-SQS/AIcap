@@ -1,8 +1,8 @@
 package com.aicap.generation;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentProperties;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.LlmProperties;
+import com.aicap.llm.ModelClient;
+import com.aicap.common.AgentError;
 import com.aicap.entity.User;
 import com.aicap.mapper.UserMapper;
 import com.fasterxml.jackson.databind.JsonNode;

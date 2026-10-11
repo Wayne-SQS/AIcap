@@ -1,6 +1,6 @@
 package com.aicap.contract;
 
-import com.aicap.agent.AgentProperties;
+import com.aicap.llm.LlmProperties;
 import com.aicap.contract.RerankModelFixture.Scenario;
 import com.aicap.rag.RagProperties;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -62,7 +62,7 @@ class RetrievalRerankContractTest extends ContractTestSupport {
     private RagProperties ragProperties;
 
     @Autowired
-    private AgentProperties agentProps;
+    private LlmProperties agentProps;
 
     private Path docsDir;
 

@@ -1,6 +1,5 @@
 package com.aicap.rag;
 
-import com.aicap.agent.AnalysisValidator;
 import com.aicap.entity.Meeting;
 import com.aicap.entity.MemberProfile;
 import com.aicap.entity.PoolItem;
@@ -20,7 +19,7 @@ import java.util.List;
  * <p><b>为什么每类源切法不同 —— 这是本层最该被讲清楚的地方</b>:
  * <ul>
  *   <li>结构化单行(story/pool_item/task/profile)自己就是一个语义单元,再切只会丢上下文;</li>
- *   <li>会议转写复用 {@link AnalysisValidator#segmentsFor},因为切分结果与 Agent 证据引用的
+ *   <li>会议转写复用 {@link TranscriptSegmenter#segmentsFor},因为切分结果与 Agent 证据引用的
  *       {@code seg-N} 天然对齐 —— 检索命中的块可以直接当证据用,不用再做一次映射。
  *       <b>这是免费拿到的一致性</b>,自己另写一套切分反而会把这条链断掉;</li>
  *   <li>Markdown 文档按 {@code ##} 切,标题就是天然的语义边界。</li>
@@ -40,7 +39,7 @@ public class Chunker {
     private static final String[] TASK_STATUS = {"待办", "进行中", "完成", "已取消"};
 
     private final RagProperties props;
-    private final AnalysisValidator analysisValidator;
+    private final TranscriptSegmenter transcriptSegmenter;
 
     private int maxChars() {
         return Math.max(200, props.getEmbedding().getMaxChars());
@@ -146,14 +145,14 @@ public class Chunker {
     }
 
     // ------------------------------------------------------------------
-    // 会议转写 —— 复用 AnalysisValidator.segmentsFor,与证据引用 seg-N 对齐
+    // 会议转写 —— 复用 TranscriptSegmenter.segmentsFor,与证据引用 seg-N 对齐
     // ------------------------------------------------------------------
 
     public List<Chunk> chunkMeeting(Meeting m) {
-        List<AnalysisValidator.Segment> segments = analysisValidator.segmentsFor(m.getTranscript());
+        List<TranscriptSegmenter.Segment> segments = transcriptSegmenter.segmentsFor(m.getTranscript());
         List<Chunk> chunks = new ArrayList<>(segments.size());
         for (int i = 0; i < segments.size(); i++) {
-            AnalysisValidator.Segment seg = segments.get(i);
+            TranscriptSegmenter.Segment seg = segments.get(i);
             String prefix = "【会议 " + nz(m.getTitle()) + "】片段 " + seg.id() + "\n";
             // chunkIndex = seg 号 - 1,保证 seg-7 恒为 chunk_index 6
             Chunk chunk = Chunk.of(Chunk.SRC_MEETING, nz(m.getId()), i,

@@ -1,6 +1,6 @@
 package com.aicap.planning;
 
-import com.aicap.agent.AgentProperties;
+import com.aicap.llm.LlmProperties;
 import com.aicap.common.ApiException;
 import com.aicap.entity.PlanningAgentEvent;
 import com.aicap.entity.PlanningAgentRun;
@@ -29,7 +29,7 @@ public class PlanningAgentService {
     private final PlanningAgentRunMapper runs;
     private final PlanningAgentEventMapper events;
     private final PlanningAgentExecutionService execution;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
     private final PlatformTransactionManager transactionManager;
 

@@ -1,8 +1,10 @@
 package com.aicap.contract;
 
+import com.aicap.llm.LlmProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.LinkedHashSet;
@@ -52,6 +54,26 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** 清单项允许出现的字段;多一个都算把业务数据漏进了能力声明 */
     private static final Set<String> ALLOWED_TOOL_FIELDS = Set.of(
             "name", "agent", "description", "args_schema", "args_hint", "read_only", "uses_retrieval");
+
+    @Autowired
+    private LlmProperties llmProperties;
+
+    // ==================== 配置绑定 ====================
+
+    /**
+     * PLAT-17:{@code aicap.llm.agent-worker-enabled=false} 必须真的绑上。
+     *
+     * <p>这条不属于工具层契约,但只有这里能钉住它:本类已经用这个 key 起上下文,
+     * 而本仓在这上面栽过一次——9 个测试类曾把它写成 {@code aicap.agent-worker-enabled}
+     * (少了 {@code llm.}),于是<b>从来没绑定过</b>,worker 一直开着而用例照过
+     * ({@code qa/测试用例设计_当前基线_v3.md:680})。现有断言都不查这个方向:
+     * {@code AgentContractTest} 断的是 {@code true},而那正是默认值,绑不上也过。
+     */
+    @Test
+    void plat17_workerToggle_actuallyBindsFromTheYmlKey() {
+        assertFalse(llmProperties.isAgentWorkerEnabled(),
+                "aicap.llm.agent-worker-enabled=false 没有绑到 LlmProperties —— 前缀或字段名被改过了");
+    }
 
     // ==================== 清单 ====================
 

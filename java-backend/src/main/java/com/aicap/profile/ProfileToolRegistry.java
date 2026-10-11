@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * 画像智能体专属工具注册表(独立于会议智能体的 AgentTools)。
+ * 画像智能体专属工具注册表(独立于会议智能体的 MeetingTools)。
  * LLM 通过 {name, argsJson} 形式调用;每个工具带 JSON schema 描述,注入 system prompt 供模型选择。
  * 数据不足时工具返回明确的"空结果"结构,由运行循环决定是否追问/换工具——而不是像规则引擎那样直接放弃。
  */

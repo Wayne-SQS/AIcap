@@ -1,6 +1,6 @@
 package com.aicap.generation;
 
-import com.aicap.agent.AgentProperties;
+import com.aicap.llm.LlmProperties;
 import com.aicap.common.ApiException;
 import com.aicap.entity.ProjectGenerationEvent;
 import com.aicap.entity.ProjectGenerationRun;
@@ -35,7 +35,7 @@ public class ProjectGenerationService {
     private final ProjectGenerationValidator validator;
     private final ProjectGenerationImportService importer;
     private final ProjectGenerationExecutionService execution;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper mapper;
 
     public Map<String,Object> create(String mode,String request,String strategy,User user){if(user==null)throw ApiException.unauthorized("未登录");if(!props.settingsReady())throw ApiException.server("服务端尚未配置模型密钥");if(request==null||request.isBlank())throw ApiException.badRequest("生成描述不能为空");String normalizedMode=normalizeNaturalLanguageMode(mode);ProjectGenerationRun r=base(normalizedMode,sourceNameForMode(normalizedMode),request,strategy,user);runs.insert(r);jobs.event(r,"queued","生成请求已入队");return out(r);}

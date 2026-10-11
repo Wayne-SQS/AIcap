@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * RAG 检索层参数(绑定 application.yml 的 aicap.rag.*)。
  *
- * <p>沿用 {@code AgentProperties} 的「无密钥 = 停用」约定:embedding 三项不齐时
+ * <p>沿用 {@code LlmProperties} 的「无密钥 = 停用」约定:embedding 三项不齐时
  * <b>不抛异常、不静默产出空结果</b>,由调用方(索引任务/管理接口)显式返回 not_configured,
  * 让前端能如实告诉用户"去配密钥",而不是显示"索引完成 0 块"。
  */
@@ -134,7 +134,7 @@ public class RagProperties {
         /** 单条文本最大字符数(超长直接截断,避免上游 400) */
         private int maxChars = 2000;
 
-        /** 三项齐全才可用(对齐 AgentProperties.settingsReady) */
+        /** 三项齐全才可用(对齐 LlmProperties.settingsReady) */
         public boolean settingsReady() {
             return notBlank(apiKey) && notBlank(baseUrl) && notBlank(model);
         }

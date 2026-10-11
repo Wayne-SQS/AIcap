@@ -1,7 +1,6 @@
 package com.aicap.platform;
 
-import com.aicap.agent.AgentError;
-import com.aicap.agent.AgentTools;
+import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
 import com.aicap.entity.User;
 import com.aicap.profile.ProfileToolRegistry;
@@ -64,7 +63,7 @@ public class PlatformToolService {
     }
 
     private final PlatformToolCatalog catalog;
-    private final AgentTools meetingTools;
+    private final MeetingTools meetingTools;
     private final ProfileToolRegistry profileTools;
     private final RetrievalService retrievalService;
     private final RagProperties props;
@@ -94,7 +93,7 @@ public class PlatformToolService {
                 default -> throw ApiException.notFound("未知工具: " + toolName);
             };
         } catch (AgentError e) {
-            // AgentTools 的参数校验与权限复核都抛 AgentError;对编排层是"可纠正的观察",
+            // MeetingTools 的参数校验与权限复核都抛 AgentError;对编排层是"可纠正的观察",
             // 不是服务的错 —— 所以走 ok=false 而不是 5xx
             return failure(toolName, e.getCode(), e.getMessage(), started);
         } catch (ApiException e) {

@@ -5,6 +5,7 @@ import com.aicap.entity.Meeting;
 import com.aicap.entity.MeetingAgentEvent;
 import com.aicap.entity.MeetingAgentRun;
 import com.aicap.entity.User;
+import com.aicap.llm.LlmProperties;
 import com.aicap.mapper.MeetingAgentEventMapper;
 import com.aicap.mapper.MeetingAgentRunMapper;
 import com.aicap.mapper.MeetingMapper;
@@ -31,7 +32,7 @@ public class MeetingAgentService {
     private final MeetingAgentRunMapper runMapper;
     private final MeetingAgentEventMapper eventMapper;
     private final AgentJobs jobs;
-    private final AgentProperties props;
+    private final LlmProperties props;
     private final ObjectMapper objectMapper;
 
     // ---------- 配置 ----------
@@ -42,7 +43,7 @@ public class MeetingAgentService {
         out.put("model", props.getModel());
         out.put("worker_enabled", props.isAgentWorkerEnabled());
         out.put("supported_actions", List.of("pool.create"));
-        out.put("prompt_version", AgentProperties.PROMPT_VERSION);
+        out.put("prompt_version", MeetingAgentConstants.PROMPT_VERSION);
         return out;
     }
 
