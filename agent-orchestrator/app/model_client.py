@@ -26,8 +26,9 @@ import httpx
 from . import config
 from .schemas import ModelError
 
-# 单轮返回的工具调用上限（与 loop 的 MAX_CALLS_PER_TURN 呼应：这里先挡住明显异常的响应）
-_MAX_CALLS = 8
+# 单轮返回的工具调用上限（协议级）。loop 的预算闸与本层的早筛共用这一个值，
+# 避免两处各写一个数之后悄悄漂移（漂移会让超限的报错码在两处不一致）。
+MAX_CALLS_PER_TURN = 8
 
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
@@ -136,7 +137,7 @@ class ModelClient:
             if choice.get("finish_reason") not in ("stop", "tool_calls"):
                 raise ModelError("incomplete_response", "模型输出被截断或中断，本次 run 未产出结果")
             calls = message.get("tool_calls") or []
-            if not isinstance(calls, list) or len(calls) > _MAX_CALLS:
+            if not isinstance(calls, list) or len(calls) > MAX_CALLS_PER_TURN:
                 raise ValueError("invalid tool calls")
             for call in calls:
                 if (

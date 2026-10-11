@@ -28,7 +28,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from .java_client import JavaClient
-from .model_client import ModelProtocol
+from .model_client import MAX_CALLS_PER_TURN, ModelProtocol
 from .runtime import RunRegistry
 from .schemas import Catalog, ModelError, PlatformError, ToolOutcome
 
@@ -36,7 +36,7 @@ from .schemas import Catalog, ModelError, PlatformError, ToolOutcome
 MAX_STEPS = 6
 MAX_SECONDS = 180
 MAX_TOOL_CALLS = 24
-MAX_CALLS_PER_TURN = 8
+# MAX_CALLS_PER_TURN 由 model_client 定义并在此处导入：协议级上限，两层共用同一个值
 
 # `agent_checkpoints.node_name` 固定单值、滚动覆盖（契约 §4.5）。
 LOOP_NODE = "loop"
