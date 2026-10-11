@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -100,7 +101,13 @@ class ProjectGenerationServiceTest {
 
         verify(jobs).event(run, "confirmed", "用户确认执行项目图");
         verify(jobs).event(run, "action_started", "开始写入项目图业务数据");
-        verify(jobs).event(run, "failed", "写库失败");
+        // 事件(以及落库的 error_message)一律是分类文案:内部异常文案可能带表名/约束名/SQL,
+        // 原始异常只进服务端日志 —— 与 GlobalExceptionHandler:98-103 同一条原则。
+        // 本用例原先钉的正是"把 e.getMessage() 原样写进事件"这一行为。
+        verify(jobs).event(run, "failed", "项目图写入失败，业务数据未改动");
+        verify(jobs, never()).event(run, "failed", "写库失败");
+        assertFalse(String.valueOf(run.getErrorMessage()).contains("写库失败"),
+                "内部异常文案泄漏进了 error_message: " + run.getErrorMessage());
         verify(jobs, never()).event(run, "action_completed", "项目图业务数据写入完成");
         verify(jobs, never()).event(run, "completed", "项目图已写入统一项目数据");
         assertEquals("failed", run.getStatus());

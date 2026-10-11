@@ -32,27 +32,12 @@ class AgentPackageIsSelfContainedTest {
 
     private static final String FORBIDDEN_IMPORT = "import com.aicap.agent.";
 
+    /** 不限行首的全限定名引用:不 import 也能用 com.aicap.agent.Xxx */
+    private static final String FORBIDDEN_QUALIFIER = "com.aicap.agent.";
+
     @Test
     void noMainCodeOutsideTheAgentPackageImportsIt() throws IOException {
-        Path sourceRoot = Path.of("src", "main", "java");
-        assertTrue(Files.isDirectory(sourceRoot),
-                "找不到 src/main/java,测试的工作目录可能不是 java-backend");
-
-        List<String> offenders = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(sourceRoot)) {
-            for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
-                // 只排除 agent/ 自己的文件;其余任何文件出现该 import 都算越界。
-                String normalized = file.toString().replace('\\', '/');
-                if (normalized.contains("/" + DELETABLE_PACKAGE)) {
-                    continue;
-                }
-                for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                    if (line.strip().startsWith(FORBIDDEN_IMPORT)) {
-                        offenders.add(normalized + " -> " + line.strip());
-                    }
-                }
-            }
-        }
+        List<String> offenders = scanOutsideAgentPackage(line -> line.strip().startsWith(FORBIDDEN_IMPORT));
 
         assertTrue(offenders.isEmpty(),
                 "老会议 Agent 包不再是可删除的了 —— 以下文件从外部依赖它,"
@@ -60,5 +45,65 @@ class AgentPackageIsSelfContainedTest {
                         + "(配置/传输 → com.aicap.llm,域错误 → com.aicap.common,"
                         + "平台工具 → com.aicap.platform,切分 → com.aicap.rag),"
                         + "或让该域自注册一个 WorkerTask:\n  " + String.join("\n  ", offenders));
+    }
+
+    /**
+     * 同一条保证的第二个缺口:{@code import} 不是唯一的依赖写法。
+     *
+     * <p>不写 import、直接在代码里用 {@code com.aicap.agent.Xxx} 全限定名,同样是编译期依赖,
+     * 删 {@code agent/} 一样会挂 —— 而只查行首 {@code import} 的写法看不到它。
+     *
+     * <p>判定前必须<b>先剥注释</b>:{@code llm/LlmProperties} 的 javadoc 里就写着
+     * "原先住在 com.aicap.agent.AgentProperties",那是史实说明,不是依赖。
+     */
+    @Test
+    void noMainCodeOutsideTheAgentPackageUsesItsFullyQualifiedName() throws IOException {
+        List<String> offenders = scanOutsideAgentPackage(
+                line -> line.contains(FORBIDDEN_QUALIFIER), true);
+
+        assertTrue(offenders.isEmpty(),
+                "以下文件在代码里用了 com.aicap.agent.* 全限定名(不是 import,但同样是编译期依赖),"
+                        + "删掉 agent/ 时会编译不过:\n  " + String.join("\n  ", offenders));
+    }
+
+    /** 去掉块注释与行注释:注释里提该包名是史实说明,不构成依赖 */
+    private static String stripComments(String src) {
+        return src.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)//.*$", " ");
+    }
+
+    private List<String> scanOutsideAgentPackage(java.util.function.Predicate<String> hit) throws IOException {
+        return scanOutsideAgentPackage(hit, false);
+    }
+
+    /**
+     * @param stripCommentsFirst 是否先剥注释。逐行判定时无法可靠剥块注释,
+     *                           故该模式改为整文件剥注释后按行返回命中处
+     */
+    private List<String> scanOutsideAgentPackage(java.util.function.Predicate<String> hit,
+                                                 boolean stripCommentsFirst) throws IOException {
+        Path sourceRoot = Path.of("src", "main", "java");
+        assertTrue(Files.isDirectory(sourceRoot),
+                "找不到 src/main/java,测试的工作目录可能不是 java-backend");
+
+        List<String> offenders = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(sourceRoot)) {
+            for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                // 只排除 agent/ 自己的文件;其余任何文件命中都算越界。
+                String normalized = file.toString().replace('\\', '/');
+                if (normalized.contains("/" + DELETABLE_PACKAGE)) {
+                    continue;
+                }
+                List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                if (stripCommentsFirst) {
+                    lines = List.of(stripComments(String.join("\n", lines)).split("\n", -1));
+                }
+                for (String line : lines) {
+                    if (hit.test(line)) {
+                        offenders.add(normalized + " -> " + line.strip());
+                    }
+                }
+            }
+        }
+        return offenders;
     }
 }

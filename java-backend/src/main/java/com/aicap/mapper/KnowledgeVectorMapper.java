@@ -62,6 +62,27 @@ public interface KnowledgeVectorMapper extends BaseMapper<KnowledgeVector> {
             """)
     int upsert(KnowledgeVector vector);
 
+    /**
+     * 批量幂等写入:语义与 {@link #upsert} 完全相同,只是把 N 条并成一条语句。
+     *
+     * <p>为什么值得:逐条 upsert 时每批 32 条就是 32 次往返,重建索引的成本随块数线性放大。
+     * 多值 VALUES 用 {@code <foreach>} 拼 —— 与 {@link #deleteByIds} 同一写法。
+     */
+    @Insert("""
+            <script>
+            INSERT INTO `knowledge_vectors` (`chunk_id`, `model`, `dimension`, `vector`, `created_at`)
+            VALUES
+            <foreach collection="vectors" item="v" separator=",">
+            (#{v.chunkId}, #{v.model}, #{v.dimension}, #{v.vector}, NOW())
+            </foreach>
+            ON DUPLICATE KEY UPDATE `model` = VALUES(`model`),
+                                    `dimension` = VALUES(`dimension`),
+                                    `vector` = VALUES(`vector`),
+                                    `created_at` = VALUES(`created_at`)
+            </script>
+            """)
+    int upsertAll(@Param("vectors") List<KnowledgeVector> vectors);
+
     /** 按源删向量:源记录被删时调用,避免留下检索得到却已不存在的「幽灵 chunk」 */
     @Delete("""
             DELETE v FROM `knowledge_vectors` v

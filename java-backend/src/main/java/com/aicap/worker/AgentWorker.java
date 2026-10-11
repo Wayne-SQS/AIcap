@@ -32,6 +32,17 @@ public class AgentWorker {
     private final LlmProperties props;
     private final List<WorkerTask> tasks;
 
+    /** 有活时赶紧看下一步(保持原值) */
+    private static final long BUSY_POLL_MS = 200;
+    /** 空转/出错的起始间隔(保持原值,不牺牲正常情况下的接单速度) */
+    private static final long IDLE_POLL_MIN_MS = 1000;
+    /**
+     * 空转退避上限。刻意只到 4s:三个域各一条线程长期每秒查库是纯浪费,
+     * 但"用户点了分析要等多久才被接走"是用户可感知的 —— 一次 LLM 分析本身就要几十秒,
+     * 4s 的接单延迟不可感知,再大就不划算了。
+     */
+    private static final long IDLE_POLL_MAX_MS = 4000;
+
     private volatile boolean running;
     private final Map<String, Thread> threads = new ConcurrentHashMap<>();
     private final Map<String, WorkerState> states = new ConcurrentHashMap<>();
@@ -62,6 +73,7 @@ public class AgentWorker {
 
     private void loop(String name, java.util.function.BooleanSupplier step, WorkerState state) {
         state.active = true;
+        long idleMs = IDLE_POLL_MIN_MS;
         while (running) {
             boolean worked = false;
             try {
@@ -75,7 +87,16 @@ public class AgentWorker {
                 log.warn("{} worker step error: {}", name, e.toString());
             }
             try {
-                Thread.sleep(worked ? 200 : 1000);
+                long sleepMs;
+                if (worked) {
+                    idleMs = IDLE_POLL_MIN_MS;   // 有活就把退避收回起点
+                    sleepMs = BUSY_POLL_MS;
+                } else {
+                    // 空转与出错同样退避:长期无活 / 长期故障时不该仍按 1s 硬查库
+                    sleepMs = idleMs;
+                    idleMs = Math.min(idleMs * 2, IDLE_POLL_MAX_MS);
+                }
+                Thread.sleep(sleepMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 if (running) break;

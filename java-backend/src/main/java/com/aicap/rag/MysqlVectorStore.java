@@ -32,6 +32,9 @@ public class MysqlVectorStore implements VectorStore {
     /** 单条 DELETE 最多的 IN 元素数 */
     private static final int DELETE_BATCH = 500;
 
+    /** 单条 INSERT 最多的 VALUES 行数:向量是大字段,批太大易撞 max_allowed_packet */
+    private static final int INSERT_BATCH = 200;
+
     private final KnowledgeVectorMapper mapper;
     private final EmbeddingModel embeddingModel;
     private final RagProperties props;
@@ -55,6 +58,10 @@ public class MysqlVectorStore implements VectorStore {
 
     @Override
     public void upsertBatch(List<Entry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
+        List<KnowledgeVector> rows = new ArrayList<>(Math.min(entries.size(), INSERT_BATCH));
         for (Entry e : entries) {
             KnowledgeVector row = new KnowledgeVector();
             row.setChunkId(e.id());
@@ -62,7 +69,11 @@ public class MysqlVectorStore implements VectorStore {
             row.setDimension(e.vector().length);
             row.setVector(Vectors.toBytes(e.vector()));
             row.setCreatedAt(LocalDateTime.now());
-            mapper.upsert(row);
+            rows.add(row);
+        }
+        // 分批一条语句写完:原先是逐行 INSERT,每批 32 条 = 32 次往返
+        for (int i = 0; i < rows.size(); i += INSERT_BATCH) {
+            mapper.upsertAll(rows.subList(i, Math.min(i + INSERT_BATCH, rows.size())));
         }
     }
 

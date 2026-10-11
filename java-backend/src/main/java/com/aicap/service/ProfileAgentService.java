@@ -26,6 +26,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +56,7 @@ import java.util.stream.Collectors;
  * - 区分「客观事实」与「AI 推断」;
  * - 不把提交次数等同于工作量或工作质量。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProfileAgentService {
@@ -1153,10 +1155,13 @@ public class ProfileAgentService {
         } catch (Exception e) {
             // H4 修复:无论成功失败都复位录制状态,防止 ThreadLocal 泄漏到线程池复用线程
             try { brain.collectSteps(); } catch (Exception ignore) { }
+            // 内部异常文案可能带表名/约束名/片段 SQL:原始异常只进服务端日志,
+            // 落库与回显用分类文案(与 GlobalExceptionHandler:98-103 同一条原则)
+            log.warn("画像分析失败", e);
             run.setStatus("failed");
-            run.setErrorMessage(e.getMessage() == null ? "unknown" : e.getMessage().substring(0, Math.min(490, e.getMessage().length())));
+            run.setErrorMessage("分析失败，运行记录已留痕，可重试");
             runMapper.updateById(run);
-            throw ApiException.server("分析失败,运行记录已留痕,可重试: " + e.getMessage());
+            throw ApiException.server("分析失败，运行记录已留痕，可重试");
         }
     }
 

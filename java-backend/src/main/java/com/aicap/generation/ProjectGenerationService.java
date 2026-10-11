@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProjectGenerationService {
@@ -68,7 +70,7 @@ public class ProjectGenerationService {
             return get(id);
         }catch(ApiException e){throw e;}catch(Exception e){throw ApiException.conflict("草案内容无法解析，请重新生成");}
     }
-    public Map<String,Object> confirm(String id,boolean replaceConfirmed,User user){ProjectGenerationRun r=require(id);if(!"waiting_confirmation".equals(r.getStatus()))throw ApiException.conflict("该生成草案不在待确认状态");if("replace".equals(r.getStrategy())&&!replaceConfirmed)throw ApiException.badRequest("替换现有项目需要再次确认");if(runs.update(null,new UpdateWrapper<ProjectGenerationRun>().set("status","executing").set("updated_at",LocalDateTime.now()).eq("id",id).eq("status","waiting_confirmation"))!=1)throw ApiException.conflict("该草案已被处理");r=require(id);jobs.event(r,"confirmed","用户确认执行项目图");jobs.event(r,"action_started","开始写入项目图业务数据");try{execution.execute(r.getDraftJson(),r.getStrategy(),user);jobs.event(r,"action_completed","项目图业务数据写入完成");r.setStatus("completed");r.setUpdatedAt(LocalDateTime.now());runs.updateById(r);jobs.event(r,"completed","项目图已写入统一项目数据");return out(r);}catch(RuntimeException e){r.setStatus("failed");r.setErrorCode("execution_failed");r.setErrorMessage(e.getMessage()==null?"项目图写入失败":e.getMessage());r.setUpdatedAt(LocalDateTime.now());runs.updateById(r);jobs.event(r,"failed",r.getErrorMessage());throw e;}}
+    public Map<String,Object> confirm(String id,boolean replaceConfirmed,User user){ProjectGenerationRun r=require(id);if(!"waiting_confirmation".equals(r.getStatus()))throw ApiException.conflict("该生成草案不在待确认状态");if("replace".equals(r.getStrategy())&&!replaceConfirmed)throw ApiException.badRequest("替换现有项目需要再次确认");if(runs.update(null,new UpdateWrapper<ProjectGenerationRun>().set("status","executing").set("updated_at",LocalDateTime.now()).eq("id",id).eq("status","waiting_confirmation"))!=1)throw ApiException.conflict("该草案已被处理");r=require(id);jobs.event(r,"confirmed","用户确认执行项目图");jobs.event(r,"action_started","开始写入项目图业务数据");try{execution.execute(r.getDraftJson(),r.getStrategy(),user);jobs.event(r,"action_completed","项目图业务数据写入完成");r.setStatus("completed");r.setUpdatedAt(LocalDateTime.now());runs.updateById(r);jobs.event(r,"completed","项目图已写入统一项目数据");return out(r);}catch(RuntimeException e){log.warn("项目图写入失败 run={}",id,e);r.setStatus("failed");r.setErrorCode("execution_failed");r.setErrorMessage("项目图写入失败，业务数据未改动");r.setUpdatedAt(LocalDateTime.now());runs.updateById(r);jobs.event(r,"failed",r.getErrorMessage());throw e;}}
     @Transactional public Map<String,Object> cancel(String id,User user){ProjectGenerationRun r=require(id);if(runs.update(null,new UpdateWrapper<ProjectGenerationRun>().set("status","cancelled").set("updated_at",LocalDateTime.now()).eq("id",id).eq("status","waiting_confirmation"))!=1)throw ApiException.conflict("该草案已被处理");jobs.event(r,"cancelled","用户取消，未修改项目数据");r.setStatus("cancelled");return out(r);}
     private ProjectGenerationRun base(String mode,String sourceName,String requestText,String strategy,User u){ProjectGenerationRun r=new ProjectGenerationRun();r.setId(UUID.randomUUID().toString());r.setRequestedBy(u.getId());r.setMode(mode);r.setStrategy("replace".equals(strategy)?"replace":"merge");r.setSourceName(sourceName);r.setRequestText(requestText);r.setStatus("queued");r.setAttempt(1);r.setModel(props.getModel());r.setPromptVersion("project-generator-v1");r.setCreatedAt(LocalDateTime.now());r.setUpdatedAt(LocalDateTime.now());return r;}
     private String normalizeNaturalLanguageMode(String mode){return "overview".equals(mode)?"overview":"detailed";}

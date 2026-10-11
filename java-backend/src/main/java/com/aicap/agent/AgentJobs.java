@@ -383,13 +383,20 @@ public class AgentJobs {
     /** 已有标题池(故事 + 需求池 + 待审建议的 title),用于去重(对齐 jobs.py final 段) */
     private Set<String> existingTitlePool() {
         Set<String> titles = new LinkedHashSet<>();
-        for (Story s : storyMapper.selectList(null)) {
+        // 只取 title 列:这三条 selectList 在一个写事务里执行(complete()),
+        // 全列装载会把 description / evidence / note 等长文本一起读进来并拉长持锁时间。
+        // 去重只需要标题。
+        for (Story s : storyMapper.selectList(new QueryWrapper<Story>().select("title"))) {
             if (s.getTitle() != null) titles.add(s.getTitle().trim().toLowerCase(Locale.ROOT));
         }
-        for (PoolItem p : poolItemMapper.selectList(null)) {
+        for (PoolItem p : poolItemMapper.selectList(new QueryWrapper<PoolItem>().select("title"))) {
             if (p.getTitle() != null) titles.add(p.getTitle().trim().toLowerCase(Locale.ROOT));
         }
-        for (Suggestion s : suggestionMapper.selectList(new QueryWrapper<Suggestion>().eq("status", "pending"))) {
+        // 建议的 title 不是列,而在 change_json 里,故这条无法只取 title 列 ——
+        // 仍需解析。残余成本见 qa/ 与提交说明:真要再降,得把 title 落到列上或用
+        // MySQL JSON_EXTRACT 下推(会引入库方言,故本轮不做)。
+        for (Suggestion s : suggestionMapper.selectList(new QueryWrapper<Suggestion>()
+                .select("change_json").eq("status", "pending"))) {
             try {
                 JsonNode data = mapper.readTree(s.getChangeJson());
                 if (data.isObject() && data.path("title").isTextual()) {

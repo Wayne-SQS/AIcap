@@ -12,6 +12,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -22,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PlanningAgentService {
@@ -86,7 +88,10 @@ public class PlanningAgentService {
             markFailed(run, "execution_failed", e.getMessage());
             throw e;
         } catch (Exception e) {
-            String message = e.getMessage() == null ? "确认执行失败，未完成规划修改" : e.getMessage();
+            // 内部异常文案可能带表名/约束名/片段 SQL:原始异常只进日志,
+            // 落库与回显一律用分类文案(与 GlobalExceptionHandler:98-103 同一条原则)
+            log.warn("规划执行失败 run={}", run.getId(), e);
+            String message = "确认执行失败，未完成规划修改";
             markFailed(run, "execution_failed", message);
             throw ApiException.conflict(message);
         }
