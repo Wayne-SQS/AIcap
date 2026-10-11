@@ -6,7 +6,7 @@ import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
 import AssignmentHistory from './AssignmentHistory.vue'
 
-const props = defineProps({ meetingId: String })
+const props = defineProps({ meetingId: String, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
 const session = useSessionStore()
 const saved = ref(null), pending = ref(null), saving = ref(false), saveError = ref(''), saveNotice = ref('')
@@ -123,7 +123,7 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
     </p>
     <p v-if="saveError" role="alert">{{ saveError }}</p>
     <p v-if="saveNotice" role="status">{{ saveNotice }}</p>
-    <AssignmentHistory :meeting-id="meetingId" :saved="saved" />
+    <AssignmentHistory :meeting-id="meetingId" :saved="saved" :initial-analysis-id="initialAnalysisId" />
   </section>
 </template>
 <style scoped>

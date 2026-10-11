@@ -3,7 +3,7 @@ import { ref, watch, onBeforeUnmount } from 'vue'
 import { assignmentSuggestionsApi } from '@/api/assignment'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
-const props = defineProps({ meetingId: String, saved: Object })
+const props = defineProps({ meetingId: String, saved: Object, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore(), project = useProjectStore()
 const records = ref([]), selected = ref(null), error = ref(''), loading = ref(false), busy = ref(false), boardError = ref('')
 const decision = ref('approve'), memberId = ref(null), reason = ref(''), acknowledged = ref(false)
@@ -22,12 +22,16 @@ async function refresh() {
   try {
     const rows = await assignmentSuggestionsApi.list(props.meetingId)
     if (!alive || attempt !== version) return
-    const id = selected.value?.id
+    const id = selected.value?.id || props.initialAnalysisId
     records.value = rows; choose(rows.find(r => r.id === id) || rows[0] || null)
   } catch (err) { if (alive && attempt === version) error.value = `读取建议失败：${err.message}` }
   finally { if (alive) loading.value = false }
 }
 watch(() => props.meetingId, refresh, { immediate: true })
+watch(() => props.initialAnalysisId, id => {
+  const record = records.value.find(item => item.id === id)
+  if (record) choose(record)
+})
 watch(() => props.saved, record => {
   if (!record || record.meeting_id !== props.meetingId) return
   records.value = [record, ...records.value.filter(r => r.id !== record.id)]; choose(record)
@@ -71,7 +75,7 @@ async function execute() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="!loading && !error && !records.length">暂无已保存建议。</p>
     <label v-if="records.length" class="field">历史分配建议<select :value="selected?.id" :disabled="busy || loading" @change="choose(records.find(r => r.id === $event.target.value))"><option v-for="r in records" :key="r.id" :value="r.id">{{ r.created_at }} · {{ r.input.story_ids[0] }} · {{ r.id }}</option></select></label>
-    <article v-if="selected">
+    <article v-if="selected" :data-source-proposal="selected.id" tabindex="-1">
       <p>记录 {{ selected.id }} · 提交人 #{{ selected.submitted_by }} · {{ selected.created_at }}</p>
       <p>故事 {{ selected.result.context.selected_stories[0].id }} · {{ selected.result.context.selected_stories[0].title }}；目标Sprint {{ selected.input.target_sprint ?? '未知' }}</p>
       <p><strong>此处为保存时的快照。容量尚未验证，批准不会立即修改负责人，需单独执行。</strong></p>

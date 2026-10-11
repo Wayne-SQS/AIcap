@@ -199,7 +199,7 @@ function genDemoSuggestion() {
         <RetroAnalysisPanel v-else-if="analysisType === 'retro'" :key="'retro:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <RefinementAnalysisPanel v-else-if="analysisType === 'refinement'" :key="'refinement:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <details><summary>通用会议 Agent（分析摘要与行动项）</summary><AgentRunPanel /></details>
-        <details :open="analysisType === 'assignment'"><summary>Assignment 分配建议 · 只读查询后可另行保存建议</summary><AssignmentPanel :key="'assignment:' + meeting.selected" :meeting-id="meeting.selected" /></details>
+        <details :open="analysisType === 'assignment'"><summary>Assignment 分配建议 · 只读查询后可另行保存建议</summary><AssignmentPanel :key="'assignment:' + meeting.selected" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" /></details>
       </template>
       <p v-else class="empty">先创建或选择会议，再开始分析。</p>
     </div>

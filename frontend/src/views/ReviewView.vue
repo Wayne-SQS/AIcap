@@ -149,7 +149,8 @@ function openSource(row) {
   }
   meeting.select(row.meetingId)
   router.push({ name: 'meetings', query: {
-    meetingId: row.meetingId, type: row.source, analysisId: row.analysisId, fromReview: '1',
+    meetingId: row.meetingId, type: row.source, analysisId: row.analysisId,
+    proposalId: row.proposalId, fromReview: '1',
     status: queueFilter.value, source: queueSource.value, search: queueSearch.value,
     fromDate: queueFrom.value, toDate: queueTo.value
   } })
@@ -261,6 +262,7 @@ async function serverEdit(id) {
           <div class="sug-row"><b>流程进度</b><span>{{ row.flowStage || '分析完成 · 处理状态待确认' }}</span></div>
           <div class="sug-row"><b>审核留痕</b><span>{{ row.proposal?.decision ? `审核决定：${row.proposal.decision}` : '尚无审核决定' }}{{ row.reviewer ? ` · 审核人 #${row.reviewer}` : '' }}{{ row.reviewedAt ? ` · ${row.reviewedAt}` : '' }}{{ row.reviewReason ? ` · ${row.reviewReason}` : '' }}</span></div>
           <div class="sug-row"><b>执行状态</b><span>{{ executionLabel(row) }}{{ row.executor ? ` · 执行人 #${row.executor}` : '' }}{{ row.executedAt ? ` · ${row.executedAt}` : '' }}</span></div>
+          <p v-if="row.status === 'pending' && !meeting.mayReview" class="small queue-inline-permission">当前账号只能查看；请使用管理员或负责人账号审核。</p>
           <details><summary>查看原始提案、批准内容与证据</summary><pre class="queue-detail">{{ JSON.stringify(row.proposal?.original_proposal || row.proposal, null, 2) }}</pre><blockquote v-for="(evidence,index) in (row.proposal?.original_proposal?.evidence || [])" :key="index">{{ evidence.segment_id || '原文证据' }} · {{ evidence.quote || evidence.text }}</blockquote><p v-if="row.proposal?.approved_proposal" class="small">批准后的变更：{{ JSON.stringify(row.proposal.approved_proposal) }}</p></details>
           <div v-if="row.source === 'general' && row.status === 'pending' && meeting.mayReview" class="sug-acts">
             <button type="button" :data-edit-suggestion="row.proposalId" :disabled="meeting.busy.includes(row.proposalId)" @click="serverEdit(row.proposalId)">修改后采纳</button>

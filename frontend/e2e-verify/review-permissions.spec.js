@@ -63,7 +63,7 @@ test('提案队列只读权限：查看者可查看但没有审核写操作', as
   expect(mobileLayout.buttonHeight).toBeGreaterThanOrEqual(38)
 
   await page.evaluate(() => { window.sessionStore.currentUser = { id: 9, username: 'member', display_name: '普通成员', role: 'member' } })
-  await expect(page.locator('.queue-permission')).toBeVisible()
+  await expect(page.locator('.review-queue > .queue-permission')).toBeVisible()
   await expect(page.locator('.review-queue .sug-acts')).toHaveCount(0)
   await expect(page.locator('[data-meeting-suggestion="suggestion-1"] .sug-acts')).toHaveCount(0)
 
@@ -79,6 +79,8 @@ test('提案队列只读权限：查看者可查看但没有审核写操作', as
 
   await generalSuggestion.getByRole('button', { name: '查看来源会议' }).click()
   await expect(page.getByText('通用会议建议', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-source-suggestion="suggestion-1"]')).toBeFocused()
+  await expect(page.locator('[data-source-suggestion="suggestion-1"]')).toContainText('完善评审流程')
   await page.getByRole('button', { name: '← 返回审核中心（保留筛选）' }).click()
   await expect(page.getByLabel('处理状态')).toHaveValue('all')
   await expect(page.locator('[data-meeting-suggestion="suggestion-1"]')).toContainText('已拒绝')

@@ -101,7 +101,7 @@ onBeforeUnmount(() => { alive = false; ++listVersion; ++detailVersion; ++actionV
       <template v-else-if="reviews">
         <p role="status">审核进度：{{ progressName(reviews.review_status) }}</p>
         <WorkflowPermissionNote :proposals="reviews.proposals" />
-        <article v-for="item in reviews.proposals" :key="selected + ':' + item.proposal_id" class="proposal-card">
+          <article v-for="item in reviews.proposals" :key="selected + ':' + item.proposal_id" class="proposal-card" :data-source-proposal="item.proposal_id" tabindex="-1">
           <h4>{{ item.original_proposal.changes.title }}</h4>
           <p>提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(item) }}</p>
           <p class="preserve">原始事项：{{ item.original_proposal.changes.title }}<br>{{ item.original_proposal.changes.description }}<br>负责人：{{ ownerName(item.original_proposal.changes.owner_id) }} · 截止时间：{{ item.original_proposal.changes.deadline_text ?? '未确定' }}</p>
