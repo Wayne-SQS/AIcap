@@ -1,14 +1,10 @@
 """Read-only Planning graph: context -> model -> validated pending proposals."""
 from typing import TypedDict
 
-from langgraph.graph import END, START, StateGraph
-from langsmith import tracing_context
-
-from .contracts import ResultContractError
+from .graph_runtime import CompletionModel, WorkflowError, run_linear_graph, validate_candidate
 from .planning_context import PlanningContextReader, SprintPlanningInput
 from .planning_contracts import SprintPlanningOutput, validate_planning_result
 from .planning_skill import SprintPlanningSkill
-from .workflow import CompletionModel, WorkflowError
 
 
 class PlanningState(TypedDict, total=False):
@@ -44,22 +40,11 @@ class SprintPlanningWorkflow:
             return {'candidate': self._model.complete(messages)}
 
         def validate(state: PlanningState):
-            try:
-                result = validate_planning_result(
-                    SprintPlanningInput.model_validate(state['context']), state['candidate'])
-            except ResultContractError as exc:
-                raise WorkflowError(exc.code) from exc
-            except ValueError:
-                raise WorkflowError('invalid_model_proposal') from None
-            return {'result': result.model_dump()}
+            return validate_candidate(validate_planning_result, SprintPlanningInput, state)
 
-        builder = StateGraph(PlanningState)
-        for name, node in (('load_context', load_context), ('analyze', analyze), ('validate', validate)):
-            builder.add_node(name, node)
-        for source, target in ((START, 'load_context'), ('load_context', 'analyze'),
-                               ('analyze', 'validate'), ('validate', END)):
-            builder.add_edge(source, target)
-        graph = builder.compile()
-        with tracing_context(enabled=False):
-            state = graph.invoke({}, config={'recursion_limit': 5})
+        state = run_linear_graph(
+            PlanningState,
+            (('load_context', load_context), ('analyze', analyze), ('validate', validate)),
+            payload={},
+        )
         return SprintPlanningOutput.model_validate(state['result'])

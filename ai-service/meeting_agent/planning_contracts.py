@@ -3,7 +3,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .contracts import Contract, Evidence, Identifier, NonBlank, ResultContractError, StoryId
+from .contracts import (Contract, Evidence, Identifier, NonBlank, ResultContractError, StoryId,
+                        require_quoted_evidence)
 from .planning_context import SprintPlanningInput
 
 
@@ -62,10 +63,5 @@ def validate_planning_result(context: SprintPlanningInput, payload: dict) -> Spr
             raise ResultContractError('unknown story', 'unknown_story', path + ('story_id',))
         if proposal.expected.sprint != story.sprint:
             raise ResultContractError('snapshot mismatch', 'snapshot_mismatch', path + ('expected', 'sprint'))
-        for ei, evidence in enumerate(proposal.evidence):
-            text = segments.get(evidence.segment_id)
-            if text is None or evidence.quote not in text:
-                field = 'segment_id' if text is None else 'quote'
-                code = 'unknown_segment' if text is None else 'quote_mismatch'
-                raise ResultContractError('invalid evidence', code, path + ('evidence', ei, field))
+        require_quoted_evidence(proposal.evidence, segments, path)
     return result

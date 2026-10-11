@@ -26,7 +26,7 @@
 
 | # | 外部功能 | 老家依据 | 新架构落点 | **验收方式** |
 |---|---|---|---|---|
-| F1 | **通用会议分析入口**（不分类型，给转写就出结果） | `AgentJobs.queueRun` → `AgentRunner`，整条无类型参数 | **需新建**：一条通用 LangGraph 工作流。新家现有五类入口（`/analyze`、`/planning/analyze`、…）都是**类型化**的，没有通用入口。⚠️ 它会成为**第六张图**——现有五张（`workflow.py:79` / `planning_workflow.py:53` / `review_workflow.py:51` / `retro_workflow.py:51` / `refinement_workflow.py:51`）**骨架同构**（normalize → load_context → skill → validate → END），已经到头：**先把公共图抽出来，别再复制第六份** | 契约测试：给一段转写 + 会议 id，返回含 F2–F9 全部键 |
+| F1 | **通用会议分析入口**（不分类型，给转写就出结果） | `AgentJobs.queueRun` → `AgentRunner`，整条无类型参数 | **需新建**：一条通用 LangGraph 工作流。新家现有五类入口（`/analyze`、`/planning/analyze`、…）都是**类型化**的，没有通用入口。⚠️ **公共骨架已抽出**（`graph_runtime.run_linear_graph`，五张图共用；全仓仅此一处 `StateGraph(`）——F1 是**往骨架里加节点**（节点表 + 边表），不是复制第六份 | 契约测试：给一段转写 + 会议 id，返回含 F2–F9 全部键 |
 | F2 | `summary`（模型产出） | `AnalysisValidator:70`，1–2000 字 | 工作流输出模型 | 结构测试 + 非空 |
 | F3 | `decisions` 决议（模型产出） | `:71`，≤20，每项 `text`+`evidence` | 同上 | 逐项 `evidence` 非空 |
 | F4 | `action_items` 行动项（模型产出） | `:72`，`description`+`owner_mention`+`deadline_text`+`evidence` | 同上 | 逐项证据 + F12 |
@@ -47,12 +47,12 @@
 | # | 外部功能 | 老家依据 | 新架构落点 | **验收方式** |
 |---|---|---|---|---|
 | F10 | **字段集精确匹配**——evidence 字段集必须**恰好等于** `{segment_id, quote}`，多一个少一个都拒 | `AnalysisValidator:143` `if (!seen.equals(Set.of("segment_id","quote"))) throw` | **已有**：`contracts.py:19` `ConfigDict(extra="forbid", strict=True, frozen=True)` | 契约测试：多带一个字段必须失败 |
-| F11 | **证据逐字核对**——`quote` 必须在被引用的转写片段里**逐字出现** | `:104` → `invalid_evidence` | **五类都有，但是三份独立实现**：daily `contracts.py:138`、planning `planning_contracts.py:67`（抄 daily）、review `review_contracts.py:35`（复用 daily 的 `validate_status_provenance`）、retro `retro_contracts.py:77`（自写）、refinement `refinement_contracts.py:57`（自写）。**均在运行时 validate 节点内**（如 `workflow.py:72-74`） | **必须新增**：喂**伪造 quote**（原文查无此句）**必须失败**。且用例要覆盖 F3–F8 每一类——只测提案类等于只测了五分之一 |
+| F11 | **证据逐字核对**——`quote` 必须在被引用的转写片段里**逐字出现** | `:104` → `invalid_evidence` | **五类都有，且已并成一处**：`contracts.py:require_quoted_evidence`（原先是 daily / planning / retro / refinement 四份逐字复制的实现，review 经 daily 的 `validate_status_provenance` 复用；本轮合并）。**均在运行时 validate 节点内** | **必须新增**：喂**伪造 quote**（原文查无此句）**必须失败**。且用例要覆盖 F3–F8 每一类——只测提案类等于只测了五分之一 |
 | F12 | **不得编造负责人/日期**——`owner_mention` / `deadline_text` 必须逐字出现在该条的 quote 里 | `:108-119` → `invented_assignment`「负责人或日期缺少原文依据」 | **retro 已有，且比老家更严**（`retro_contracts.py:95-99`）：除「名字必须在 quote 里」外，还要求 `sum(m.display_name == owner.display_name for m in context.members) == 1`——**同名成员数必须恰好为 1**，防歧义。日期侧 `deadline_not_quoted`。**其余四类不是「没有」，是「没有对象」**——逐类核过：planning / review / refinement **根本没有负责人字段**；daily 的 `StorySnapshot.owner_id`（`contracts.py:34`）是**输入侧**快照字段，`validate_status_provenance` **从不校验它**，产出侧 `StatusChange` / `StoryStatusProposal` 也没有负责人；老家拦的 `action_items.owner_mention` / `coordination_items` 属 **F3–F8 开放类产出**，那套产出模型在新家**还不存在**。所以 F12 不是「推广到现有四类」，而是 **F3–F8 产出模型落地时必须自带的一条**（retro 是现成的参照实现） | **随 F3–F8 落地**：F4 行动项 / F5 协调事项的产出模型必须带这条校验。喂一条 owner 不在 quote 里的行动项，**必须失败**；另补一条**同名成员**用例（两个同名成员时必须拒，这条老家没有，不能丢） |
 | F13 | **片段全覆盖**——每个转写片段都必须被某条证据引用到，否则拒 | `:120-131` → `incomplete_analysis`「会议片段未被分析：…」 | ❌ **新家没有**（核过：`validate_status_provenance` 只核提案自己引用的片段，不作全覆盖；同为 F3–F8 产出模型落地时自带） | **必须新增**：给 3 段转写、只分析 2 段，**必须失败** |
 
 **落地要求**：F11–F13 应当是 LangGraph 里**一个独立的 validate 节点**——所以这里**不要**用纯固定节点的思路。校验节点用代码逐字比对（不调模型），失败即终止本次 run、不落库、不送审。
-**但「终止」目前不足以让码出去**：五类的 validate 节点一律 `except ValueError: raise WorkflowError('invalid_model_proposal')`（如 `retro_workflow.py:46-48`），而 `ResultContractError` 是 `ValueError` 子类 → 具体码在 API 边界被吞，只剩 `invalid_model_proposal`，且 `api.py:124-126` 把它报成 **502**。详见 §8.3。**不要**期望 Pydantic 结构校验能兜住 F11–F13：结构合法但 quote 伪造的输入，Pydantic 一定放行。
+**「码出不了边界」已修**（`cbfc2d8`）：五类的 validate 节点此前一律 `except ValueError: raise WorkflowError('invalid_model_proposal')`，而 `ResultContractError` 是 `ValueError` 子类 → 细码在 API 边界被吞、还被报成 502。现在细码透传、契约码 → 422；五处 validate 节点体也已并成 `graph_runtime.validate_candidate`。详见 §8.3。**不要**期望 Pydantic 结构校验能兜住 F11–F13：结构合法但 quote 伪造的输入，Pydantic 一定放行。
 
 ---
 
@@ -152,11 +152,10 @@ F22 在换算时**不能丢**——它是防止模型基于过期快照提状态
 
 1. **F21 的二选一**（留自主选源 / 无条件喂全量上下文）——唯一会改执行模型的条目。
 2. **F17/F19 的 `seq` 与续传语义**，含"重试后 `after_seq` 从哪续"——§2.7 必须回答。
-3. **F11 的覆盖面与错误码**：是逐类补校验，还是先统一产出模型再补。
-   **分叉的实际形态**（逐类核过，比原先写的多一处）：`quote_mismatch` / `unknown_segment` 三处——daily 定义（`contracts.py:138`）、planning 另抄一份（`planning_contracts.py:67`）、review 复用 daily 的函数（`review_contracts.py:35`）；`invalid_evidence` **两处**——retro（`retro_contracts.py:78`）与 refinement（`refinement_contracts.py:58`），两段代码几乎相同，却是**两份独立实现**。
-   **但「先统一码」不是前置，真前置是「让码出得了边界」**：五类的 validate 节点一律 `except ValueError: raise WorkflowError('invalid_model_proposal')`，`ResultContractError` 是 `ValueError` 子类 → **所有细码在生产 HTTP 响应里被吞成 `invalid_model_proposal`**，且 `api.py:124-126` 把它映射成 **502**（只有 `invalid_meeting_input` 才是 422）。细码现在只活在离线评测（`*_evaluation.py`）与测试里——前端**一套都收不到**，不是「要认两套」。
-   两个后果：① F17 要的 `error_code` / `error_message` 在「契约失败」这条路径上是空的；② **502 是归因错误**——「模型产出不合契约」被报成「上游服务故障」，调用方会据此重试本不该重试的失败。
-   统一码的连锁面比预想小：`invalid_evidence` **零测试断言**；`quote_mismatch` / `unknown_segment` 只被 `test_daily_h03_cases.py:144`、`test_evaluation.py:196-198`、`test_planning_skill.py:40` 断言。
+3. ~~**F11 的错误码出不了边界**~~ **已收口**（`cbfc2d8` + 本轮重构）：
+   - 细码透传：catch `ResultContractError` 必须在 `except ValueError` **之前**（它是 `ValueError` 子类，顺序反了两者一样被吞）；五处 validate 节点体并成 `graph_runtime.validate_candidate`。`api.py` 里契约码 → **422**，`invalid_*_context` 等内部状态码保持 502。
+   - 四处逐字复制的证据核对并成 `contracts.py:require_quoted_evidence`；图构造并成 `graph_runtime.run_linear_graph`。
+   - **仍未做的是「覆盖面」**：F11 现在只覆盖提案类；F3–F8 开放类产出还不存在，所以「每一类都测」仍**随 F3–F8 落地**（见 F12）。
 4. **F13 片段全覆盖**在新家是否仍适用（新家是类型化分析，覆盖率的口径可能不同）。
 
 ---

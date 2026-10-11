@@ -1,33 +1,10 @@
 """Text -> project snapshot -> Daily Skill -> validated proposals, without writes."""
 
-from typing import Protocol, TypedDict
-
-from langgraph.graph import END, START, StateGraph
-from langsmith import tracing_context
-from pydantic import ValidationError
-
-from .contracts import DailyScrumInput, DailyScrumOutput, ResultContractError, TranscriptSegment, validate_daily_result
+from .contracts import DailyScrumInput, DailyScrumOutput, TranscriptSegment, validate_daily_result
 from .daily_skill import DailyScrumSkill
+from .graph_runtime import (CompletionModel, MeetingState, WorkflowError, run_linear_graph,
+                            validate_candidate)
 from .story_tool import StoryReadTool
-
-
-class CompletionModel(Protocol):
-    def complete(self, messages: list[dict[str, str]]) -> dict: ...
-
-
-class WorkflowError(Exception):
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
-
-
-class MeetingState(TypedDict, total=False):
-    meeting_id: str
-    transcript: str
-    current_sprint: int | None
-    context: dict
-    candidate: dict
-    result: dict
 
 
 class DailyScrumWorkflow:
@@ -70,26 +47,13 @@ class DailyScrumWorkflow:
             return {"candidate": self._model.complete(self._skill.messages(context))}
 
         def validate(state: MeetingState):
-            try:
-                result = validate_daily_result(DailyScrumInput.model_validate(state["context"]), state["candidate"])
-            except ResultContractError as exc:
-                # Contract diagnostics carry a precise code (quote_mismatch,
-                # snapshot_mismatch, ...); propagate it instead of collapsing
-                # every contract failure into invalid_model_proposal.
-                raise WorkflowError(exc.code) from exc
-            except (ValueError, ValidationError):
-                raise WorkflowError("invalid_model_proposal") from None
-            return {"result": result.model_dump()}
+            return validate_candidate(validate_daily_result, DailyScrumInput, state)
 
-        builder = StateGraph(MeetingState)
-        for name, node in (("normalize", normalize), ("load_context", load_context),
-                           ("analyze", analyze), ("validate", validate)):
-            builder.add_node(name, node)
-        for source, target in ((START, "normalize"), ("normalize", "load_context"),
-                               ("load_context", "analyze"), ("analyze", "validate"), ("validate", END)):
-            builder.add_edge(source, target)
-        graph = builder.compile()
-        with tracing_context(enabled=False):
-            state = graph.invoke({"meeting_id": meeting_id, "transcript": transcript,
-                                  "current_sprint": current_sprint}, config={"recursion_limit": 6})
+        state = run_linear_graph(
+            MeetingState,
+            (("normalize", normalize), ("load_context", load_context),
+             ("analyze", analyze), ("validate", validate)),
+            payload={"meeting_id": meeting_id, "transcript": transcript,
+                     "current_sprint": current_sprint},
+        )
         return DailyScrumOutput.model_validate(state["result"])

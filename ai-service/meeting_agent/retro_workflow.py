@@ -1,12 +1,10 @@
 """Read-only Retro graph. Caller must authorize meeting and analysis first."""
-from langgraph.graph import END, START, StateGraph
-from langsmith import tracing_context
-
-from .contracts import ResultContractError, TranscriptSegment
+from .contracts import TranscriptSegment
+from .graph_runtime import (CompletionModel, MeetingState, WorkflowError, run_linear_graph,
+                            validate_candidate)
+from .member_tool import MemberReadTool
 from .retro_contracts import SprintRetroInput, SprintRetroOutput, validate_retro_result
 from .retro_skill import SprintRetroSkill
-from .member_tool import MemberReadTool
-from .workflow import CompletionModel, MeetingState, WorkflowError
 
 
 class SprintRetroWorkflow:
@@ -42,20 +40,11 @@ class SprintRetroWorkflow:
             return {'candidate': self._model.complete(messages)}
 
         def validate(state: MeetingState):
-            try:
-                result = validate_retro_result(SprintRetroInput.model_validate(state['context']), state['candidate'])
-            except ResultContractError as exc:
-                raise WorkflowError(exc.code) from exc
-            except ValueError:
-                raise WorkflowError('invalid_model_proposal') from None
-            return {'result': result.model_dump()}
+            return validate_candidate(validate_retro_result, SprintRetroInput, state)
 
-        builder = StateGraph(MeetingState)
-        for name, node in (('load_context', load_context), ('analyze', analyze), ('validate', validate)):
-            builder.add_node(name, node)
-        for source, target in ((START, 'load_context'), ('load_context', 'analyze'),
-                               ('analyze', 'validate'), ('validate', END)):
-            builder.add_edge(source, target)
-        with tracing_context(enabled=False):
-            state = builder.compile().invoke({}, config={'recursion_limit': 5})
+        state = run_linear_graph(
+            MeetingState,
+            (('load_context', load_context), ('analyze', analyze), ('validate', validate)),
+            payload={},
+        )
         return SprintRetroOutput.model_validate(state['result'])

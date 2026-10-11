@@ -1,12 +1,10 @@
 """Read-only Refinement graph. Caller must authorize meeting and analysis first."""
-from langgraph.graph import END, START, StateGraph
-from langsmith import tracing_context
-
-from .contracts import ResultContractError, TranscriptSegment
+from .contracts import TranscriptSegment
+from .graph_runtime import (CompletionModel, MeetingState, WorkflowError, run_linear_graph,
+                            validate_candidate)
 from .refinement_contracts import BacklogRefinementInput, BacklogRefinementOutput, validate_refinement_result
 from .refinement_skill import BacklogRefinementSkill
 from .story_tool import StoryReadTool
-from .workflow import CompletionModel, MeetingState, WorkflowError
 
 
 class BacklogRefinementWorkflow:
@@ -42,20 +40,11 @@ class BacklogRefinementWorkflow:
             return {'candidate': self._model.complete(messages)}
 
         def validate(state: MeetingState):
-            try:
-                result = validate_refinement_result(BacklogRefinementInput.model_validate(state['context']), state['candidate'])
-            except ResultContractError as exc:
-                raise WorkflowError(exc.code) from exc
-            except ValueError:
-                raise WorkflowError('invalid_model_proposal') from None
-            return {'result': result.model_dump()}
+            return validate_candidate(validate_refinement_result, BacklogRefinementInput, state)
 
-        builder = StateGraph(MeetingState)
-        for name, node in (('load_context', load_context), ('analyze', analyze), ('validate', validate)):
-            builder.add_node(name, node)
-        for source, target in ((START, 'load_context'), ('load_context', 'analyze'),
-                               ('analyze', 'validate'), ('validate', END)):
-            builder.add_edge(source, target)
-        with tracing_context(enabled=False):
-            state = builder.compile().invoke({}, config={'recursion_limit': 5})
+        state = run_linear_graph(
+            MeetingState,
+            (('load_context', load_context), ('analyze', analyze), ('validate', validate)),
+            payload={},
+        )
         return BacklogRefinementOutput.model_validate(state['result'])

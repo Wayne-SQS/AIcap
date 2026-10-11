@@ -1,7 +1,8 @@
 """Refinement new-story candidates, never executable without human completion/review."""
 from typing import Annotated, Literal
 from pydantic import Field
-from .contracts import Contract, DailyScrumInput, Evidence, Identifier, NonBlank, ResultContractError
+from .contracts import (Contract, DailyScrumInput, Evidence, Identifier, NonBlank, ResultContractError,
+                        require_quoted_evidence)
 from .story_tool import PlanningStorySnapshot
 
 
@@ -53,11 +54,6 @@ def validate_refinement_result(context: BacklogRefinementInput, payload: dict) -
         if title in titles or title in proposed_titles:
             raise ResultContractError('duplicate story title', 'duplicate_story_title', path + ('changes', 'title'))
         proposed_titles.add(title)
-        for ei, evidence in enumerate(proposal.evidence):
-            text = segments.get(evidence.segment_id)
-            if text is None or evidence.quote not in text:
-                field = 'segment_id' if text is None else 'quote'
-                code = 'unknown_segment' if text is None else 'quote_mismatch'
-                raise ResultContractError('evidence must quote the referenced segment exactly', code, path + ('evidence', ei, field))
+        require_quoted_evidence(proposal.evidence, segments, path)
     # Exact-title checks are conservative, not semantic deduplication or approval.
     return result

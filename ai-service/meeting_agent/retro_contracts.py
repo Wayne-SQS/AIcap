@@ -2,7 +2,8 @@
 from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
-from .contracts import Contract, Evidence, Identifier, NonBlank, TranscriptSegment, ResultContractError
+from .contracts import (Contract, Evidence, Identifier, NonBlank, ResultContractError, TranscriptSegment,
+                        require_quoted_evidence)
 
 
 class RetroMember(Contract):
@@ -72,12 +73,7 @@ def validate_retro_result(context: SprintRetroInput, payload: dict) -> SprintRet
     for group, items in (('decisions', result.decisions), ('proposed_actions', result.proposed_actions)):
         for index, item in enumerate(items):
             path = (group, index)
-            for ei, evidence in enumerate(item.evidence):
-                text = segments.get(evidence.segment_id)
-                if text is None or evidence.quote not in text:
-                    field = 'segment_id' if text is None else 'quote'
-                    code = 'unknown_segment' if text is None else 'quote_mismatch'
-                    raise ResultContractError('evidence must quote the referenced segment exactly', code, path + ('evidence', ei, field))
+            require_quoted_evidence(item.evidence, segments, path)
             if group == 'decisions':
                 continue
             if item.proposal_id in ids:

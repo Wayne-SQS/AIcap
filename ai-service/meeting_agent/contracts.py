@@ -113,6 +113,22 @@ def validate_daily_result(context: DailyScrumInput, payload: dict) -> DailyScrum
     return result
 
 
+def require_quoted_evidence(evidence_items, segments, path) -> None:
+    """F11: every quote must appear verbatim in the segment it cites.
+
+    ``path`` points at the item carrying the evidence; the offending index and
+    field are appended. Codes: unknown_segment (no such segment_id),
+    quote_mismatch (quote absent from that segment).
+    """
+    for index, evidence in enumerate(evidence_items):
+        text = segments.get(evidence.segment_id)
+        if text is None or evidence.quote not in text:
+            field = "segment_id" if text is None else "quote"
+            code = "unknown_segment" if text is None else "quote_mismatch"
+            raise ResultContractError("evidence must quote the referenced segment exactly",
+                                      code, path + ("evidence", index, field))
+
+
 def validate_status_provenance(context, result) -> None:
     """Shared snapshot/evidence checks after each meeting contract is validated."""
     if result.meeting_id != context.meeting_id:
@@ -133,9 +149,4 @@ def validate_status_provenance(context, result) -> None:
             raise ResultContractError("story is absent from project context", "unknown_story", path + ("story_id",))
         if proposal.expected.status != story.status:
             raise ResultContractError("expected status does not match project snapshot", "snapshot_mismatch", path + ("expected", "status"))
-        for evidence_index, evidence in enumerate(proposal.evidence):
-            text = segments.get(evidence.segment_id)
-            if text is None or evidence.quote not in text:
-                field = "segment_id" if text is None else "quote"
-                code = "unknown_segment" if text is None else "quote_mismatch"
-                raise ResultContractError("evidence must quote the referenced segment exactly", code, path + ("evidence", evidence_index, field))
+        require_quoted_evidence(proposal.evidence, segments, path)
