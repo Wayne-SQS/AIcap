@@ -437,3 +437,23 @@ CREATE TABLE IF NOT EXISTS `agent_checkpoints` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_run_node` (`run_id`, `node_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 主管路由留痕(S5′，契约 §4.3):S7「路由质量」指标的唯一数据源。
+-- utterance 是用户原话(隐私):只落本表,读接口限 admin/owner。
+CREATE TABLE IF NOT EXISTS `routing_logs` (
+  `id`              BIGINT        NOT NULL AUTO_INCREMENT,
+  `run_id`          VARCHAR(36)   NOT NULL,
+  `session_id`      VARCHAR(36)   NOT NULL,
+  `user_id`         INT           NOT NULL,
+  `utterance`       VARCHAR(1000) NOT NULL,
+  `intent`          VARCHAR(64)   NOT NULL,
+  `route`           VARCHAR(64)       NULL,
+  `confidence`      DECIMAL(4,3)      NULL,
+  `reason`          VARCHAR(500)      NULL,
+  `asked_clarify`   TINYINT(1)    NOT NULL DEFAULT 0,
+  `candidates_json` JSON              NULL,
+  `created_at`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_run` (`run_id`),
+  KEY `idx_intent_created` (`intent`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
