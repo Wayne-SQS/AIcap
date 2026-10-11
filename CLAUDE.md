@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `frontend/` | **现行**前端:Vue3 + Vite + Pinia(像素风,15 视图) |
 | `java-backend/` | **现行**平台后端:Java 23 + Spring Boot 3.5 + MyBatis-Plus(8080) |
 | `ai-service/` | **现行**会议 Agent:Python + FastAPI + **LangGraph**(8090)。五类会议的类型化分析 + 音频转写/说话人分离;写库一律回 Java 业务接口 |
-| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100;S4′.2 已落地:有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 七端点;`orchestrator.plan()`/`report.build_report()` 仍是 S5′/S8′ 骨架)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
+| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100)。进度口径以它自己的 `README.md` 状态表为准——当前 **S5′**:S4′.2 的有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 七端点之上,又在循环前接上了规划相 `orchestrator.plan()`(真实实现:路由 + 反问阈值 + `routing_logs` + 触发型工具,**只有 `plan()`,没有 `execute()`**);`report.build_report()` 是**唯一**未落地项(`raise NotImplementedError("复盘报告属 S8′")`)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
 | `deploy/` | **现行**生产编排:`deploy/compose.yaml` 四容器(Nginx / Java / ai / MySQL) |
 | `backend/` | **归档**:FastAPI + SQLAlchemy 参考实现。**不要按它改功能**,但它的 `docker-compose.yml` 仍是**本机开发/测试**起 MySQL(3307)的现行方式;生产编排走 `deploy/compose.yaml`,两者别混用 |
 | `legacy/` | **归档**:Vue 改造前的旧版单文件前端 |
@@ -76,6 +76,7 @@ npm install
 npm run dev        # 必须用 http://localhost:5173 访问
 npm run build
 npm run e2e:verify # 浏览器验收(8 例,走系统 Edge)
+npm run e2e:smoke  # 同配置,但 --grep 只跑 8 个命名场景(离线演示/AI 工作台/跨来源队列/…)
 ```
 
 **Vite dev 只监听 `[::1]:5173`** —— 用 `127.0.0.1:5173` 会连不上。
@@ -170,6 +171,7 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 ## 约定
 
+- **本仓没有 linter**:`frontend/package.json` 无 eslint 脚本,`java-backend/pom.xml` 无 checkstyle/spotbugs/pmd。质量闸门是**契约测试**与 `agent-orchestrator/tests/test_no_db.py`、`arch/AgentPackageIsSelfContainedTest` 这类结构性测试,不是静态检查 —— 别去找或新引一个 lint 工具。
 - **不引第三方 SDK**:HTTP 一律 JDK `HttpClient`,JSON 一律 Jackson(`ObjectMapper`)。已刻意排除 OkHttp/Retrofit/Feign 与 Qdrant Java SDK。
 - 配置走 `@ConfigurationProperties` + `application.yml` 的 `${ENV_VAR:默认值}`;密钥默认留空,由环境变量注入。
 - **不改动 `agent/`、`profile/` 现有类的公开签名** —— 新能力加在旁路,不改老接口。
