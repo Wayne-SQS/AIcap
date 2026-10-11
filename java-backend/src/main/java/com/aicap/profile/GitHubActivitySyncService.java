@@ -6,7 +6,6 @@ import com.aicap.entity.User;
 import com.aicap.mapper.ActivityRecordMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -373,16 +372,15 @@ public class GitHubActivitySyncService {
         int skipped = (int) out.get("skipped");
         for (ActivityRecord r : records) {
             if (r.getGithubEventId() == null) { skipped++; continue; }
-            Long exist = activityMapper.selectCount(new QueryWrapper<ActivityRecord>()
-                    .eq("github_event_id", r.getGithubEventId()));
-            if (exist != null && exist > 0) { skipped++; continue; }
             r.setCreatedAt(LocalDateTime.now());
             r.setSource("github");
             try {
                 activityMapper.insert(r);
                 synced++;
             } catch (DuplicateKeyException e) {
-                skipped++;   // 唯一索引兜底
+                // 唯一索引兜底本身就是幂等判定 —— 原先每条先 COUNT 再 INSERT,
+                // 一轮同步要多几千次往返,而并发下这个"先查后插"本来也不保证原子
+                skipped++;
             }
         }
         out.put("synced", synced);

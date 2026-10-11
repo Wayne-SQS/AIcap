@@ -62,6 +62,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"lease_until", "lease_until datetime DEFAULT NULL"},
     };
 
+    /** 三个后台队列表:认领查询同形(WHERE status=? ORDER BY created_at LIMIT 1),索引也应同形 */
+    private static final String[] QUEUE_TABLES = {
+            "meeting_agent_runs", "planning_agent_runs", "project_generation_runs",
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
@@ -102,6 +107,13 @@ public class SchemaUpgrader implements ApplicationRunner {
             if (tableExists(conn, "project_generation_runs")) {
                 added.addAll(addMissing(conn, "project_generation_runs", LEASE_COLUMNS));
             }
+            // 认领查询是 WHERE status=? ORDER BY created_at LIMIT 1,而表上只有 status 单列索引
+            // → status 相等的那批仍要 filesort。补 (status, created_at) 复合索引。
+            for (String queue : QUEUE_TABLES) {
+                if (tableExists(conn, queue)) {
+                    added.addAll(ensureQueueIndex(conn, queue, "ix_" + queue + "_status_created"));
+                }
+            }
             if (added.isEmpty()) {
                 log.info("存量库列迁移:列集合已是最新,无需变更");
             } else {
@@ -134,6 +146,16 @@ public class SchemaUpgrader implements ApplicationRunner {
         execute(conn, "ALTER TABLE `knowledge_chunks` ADD FULLTEXT KEY `ft_content` (`content`) WITH PARSER ngram");
         log.info("knowledge_chunks.ft_content 缺失,已补建 ngram 全文索引");
         return Set.of("knowledge_chunks.ft_content");
+    }
+
+    /** 队列表补 (status, created_at) 复合索引;CREATE INDEX 无 IF NOT EXISTS,故先查存在性 */
+    private Set<String> ensureQueueIndex(Connection conn, String table, String indexName) throws SQLException {
+        if (indexExists(conn, table, indexName)) {
+            return Set.of();
+        }
+        execute(conn, "ALTER TABLE `" + table + "` ADD KEY `" + indexName + "` (`status`, `created_at`)");
+        log.info("{}.{} 缺失,已补建 (status, created_at) 索引", table, indexName);
+        return Set.of(table + "." + indexName);
     }
 
     /**
