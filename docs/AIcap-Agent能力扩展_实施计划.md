@@ -227,9 +227,36 @@ MySQL 实现靠 JOIN 实时读角色，但 Qdrant 把 `acl_rank` 存在 payload 
       配好真实密钥后跑一次 `reindex`（不必 force，模型名不同会自动全部重算）即可覆盖
 - [x] ~~`backend/docker-compose.yml` 补一句境内镜像源拉取说明~~（已加注释）
 - [ ] 本次改动**尚未 commit**；`backend/.env` 的真实 `AICAP_LLM_API_KEY` 全程未被读取或写入日志
-- [ ] **⚠️ 安全缺陷：`query_members` 经工具层泄露全员密码哈希**
-      （2026-10-11 实测：任何 `Roles.writer()` 调用者都能从
+- [x] ~~**⚠️ 安全缺陷：`query_members` 经工具层泄露全员密码哈希**~~（2026-10-11 已修，`1e2226d`）
+      （实测：任何 `Roles.writer()` 调用者都能从
       `POST /api/agents/tools/query_members` 拉到 5 个用户的 bcrypt `passwordHash`）
-      根因：画像域 `ProfileToolRegistry` 的 `query_members` 直接返回 `User` 实体、未做字段投影。
+      根因：画像域 `ProfileToolRegistry` 的 `query_members` 直接返回 `User` 实体、未做字段投影
+      （两个分支都是：`selectList(null)` 与 `selectById(uid)`）。
       S3 引入统一工具端点后，同一份数据多了一个直连 HTTP 入口，暴露面因此扩大。
-      修法：Java 侧字段投影（出参白名单）+ 契约测试钉住响应不含 `passwordHash`。
+      修法：出参白名单 `memberView()`（id/username/displayName/role/color/capacityHours）
+      + 契约测试 `PlatformAgentContractTest#plat16` 钉住响应不含 `passwordHash`。
+      **验证**：定向跑 `PlatformAgentContractTest` 16/16 绿；把 `ProfileToolRegistry` 回退到修复前、
+      只保留新用例 → `plat16` 转红并在断言消息里打印出泄露的哈希（证明用例真的咬得住，
+      而不是"恰好是绿的"）。注意 `plat13` 覆盖不到这条：它只断言 `members` 是数组。
+
+- [ ] **⚠️ 全量 `mvn -B test` 是红的，且合并前后都红 —— 尚未定位**
+      （2026-10-11 实测，与 `query_members` 修复无关；改动只有一个文件，却整片红）
+      | 树 | 结果 |
+      |---|---|
+      | 合并前 `6a6818b` | **219 项 / 29 失败 / 1 错误** |
+      | 合并后 `11eac48` | **397~424 项 / 57 失败 / 3 错误** |
+      可疑点（按可疑度）：
+      1. **同一棵树的用例总数在多次运行间变化**（157 / 219 / 397 / 424）——
+         上下文加载失败时该类的 N 个用例塌成 1 个 error，总数因此浮动。这是"加载期就炸"的指纹。
+      2. 加载期实测到 `java.sql.SQLException: Table definition has changed`（MySQL 1412，
+         说明**另一个进程在我跑测试时对 `aicap_java_test` 执行了 DDL**）与
+         `stories.owner_id` 外键失败（`users` 被并发 TRUNCATE 空了）。
+      3. 单类/双类隔离跑**全绿**：`KnowledgeIndexMySqlContractTest` 10/10、
+         `AgentContractTest`+`KnowledgeIndexMySqlContractTest` 24/24、
+         `MeetingSuggestionReviewContractTest` 单跑绿（它在全量里有过
+         `expected:<7> but was:<8>` 的差一行，像是并发写入者）。
+      **已排除**的假设：不是连接数耗尽（`max_connections=500`，峰值 11）；
+      不是"worker 线程污染"（把 `agent-worker-enabled=true` 的 `AgentContractTest`
+      与 `KnowledgeIndexMySqlContractTest` 放同一次调用跑，24/24 绿）。
+      **待查**：全量下哪些上下文真的并发存活、是不是有第二个 JVM 同时在跑 `aicap_java_test`。
+      定位前，全量红灯**不能**当作新改动的判据 —— 得先用"隔离跑受影响类"来判。

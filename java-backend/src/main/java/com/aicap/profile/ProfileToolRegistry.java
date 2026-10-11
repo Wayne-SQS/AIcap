@@ -271,7 +271,8 @@ public class ProfileToolRegistry {
      * Roles.writer() 角色开放(member 即可),等于把全员 bcrypt 哈希发给任意登录用户。
      * 新增要暴露的成员字段时显式加到这里;**不要**为了省事改成返回实体或整个字段列表
      * (实体上加字段会静默扩大暴露面,这里加了才会被人看到)。
-     * 契约测试 PlatformAgentContractTest#plat13 钉住响应不含 passwordHash。
+     * 契约测试 PlatformAgentContractTest#plat16 钉住响应不含 passwordHash
+     * （plat13 只断言 members 是数组，泄露时照样是绿的，别把它当成守卫）。
      */
     private static Map<String, Object> memberView(User u) {
         Map<String, Object> view = new LinkedHashMap<>();
