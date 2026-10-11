@@ -25,6 +25,10 @@ __pycache__/
 
 # Local runtime and isolated test artifacts
 backend/.venv/
+# 编排层(agent-orchestrator/)的本地环境与配置:与 backend/ 同理,可再生产
+agent-orchestrator/.venv/
+agent-orchestrator/.env
+agent-orchestrator/*.egg-info/
 .pytest_cache/
 *.sqlite3
 # 从交付用 docx 抽取的纯文本，可再生，仅本地查阅
