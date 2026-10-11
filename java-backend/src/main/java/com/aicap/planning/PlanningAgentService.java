@@ -40,6 +40,8 @@ public class PlanningAgentService {
     }
 
     public Map<String, Object> get(String id) {
+        // 读路由也先回收过期 run:否则用户点开卡死的 run 只能看到永久的 running
+        jobs.expireRuns();
         PlanningAgentRun run = runs.selectById(id);
         if (run == null) throw ApiException.notFound("规划运行不存在");
         Map<String, Object> result = out(run);

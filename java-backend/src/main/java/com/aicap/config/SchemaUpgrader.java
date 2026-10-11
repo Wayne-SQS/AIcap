@@ -53,6 +53,15 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"acl_rank", "`acl_rank` int DEFAULT NULL"},
     };
 
+    /**
+     * planning / generation 两个队列的租约列(对齐 {@code meeting_agent_runs.worker_token/lease_until})。
+     * 没有租约时进程崩溃会让 run 永久停在 {@code running},任何路径都不回收 —— 任务是永久丢单。
+     */
+    private static final String[][] LEASE_COLUMNS = {
+            {"worker_token", "worker_token varchar(36) DEFAULT NULL"},
+            {"lease_until", "lease_until datetime DEFAULT NULL"},
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
@@ -85,6 +94,14 @@ public class SchemaUpgrader implements ApplicationRunner {
             execute(conn, "ALTER TABLE planning_agent_events MODIFY COLUMN created_at datetime(6) NOT NULL");
             execute(conn, "ALTER TABLE project_generation_events MODIFY COLUMN created_at datetime(6) NOT NULL");
             execute(conn, "CREATE TABLE IF NOT EXISTS milestones (id varchar(20) NOT NULL, name varchar(200) NOT NULL, week int NOT NULL, description varchar(500) NOT NULL DEFAULT '', status varchar(20) NOT NULL DEFAULT 'planned', related_task_ids varchar(500), PRIMARY KEY (id), KEY ix_milestones_week (week)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            // planning / generation 队列的租约列。补列后老库里已卡在 running 的 run,
+            // lease_until 为 NULL —— expireRuns 的判定显式把 NULL 也算过期,不靠一次性回填。
+            if (tableExists(conn, "planning_agent_runs")) {
+                added.addAll(addMissing(conn, "planning_agent_runs", LEASE_COLUMNS));
+            }
+            if (tableExists(conn, "project_generation_runs")) {
+                added.addAll(addMissing(conn, "project_generation_runs", LEASE_COLUMNS));
+            }
             if (added.isEmpty()) {
                 log.info("存量库列迁移:列集合已是最新,无需变更");
             } else {

@@ -23,6 +23,9 @@ public class PlanningAgentRun {
     private String resultJson;
     private String errorCode;
     private String errorMessage;
+    /** 认领该 run 的 worker 令牌 + 租约到期时刻:到期仍 running 即视为中断,可被回收 */
+    private String workerToken;
+    private LocalDateTime leaseUntil;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
