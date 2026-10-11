@@ -362,7 +362,8 @@ public class GitHubActivitySyncService {
             return objectMapper.readTree("[]");
         }
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            throw new IllegalStateException("GitHub API " + resp.statusCode() + ": " + truncate(resp.body(), 200));
+            // 绝不回显上游响应体:可能回显凭据或私有文本(红线②;对齐 llm/ModelClient:113)
+            throw new IllegalStateException("GitHub API " + resp.statusCode());
         }
         return objectMapper.readTree(resp.body());
     }

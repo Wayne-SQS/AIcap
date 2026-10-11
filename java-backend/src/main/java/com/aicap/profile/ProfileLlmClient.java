@@ -86,8 +86,8 @@ public class ProfileLlmClient {
 
             HttpResponse<String> resp = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
-                throw new ProfileLlmException("DeepSeek 返回 HTTP " + resp.statusCode()
-                        + ": " + truncate(resp.body()));
+                // 绝不回显上游响应体:可能回显凭据或私有文本(红线②;对齐 llm/ModelClient:113)
+                throw new ProfileLlmException("DeepSeek 返回 HTTP " + resp.statusCode());
             }
             JsonNode root = objectMapper.readTree(resp.body());
             String content = root.path("choices").path(0).path("message").path("content").asText("");
@@ -103,8 +103,4 @@ public class ProfileLlmClient {
         }
     }
 
-    private String truncate(String s) {
-        if (s == null) return "";
-        return s.length() <= 300 ? s : s.substring(0, 300) + "…";
-    }
 }
