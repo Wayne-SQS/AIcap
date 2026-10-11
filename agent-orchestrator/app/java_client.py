@@ -22,11 +22,15 @@ import httpx
 
 from . import config
 from .schemas import (
+    AgentCheckpointRow,
+    AgentEventRow,
+    AgentSessionView,
     AuthUser,
     Catalog,
     PlatformProtocolError,
     PlatformUnavailable,
     ToolOutcome,
+    UnfinishedRun,
 )
 
 # Java 自己的 detail 文案最长保留多少字符（红线②：宁可少，不可回显整个 body）
@@ -132,6 +136,93 @@ class JavaClient:
         )
         return ToolOutcome.model_validate(response.json())
 
+    # --- 会话 / 事件流 / 检查点（S4′.2，契约 §2.7）----------------------
+
+    async def create_session(self, jwt: str, *, title: str | None = None) -> AgentSessionView:
+        """`POST /api/agents/sessions` —— 建一个归属调用者的会话。"""
+        payload: dict[str, Any] = {"title": title} if title else {}
+        response = await self._request("POST", "/api/agents/sessions", jwt=jwt, json=payload)
+        return AgentSessionView.model_validate(response.json())
+
+    async def list_sessions(self, jwt: str) -> list[AgentSessionView]:
+        """`GET /api/agents/sessions` —— 只回**当前用户**的会话。"""
+        response = await self._request("GET", "/api/agents/sessions", jwt=jwt)
+        return [AgentSessionView.model_validate(item) for item in response.json()]
+
+    async def append_event(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        type: str,
+        detail: dict[str, Any],
+        jwt: str,
+    ) -> int:
+        """`POST /api/agents/events` —— 落一条事件，返回的 `id` **就是 seq**。
+
+        事件先落库、拿到自增 id 再推给前端（契约 §3.2）——这是"重启后 seq 不回退"
+        的唯一根据。
+        """
+        response = await self._request(
+            "POST",
+            "/api/agents/events",
+            jwt=jwt,
+            json={"session_id": session_id, "run_id": run_id, "type": type, "detail": detail},
+        )
+        return int(response.json()["id"])
+
+    async def list_events(
+        self,
+        *,
+        session_id: str,
+        after_seq: int,
+        jwt: str,
+    ) -> list[AgentEventRow]:
+        """`GET /api/agents/events` —— 增量读，语义是 `id > after_seq`（严格大于）。"""
+        response = await self._request(
+            "GET",
+            "/api/agents/events",
+            jwt=jwt,
+            params={"session_id": session_id, "after_seq": after_seq},
+        )
+        return [AgentEventRow.model_validate(item) for item in response.json()]
+
+    async def put_checkpoint(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        node_name: str,
+        state: dict[str, Any],
+        jwt: str,
+    ) -> int:
+        """`POST /api/agents/checkpoints` —— 按 `(run_id, node_name)` upsert 覆盖。
+
+        编排层不持有 DB 连接（结构性约束见 `tests/test_no_db.py`），检查点只能
+        经这个端点写。
+        """
+        response = await self._request(
+            "POST",
+            "/api/agents/checkpoints",
+            jwt=jwt,
+            json={"session_id": session_id, "run_id": run_id, "node_name": node_name, "state": state},
+        )
+        return int(response.json()["id"])
+
+    async def list_checkpoints(self, *, run_id: str, jwt: str) -> list[AgentCheckpointRow]:
+        """`GET /api/agents/checkpoints` —— 读某 run 的全部检查点。"""
+        response = await self._request(
+            "GET", "/api/agents/checkpoints", jwt=jwt, params={"run_id": run_id}
+        )
+        return [AgentCheckpointRow.model_validate(item) for item in response.json()]
+
+    async def list_unfinished_runs(self, *, session_id: str, jwt: str) -> list[UnfinishedRun]:
+        """`GET /api/agents/runs/unfinished` —— 惰性恢复的触发源。"""
+        response = await self._request(
+            "GET", "/api/agents/runs/unfinished", jwt=jwt, params={"session_id": session_id}
+        )
+        return [UnfinishedRun.model_validate(item) for item in response.json()]
+
     async def health(self) -> bool:
         """探 Java 是否可达。
 
@@ -155,12 +246,15 @@ class JavaClient:
         *,
         jwt: str,
         json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> httpx.Response:
         headers = _auth_headers(jwt)
         if json is not None:
             headers.update(_JSON_HEADERS)
         try:
-            response = await self._client.request(method, path, headers=headers, json=json)
+            response = await self._client.request(
+                method, path, headers=headers, json=json, params=params
+            )
         except httpx.HTTPError as exc:
             # 连不上 / 超时。只带异常类型名，不带 URL 与参数，避免回显调用内容。
             raise PlatformUnavailable(f"无法连接 Java 平台（{type(exc).__name__}）") from None

@@ -28,6 +28,15 @@ AICAP_LLM_API_KEY = os.getenv("AICAP_LLM_API_KEY", "")
 AICAP_LLM_BASE_URL = os.getenv("AICAP_LLM_BASE_URL", "https://api.deepseek.com")
 AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-v4-flash")
 
+# 单次模型调用的超时（秒）。有界循环的 180s 总预算由 loop 的 deadline 管，
+# 这里是单步上限，防止某一步卡死把整个预算耗光。
+AICAP_LLM_TIMEOUT = float(os.getenv("AICAP_LLM_TIMEOUT", "60"))
+
+# SSE 心跳间隔（秒，契约 §3.1 建议 15s 防反代断流）。
+# **消费方必须每次循环重新读这个属性**，不要在导入时抄进局部变量 ——
+# 测试靠 monkeypatch 成 0.05 把心跳路径跑快。
+SSE_HEARTBEAT_SECONDS = float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
+
 
 def llm_configured() -> bool:
     """是否配了真实 LLM。没配时如实回报，不假装能干活。"""

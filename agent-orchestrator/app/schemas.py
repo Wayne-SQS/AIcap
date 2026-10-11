@@ -101,6 +101,76 @@ class ToolOutcome(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# 会话 / 事件流 / 检查点（S4′.2，契约 §2.7 / §4）
+#
+# 字段与 java-backend 的出参 record **逐字对齐**（`AgentEventService.SessionView`
+# / `EventView`、`AgentCheckpointService.CheckpointView` / `UnfinishedRunView`）。
+# 那些 record 的 snake_case 是靠显式 `@JsonProperty` 钉的，不是全局命名策略 ——
+# 所以这里也不能靠 `alias_generator` 猜，只能照抄。
+# --------------------------------------------------------------------------
+
+
+class AgentSessionView(BaseModel):
+    """`POST /api/agents/sessions` 与 `GET /api/agents/sessions` 的元素。
+
+    两个形态共用一个模型：建会话时 Java 只回 `{"session_id": ...}`，列会话时
+    字段齐全 —— 差异由默认值吸收。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    session_id: str
+    title: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AgentEventRow(BaseModel):
+    """`GET /api/agents/events` 的一行。
+
+    `id` 即事件的 **`seq`**（`agent_events.id` 自增主键，全系统唯一产生 seq 处）；
+    `detail` 是 JSON **对象**（Java 侧用 `readTree` 解析后才回，不是字符串）。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    session_id: str
+    run_id: str
+    type: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class AgentCheckpointRow(BaseModel):
+    """`GET /api/agents/checkpoints` 的一行。`node_name` 恒为 `"loop"`。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str
+    node_name: str
+    state: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class UnfinishedRun(BaseModel):
+    """`GET /api/agents/runs/unfinished` 的一行 —— 惰性恢复的**唯一**触发源。
+
+    判定口径（Java 侧）：该 run 在 `agent_checkpoints` 有行 **且** 该 run 没有
+    `run.end`/`run.error` 事件，按 `session_id` 圈定。少任一半都会误判
+    （漏恢复，或把已经跑完的 run 又跑一遍）。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str
+    session_id: str
+    node_name: str
+    state: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+# --------------------------------------------------------------------------
 # 异常
 # --------------------------------------------------------------------------
 
@@ -139,3 +209,18 @@ class PlatformProtocolError(PlatformError):
         super().__init__(code, f"HTTP {status}: {detail}")
         self.status = status
         self.detail = detail
+
+
+class ModelError(PlatformError):
+    """模型调用失败。码沿用归档 `backend/app/meeting_agent/schemas.py:AgentError`。
+
+    `not_configured` / `invalid_config` 是**配置**问题（不该重试）；
+    `provider_timeout` / `provider_unreachable` / `provider_error` /
+    `incomplete_response` / `invalid_response` 是**上游**问题（可重试）。
+
+    `provider_error` 的 message 里**只有状态码**，没有上游响应体 —— 归档那里的
+    注释写得很清楚：上游 body 可能回显凭据或私有文本，任何级别都不落地。
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message)
