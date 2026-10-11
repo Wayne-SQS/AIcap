@@ -188,6 +188,35 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertTrue(r.json().path("result").path("members").isArray(), "应回 members: " + r.body());
     }
 
+    /**
+     * PLAT-16:query_members **不得回密码哈希**。
+     *
+     * 原先两个分支都直接把 User 实体序列化出去(`selectList(null)` / `selectById(uid)`),
+     * 而工具层只要求 Roles.writer() —— 任何 member 都能拉走全员 bcrypt 哈希做离线爆破。
+     * 注意 PLAT-13 覆盖不到这条:它只断言 members 是数组,在泄露的情况下照样是绿的。
+     * 两个分支必须都验 —— 只修列表分支等于只补了一半。
+     */
+    @Test
+    void plat16_queryMembers_neverExposesPasswordHash() {
+        ApiResponse list = post(TOOLS + "query_members", token(USER_ADMIN), null);
+        assertEquals(200, list.status(), list.body());
+        for (var member : list.json().path("result").path("members")) {
+            assertFalse(member.has("passwordHash"),
+                    "列表分支把 User 实体直接序列化出去了,泄露 bcrypt 哈希: " + member);
+        }
+
+        ApiResponse one = post(TOOLS + "query_members", token(USER_ADMIN), json(map("userId", 1)));
+        assertEquals(200, one.status(), one.body());
+        assertTrue(one.json().path("result").path("found").asBoolean(), one.body());
+        assertFalse(one.json().path("result").path("member").has("passwordHash"),
+                "单成员分支泄露 bcrypt 哈希: " + one.body());
+
+        // 白名单投影不得把该暴露的字段一起丢掉(否则"修好"的方式是回个空对象)
+        var member = one.json().path("result").path("member");
+        assertFalse(member.path("displayName").asText().isEmpty(), "displayName 不该丢: " + one.body());
+        assertFalse(member.path("role").asText().isEmpty(), "role 不该丢: " + one.body());
+    }
+
     // ==================== semantic_search ====================
 
     /** PLAT-14:未配置 embedding 时如实说明,而不是发外部请求或报 500 */
