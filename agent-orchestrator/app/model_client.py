@@ -14,6 +14,15 @@
    私有文本，任何级别都不落地。`provider_error` 只带状态码。
 2. **地址必须 HTTPS**（本机测试服务除外）—— 明文发出的是 API key。
 3. deepseek 关 thinking：本循环要的是非思考型响应。
+
+重试面：单发请求（POST `/chat/completions`）本是**无状态**的，重发不会污染任何
+服务端状态，所以瞬时故障（连不上 / 建连超时 / 连接被掐断 / 502·503·504）**有界重试
+2 次**，与 `java_client` 共用 `app/retry.py` 那一份原语。两条刻意留白的边界：
+
+- **读超时不重试**（`ReadTimeout` 不在 `RETRYABLE_TRANSPORT` 里）：默认 60s 一发，
+  2 次重试 = 180s = 整个 run 的总预算，且每次重发都要**重复付费**；
+- **429 不重试**：0.2/0.4 秒的退避清不掉限流窗口，而更长的退避会吃掉预算。
+  如实报 `provider_error`，让 run 以真实原因结束比"悄悄重试三次还是失败"更好排查。
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from urllib.parse import urlparse
 import httpx
 
 from . import config
+from . import retry
 from .schemas import ModelError
 
 # 单轮返回的工具调用上限（协议级）。loop 的预算闸与本层的早筛共用这一个值，
@@ -113,12 +123,30 @@ class ModelClient:
                 follow_redirects=False,
                 transport=self._transport,
             ) as client:
-                response = await client.post(
-                    base + "/chat/completions",
-                    json=body,
-                    headers={"Authorization": "Bearer " + config.AICAP_LLM_API_KEY},
-                )
+
+                async def attempt() -> httpx.Response:
+                    response = await client.post(
+                        base + "/chat/completions",
+                        json=body,
+                        headers={"Authorization": "Bearer " + config.AICAP_LLM_API_KEY},
+                    )
+                    if response.status_code in retry.RETRYABLE_STATUS:
+                        # 502/503/504：提供方过载/重启，是**经典**的瞬时故障
+                        raise retry.TransientResponse(response)
+                    return response
+
+                # 重试原语与 `java_client` 共用一份（`app/retry.py`）：算不算瞬时故障、
+                # 退避多久、最多几次，全层只有一个定义。读完预算用尽后把应答还原回来，
+                # 状态码与红线②的"不回显 body"都不受影响。
+                try:
+                    response = await retry.call_with_retry(attempt)
+                except retry.TransientResponse as exhausted:
+                    response = exhausted.response
         except httpx.TimeoutException:
+            # 注意：**读超时**不在重试范围内（见 `retry.RETRYABLE_TRANSPORT`）——
+            # 60s 一发，2 次重试就是 180s，等于把循环的总预算整个吃掉，
+            # 而且每次重发都要为一次生成重复付费。`ConnectTimeout` 会先被重试，
+            # 预算用尽后才落到这里。
             raise ModelError("provider_timeout", "模型请求超时，可重试") from None
         except httpx.HTTPError:
             raise ModelError("provider_unreachable", "无法连接模型服务，请检查服务端网络") from None

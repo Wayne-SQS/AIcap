@@ -37,6 +37,14 @@ AICAP_LLM_TIMEOUT = float(os.getenv("AICAP_LLM_TIMEOUT", "60"))
 # 测试靠 monkeypatch 成 0.05 把心跳路径跑快。
 SSE_HEARTBEAT_SECONDS = float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
 
+# SSE 事件**单次读取**的页大小（契约 §3.1「增量读」）。
+# Java 侧不传 limit 时一页 500 条、上限 1000（`AgentEventService.DEFAULT_LIMIT`
+# / `MAX_LIMIT`）—— 断线久了盘子里可能压着上千条事件，整批读会把它们一次性
+# 搬进内存，第一帧也要等整批读完才吐得出来。编排层刻意只要一小页，由
+# `main._stream` 的循环带着新的 after_seq 续读下一页。
+# **消费方（`java_client.list_events`）每次调用重读这个属性**，不要在导入时抄走。
+EVENT_PAGE_LIMIT = int(os.getenv("SSE_EVENT_PAGE_LIMIT", "100"))
+
 
 def llm_configured() -> bool:
     """是否配了真实 LLM。没配时如实回报，不假装能干活。"""

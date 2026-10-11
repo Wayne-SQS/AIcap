@@ -350,6 +350,108 @@ async def test_event_data_is_the_stored_object_not_a_string():
 
 
 # ==========================================================================
+# 有界增量读（任务 C）
+# ==========================================================================
+
+
+async def test_backlog_larger_than_one_page_is_streamed_by_paging(monkeypatch: pytest.MonkeyPatch):
+    """盘子里压着的事件多于**一页**时，分页取、逐页吐 —— 语义一字不变。
+
+    这一条同时钉住三件事：
+
+    1. **单次读有界**：每次 `GET /events` 只问 3 条（`config.EVENT_PAGE_LIMIT`），
+       不会把积压整批搬进内存（Java 侧不传 limit 的默认值是 500，
+       上限 1000 —— `AgentEventService.DEFAULT_LIMIT` / `MAX_LIMIT`）；
+    2. **续读不漏**：8 条事件分成 3 页（3 + 3 + 2）全部推出去；
+    3. **顺序与 seq 单调不变**：逐页拼起来仍是 1..8 升序、无重复 —— 分页最容易
+       踩的坑就是"页边界丢一条"或"重复吐同一条"。
+    """
+    monkeypatch.setattr(config, "EVENT_PAGE_LIMIT", 3)
+    platform = FakePlatform()
+    session_id = platform.make_session()
+    for step in range(1, 9):
+        platform.add_event(session_id, "run-x", "model.step", {"step": step})
+
+    app = _app(platform, ScriptedModel())
+
+    frames: list[dict[str, Any]] = []
+    async with SSEStream() as stream:
+        await _open(stream, app, session_id)
+        while len([f for f in frames if f["kind"] == "event"]) < 8:
+            frame = await stream.frame()
+            assert frame is not None
+            frames.append(frame)
+
+    assert [f["seq"] for f in events_only(frames)] == list(range(1, 9))
+    # 3 页：limit 3 → [3, 3, 2]；"每次只要 3 条"就是"单次读有界"。
+    # 只断言前 3 次 —— 事件吐完之后生成器会继续空转读（空页 → 心跳），次数不确定。
+    assert platform.event_read_limits[:3] == [3, 3, 3]
+    assert set(platform.event_read_limits) == {3}, "任何一次读都不该越过页大小"
+    assert platform.event_read_after[:3] == [0, 3, 6], "cursor 必须逐页严格前进"
+
+
+async def test_backlog_twice_as_large_takes_twice_as_many_bounded_reads(monkeypatch: pytest.MonkeyPatch):
+    """读取次数随积压**线性增长**，而每次读的条数恒定 —— 这就是"有界增量读"。
+
+    对比 `test_backlog_larger_than_one_page_is_streamed_by_paging`：8 条要 3 页，
+    10 条要 5 页（页大小 2）。若哪天有人把 `limit` 从调用里去掉了，
+    假平台会按 Java 的默认值 500 一次全给，这两条断言会立刻变成 `[500]`。
+
+    关于回压：本夹具（`tests/sse.py`）没有内核级的写回压（`send` 直接进无界队列），
+    所以生成器会跑在测试读帧之前，把积压按页一次读完 —— 那是夹具的形态，
+    不是被测代码绕过了分页。这里能钉住的是"每页有界 + cursor 逐页前进"这个形状；
+    生产路径上的回压来自 uvicorn 传输层，`await send(...)` 会在写缓冲满时挂住。
+    """
+    monkeypatch.setattr(config, "EVENT_PAGE_LIMIT", 2)
+    platform = FakePlatform()
+    session_id = platform.make_session()
+    for step in range(1, 11):
+        platform.add_event(session_id, "run-x", "model.step", {"step": step})
+
+    app = _app(platform, ScriptedModel())
+
+    frames: list[dict[str, Any]] = []
+    async with SSEStream() as stream:
+        await _open(stream, app, session_id)
+        while len([f for f in frames if f["kind"] == "event"]) < 10:
+            frame = await stream.frame()
+            assert frame is not None
+            frames.append(frame)
+
+    assert [f["seq"] for f in events_only(frames)] == list(range(1, 11))
+    assert platform.event_read_limits[:5] == [2, 2, 2, 2, 2]
+    assert platform.event_read_after[:5] == [0, 2, 4, 6, 8]
+
+
+async def test_paging_does_not_resend_an_already_delivered_event(monkeypatch: pytest.MonkeyPatch):
+    """页边界上 `after_seq` 只前进不回退：不会因为分页把同一帧吐两次。
+
+    6 条事件、页大小 4 → 两页（4 + 2）。第二次读的 `after_seq` 必须是**第 4 条的 id**
+    （Java 侧语义是严格大于 `id > after_seq`）。
+    """
+    monkeypatch.setattr(config, "EVENT_PAGE_LIMIT", 4)
+    platform = FakePlatform()
+    session_id = platform.make_session()
+    for step in range(1, 7):
+        platform.add_event(session_id, "run-x", "model.step", {"step": step})
+
+    app = _app(platform, ScriptedModel())
+
+    frames: list[dict[str, Any]] = []
+    async with SSEStream() as stream:
+        await _open(stream, app, session_id)
+        while len([f for f in frames if f["kind"] == "event"]) < 6:
+            frame = await stream.frame()
+            assert frame is not None
+            frames.append(frame)
+
+    seqs = [f["seq"] for f in events_only(frames)]
+    assert seqs == [1, 2, 3, 4, 5, 6]
+    assert len(set(seqs)) == 6, "分页把事件重发了"
+    assert platform.event_read_after[:2] == [0, 4]
+
+
+# ==========================================================================
 # 门禁与响应头
 # ==========================================================================
 

@@ -207,6 +207,161 @@ async def test_connection_error_maps_to_provider_unreachable(configured):
 
 
 # --------------------------------------------------------------------------
+# 有界重试（任务 A）
+#
+# 重试原语在 `test_retry.py`；这里钉的是模型出口的**接入方式**：
+# 单发 POST 是无状态的，瞬时故障该重试；读超时与 429 刻意不重试。
+# 套件级 conftest 把退避压成 0，所以这些用例跑满 3 次尝试却一次都不真睡。
+# --------------------------------------------------------------------------
+
+
+def _counting_handler(calls: list[httpx.Request], *steps):
+    """按脚本回放（`httpx.Response` 就返回、异常就抛），并记录每一发。
+
+    **最后一步会一直重复**（脚本用完不报错，只有一条脚本时就是"每次都这样"）——
+    这样"代码错误地重试了"会表现为**次数断言失败**，而不是一个来自测试脚手架的
+    `AssertionError`，失败信息才指得准。
+    """
+    remaining = list(steps)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if not remaining:
+            raise AssertionError("脚本用完了（测试脚本给少了）")
+        step = remaining[0] if len(remaining) == 1 else remaining.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+    return handler
+
+
+async def test_transient_connect_failure_is_retried(configured):
+    """一次建连抖动不该让整个 run 变成 `run.error` —— 第二次成功即返回。"""
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(
+        calls,
+        httpx.ConnectError("blip"),
+        httpx.Response(200, json=_reply({"role": "assistant", "content": "hi"})),
+    )
+
+    message, _ = await _send(_client(handler))
+
+    assert message["content"] == "hi"
+    assert len(calls) == 2
+
+
+async def test_model_retries_are_bounded(configured):
+    """提供方一直连不上：发满 3 次（1 + 2）就收敛成 `provider_unreachable`。"""
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(calls, httpx.ConnectError("no route"))
+
+    with pytest.raises(ModelError) as caught:
+        await _send(_client(handler))
+
+    assert caught.value.code == "provider_unreachable"
+    assert len(calls) == 3
+
+
+async def test_provider_read_timeout_is_not_retried(configured):
+    """`ReadTimeout` 不重试：默认 60s 一发，2 次重试 = 180s = 整个 run 的总预算。
+
+    而且每次重发都要为一次生成**重复付费**。宁可如实报 `provider_timeout`。
+    """
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(calls, httpx.ReadTimeout("too slow"))
+
+    with pytest.raises(ModelError) as caught:
+        await _send(_client(handler))
+
+    assert caught.value.code == "provider_timeout"
+    assert len(calls) == 1
+
+
+async def test_connect_timeout_is_retried_before_giving_up(configured):
+    """连不上（`ConnectTimeout`）重试，预算用尽后仍如实报 `provider_timeout`。"""
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(calls, httpx.ConnectTimeout("connect slow"))
+
+    with pytest.raises(ModelError) as caught:
+        await _send(_client(handler))
+
+    assert caught.value.code == "provider_timeout"
+    assert len(calls) == 3
+
+
+async def test_provider_503_is_retried(configured):
+    """502/503/504 是"提供方过载"，是**经典**的瞬时故障。"""
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(
+        calls,
+        httpx.Response(503, text="overloaded"),
+        httpx.Response(200, json=_reply({"role": "assistant", "content": "ok"})),
+    )
+
+    message, _ = await _send(_client(handler))
+
+    assert message["content"] == "ok"
+    assert len(calls) == 2
+
+
+async def test_exhausted_provider_503_reports_the_status_and_leaks_nothing(configured):
+    """重试预算用尽后仍是 `provider_error` + 状态码，**上游 body 一个字都不回显**。
+
+    红线②在重试路径上同样成立：重试只是多发几次，错误信息的形状不能变。
+    """
+    secret = "sk-leaked-into-error-body"
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(calls, httpx.Response(503, text=f"upstream dump: {secret}"))
+
+    with pytest.raises(ModelError) as caught:
+        await _send(_client(handler))
+
+    error = caught.value
+    assert error.code == "provider_error"
+    assert "503" in error.message
+    assert secret not in error.message
+    assert secret not in str(error)
+    assert len(calls) == 3
+
+
+async def test_rate_limit_is_not_retried(configured):
+    """429 不重试：0.2/0.4 秒的退避清不掉限流窗口，而更长的退避会吃掉循环预算。
+
+    如实报 `provider_error`，让 run 以真实原因结束 —— 比"悄悄重试三次还是失败"好排查。
+    """
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(calls, httpx.Response(429, text="rate limited"))
+
+    with pytest.raises(ModelError) as caught:
+        await _send(_client(handler))
+
+    assert caught.value.code == "provider_error"
+    assert len(calls) == 1
+
+
+async def test_retry_reuses_one_http_client(configured):
+    """重试发生在 `AsyncClient` 生命周期**内部** —— 不为每次重试新建连接池。
+
+    新建的话"重试"就退化成"重连"，而且 `transport` 注入点也会在第二次起失效。
+    """
+    calls: list[httpx.Request] = []
+    handler = _counting_handler(
+        calls,
+        httpx.ConnectError("blip"),
+        httpx.ConnectError("blip again"),
+        httpx.Response(200, json=_reply({"role": "assistant", "content": "ok"})),
+    )
+
+    message, _ = await _send(_client(handler))
+
+    assert message["content"] == "ok"
+    assert len(calls) == 3
+    # 三次尝试发的是同一个请求体 —— 重试不重新构造请求
+    assert len({request.content for request in calls}) == 1
+
+
+# --------------------------------------------------------------------------
 # 响应校验
 # --------------------------------------------------------------------------
 

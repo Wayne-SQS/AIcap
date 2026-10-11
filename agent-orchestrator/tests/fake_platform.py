@@ -28,6 +28,12 @@ from app.loop import DEFAULT_SYSTEM_PROMPT
 
 OWNER_ID = 1
 
+# 照抄 `AgentEventService` 的页大小常量：不传 `limit` 时一页 500 条、上限 1000。
+# 替身必须复刻这两个数，否则"编排层有没有真的传小页"根本测不出来 ——
+# 一个忽略 `limit` 的假平台会让所有分页断言恒绿。
+DEFAULT_EVENT_LIMIT = 500
+MAX_EVENT_LIMIT = 1000
+
 # 归还一个「没有 pending 回复」的假模型会抛这个 —— 它意味着测试脚本写少了，
 # 不是被测代码的错，所以要能一眼看出来。
 _SCRIPT_EXHAUSTED = "脚本化假模型没有更多回复了（测试脚本给少了）"
@@ -54,6 +60,11 @@ class FakePlatform:
         self.limitations = ["未配置当前 Sprint 日期"]
         self.sessions: dict[str, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
+        # 每次 `GET /api/agents/events` 实际生效的页大小（照 Java 的 `cap` 算）
+        # 与它带的 `after_seq`。编排层"单次读有界""页边界只前进不回退"两条断言
+        # 就靠它们：只有真读了多页，这里才会出现多个条目。
+        self.event_read_limits: list[int] = []
+        self.event_read_after: list[int] = []
         self.checkpoints: dict[tuple[str, str], dict[str, Any]] = {}
         # 工具调用的**全部**记录：断言"恢复时没重跑已完成的工具调用"靠它
         self.calls: list[dict[str, Any]] = []
@@ -184,8 +195,16 @@ class FakePlatform:
         if not self._owned(sid):
             return _json(404, {"detail": "会话不存在"})
         after = int(request.url.params.get("after_seq") or 0)
+        # 与 `AgentEventService.listEvents` 同一套口径：
+        # `limit` 缺省或 <=0 → DEFAULT_LIMIT，否则 min(limit, MAX_LIMIT)。
+        raw_limit = request.url.params.get("limit")
+        limit = int(raw_limit) if raw_limit else None
+        cap = DEFAULT_EVENT_LIMIT if limit is None or limit <= 0 else min(limit, MAX_EVENT_LIMIT)
+        self.event_read_limits.append(cap)
+        self.event_read_after.append(after)
         rows = [e for e in self.events if e["session_id"] == sid and e["id"] > after]
-        return _json(200, [copy.deepcopy(r) for r in sorted(rows, key=lambda e: e["id"])])
+        page = sorted(rows, key=lambda e: e["id"])[:cap]
+        return _json(200, [copy.deepcopy(r) for r in page])
 
     def _checkpoints(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST":

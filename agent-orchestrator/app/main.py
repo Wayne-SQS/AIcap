@@ -300,6 +300,12 @@ async def _stream(
         # 先清唤醒位、再读事件：这样"读完发现没有新事件"与"循环在这期间推了事件"
         # 之间不会丢唤醒 —— 后者会把位置上，下面的 wait 立即返回。
         registry.clear(session_id)
+        # 一次只取**一页**（页大小 `config.EVENT_PAGE_LIMIT`，由 java_client 传
+        # Java 的 `limit` 参数）。读到满页就说明后面还有：这一圈 yield 完，下一圈
+        # 带着新的 cursor 接着读下一页。于是"断线很久、盘子里压着上千条事件"也只是
+        # 一页一页地搬 —— 不会一次性读进内存，也不会让第一帧等整批读完。
+        # 顺序与 seq 单调性不受影响：Java 侧 `id > after_seq` 升序返回，
+        # cursor 只前进不回退，`Last-Event-ID` 续传的起点仍是 `_start_seq`。
         rows = await client.list_events(session_id=session_id, after_seq=cursor, jwt=jwt)
         if not rows:
             yield events.heartbeat()
