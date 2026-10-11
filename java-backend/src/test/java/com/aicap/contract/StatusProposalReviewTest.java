@@ -50,6 +50,25 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
         assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
     }
 
+    @Test void correctedStoryReviewIsIdempotentAndRejectsInvalidFields() throws Exception {
+        String id=savedAnalysis(); role("admin"); var input=reviewBody("modify_and_approve");
+        input.put("story_id","US14"); input.putObject("changes").put("status",1);
+        input.putObject("story_patch").put("owner_id",2);
+        var first=review(id,input); assertEquals(200,first.getStatus(),first.getContentAsString());
+        jdbc.update("UPDATE stories SET sprint=4 WHERE id='US14'");
+        assertEquals(first.getContentAsString(),review(id,input).getContentAsString());
+        input.put("story_id","US13"); assertEquals(409,review(id,input).getStatus());
+        var second=body(); second.put("client_request_id","second-review");
+        String secondId=mapper.readTree(submit(second).getContentAsByteArray()).path("id").asText();
+        var bad=reviewBody("modify_and_approve"); bad.putObject("changes").put("status",0);
+        bad.putObject("story_patch").put("status",1);
+        assertEquals(422,review(secondId,bad).getStatus());
+        bad.remove("story_patch"); bad.put("story_id","US999");
+        assertEquals(409,review(secondId,bad).getStatus());
+        bad.put("story_id","US14"); bad.putObject("story_patch").put("sprint",4294967297L);
+        assertEquals(422,review(secondId,bad).getStatus());
+    }
+
     @Test void staleOrDeletedStoryCannotBeApprovedButCanBeRejected() throws Exception {
         String id=savedAnalysis(); role("admin");
         jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");

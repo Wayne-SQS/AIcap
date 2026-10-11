@@ -51,6 +51,19 @@ class ReviewProposalFlowTest extends ReviewAnalysisStorageTest {
         assertEquals(409,review(id,decision("reject",null)).getStatus());
     }
 
+    @Test void correctedReviewStoryCompletesSelectedStory() throws Exception {
+        String id=saved(); role("admin");
+        var input=decision("modify_and_approve","确认验收通过"); input.put("story_id","US14");
+        var response=review(id,input); assertEquals(200,response.getStatus(),response.getContentAsString());
+        var reviewed=mapper.readTree(response.getContentAsByteArray());
+        assertEquals("US13",reviewed.at("/original_proposal/story_id").asText());
+        assertEquals("US14",reviewed.at("/approved_proposal/story_id").asText());
+        assertEquals(0,reviewed.at("/approved_proposal/expected/status").asInt());
+        assertEquals(200,execute(id).getStatus());
+        assertEquals(2,jdbc.queryForObject("SELECT status FROM stories WHERE id='US14'",Integer.class));
+        assertEquals(1,status());
+    }
+
     @Test void pendingRejectedAndUnauthorizedRequestsCannotWrite() throws Exception {
         String id=saved();
         for(String name:java.util.List.of("member","viewer")) {

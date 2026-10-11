@@ -259,6 +259,7 @@ async function serverEdit(id) {
           <div class="sug-head"><b>{{ row.sourceLabel }}</b><span class="sug-status" :class="row.status">{{ row.status === 'pending' ? '待审核' : row.status === 'approved' ? '已批准' : row.status === 'rejected' ? '已拒绝' : row.status }}</span><span class="small">{{ row.createdAt }}</span></div>
           <div class="sug-row"><b>会议</b><span>{{ row.meetingTitle }}</span></div>
           <div class="sug-row"><b>提案 / 影响</b><span>{{ row.proposalId }} · {{ row.summaryText }}</span></div>
+          <div class="sug-row"><b>审核方式</b><span>{{ row.source === 'general' ? '新需求建议：在此采纳或修改后采纳，采纳时创建需求池条目。' : '现有记录变更：打开来源分析核对证据、修改批准内容；审核后另行执行。' }}</span></div>
           <div class="sug-row"><b>流程进度</b><span>{{ row.flowStage || '分析完成 · 处理状态待确认' }}</span></div>
           <div class="sug-row"><b>审核留痕</b><span>{{ row.proposal?.decision ? `审核决定：${row.proposal.decision}` : '尚无审核决定' }}{{ row.reviewer ? ` · 审核人 #${row.reviewer}` : '' }}{{ row.reviewedAt ? ` · ${row.reviewedAt}` : '' }}{{ row.reviewReason ? ` · ${row.reviewReason}` : '' }}</span></div>
           <div class="sug-row"><b>执行状态</b><span>{{ executionLabel(row) }}{{ row.executor ? ` · 执行人 #${row.executor}` : '' }}{{ row.executedAt ? ` · ${row.executedAt}` : '' }}</span></div>

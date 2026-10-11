@@ -46,6 +46,46 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
         assertEquals(200,execute(id,executionBody()).getStatus()); assertEquals(0,storyStatus());
     }
 
+    @Test void correctedStoryAndMultipleFieldsExecuteTogetherWithAudit() throws Exception {
+        String id=savedAnalysis(); role("admin"); var input=reviewBody("modify_and_approve");
+        input.put("story_id","US14"); input.putObject("changes").put("status",1);
+        input.putObject("story_patch").put("sprint",3).put("owner_id",2).put("title","权限审核");
+        var reviewed=review(id,input); assertEquals(200,reviewed.getStatus(),reviewed.getContentAsString());
+        var saved=mapper.readTree(reviewed.getContentAsByteArray());
+        assertEquals("US13",saved.at("/original_proposal/story_id").asText());
+        assertEquals("US14",saved.at("/approved_proposal/story_id").asText());
+        assertEquals(0,saved.at("/approved_proposal/expected/status").asInt());
+        assertEquals(200,execute(id,executionBody()).getStatus());
+        var story=jdbc.queryForMap("SELECT title,status,sprint,owner_id FROM stories WHERE id='US14'");
+        assertEquals("权限审核",story.get("title")); assertEquals(1,story.get("status"));
+        assertEquals(3,story.get("sprint")); assertEquals(2,story.get("owner_id"));
+        assertEquals(1,storyStatus()); assertEquals(1,logs());
+        assertEquals("US14",jdbc.queryForObject("SELECT story_id FROM meeting_status_proposal_executions",String.class));
+    }
+
+    @Test void staleSnapshotBlocksAllApprovedStoryFieldChanges() throws Exception {
+        String id=savedAnalysis(); role("admin"); var input=reviewBody("modify_and_approve");
+        input.putObject("changes").put("status",2);
+        input.putObject("story_patch").put("sprint",3);
+        assertEquals(200,review(id,input).getStatus());
+        jdbc.update("UPDATE stories SET sprint=4 WHERE id='US13'");
+        assertEquals(409,execute(id,executionBody()).getStatus());
+        assertEquals(1,storyStatus()); assertEquals(0,logs()); assertEquals(0,executions());
+    }
+
+    @Test void sprintOnlyAmendmentCanExecuteWithoutStatusMovement() throws Exception {
+        String id=savedAnalysis(); role("admin"); var input=reviewBody("modify_and_approve");
+        input.putObject("changes").put("status",1);
+        input.putObject("story_patch").put("sprint",3);
+        assertEquals(200,review(id,input).getStatus());
+        var response=execute(id,executionBody()); assertEquals(200,response.getStatus(),response.getContentAsString());
+        var result=mapper.readTree(response.getContentAsByteArray());
+        assertEquals(1,result.path("previous_status").asInt());
+        assertEquals(1,result.path("new_status").asInt());
+        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US13'",Integer.class));
+        assertEquals("edit",jdbc.queryForObject("SELECT log_type FROM story_logs",String.class));
+    }
+
     @Test void pendingRejectedAndStaleOrDeletedTargetsHaveNoSideEffects() throws Exception {
         String id=savedAnalysis(); role("admin");
         assertEquals(409,execute(id,executionBody()).getStatus());

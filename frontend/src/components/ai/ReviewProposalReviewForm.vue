@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { reviewAnalysesApi } from '@/api/reviewAnalyses'
 import { useMeetingStore } from '@/stores/meeting'
+import { useReviewStoryChoices } from './useReviewStoryChoices'
 
 const props = defineProps({ meetingId: String, analysisId: String, proposal: Object })
 const emit = defineEmits(['saved', 'refresh'])
@@ -9,20 +10,25 @@ const meeting = useMeetingStore()
 const decision = ref('approve')
 const reason = ref('')
 const amendedReason = ref(props.proposal.reason)
+const storyId = ref(props.proposal.story_id)
+const { stories, loadingStories, storyError, loadStories, stopStoryChoices } = useReviewStoryChoices()
 const busy = ref(false)
 const error = ref('')
 let mounted = true
-onBeforeUnmount(() => { mounted = false })
+onBeforeUnmount(() => { mounted = false; stopStoryChoices() })
 
 async function submit() {
   if (busy.value || !meeting.mayReview) return
   error.value = ''
   const payload = { proposal_id: props.proposal.proposal_id, decision: decision.value, reason: reason.value }
   if (decision.value === 'modify_and_approve') {
-    if (!reason.value.trim() || !amendedReason.value.trim() || amendedReason.value === props.proposal.reason) {
-      error.value = '请修订提案理由并填写修改原因。'
+    if (!reason.value.trim() || !stories.value.some(story => story.id === storyId.value)
+      || !amendedReason.value.trim()
+      || (storyId.value === props.proposal.story_id && amendedReason.value === props.proposal.reason)) {
+      error.value = '请选择有效的目标故事，修订故事或提案理由，并填写修改原因。'
       return
     }
+    payload.story_id = storyId.value
     payload.changes = { reason: amendedReason.value }
   }
   busy.value = true
@@ -49,7 +55,13 @@ async function submit() {
         </select>
       </label>
       <template v-if="decision === 'modify_and_approve'">
-        <p class="small">可修订提案理由，原证据、目标故事与完成状态保持不变。若验收结论有误，请拒绝提案。</p>
+        <label class="field">批准后的目标故事
+          <select v-model="storyId" required :disabled="loadingStories || !!storyError">
+            <option v-for="story in stories" :key="story.id" :value="story.id">{{ story.id }} · {{ story.title }}</option>
+          </select>
+        </label>
+        <p v-if="storyError" role="alert">{{ storyError }} <button type="button" @click="loadStories">重试</button></p>
+        <p class="small">原识别故事：{{ proposal.story_id }}。可纠正故事或修订理由；原提案与证据留存。</p>
         <label class="field">批准后的提案理由
           <textarea v-model="amendedReason" required maxlength="1000" rows="3"></textarea>
         </label>

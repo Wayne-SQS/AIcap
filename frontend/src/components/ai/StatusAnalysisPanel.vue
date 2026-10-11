@@ -149,6 +149,8 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
             <p class="small">提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(execution(item.proposal_id) ? 'succeeded' : item.execution_status) }}</p>
             <p>原始提案：{{ statusName(item.original_proposal.expected.status) }} → {{ statusName(item.original_proposal.changes.status) }}</p>
             <p v-if="item.approved_proposal">批准后的变更：{{ statusName(item.approved_proposal.expected.status) }} → {{ statusName(item.approved_proposal.changes.status) }}</p>
+            <p v-if="item.approved_proposal && item.approved_proposal.story_id !== item.original_proposal.story_id" class="preserve">批准后的目标故事：{{ item.approved_proposal.story_id }}（原识别：{{ item.original_proposal.story_id }}）</p>
+            <p v-if="item.approved_proposal?.story_patch" class="preserve">批准后的其他故事字段：<span v-for="(value, field) in item.approved_proposal.story_patch" :key="field">{{ ({ title: '标题', description: '描述', acceptance: '验收条件', priority: '优先级', sprint: 'Sprint', activity: '活动', owner_id: '负责人' })[field] || field }}：{{ value === null ? '未分配' : value }}；</span></p>
             <p class="preserve">提案原因：{{ item.original_proposal.reason }}</p>
             <div class="evidence">
               <b>原文证据</b>

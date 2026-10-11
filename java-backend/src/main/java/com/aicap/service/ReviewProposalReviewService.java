@@ -26,6 +26,7 @@ public class ReviewProposalReviewService {
 
     public record Review(@NotBlank @Size(max=80) @JsonProperty("proposal_id") String proposalId,
                          @NotNull @Pattern(regexp="approve|modify_and_approve|reject") String decision,
+                         @Pattern(regexp="US[0-9]+") @Size(max=10) @JsonProperty("story_id") String storyId,
                          @Valid Amendment changes,
                          @NotNull @Size(max=1000) String reason) {}
 
@@ -37,7 +38,7 @@ public class ReviewProposalReviewService {
             var input = strict.treeToValue(body, Review.class);
             if (input == null || !validator.validate(input).isEmpty()) throw new IllegalArgumentException();
             boolean edit = input.decision().equals("modify_and_approve");
-            if (edit != (input.changes() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
+            if (edit != (input.changes() != null) || (!edit && input.storyId() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
             return input;
         } catch (Exception e) { throw ApiException.unprocessable("审核载荷无效；仅修改后接受可带 changes，且必须说明修改原因"); }
     }
@@ -76,17 +77,20 @@ public class ReviewProposalReviewService {
         if (index < 0) throw ApiException.notFound("提案不存在");
         var original = proposals.get(index);
         ObjectNode approved = input.decision().equals("reject") ? null : original.deepCopy();
-        // This Review slice only completes stories. Human edits clarify the rationale,
-        // never replace provenance, target, expected state or completion status.
+        String targetId = input.storyId() == null ? original.path("story_id").asText() : input.storyId();
+        boolean retargeted = !targetId.equals(original.path("story_id").asText());
+        if (approved != null) approved.put("story_id",targetId);
         if (input.changes() != null) {
-            if (input.changes().reason().equals(original.path("reason").asText()))
-                throw ApiException.unprocessable("修改后接受必须修订提案理由");
+            if (!retargeted && input.changes().reason().equals(original.path("reason").asText()))
+                throw ApiException.unprocessable("修改后接受必须修订提案理由或目标故事");
             approved.put("reason",input.changes().reason());
         }
         var existing = jdbc.queryForList("SELECT * FROM meeting_review_proposal_reviews WHERE analysis_id=? AND proposal_index=?", analysisId,index);
         if (!existing.isEmpty()) {
             var previous = existing.getFirst();
             var previousApproved = previous.get("approved_json") == null ? null : json(previous.get("approved_json"));
+            if (retargeted && approved != null && previousApproved != null)
+                approved.set("expected",previousApproved.path("expected"));
             if (((Number)previous.get("reviewed_by")).intValue() != reviewerId
                     || !previous.get("decision").equals(input.decision()) || !previous.get("reason").equals(input.reason())
                     || !Objects.equals(previousApproved,approved))
@@ -96,11 +100,15 @@ public class ReviewProposalReviewService {
         if (approved != null) {
             int expected=original.path("expected").path("status").asInt();
             int desired=approved.path("changes").path("status").asInt();
-            if (expected < 0 || expected > 1 || desired != 2)
+            if ((!retargeted && (expected < 0 || expected > 1)) || desired != 2)
                 throw ApiException.unprocessable("Review仅支持待办或进行中故事的完成提案");
-            var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",original.path("story_id").asText());
-            if (stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=expected)
-                throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
+            var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",targetId);
+            if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
+            int current=((Number)stories.getFirst().get("status")).intValue();
+            if (!retargeted && current!=expected) throw ApiException.conflict("故事状态已变化，请重新分析");
+            if (retargeted) { expected=current; ((ObjectNode)approved.path("expected")).put("status",current); }
+            if (expected < 0 || expected > 1)
+                throw ApiException.unprocessable("Review只能完成待办或进行中的目标故事");
         }
         jdbc.update("INSERT INTO meeting_review_proposal_reviews (analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,reviewed_at,original_json,approved_json,execution_status) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?)",
                 analysisId,index,input.proposalId(),input.decision(),input.reason(),reviewerId,
