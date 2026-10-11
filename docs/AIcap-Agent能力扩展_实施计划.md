@@ -32,13 +32,20 @@
 | Sprint | 内容 | 可演示产出 | 状态 |
 |---|---|---|---|
 | **S1** | `knowledge_chunks` 表 + 切分器 + `EmbeddingModel` + `QdrantVectorStore` + 索引任务 | 知识库页能重建索引，chunk 数正确 | ✅ **已完成**（2026-09-19，实测 239 chunk） |
-| **S2** | `Retriever` 三路 + RRF + Reranker + ACL + `retrieval_logs` | 检索调试台并排看三路结果 | ⬜ 未开始 |
-| **S3** | 替换 `AgentTools` 内部实现 + 新增 4 个工具 + Query Rewrite | 会议 Agent 建议质量提升 | ⬜ 未开始 |
-| **S4** | `AgentGraph` + `Checkpointer` + 会议 Agent 重构成图 + interrupt 节点 | kill 进程后重启能续跑 | ⬜ 未开始 |
+| **S2** | `Retriever` 三路 + RRF + Reranker + ACL + `retrieval_logs` | 检索调试台并排看三路结果 | ✅ **已完成**（2026-09-25，`c0625f6`；契约测试双实现各跑一遍） |
+| **S3** | 工具层 REST 暴露（14 只读工具）+ Query Rewrite | 会议 Agent 建议质量提升 | 🟡 **S3.1/S3.2 已完成**（2026-09-25，`49604cc` + 契约测试 15 项）；**S3.3 Query Rewrite 未做** |
+| **S4** | `AgentGraph` + `Checkpointer` + 会议 Agent 重构成图 + interrupt 节点 | kill 进程后重启能续跑 | 🟡 **S4′.1 已完成**（2026-10-11，`agent-orchestrator/` 骨架 + `java_client` + `test_no_db`）；有界循环等见下注 |
 | **S5** | `OrchestratorAgent` + `RiskAgent` + `ReviewAgent` | 一句话触发多 Agent 协作 | ⬜ 未开始 |
 | **S6** | **MCP Server** | Claude Desktop 直连查 AIcap 数据 | ⬜ 未开始 |
 | **S7** | Golden Set + 4 类指标 + `baseline.json` | 第一份评测报告 | ⬜ 未开始 |
 | **S8** | 流式 + 引用卡片 + 检索调试台前端 | 完整演示 | ⬜ 未开始 |
+
+> ⚠️ **本表的 S3~S8 已被《主管智能体 · 落地方案 v1.0》重新切分**（`docs/主管智能体_落地方案_v1.0.md` §7）：
+> 那条线把「Java 作平台、Python 作编排层」拆成 S2.5 / S3.1 / S3.2 / S3.3 / S4′.1 / S4′.2 / S5′ / S5.5′ / S6 / S7 / S8′，
+> 且**S4′ 起是新开的 Python 进程（`agent-orchestrator/`），不是本表的 `AgentGraph`/`Checkpointer` 方案**。
+> 两处的 Sprint 编号含义已不同 —— 引用时先说清是哪一条线。本表保留原设计口径，仅回填实际完成状态。
+>
+> **进度口径**：S1/S2 以本表为准；S3 之后**以《落地方案》§7 为准**（它有逐格的可演示验收）。
 
 > 最小集（时间紧时不可砍）：**S1 → S2 → S3 → S6**，覆盖 JD 最硬的三条：RAG + 工具 + MCP。
 
@@ -220,3 +227,9 @@ MySQL 实现靠 JOIN 实时读角色，但 Qdrant 把 `acl_rank` 存在 payload 
       配好真实密钥后跑一次 `reindex`（不必 force，模型名不同会自动全部重算）即可覆盖
 - [x] ~~`backend/docker-compose.yml` 补一句境内镜像源拉取说明~~（已加注释）
 - [ ] 本次改动**尚未 commit**；`backend/.env` 的真实 `AICAP_LLM_API_KEY` 全程未被读取或写入日志
+- [ ] **⚠️ 安全缺陷：`query_members` 经工具层泄露全员密码哈希**
+      （2026-10-11 实测：任何 `Roles.writer()` 调用者都能从
+      `POST /api/agents/tools/query_members` 拉到 5 个用户的 bcrypt `passwordHash`）
+      根因：画像域 `ProfileToolRegistry` 的 `query_members` 直接返回 `User` 实体、未做字段投影。
+      S3 引入统一工具端点后，同一份数据多了一个直连 HTTP 入口，暴露面因此扩大。
+      修法：Java 侧字段投影（出参白名单）+ 契约测试钉住响应不含 `passwordHash`。
