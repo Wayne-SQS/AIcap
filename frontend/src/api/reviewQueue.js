@@ -210,31 +210,39 @@ export async function loadReviewQueueSummary() {
   if (!summary || !Number.isSafeInteger(summary.pendingCount) || !Number.isSafeInteger(summary.executionCount)
       || !Object.hasOwn(summary, 'latest') || !Object.hasOwn(summary, 'recentMeeting')) throw new Error('审核队列摘要响应无效')
   const details = summary.latest
-    ? await hydrateReviewQueuePage({ items: [summary.latest], nextCursor: null })
+    ? await hydrateReviewQueuePage({ items: [summary.latest], nextCursor: null, details: summary.details })
     : { entries: [], errors: [] }
   return { pendingCount: summary.pendingCount, executionCount: summary.executionCount,
     latestEntry: details.entries[0] || null, recentMeeting: summary.recentMeeting, errors: details.errors }
 }
 
+/* 详情来源有两档:服务端已在同一响应里补齐整页详情(page.details)时直接消费,一次请求即可;
+   老后端没有该字段时退回逐组回源。两条路径共用下面同一段 entry 组装逻辑 ——
+   字段、排序、错误与空值语义都不因来源切换而改变。 */
 async function hydrateReviewQueuePage(page) {
+  const details = page.details && typeof page.details === 'object' && !Array.isArray(page.details) ? page.details : null
+  const groupKey = ref => `${ref.source}:${ref.meetingId || ''}:${ref.analysisId}`
   const entries = [], errors = []
   const read = createReadLimiter(6)
   const groups = new Map()
   for (const ref of page.items) {
-    const key = `${ref.source}:${ref.meetingId || ''}:${ref.analysisId}`
+    const key = groupKey(ref)
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(ref)
   }
   await mapLimit([...groups.values()], 6, async refs => {
     const ref = refs[0]
+    const detail = details ? details[groupKey(ref)] || null : null
     try {
       if (ref.source === 'general') {
+        /* general 的载荷是 SuggestionOut,索引不带,始终逐条读(每组恰好 1 个请求)。 */
         const s = await read(() => api(`/api/suggestions/${encodeURIComponent(ref.proposalId)}`))
         entries.push(generalRow(s))
         return
       }
+      if (detail?.error) throw new Error(detail.error)
       if (ref.source === 'assignment') {
-        const row = await read(() => api(`/api/meetings/${encodeURIComponent(ref.meetingId)}/assignment-suggestions/${encodeURIComponent(ref.analysisId)}`))
+        const row = detail?.assignment || await read(() => api(`/api/meetings/${encodeURIComponent(ref.meetingId)}/assignment-suggestions/${encodeURIComponent(ref.analysisId)}`))
         const status = row.review?.status || 'pending'
         const proposal = { original_proposal: row.result, approved_proposal: row.review?.input || null,
           status, decision: row.review?.input?.decision || null, reviewed_by: row.review?.reviewed_by,
@@ -249,15 +257,22 @@ async function hydrateReviewQueuePage(page) {
       const source = sources.find(item => item.key === ref.source)
       const path = analysisPaths[ref.source]
       if (!source || !path) throw new Error('未知提案来源')
-      const base = `/api/meetings/${encodeURIComponent(ref.meetingId)}/${path}/${encodeURIComponent(ref.analysisId)}`
-      const [analysis, reviewState] = await Promise.all([
-        read(() => api(base)), read(() => source.api.reviews(ref.meetingId, ref.analysisId))
-      ])
-      let executions = []
-      if (arr(reviewState?.proposals).some(item => item.status === 'approved')) {
-        try { executions = arr(await read(() => source.api.executions(ref.meetingId, ref.analysisId))) }
-        catch (error) { errors.push({ meetingId: ref.meetingId, meetingTitle: ref.meetingTitle,
-          source: `${source.label} · ${ref.analysisId} · 执行记录`, message: error.message }) }
+      let analysis, reviewState, executions = []
+      if (detail) {
+        if (!detail.analysis || !detail.reviewState) throw new Error('审核详情不完整，请刷新队列')
+        analysis = detail.analysis
+        reviewState = detail.reviewState
+        executions = arr(detail.executions)
+      } else {
+        const base = `/api/meetings/${encodeURIComponent(ref.meetingId)}/${path}/${encodeURIComponent(ref.analysisId)}`
+        ;[analysis, reviewState] = await Promise.all([
+          read(() => api(base)), read(() => source.api.reviews(ref.meetingId, ref.analysisId))
+        ])
+        if (arr(reviewState?.proposals).some(item => item.status === 'approved')) {
+          try { executions = arr(await read(() => source.api.executions(ref.meetingId, ref.analysisId))) }
+          catch (error) { errors.push({ meetingId: ref.meetingId, meetingTitle: ref.meetingTitle,
+            source: `${source.label} · ${ref.analysisId} · 执行记录`, message: error.message }) }
+        }
       }
       for (const item of refs) {
         const proposal = arr(reviewState?.proposals).find(p => p.proposal_id === item.proposalId)
