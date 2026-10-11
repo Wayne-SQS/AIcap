@@ -144,11 +144,12 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
         <template v-else-if="reviews">
           <p role="status">审核进度：{{ progressName(reviews.review_status) }}</p>
           <WorkflowPermissionNote :proposals="reviews.proposals" />
-          <article v-for="item in reviews.proposals" :key="item.proposal_id" class="proposal-card">
+          <article v-for="item in reviews.proposals" :key="item.proposal_id" class="proposal-card" :data-source-proposal="item.proposal_id" tabindex="-1">
             <h4>{{ item.original_proposal.story_id }} · {{ snapshot(item.original_proposal.story_id)?.title || '故事' }}</h4>
             <p class="small">提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(execution(item.proposal_id) ? 'succeeded' : item.execution_status) }}</p>
             <p>原始提案：{{ statusName(item.original_proposal.expected.status) }} → {{ statusName(item.original_proposal.changes.status) }}</p>
             <p v-if="item.approved_proposal">批准后的变更：{{ statusName(item.approved_proposal.expected.status) }} → {{ statusName(item.approved_proposal.changes.status) }}</p>
+            <p v-if="item.approved_proposal && item.approved_proposal.story_id !== item.original_proposal.story_id" class="preserve">批准后的目标故事：{{ item.approved_proposal.story_id }}（原识别：{{ item.original_proposal.story_id }}）</p>
             <p class="preserve">提案原因：{{ item.original_proposal.reason }}</p>
             <p v-if="item.approved_proposal && item.decision === 'modify_and_approve'" class="preserve">批准后的提案理由：{{ item.approved_proposal.reason }}</p>
             <div class="evidence">

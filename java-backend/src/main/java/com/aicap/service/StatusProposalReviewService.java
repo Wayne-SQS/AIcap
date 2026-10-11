@@ -25,7 +25,9 @@ public class StatusProposalReviewService {
 
     public record Review(@NotBlank @Size(max=80) @JsonProperty("proposal_id") String proposalId,
                          @NotNull @Pattern(regexp="approve|modify_and_approve|reject") String decision,
+                         @Pattern(regexp="US[0-9]+") @Size(max=10) @JsonProperty("story_id") String storyId,
                          @Valid StatusAnalysisDtos.Status changes,
+                         @JsonProperty("story_patch") JsonNode storyPatch,
                          @NotNull @Size(max=1000) String reason) {}
 
     private Review parse(JsonNode body) {
@@ -36,9 +38,27 @@ public class StatusProposalReviewService {
             var input = strict.treeToValue(body, Review.class);
             if (input == null || !validator.validate(input).isEmpty()) throw new IllegalArgumentException();
             boolean edit = input.decision().equals("modify_and_approve");
-            if (edit != (input.changes() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
+            if (edit != (input.changes() != null) || (!edit && (input.storyId() != null || input.storyPatch() != null)) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
+            if (input.storyPatch() != null) validatePatch(input.storyPatch());
             return input;
         } catch (Exception e) { throw ApiException.unprocessable("审核载荷无效；仅修改后接受可带 changes，且必须说明修改原因"); }
+    }
+
+    private void validatePatch(JsonNode patch) {
+        if (!patch.isObject() || patch.isEmpty()) throw new IllegalArgumentException();
+        for (var fields=patch.fieldNames();fields.hasNext();) {
+            String key=fields.next(); JsonNode value=patch.get(key);
+            boolean valid=switch(key) {
+                case "title" -> value.isTextual() && !value.asText().isBlank() && value.asText().length()<=200;
+                case "description", "acceptance" -> value.isTextual();
+                case "priority" -> value.isTextual() && Set.of("Must","Should","Could").contains(value.asText());
+                case "sprint" -> value.isIntegralNumber() && value.canConvertToInt() && value.intValue()>=1 && value.intValue()<=4;
+                case "activity" -> value.isIntegralNumber() && value.canConvertToInt() && value.intValue()>=1 && value.intValue()<=5;
+                case "owner_id" -> value.isNull() || value.isIntegralNumber() && value.canConvertToInt() && value.intValue()>0;
+                default -> false;
+            };
+            if (!valid) throw new IllegalArgumentException();
+        }
     }
 
     private JsonNode json(Object text) {
@@ -76,10 +96,18 @@ public class StatusProposalReviewService {
         var original = proposals.get(index);
         ObjectNode approved = input.decision().equals("reject") ? null : original.deepCopy();
         if (input.changes() != null) approved.set("changes",mapper.valueToTree(input.changes()));
+        if (input.storyPatch() != null) approved.set("story_patch",input.storyPatch().deepCopy());
+        String targetId = input.storyId() == null ? original.path("story_id").asText() : input.storyId();
+        boolean retargeted = !targetId.equals(original.path("story_id").asText());
+        if (approved != null) approved.put("story_id",targetId);
         var existing = jdbc.queryForList("SELECT * FROM meeting_status_proposal_reviews WHERE analysis_id=? AND proposal_index=?", analysisId,index);
         if (!existing.isEmpty()) {
             var previous = existing.getFirst();
             var previousApproved = previous.get("approved_json") == null ? null : json(previous.get("approved_json"));
+            if (retargeted && approved != null && previousApproved != null)
+                approved.set("expected",previousApproved.path("expected"));
+            if (approved != null && previousApproved != null && previousApproved.has("expected_story"))
+                approved.set("expected_story",previousApproved.path("expected_story"));
             if (((Number)previous.get("reviewed_by")).intValue() != reviewerId
                     || !previous.get("decision").equals(input.decision()) || !previous.get("reason").equals(input.reason())
                     || !Objects.equals(previousApproved,approved))
@@ -89,11 +117,35 @@ public class StatusProposalReviewService {
         if (approved != null) {
             int expected=original.path("expected").path("status").asInt();
             int desired=approved.path("changes").path("status").asInt();
-            if (expected == desired || (input.changes()!=null && desired==original.path("changes").path("status").asInt()))
-                throw ApiException.unprocessable("修改后接受必须改变提案目标状态且不能形成无变化操作");
-            var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",original.path("story_id").asText());
-            if (stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=expected)
-                throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
+            if (!retargeted && input.changes()!=null && input.storyPatch()==null && desired==original.path("changes").path("status").asInt())
+                throw ApiException.unprocessable("修改后接受必须改变目标状态或目标故事");
+            var stories=jdbc.queryForList("SELECT title,description,acceptance,priority,sprint,activity,status,owner_id FROM stories WHERE id=? FOR UPDATE",targetId);
+            if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
+            var story=stories.getFirst();
+            int current=((Number)story.get("status")).intValue();
+            if (!retargeted && current!=expected)
+                throw ApiException.conflict("故事状态已变化，请重新分析");
+            if (retargeted) { expected=current; ((ObjectNode)approved.path("expected")).put("status",current); }
+            if (input.storyPatch()!=null && input.storyPatch().has("owner_id") && !input.storyPatch().path("owner_id").isNull()) {
+                Integer owner=input.storyPatch().path("owner_id").intValue();
+                if (jdbc.queryForList("SELECT id FROM users WHERE id=?",owner).isEmpty())
+                    throw ApiException.unprocessable("目标负责人不存在");
+            }
+            if (input.storyPatch()!=null) {
+                var snapshot=mapper.createObjectNode();
+                for (String field:List.of("title","description","acceptance","priority","sprint","activity","status","owner_id"))
+                    snapshot.set(field,mapper.valueToTree(story.get(field)));
+                approved.set("expected_story",snapshot);
+            }
+            boolean patchChanges=false;
+            if (input.storyPatch()!=null) for (var fields=input.storyPatch().fieldNames();fields.hasNext();) {
+                String field=fields.next();
+                if (!input.storyPatch().get(field).equals(mapper.valueToTree(story.get(field)))) patchChanges=true;
+            }
+            if (input.changes()!=null && ((expected==desired && !patchChanges)
+                    || (!retargeted && desired==original.path("changes").path("status").asInt() && !patchChanges))
+               )
+                throw ApiException.unprocessable("修改后接受必须改变目标故事或批准内容");
         }
         jdbc.update("INSERT INTO meeting_status_proposal_reviews (analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,reviewed_at,original_json,approved_json,execution_status) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?)",
                 analysisId,index,input.proposalId(),input.decision(),input.reason(),reviewerId,

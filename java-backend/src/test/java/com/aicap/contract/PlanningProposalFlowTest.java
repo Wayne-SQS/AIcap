@@ -37,6 +37,20 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         assertEquals(409,review(id,"reject",null).getStatus());
     }
 
+    @Test void correctedStorySprintUsesSelectedStoryCurrentValue() throws Exception {
+        String id=saved(); role("admin");
+        var input=mapper.createObjectNode().put("proposal_id","p1").put("decision","modify_and_approve")
+                .put("story_id","US14").put("reason","原故事编号错误");
+        input.putObject("changes").put("sprint",3);
+        var response=mvc.perform(post(path+"/"+id+"/proposal-reviews").contentType("application/json")
+                .content(input.toString())).andReturn().getResponse();
+        assertEquals(200,response.getStatus(),response.getContentAsString());
+        assertEquals(2,mapper.readTree(response.getContentAsByteArray()).at("/approved_proposal/expected/sprint").asInt());
+        assertEquals(200,execute(id).getStatus());
+        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US14'",Integer.class));
+        assertEquals(1,sprint());
+    }
+
     @Test void permissionsPendingRejectionAndStaleExecutionCannotWrite() throws Exception {
         String id=saved();
         for(String role:java.util.List.of("member","viewer")) {

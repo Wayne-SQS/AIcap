@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { planningAnalysesApi } from '@/api/planningAnalyses'
 import { useMeetingStore } from '@/stores/meeting'
+import { useReviewStoryChoices } from './useReviewStoryChoices'
 const statuses = [1, 2, 3, 4]
 
 const props = defineProps({ meetingId: String, analysisId: String, proposal: Object })
@@ -10,22 +11,27 @@ const meeting = useMeetingStore()
 const decision = ref('approve')
 const reason = ref('')
 const target = ref('')
+const storyId = ref(props.proposal.story_id)
+const { stories, loadingStories, storyError, loadStories, stopStoryChoices } = useReviewStoryChoices()
 const busy = ref(false)
 const error = ref('')
 let mounted = true
-onBeforeUnmount(() => { mounted = false })
+onBeforeUnmount(() => { mounted = false; stopStoryChoices() })
 const choices = computed(() => statuses.map(status => ({ label: 'Sprint ' + status, status }))
-  .filter(item => item.status !== props.proposal.expected.sprint && item.status !== props.proposal.changes.sprint))
+  .filter(item => item.status !== props.proposal.expected.sprint || storyId.value !== props.proposal.story_id))
 
 async function submit() {
   if (busy.value || !meeting.mayReview) return
   error.value = ''
   const payload = { proposal_id: props.proposal.proposal_id, decision: decision.value, reason: reason.value }
   if (decision.value === 'modify_and_approve') {
-    if (!reason.value.trim() || !choices.value.some(item => item.status === target.value)) {
-      error.value = '请选择新的目标Sprint并填写修改原因。'
+    if (!reason.value.trim() || !stories.value.some(story => story.id === storyId.value)
+      || !choices.value.some(item => item.status === target.value)
+      || (storyId.value === props.proposal.story_id && target.value === props.proposal.changes.sprint)) {
+      error.value = '请选择有效的目标故事及修改后的Sprint，并填写修改原因。'
       return
     }
+    payload.story_id = storyId.value
     payload.changes = { sprint: target.value }
   }
   busy.value = true
@@ -51,10 +57,19 @@ async function submit() {
           <option value="reject">拒绝</option>
         </select>
       </label>
+      <template v-if="decision === 'modify_and_approve'">
+        <label class="field">批准后的目标故事
+          <select v-model="storyId" required :disabled="loadingStories || !!storyError">
+            <option v-for="story in stories" :key="story.id" :value="story.id">{{ story.id }} · {{ story.title }}</option>
+          </select>
+        </label>
+        <p v-if="storyError" role="alert">{{ storyError }} <button type="button" @click="loadStories">重试</button></p>
+        <p class="small">原识别故事：{{ proposal.story_id }}。修正目标时会记录原提案，执行前核对所选故事Sprint。</p>
+      </template>
       <label v-if="decision === 'modify_and_approve'" class="field">批准后的目标Sprint
         <select v-model="target" required>
           <option disabled value="">请选择目标Sprint</option>
-          <option v-for="item in choices" :key="item.status" :value="item.status">{{ item.label }}</option>
+          <option v-for="item in statuses.map(status => ({ label: 'Sprint ' + status, status }))" :key="item.status" :value="item.status">{{ item.label }}</option>
         </select>
       </label>
       <label class="field">{{ decision === 'modify_and_approve' ? '修改原因（必填）' : '审核意见（可选）' }}

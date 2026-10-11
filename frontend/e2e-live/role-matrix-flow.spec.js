@@ -58,6 +58,8 @@ test('real review queue keeps source navigation and role permissions', async ({ 
 
       await row.getByRole('button', { name: '查看来源会议' }).click()
       await expect(page.getByRole('heading', { name: '会议工作区' })).toBeVisible()
+      await expect(page.locator(`[data-source-suggestion="${suggestionId}"]`)).toBeFocused()
+      await expect(page.locator(`[data-source-suggestion="${suggestionId}"]`)).toContainText('角色矩阵测试建议')
       if (account.username === '成员5') {
         await expect(page.locator('#meeting-save-form button')).toBeDisabled()
       } else {

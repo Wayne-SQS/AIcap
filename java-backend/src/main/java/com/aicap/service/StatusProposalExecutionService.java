@@ -64,16 +64,31 @@ public class StatusProposalExecutionService {
         String storyId=approved.path("story_id").asText();
         int before=approved.path("expected").path("status").asInt();
         int after=approved.path("changes").path("status").asInt();
-        var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",storyId);
+        var stories=jdbc.queryForList("SELECT title,description,acceptance,priority,sprint,activity,status,owner_id FROM stories WHERE id=? FOR UPDATE",storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=before)
             throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
-        if(jdbc.update("UPDATE stories SET status=? WHERE id=? AND status=?",after,storyId,before)!=1)
+        var story=stories.getFirst();
+        JsonNode snapshot=approved.path("expected_story");
+        if (snapshot.isObject()) for (String field:List.of("title","description","acceptance","priority","sprint","activity","status","owner_id"))
+            if (!snapshot.path(field).equals(mapper.valueToTree(story.get(field))))
+                throw ApiException.conflict("目标故事内容已变化，请重新分析和审核");
+        JsonNode patch=approved.path("story_patch");
+        if (patch.isObject()) {
+            Object value=(fieldValue(patch,"owner_id",story.get("owner_id")));
+            if (value!=null && jdbc.queryForList("SELECT id FROM users WHERE id=?",value).isEmpty())
+                throw ApiException.conflict("批准的负责人已不存在");
+        }
+        if(jdbc.update("UPDATE stories SET status=?,title=?,description=?,acceptance=?,priority=?,sprint=?,activity=?,owner_id=? WHERE id=? AND status=?",
+                after,fieldValue(patch,"title",story.get("title")),fieldValue(patch,"description",story.get("description")),
+                fieldValue(patch,"acceptance",story.get("acceptance")),fieldValue(patch,"priority",story.get("priority")),
+                fieldValue(patch,"sprint",story.get("sprint")),fieldValue(patch,"activity",story.get("activity")),
+                fieldValue(patch,"owner_id",story.get("owner_id")),storyId,before)!=1)
             throw ApiException.conflict("故事状态已变化，请重新分析");
-        String detail="会议提案执行："+before+" → "+after+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
+        String detail="会议提案执行："+before+" → "+after+"；故事字段="+(patch.isObject() ? patch.properties().stream().map(Map.Entry::getKey).toList() : "无")+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs (story_id,log_type,detail,user_id,created_at) VALUES (?,'move',?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1,storyId); statement.setString(2,detail); statement.setInt(3,executorId);
+            var statement=connection.prepareStatement("INSERT INTO story_logs (story_id,log_type,detail,user_id,created_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1,storyId); statement.setString(2,before==after ? "edit" : "move"); statement.setString(3,detail); statement.setInt(4,executorId);
             return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();
@@ -82,6 +97,13 @@ public class StatusProposalExecutionService {
         jdbc.update("UPDATE meeting_status_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=?",analysisId,index);
         shadow.sync("daily", analysisId);
         return out(jdbc.queryForMap("SELECT * FROM meeting_status_proposal_executions WHERE analysis_id=? AND proposal_index=?",analysisId,index));
+    }
+
+    private Object fieldValue(JsonNode patch,String field,Object fallback) {
+        if (!patch.isObject() || !patch.has(field)) return fallback;
+        JsonNode value=patch.get(field);
+        if (value.isNull()) return null;
+        return value.isIntegralNumber() ? value.intValue() : value.asText();
     }
 
     @Transactional(readOnly=true)

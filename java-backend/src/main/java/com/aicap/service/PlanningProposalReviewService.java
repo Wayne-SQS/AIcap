@@ -25,6 +25,7 @@ public class PlanningProposalReviewService {
 
     public record Review(@NotBlank @Size(max=80) @JsonProperty("proposal_id") String proposalId,
                          @NotNull @Pattern(regexp="approve|modify_and_approve|reject") String decision,
+                         @Pattern(regexp="US[0-9]+") @Size(max=10) @JsonProperty("story_id") String storyId,
                          @Valid PlanningAnalysisDtos.Sprint changes,
                          @NotNull @Size(max=1000) String reason) {}
 
@@ -36,7 +37,7 @@ public class PlanningProposalReviewService {
             var input = strict.treeToValue(body, Review.class);
             if (input == null || !validator.validate(input).isEmpty()) throw new IllegalArgumentException();
             boolean edit = input.decision().equals("modify_and_approve");
-            if (edit != (input.changes() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
+            if (edit != (input.changes() != null) || (!edit && input.storyId() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
             return input;
         } catch (Exception e) { throw ApiException.unprocessable("审核载荷无效；仅修改后接受可带 changes，且必须说明修改原因"); }
     }
@@ -76,10 +77,15 @@ public class PlanningProposalReviewService {
         var original = proposals.get(index);
         ObjectNode approved = input.decision().equals("reject") ? null : original.deepCopy();
         if (input.changes() != null) approved.set("changes",mapper.valueToTree(input.changes()));
+        String targetId = input.storyId() == null ? original.path("story_id").asText() : input.storyId();
+        boolean retargeted = !targetId.equals(original.path("story_id").asText());
+        if (approved != null) approved.put("story_id",targetId);
         var existing = jdbc.queryForList("SELECT * FROM meeting_planning_proposal_reviews WHERE analysis_id=? AND proposal_index=?", analysisId,index);
         if (!existing.isEmpty()) {
             var previous = existing.getFirst();
             var previousApproved = previous.get("approved_json") == null ? null : json(previous.get("approved_json"));
+            if (retargeted && approved != null && previousApproved != null)
+                approved.set("expected",previousApproved.path("expected"));
             if (((Number)previous.get("reviewed_by")).intValue() != reviewerId
                     || !previous.get("decision").equals(input.decision()) || !previous.get("reason").equals(input.reason())
                     || !Objects.equals(previousApproved,approved))
@@ -89,11 +95,15 @@ public class PlanningProposalReviewService {
         if (approved != null) {
             int expected=original.path("expected").path("sprint").asInt();
             int desired=approved.path("changes").path("sprint").asInt();
-            if (expected == desired || (input.changes()!=null && desired==original.path("changes").path("sprint").asInt()))
-                throw ApiException.unprocessable("修改后接受必须改变提案目标Sprint且不能形成无变化操作");
-            var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE id=? FOR UPDATE",original.path("story_id").asText());
-            if (stories.isEmpty() || ((Number)stories.getFirst().get("sprint")).intValue()!=expected)
-                throw ApiException.conflict("故事不存在或Sprint已变化，请重新分析");
+            if (!retargeted && input.changes()!=null && desired==original.path("changes").path("sprint").asInt())
+                throw ApiException.unprocessable("修改后接受必须改变目标Sprint或目标故事");
+            var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE id=? FOR UPDATE",targetId);
+            if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
+            int current=((Number)stories.getFirst().get("sprint")).intValue();
+            if (!retargeted && current!=expected)
+                throw ApiException.conflict("故事Sprint已变化，请重新分析");
+            if (retargeted) { expected=current; ((ObjectNode)approved.path("expected")).put("sprint",current); }
+            if (expected==desired) throw ApiException.unprocessable("目标故事已处于目标Sprint，不能形成无变化操作");
         }
         jdbc.update("INSERT INTO meeting_planning_proposal_reviews (analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,reviewed_at,original_json,approved_json,execution_status) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?)",
                 analysisId,index,input.proposalId(),input.decision(),input.reason(),reviewerId,
