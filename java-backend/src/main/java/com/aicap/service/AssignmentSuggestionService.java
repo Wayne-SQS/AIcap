@@ -13,6 +13,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class AssignmentSuggestionService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
 
     private void require(boolean valid) { if (!valid) throw ApiException.unprocessable("分配建议载荷或匹配依据无效"); }
@@ -124,6 +125,7 @@ public class AssignmentSuggestionService {
             if(!current.path(field).equals(snapshot.path(field))) throw ApiException.conflict("故事快照已变化，请重新查询候选");
         var id=UUID.randomUUID().toString();
         jdbc.update("INSERT INTO meeting_assignment_analyses (id,meeting_id,submitted_by,client_request_id,input_json,result_json) VALUES (?,?,?,?,?,?)",id,meetingId,userId,body.path("client_request_id").asText(),body.path("input").toString(),body.path("result").toString());
+        shadow.sync("assignment", id);
         return get(meetingId,id);
     }
     public ObjectNode get(String meetingId,String id) { return out(row(meetingId,id,false)); }
@@ -167,6 +169,7 @@ public class AssignmentSuggestionService {
         review.put("status",decision.equals("approve")?"approved":"rejected");
         review.put("execution_status",decision.equals("approve")?"not_started":"not_applicable");
         jdbc.update("UPDATE meeting_assignment_analyses SET review_json=? WHERE id=?",review.toString(),id);
+        shadow.sync("assignment", id);
         return review;
     }
 
@@ -204,6 +207,7 @@ public class AssignmentSuggestionService {
         // Input/reviewer audit stays unchanged. Execution audit commits with the story and log.
         review.put("execution_status","succeeded"); review.set("execution",execution);
         jdbc.update("UPDATE meeting_assignment_analyses SET review_json=? WHERE id=?",review.toString(),id);
+        shadow.sync("assignment", id);
         return execution;
     }
 }

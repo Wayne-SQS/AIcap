@@ -2,6 +2,10 @@ package com.aicap.contract;
 
 import com.aicap.service.ReviewQueueIndexService;
 import com.aicap.service.ReviewQueueShadowIndexService;
+import com.aicap.service.StatusAnalysisService;
+import com.aicap.service.StatusProposalExecutionService;
+import com.aicap.service.StatusProposalReviewService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +32,12 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ReviewQueueIndexService index;
     @Autowired private ReviewQueueShadowIndexService shadow;
+    @Autowired private StatusAnalysisService statusAnalyses;
+    @Autowired private StatusProposalReviewService statusReviews;
+    @Autowired private StatusProposalExecutionService statusExecutions;
+    @Autowired private ObjectMapper mapper;
     private final String meetingId = UUID.randomUUID().toString();
+    private final String storyId = "US" + (10000000 + Math.abs(meetingId.hashCode() % 80000000));
     private final List<String> analysisIds = new ArrayList<>();
     private final String suggestionId = "S" + (100000 + Math.abs(meetingId.hashCode() % 800000));
     private final List<String> suggestionIds = new ArrayList<>();
@@ -39,13 +48,42 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String table = "meeting_" + source + "_analyses";
             String reviewTable = "meeting_" + source + "_proposal_reviews";
+            String executionTable = "meeting_" + source + "_proposal_executions";
+            jdbc.update("DELETE e FROM " + executionTable + " e JOIN " + table + " a ON a.id=e.analysis_id WHERE a.meeting_id=?", meetingId);
             jdbc.update("DELETE r FROM " + reviewTable + " r JOIN " + table + " a ON a.id=r.analysis_id WHERE a.meeting_id=?", meetingId);
             jdbc.update("DELETE FROM " + table + " WHERE meeting_id=?", meetingId);
         }
+        jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
+        jdbc.update("DELETE FROM stories WHERE id=?", storyId);
         jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
         for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
         jdbc.update("DELETE FROM meetings WHERE id=?", meetingId);
+    }
+
+    @Test
+    void dailyServiceWritesShadowThroughSaveReviewAndExecution() throws Exception {
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
+                meetingId, "索引写入测试", "测试提案已确认。", 1);
+        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status) VALUES(?,?,?,?,?,?,?,?)",
+                storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        String body = """
+                {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
+                "meeting_type":"daily_scrum","summary":"已确认","open_questions":[],"proposed_actions":[
+                {"proposal_id":"p1","action":"update_story_status","story_id":"%s","expected":{"status":1},
+                "changes":{"status":2},"reason":"确认验收","evidence":[{"segment_id":"S1","quote":"测试提案已确认。"}]}]}}
+                """.formatted(meetingId, storyId);
+        String id = statusAnalyses.save(meetingId, mapper.readTree(body), 1).path("id").asText();
+        assertEquals("pending", jdbc.queryForObject(
+                "SELECT status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        statusReviews.review(meetingId, id, mapper.readTree("""
+                {"proposal_id":"p1","decision":"approve","reason":"确认通过"}
+                """), 1);
+        assertEquals("approved", jdbc.queryForObject(
+                "SELECT status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        statusExecutions.execute(meetingId, id, mapper.readTree("{\"proposal_id\":\"p1\"}"), 1);
+        assertEquals("succeeded", jdbc.queryForObject(
+                "SELECT execution_status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
     }
 
     @Test

@@ -14,6 +14,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class RetroProposalExecutionService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
 
     private JsonNode json(Object value) {
@@ -71,6 +72,7 @@ public class RetroProposalExecutionService {
         jdbc.update("INSERT INTO meeting_retro_proposal_executions(analysis_id,proposal_index,proposal_id,action_item_id,action_item_log_id,executed_by) VALUES (?,?,?,?,?,?)",
             analysisId,index,id,actionId,logId,executorId);
         jdbc.update("UPDATE meeting_retro_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=?",analysisId,index);
+        shadow.sync("retro", analysisId);
         return out(jdbc.queryForMap("SELECT * FROM meeting_retro_proposal_executions WHERE analysis_id=? AND proposal_index=?",analysisId,index));
     }
     @Transactional(readOnly=true)

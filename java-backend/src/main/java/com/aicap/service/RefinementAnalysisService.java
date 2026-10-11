@@ -17,6 +17,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class RefinementAnalysisService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
     private final Validator validator;
 
@@ -96,6 +97,7 @@ public class RefinementAnalysisService {
         String status = ordered.isEmpty() ? "no_changes" : "pending";
         jdbc.update("INSERT INTO meeting_refinement_analyses (id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
                 id, meetingId, userId, input.clientRequestId(), status, transcript, result.toString(), snapshots.toString());
+        shadow.sync("refinement", id);
         return get(meetingId, id);
     }
 

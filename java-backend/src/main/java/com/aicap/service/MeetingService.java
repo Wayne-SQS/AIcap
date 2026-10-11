@@ -62,6 +62,7 @@ public class MeetingService {
     /** 显式事务模板:用于同类自调用场景(见 submitSuggestionIdempotent) */
     private final TransactionTemplate tx;
     private final MeetingDeletionGuard deletionGuard;
+    private final ReviewQueueShadowIndexService shadow;
 
     // ---------- meetings ----------
 
@@ -140,6 +141,7 @@ public class MeetingService {
         if (!suggestionIds.isEmpty()) {
             payloadMapper.delete(new QueryWrapper<MeetingApprovalPayload>().in("suggestion_id", suggestionIds));
         }
+        shadow.removeMeeting(meetingId);
         recordMapper.delete(new QueryWrapper<MeetingSuggestionRecord>().eq("meeting_id", meetingId));
         if (!suggestionIds.isEmpty()) {
             suggestionMapper.delete(new QueryWrapper<Suggestion>().in("id", suggestionIds));
@@ -210,6 +212,7 @@ public class MeetingService {
         record.setExecutionStatus("not_started");
         record.setReason("");
         recordMapper.insert(record);
+        shadow.sync("general", suggestion.getId());
         return new SuggestionOutHolder(suggestion, record);
     }
 
@@ -321,6 +324,7 @@ public class MeetingService {
             record.setExecutionStatus("not_needed");
         }
         recordMapper.updateById(record);
+        shadow.sync("general", suggestionId);
         return new SuggestionOutHolder(suggestion, record);
     }
 

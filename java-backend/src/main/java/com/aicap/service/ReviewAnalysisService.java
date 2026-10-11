@@ -17,6 +17,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ReviewAnalysisService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
     private final Validator validator;
 
@@ -98,6 +99,7 @@ public class ReviewAnalysisService {
         String status = ordered.isEmpty() ? "no_changes" : "pending";
         jdbc.update("INSERT INTO meeting_review_analyses (id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
                 id, meetingId, userId, input.clientRequestId(), status, transcript, result.toString(), snapshots.toString());
+        shadow.sync("review", id);
         return get(meetingId, id);
     }
 

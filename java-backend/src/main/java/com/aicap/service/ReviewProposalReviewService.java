@@ -18,6 +18,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ReviewProposalReviewService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
     private final Validator validator;
 
@@ -104,6 +105,7 @@ public class ReviewProposalReviewService {
         jdbc.update("INSERT INTO meeting_review_proposal_reviews (analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,reviewed_at,original_json,approved_json,execution_status) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?)",
                 analysisId,index,input.proposalId(),input.decision(),input.reason(),reviewerId,
                 original.toString(),approved==null ? null : approved.toString(),approved==null ? "not_applicable" : "not_started");
+        shadow.sync("review", analysisId);
         return out(jdbc.queryForMap("SELECT * FROM meeting_review_proposal_reviews WHERE analysis_id=? AND proposal_index=?",analysisId,index));
     }
 

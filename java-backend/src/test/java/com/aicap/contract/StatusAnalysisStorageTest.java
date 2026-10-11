@@ -39,6 +39,9 @@ class StatusAnalysisStorageTest {
         @Bean JdbcTemplate jdbc(DataSource ds) { return new JdbcTemplate(ds); }
         @Bean PlatformTransactionManager tx(DataSource ds) { return new DataSourceTransactionManager(ds); }
         @Bean ObjectMapper mapper() { return new ObjectMapper(); }
+        @Bean com.aicap.service.ReviewQueueShadowIndexService shadow() {
+            return org.mockito.Mockito.mock(com.aicap.service.ReviewQueueShadowIndexService.class);
+        }
         @Bean Validator validator() { return Validation.buildDefaultValidatorFactory().getValidator(); }
     }
     AnnotationConfigApplicationContext context;
@@ -115,7 +118,8 @@ class StatusAnalysisStorageTest {
         assertTrue(saved.get("story_snapshots").get(0).get("owner_id").isNull());
         jdbc.update("UPDATE stories SET title='changed',status=2 WHERE id='US13'");
         // Fresh JDBC-backed service read retains the original submission, not current project state.
-        var fresh = new StatusAnalysisService(jdbc, mapper, context.getBean(Validator.class));
+        var fresh = new StatusAnalysisService(jdbc, context.getBean(com.aicap.service.ReviewQueueShadowIndexService.class),
+                mapper, context.getBean(Validator.class));
         assertEquals(1,fresh.get("m1",saved.path("id").asText()).path("story_snapshots").get(0).path("status").asInt());
         assertEquals(200,mvc.perform(get(path+"/"+saved.path("id").asText())).andReturn().getResponse().getStatus());
         assertEquals(1,mapper.readTree(mvc.perform(get(path)).andReturn().getResponse().getContentAsByteArray()).size());

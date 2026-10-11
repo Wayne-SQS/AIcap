@@ -40,6 +40,9 @@ class RetroAnalysisStorageTest {
         @Bean JdbcTemplate jdbc(DataSource ds) { return new JdbcTemplate(ds); }
         @Bean PlatformTransactionManager tx(DataSource ds) { return new DataSourceTransactionManager(ds); }
         @Bean ObjectMapper mapper() { return new ObjectMapper(); }
+        @Bean com.aicap.service.ReviewQueueShadowIndexService shadow() {
+            return org.mockito.Mockito.mock(com.aicap.service.ReviewQueueShadowIndexService.class);
+        }
         @Bean Validator validator() { return Validation.buildDefaultValidatorFactory().getValidator(); }
     }
     AnnotationConfigApplicationContext context;

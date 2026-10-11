@@ -14,6 +14,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class RefinementProposalExecutionService {
     private final JdbcTemplate jdbc;
+    private final ReviewQueueShadowIndexService shadow;
     private final ObjectMapper mapper;
     private final IdAllocator idAllocator;
 
@@ -72,6 +73,7 @@ public class RefinementProposalExecutionService {
         jdbc.update("INSERT INTO meeting_refinement_proposal_executions(analysis_id,proposal_index,proposal_id,story_id,story_log_id,executed_by) VALUES (?,?,?,?,?,?)",
             analysisId,index,id,storyId,logId,executorId);
         jdbc.update("UPDATE meeting_refinement_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=?",analysisId,index);
+        shadow.sync("refinement", analysisId);
         return out(jdbc.queryForMap("SELECT * FROM meeting_refinement_proposal_executions WHERE analysis_id=? AND proposal_index=?",analysisId,index));
     }
     @Transactional(readOnly=true)

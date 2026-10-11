@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,25 @@ public class ReviewQueueShadowIndexService {
     private final ReviewQueueIndexService sources;
 
     public record Counts(long pending, long execution, long total) {}
+
+    /** Refresh one source record inside the transaction that changed its authoritative row. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void sync(String source, String analysisId) {
+        String sourceSql = sources.sql().get(source);
+        if (sourceSql == null) throw new IllegalArgumentException("Unknown review queue source: " + source);
+        jdbc.update("INSERT INTO review_queue_proposals " +
+                        "(source,analysis_id,proposal_index,meeting_id,proposal_id,created_at,status,execution_status) " +
+                        "SELECT q.source,q.analysis_id,q.proposal_index,q.meeting_id,q.proposal_id,q.created_at," +
+                        "q.status,q.execution_status FROM (" + sourceSql + ") q WHERE q.analysis_id=? " +
+                        "ON DUPLICATE KEY UPDATE meeting_id=VALUES(meeting_id),proposal_id=VALUES(proposal_id)," +
+                        "created_at=VALUES(created_at),status=VALUES(status),execution_status=VALUES(execution_status)",
+                analysisId);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void removeMeeting(String meetingId) {
+        jdbc.update("DELETE FROM review_queue_proposals WHERE meeting_id=?", meetingId);
+    }
 
     /** Idempotently inserts missing references. Existing rows are never overwritten by backfill. */
     @Transactional
