@@ -56,8 +56,9 @@ class AgentCheckpointRetentionContractTest {
     private String seedRun(String eventType, LocalDateTime eventAt, LocalDateTime checkpointAt) {
         String runId = UUID.randomUUID().toString();
         runIds.add(runId);
+        // session_id 是 VARCHAR(36):直接复用 uuid 当会话号,不要拼前缀(会超长)
         jdbc.update("INSERT INTO agent_events (session_id,run_id,type,detail_json,created_at) VALUES (?,?,?,?,?)",
-                "session-" + runId, runId, eventType, "{\"k\":1}", Timestamp.valueOf(eventAt));
+                runId, runId, eventType, "{\"k\":1}", Timestamp.valueOf(eventAt));
         jdbc.update("INSERT INTO agent_checkpoints (run_id,node_name,state_json,created_at) VALUES (?,?,?,?)",
                 runId, "loop", "{\"step\":1}", Timestamp.valueOf(checkpointAt));
         return runId;
