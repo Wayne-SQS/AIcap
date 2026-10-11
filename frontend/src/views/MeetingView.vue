@@ -24,8 +24,13 @@ function focusSource() {
     if (!target) return false
     sourceObserver?.disconnect()
     sourceObserver = null
-    target.scrollIntoView({ block: 'center' })
-    target.focus({ preventScroll: true })
+    const reviewForm = !general && meeting.mayReview ? target.querySelector('form[aria-label]') : null
+    const action = reviewForm || (!general && meeting.mayReview
+      ? [...target.querySelectorAll('button')].find(button => button.textContent?.includes('执行已批准')) : null)
+    const destination = action || target
+    destination.scrollIntoView({ block: action ? 'center' : 'start' })
+    const focus = reviewForm?.querySelector('select') || action || target
+    focus.focus({ preventScroll: true })
     return true
   }
   if (!locate()) {

@@ -43,7 +43,8 @@ test('来源分析深链刷新后仍选中指定会议、类型和分析记录',
   await expect(page.getByLabel('会议分析类型')).toHaveValue('planning')
   await expect(page.getByLabel('Planning分析记录')).toHaveValue(analysisId)
   await expect(page.getByText('来源深链验收分析记录')).toBeVisible()
-  await expect(page.locator('[data-source-proposal="proposal-planning-9"]')).toBeFocused()
+  await expect(page.locator('[data-source-proposal="proposal-planning-9"] select').first()).toBeFocused()
+  await expect(page.getByRole('button', { name: '提交审核决定' })).toBeInViewport()
   await expect(page.getByRole('button', { name: '← 返回审核中心（保留筛选）' })).toBeVisible()
 
   await page.reload()
@@ -51,5 +52,6 @@ test('来源分析深链刷新后仍选中指定会议、类型和分析记录',
   await expect(page.getByLabel('会议分析类型')).toHaveValue('planning')
   await expect(page.getByLabel('Planning分析记录')).toHaveValue(analysisId)
   await expect(page.getByText('来源深链验收分析记录')).toBeVisible()
-  await expect(page.locator('[data-source-proposal="proposal-planning-9"]')).toBeFocused()
+  await expect(page.locator('[data-source-proposal="proposal-planning-9"] select').first()).toBeFocused()
+  await expect(page.getByRole('button', { name: '提交审核决定' })).toBeInViewport()
 })
