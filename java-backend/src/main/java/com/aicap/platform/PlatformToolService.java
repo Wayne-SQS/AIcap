@@ -9,6 +9,7 @@ import com.aicap.rag.Hit;
 import com.aicap.rag.RagProperties;
 import com.aicap.rag.RetrievalContext;
 import com.aicap.rag.RetrievalService;
+import com.aicap.service.ProjectAccessService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,6 +70,7 @@ public class PlatformToolService {
     private final RetrievalService retrievalService;
     private final RagProperties props;
     private final ObjectMapper mapper;
+    private final ProjectAccessService projectAccess;
 
     /**
      * 调用一个工具。
@@ -85,11 +87,12 @@ public class PlatformToolService {
         long started = System.currentTimeMillis();
         JsonNode safeArgs = args == null || args.isNull() ? mapper.createObjectNode() : args;
         try {
+            String projectId = projectContext(safeArgs);
             return switch (spec.agent()) {
                 case PlatformToolCatalog.AGENT_MEETING ->
-                        success(toolName, meetingTools.execute(toolName, safeArgs, caller.getId()),
+                        success(toolName, meetingTools.execute(toolName, safeArgs, caller.getId(), requireProject(projectId)),
                                 null, started);
-                case PlatformToolCatalog.AGENT_PROFILE -> invokeProfile(toolName, safeArgs, started);
+                case PlatformToolCatalog.AGENT_PROFILE -> invokeProfile(toolName, safeArgs, requireProject(projectId), started);
                 case PlatformToolCatalog.AGENT_PLATFORM -> invokePlatform(toolName, safeArgs, caller, started);
                 default -> throw ApiException.notFound("未知工具: " + toolName);
             };
@@ -105,13 +108,25 @@ public class PlatformToolService {
         }
     }
 
-    private ToolOutcome invokeProfile(String toolName, JsonNode args, long started) {
-        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(args));
+    private ToolOutcome invokeProfile(String toolName, JsonNode args, String projectId, long started) {
+        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(args), projectId);
         if (!call.ok()) {
             return failure(toolName, call.error() == null ? "tool_failed" : call.error(),
                     readable(call.resultJson()), started);
         }
         return success(toolName, read(call.resultJson()), null, started);
+    }
+
+    private String projectContext(JsonNode args) {
+        String projectId = args.path("project_id").asText("").trim();
+        return projectId.isEmpty() ? args.path("projectId").asText("").trim() : projectId;
+    }
+
+    private String requireProject(String projectId) {
+        if (projectId == null || projectId.isBlank()) return projectId;
+        String scoped = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scoped);
+        return scoped;
     }
 
     private ToolOutcome invokePlatform(String toolName, JsonNode args, User caller, long started) {
