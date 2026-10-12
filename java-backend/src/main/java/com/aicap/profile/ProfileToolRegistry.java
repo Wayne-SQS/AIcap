@@ -1,6 +1,7 @@
 package com.aicap.profile;
 
 import com.aicap.entity.ProfileSnapshot;
+import com.aicap.entity.User;
 import com.aicap.mapper.ActivityRecordMapper;
 import com.aicap.mapper.DifficultyAssessmentMapper;
 import com.aicap.mapper.MemberProfileMapper;
@@ -123,9 +124,12 @@ public class ProfileToolRegistry {
                     Integer uid = intArg(args, "userId");
                     if (uid != null) {
                         var u = userMapper.selectById(uid);
-                        return toJson(u == null ? Map.of("found", false) : Map.of("found", true, "member", u));
+                        return toJson(u == null ? Map.of("found", false)
+                                : Map.of("found", true, "member", memberView(u)));
                     }
-                    return toJson(Map.of("members", userMapper.selectList(null)));
+                    List<Map<String, Object>> members = new ArrayList<>();
+                    for (User u : userMapper.selectList(null)) members.add(memberView(u));
+                    return toJson(Map.of("members", members));
                 }));
 
         // 4. 查成员技术画像
@@ -279,6 +283,27 @@ public class ProfileToolRegistry {
 
     private String err(String msg) {
         return toJson(Map.of("error", msg));
+    }
+
+    /**
+     * 成员出参白名单。
+     *
+     * **绝不能直接把 User 实体序列化出去** —— 它带 passwordHash,而工具层对任何
+     * Roles.writer() 角色开放(member 即可),等于把全员 bcrypt 哈希发给任意登录用户。
+     * 新增要暴露的成员字段时显式加到这里;**不要**为了省事改成返回实体或整个字段列表
+     * (实体上加字段会静默扩大暴露面,这里加了才会被人看到)。
+     * 契约测试 PlatformAgentContractTest#plat16 钉住响应不含 passwordHash
+     * （plat13 只断言 members 是数组，泄露时照样是绿的，别把它当成守卫）。
+     */
+    private static Map<String, Object> memberView(User u) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", u.getId());
+        view.put("username", u.getUsername());
+        view.put("displayName", u.getDisplayName());
+        view.put("role", u.getRole());
+        view.put("color", u.getColor());
+        view.put("capacityHours", u.getCapacityHours());
+        return view;
     }
 
     private String toJson(Object o) {

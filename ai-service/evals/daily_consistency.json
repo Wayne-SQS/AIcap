@@ -1,0 +1,98 @@
+[
+  {
+    "id": "clarified-negative-and-start",
+    "transcript": "甲：US21 这块收……[话音中断]\n甲：补充完整，我说的是收尾还没结束。US21 未完成，验收也未通过。\n乙：US22 已经动手实现数据导入了，现在在写解析器。\n测试：US22 的验收还没开始。",
+    "stories": [
+      {
+        "id": "US21",
+        "title": "验收用合成故事",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": null
+      },
+      {
+        "id": "US22",
+        "title": "验收用合成故事",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": null
+      }
+    ],
+    "expected_actions": [
+      [
+        "US22",
+        0,
+        1
+      ]
+    ],
+    "supporting_segments": {
+      "US22": [
+        "S3"
+      ]
+    },
+    "rubric": "只提US22进行中；不得提US21完成或把收……补成收尾完成；理由不能否定自身动作。"
+  },
+  {
+    "id": "already-in-progress-not-accepted",
+    "transcript": "开发：US21 已经开始开发，正在处理文件解析，还没验收。\n测试：对，验收要等实现结束再安排。",
+    "stories": [
+      {
+        "id": "US21",
+        "title": "验收用合成故事",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": null
+      }
+    ],
+    "expected_actions": [],
+    "rubric": "快照已经进行中，未验收不产生完成也不产生1到1占位提案。"
+  },
+  {
+    "id": "planned-not-started-with-negative",
+    "transcript": "甲：US21 未完成，继续修复，不要标为已完成。\n乙：US22 打算明天开始开发，目前还没动手。\n主持人：只记录实际发生的进展。",
+    "stories": [
+      {
+        "id": "US21",
+        "title": "验收用合成故事",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": null
+      },
+      {
+        "id": "US22",
+        "title": "验收用合成故事",
+        "status": 0,
+        "sprint": 2,
+        "owner_id": null
+      }
+    ],
+    "expected_actions": [],
+    "rubric": "对照开始正例；将来打算不提进行中，明确否定不提完成，理由解释不变不应出现在动作列表。"
+  },
+  {
+    "id": "resolved-old-defect",
+    "transcript": "测试：US21 昨天的验收没通过，当时还有失败用例。\n测试：补充最新结论，刚才已经把失败用例全部复测通过，US21 已通过全部验收，确认完成。\n开发：确认这次修复已交付，没有尚未解决的验收问题。",
+    "stories": [
+      {
+        "id": "US21",
+        "title": "验收用合成故事",
+        "status": 1,
+        "sprint": 2,
+        "owner_id": null
+      }
+    ],
+    "expected_actions": [
+      [
+        "US21",
+        1,
+        2
+      ]
+    ],
+    "supporting_segments": {
+      "US21": [
+        "S2"
+      ]
+    },
+    "rubric": "明确解决旧问题的最新完成结论应提完成，不能见到历史否定词就拒绝；reason应支持数字2而非否定当前完成。"
+  }
+]

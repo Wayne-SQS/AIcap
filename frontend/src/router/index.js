@@ -2,10 +2,21 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 
 const workspaceViews = [
-  ['overview', 'overview', '项目总览'], ['pool', 'pool', '需求池'], ['board', 'board', '用户故事看板'],
-  ['gantt', 'gantt', '甘特图'], ['members', 'members', '成员任务图'], ['profiles', 'profiles', '成员画像'],
-  ['uml', 'uml', 'UML 图'], ['ai', 'ai', 'AI 助手'], ['drawing-agent', 'drawing-agent', '画图智能体'],
-  ['project-generator', 'project-generator', '智能生成项目图'], ['review', 'review', 'AI 审核中心']
+  { name: 'overview', label: '项目总览', component: () => import('@/views/OverviewView.vue') },
+  { name: 'pool', label: '需求池', component: () => import('@/views/PoolView.vue') },
+  { name: 'board', label: '用户故事看板', component: () => import('@/views/BoardView.vue') },
+  { name: 'gantt', label: '甘特图', component: () => import('@/views/GanttView.vue') },
+  { name: 'members', label: '成员任务图', component: () => import('@/views/MembersView.vue') },
+  { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
+  { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
+  { name: 'ai', label: 'AI 工作台', component: () => import('@/views/AiView.vue') },
+  { name: 'meetings', label: '会议工作区', component: () => import('@/views/MeetingView.vue') },
+  { name: 'submit-agent', label: '任务提交分析', component: () => import('@/views/SubmitAgentView.vue') },
+  { name: 'profile-agent', label: '成员画像分析', component: () => import('@/views/ProfileAgentView.vue') },
+  { name: 'ai-demo', label: 'AI 对话演示', component: () => import('@/views/AiDemoView.vue') },
+  { name: 'drawing-agent', label: 'Planning Agent', component: () => import('@/views/DrawingAgentView.vue') },
+  { name: 'project-generator', label: '智能生成项目图', component: () => import('@/views/ProjectGeneratorView.vue') },
+  { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') }
 ]
 
 const routes = [
@@ -13,16 +24,16 @@ const routes = [
   { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
   { path: '/projects/new', name: 'project-new', component: () => import('@/views/ProjectGeneratorView.vue'), meta: { generatorContext: 'create', label: '新建项目' } },
   { path: '/projects/:projectId', redirect: to => ({ name: 'project-overview', params: { projectId: to.params.projectId } }) },
-  ...workspaceViews.map(([name, legacyName, label]) => ({
+  ...workspaceViews.map(({ name, label, component }) => ({
     path: `/projects/:projectId/${name}`,
     name: `project-${name}`,
-    component: () => import(`@/views/${name === 'overview' ? 'OverviewView' : name === 'pool' ? 'PoolView' : name === 'board' ? 'BoardView' : name === 'gantt' ? 'GanttView' : name === 'members' ? 'MembersView' : name === 'profiles' ? 'ProfilesView' : name === 'uml' ? 'UmlView' : name === 'ai' ? 'AiView' : name === 'drawing-agent' ? 'DrawingAgentView' : name === 'project-generator' ? 'ProjectGeneratorView' : 'ReviewView'}.vue`),
-    meta: { legacyName, label, projectScoped: true }
+    component,
+    meta: { legacyName: name, label, projectScoped: true }
   })),
-  ...workspaceViews.map(([name, legacyName]) => ({
+  ...workspaceViews.map(({ name, component }) => ({
     path: `/${name}`,
-    name: legacyName,
-    component: () => import(`@/views/${name === 'overview' ? 'OverviewView' : name === 'pool' ? 'PoolView' : name === 'board' ? 'BoardView' : name === 'gantt' ? 'GanttView' : name === 'members' ? 'MembersView' : name === 'profiles' ? 'ProfilesView' : name === 'uml' ? 'UmlView' : name === 'ai' ? 'AiView' : name === 'drawing-agent' ? 'DrawingAgentView' : name === 'project-generator' ? 'ProjectGeneratorView' : 'ReviewView'}.vue`)
+    name,
+    component
   }))
 ]
 

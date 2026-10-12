@@ -108,6 +108,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -128,6 +133,20 @@
                             <version>1.18.38</version>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- 测试串行执行,但 13 个 @SpringBootTest 上下文各自持有一条 Hikari 池:默认 10 条
+                         会累积到 ~130 连接,超过 MySQL 默认 max_connections=151(实测 Max_used_connections=152)。
+                         4 条足够跑完所有用例。走系统属性而非 application-test.yml:既有约定是数据源属性
+                         逐类内联在 @SpringBootTest(properties=...),没有任何测试类定义这个键,
+                         因此这里一处生效,不必改 13 个测试类。 -->
+                    <systemPropertyVariables>
+                        <spring.datasource.hikari.maximum-pool-size>4</spring.datasource.hikari.maximum-pool-size>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

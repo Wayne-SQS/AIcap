@@ -1,0 +1,216 @@
+package com.aicap.contract;
+
+import com.aicap.service.ReviewQueueIndexService;
+import com.aicap.service.ReviewQueueShadowIndexService;
+import com.aicap.service.StatusAnalysisService;
+import com.aicap.service.StatusProposalExecutionService;
+import com.aicap.service.StatusProposalReviewService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/aicap_java_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false",
+        "spring.datasource.username=aiguanli",
+        "spring.datasource.password=aiguanli-2026",
+        "aicap.llm.agent-worker-enabled=false",
+        "spring.sql.init.data-locations=classpath:db/reset_test_data.sql"
+})
+class ReviewQueueIndexContractTest extends ContractTestSupport {
+    @Autowired private JdbcTemplate jdbc;
+    @Autowired private ReviewQueueIndexService index;
+    @Autowired private ReviewQueueShadowIndexService shadow;
+    @Autowired private StatusAnalysisService statusAnalyses;
+    @Autowired private StatusProposalReviewService statusReviews;
+    @Autowired private StatusProposalExecutionService statusExecutions;
+    @Autowired private ObjectMapper mapper;
+    private final String meetingId = UUID.randomUUID().toString();
+    private final String storyId = "US" + (10000000 + Math.abs(meetingId.hashCode() % 80000000));
+    private final List<String> analysisIds = new ArrayList<>();
+    private final String suggestionId = "S" + (100000 + Math.abs(meetingId.hashCode() % 800000));
+    private final List<String> suggestionIds = new ArrayList<>();
+
+    @AfterEach
+    void cleanup() {
+        jdbc.update("DELETE FROM review_queue_proposals WHERE meeting_id=?", meetingId);
+        for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
+            String table = "meeting_" + source + "_analyses";
+            String reviewTable = "meeting_" + source + "_proposal_reviews";
+            String executionTable = "meeting_" + source + "_proposal_executions";
+            jdbc.update("DELETE e FROM " + executionTable + " e JOIN " + table + " a ON a.id=e.analysis_id WHERE a.meeting_id=?", meetingId);
+            jdbc.update("DELETE r FROM " + reviewTable + " r JOIN " + table + " a ON a.id=r.analysis_id WHERE a.meeting_id=?", meetingId);
+            jdbc.update("DELETE FROM " + table + " WHERE meeting_id=?", meetingId);
+        }
+        jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
+        jdbc.update("DELETE FROM stories WHERE id=?", storyId);
+        jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
+        jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
+        for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
+        jdbc.update("DELETE FROM meetings WHERE id=?", meetingId);
+    }
+
+    @Test
+    void dailyServiceWritesShadowThroughSaveReviewAndExecution() throws Exception {
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
+                meetingId, "索引写入测试", "测试提案已确认。", 1);
+        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status) VALUES(?,?,?,?,?,?,?,?)",
+                storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        String body = """
+                {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
+                "meeting_type":"daily_scrum","summary":"已确认","open_questions":[],"proposed_actions":[
+                {"proposal_id":"p1","action":"update_story_status","story_id":"%s","expected":{"status":1},
+                "changes":{"status":2},"reason":"确认验收","evidence":[{"segment_id":"S1","quote":"测试提案已确认。"}]}]}}
+                """.formatted(meetingId, storyId);
+        String id = statusAnalyses.save(meetingId, mapper.readTree(body), 1).path("id").asText();
+        assertEquals("pending", jdbc.queryForObject(
+                "SELECT status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        statusReviews.review(meetingId, id, mapper.readTree("""
+                {"proposal_id":"p1","decision":"approve","reason":"确认通过"}
+                """), 1);
+        assertEquals("approved", jdbc.queryForObject(
+                "SELECT status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        statusExecutions.execute(meetingId, id, mapper.readTree("{\"proposal_id\":\"p1\"}"), 1);
+        assertEquals("succeeded", jdbc.queryForObject(
+                "SELECT execution_status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+    }
+
+    @Test
+    void pagesAllSourcesAndKeepsOldPendingProposals() {
+        ReviewQueueIndexService.Summary before = index.summary();
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+                meetingId, "分页队列测试会议", "测试原文", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,0)));
+        int minute = 1;
+        for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
+            String id = UUID.randomUUID().toString();
+            analysisIds.add(id);
+            String table = "meeting_" + source + "_analyses";
+            jdbc.update("INSERT INTO " + table + "(id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    id, meetingId, 1, "queue-" + source, "pending", "测试原文",
+                    "{\"proposed_actions\":[{\"proposal_id\":\"p-" + source + "\"}]}", "[]",
+                    Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,minute++)));
+        }
+        String planningId = analysisIds.get(1);
+        jdbc.update("INSERT INTO meeting_planning_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                planningId, 0, "p-planning", "approve", "confirmed", 1, "{}", "{}", "not_started");
+        String retroId = analysisIds.get(3);
+        jdbc.update("INSERT INTO meeting_retro_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                retroId, 0, "p-retro", "reject", "rejected", 1, "{}", null, "not_applicable");
+        String assignmentId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO meeting_assignment_analyses(id,meeting_id,submitted_by,client_request_id,input_json,result_json,created_at) VALUES(?,?,?,?,?,?,?)",
+                assignmentId, meetingId, 1, "queue-assignment", "{}", "{}",
+                Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,6)));
+        jdbc.update("INSERT INTO suggestions(id,agent,kind,evidence,affected,note,change_json,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                suggestionId, "meeting", "meeting", "测试", "US01", "测试", "{}", "pending",
+                Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,7)));
+        suggestionIds.add(suggestionId);
+        jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,?,?,?,?,?,?,?)",
+                suggestionId, meetingId, "queue-general", "test-hash", 1, "manual", "", "not_started");
+
+        List<ReviewQueueIndexService.Item> all = new ArrayList<>();
+        String cursor = null;
+        for (int pageNumber = 0; pageNumber < 12; pageNumber++) {
+            ReviewQueueIndexService.Page page = index.page("all", "all", null, null, null, cursor, 2);
+            assertTrue(page.items().size() <= 2);
+            all.addAll(page.items());
+            cursor = page.nextCursor();
+            if (cursor == null) break;
+        }
+        assertNull(cursor, "全来源游标未结束: " + all.stream().map(ReviewQueueIndexService.Item::proposalId).toList());
+        assertEquals(7, all.size());
+        assertEquals(7, new HashSet<>(all.stream().map(i -> i.source() + ":" + i.proposalId()).toList()).size());
+        assertEquals(5, all.stream().filter(i -> i.status().equals("pending")).count());
+        assertEquals("pending", all.getLast().status(), "较早的待审提案必须能翻页找到");
+        assertEquals(1, index.page("reviewed", "planning", null, null, null, null, 20).items().size());
+        assertEquals(0, index.page("pending", "planning", null, null, null, null, 20).items().size());
+        assertEquals(1, index.page("pending", "daily", "分页队列", null, null, null, 20).items().size());
+        ReviewQueueIndexService.Summary summary = index.summary();
+        assertEquals(before.pendingCount() + 5, summary.pendingCount());
+        assertEquals(before.executionCount() + 1, summary.executionCount());
+        assertEquals(7, shadow.backfillMissing());
+        assertEquals(summary.pendingCount(), shadow.counts().pending());
+        assertEquals(summary.executionCount(), shadow.counts().execution());
+        assertEquals(0, shadow.backfillMissing(), "重复回填不得覆盖已有索引行");
+        var pending = index.page("pending", "all", null, null, null, null, 50).items();
+        var indexedPending = shadow.pendingFirst(50);
+        assertEquals(pending.size(), indexedPending.size());
+        for (int i = 0; i < pending.size(); i++) {
+            assertEquals(pending.get(i).source(), indexedPending.get(i).get("source"));
+            assertEquals(pending.get(i).analysisId(), indexedPending.get(i).get("analysis_id"));
+            assertEquals(pending.get(i).proposalIndex(), ((Number) indexedPending.get(i).get("proposal_index")).intValue());
+        }
+        assertNotNull(summary.latest());
+        assertNotNull(summary.recentMeeting());
+        assertThrows(RuntimeException.class, () -> index.page("all", "all", null, null, null, "invalid", 20));
+
+        ApiResponse viewer = get("/api/review-queue?status=pending&limit=2", token(USER_VIEWER));
+        assertStatus(viewer, 200);
+        assertEquals(2, viewer.json().path("items").size());
+        assertTrue(viewer.json().path("nextCursor").isTextual());
+        assertStatus(get("/api/review-queue?limit=101", token(USER_VIEWER)), 422);
+        assertStatus(get("/api/review-queue?limit=2", null), 401);
+        ApiResponse viewerSummary = get("/api/review-queue/summary", token(USER_VIEWER));
+        assertStatus(viewerSummary, 200);
+        assertEquals(summary.pendingCount(), viewerSummary.json().path("pendingCount").asLong());
+        assertTrue(viewerSummary.json().path("recentMeeting").path("title").isTextual());
+        assertStatus(get("/api/review-queue/summary", null), 401);
+    }
+
+    @Test
+    void summaryCountsRemainingProposalsAndApprovedExecutions() {
+        ReviewQueueIndexService.Summary before = index.summary();
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+                meetingId, "多提案汇总测试", "测试原文", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,2,10,0)));
+        String analysisId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, meetingId, 1, "queue-multi-proposal", "completed", "测试原文",
+                "{\"proposed_actions\":[{\"proposal_id\":\"one\"},{\"proposal_id\":\"two\"},{\"proposal_id\":\"three\"}]}",
+                "[]", Timestamp.valueOf(LocalDateTime.of(2025,1,2,10,1)));
+        jdbc.update("INSERT INTO meeting_status_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, 0, "one", "approve", "confirmed", 1, "{}", "{}", "not_started");
+        jdbc.update("INSERT INTO meeting_status_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
+                analysisId, 1, "two", "reject", "rejected", 1, "{}", null, "not_applicable");
+
+        ReviewQueueIndexService.Summary summary = index.summary();
+        assertEquals(before.pendingCount() + 1, summary.pendingCount());
+        assertEquals(before.executionCount() + 1, summary.executionCount());
+        assertEquals(1, index.page("pending", "daily", null, null, null, null, 10).items().size());
+        jdbc.update("UPDATE meeting_status_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=0", analysisId);
+        assertEquals(before.executionCount(), index.summary().executionCount());
+    }
+
+    @Test
+    void cursorUsesBinaryOrderForMixedCaseIdsAtTheSameTimestamp() {
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+                meetingId, "同秒游标测试", "测试", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,0)));
+        Timestamp time = Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,1));
+        for (String id : List.of("SAzz00001", "SaAA00001", "SBaa00001")) {
+            suggestionIds.add(id);
+            jdbc.update("INSERT INTO suggestions(id,agent,kind,evidence,affected,note,change_json,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    id, "meeting", "meeting", "测试", "US01", "测试", "{}", "pending", time);
+            jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,?,?,?,?,?,?,?)",
+                    id, meetingId, "queue-" + id, "test-hash", 1, "manual", "", "not_started");
+        }
+        String cursor = null;
+        List<String> ids = new ArrayList<>();
+        for (int pageNumber = 0; pageNumber < 8; pageNumber++) {
+            var page = index.page("pending", "general", "同秒游标测试", null, null, cursor, 1);
+            ids.addAll(page.items().stream().map(ReviewQueueIndexService.Item::proposalId).toList());
+            cursor = page.nextCursor();
+            if (cursor == null) break;
+        }
+        assertNull(cursor, "同秒游标未结束: " + ids);
+        assertEquals(List.of("SaAA00001", "SBaa00001", "SAzz00001"), ids);
+    }
+}

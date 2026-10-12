@@ -630,7 +630,7 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .bw-track .used.busy{background:repeating-linear-gradient(45deg,var(--orange) 0 7px,var(--orange-2) 7px 14px)}
 .bw-track .used.over{background:repeating-linear-gradient(45deg,#d96d5d 0 7px,#b84638 7px 14px)}
 .bw-track .cap{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
-/* 成员开发活动图:6 周(W1–W6)× 7 天,带星期/周标签(样例数据,口径在图上写明) */
+/* 成员开发活动图:6 周(W1–W6)× 7 天,带星期/周标签(真实数据,口径在图上写明) */
 .contrib-wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:10px}
 .activity-heatmap-section .contrib-wrap{border:0;background:transparent;box-shadow:none;padding:0}
 .contrib{min-width:0;align-self:start;border:1px solid var(--line);background:var(--paper-2);padding:10px}

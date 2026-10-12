@@ -13,8 +13,31 @@ const session = useSessionStore()
 const projectPicker = ref(null)
 const projectMenuOpen = ref(false)
 const navGroups = [
-  { title: '项目空间', items: [['overview','◈','项目总览'],['pool','◆','需求池'],['board','▦','用户故事看板'],['gantt','▤','甘特图'],['members','▥','成员任务图'],['profiles','▤','成员画像'],['uml','◇','UML 图']] },
-  { title: '智能协作', items: [['ai','✦','AI 助手'],['drawing-agent','✎','画图智能体'],['review','✓','AI 审核中心']] }
+  {
+    title: '项目空间',
+    items: [
+      { view: 'overview', icon: '◈', label: '项目总览' },
+      { view: 'pool', icon: '◆', label: '需求池' },
+      { view: 'board', icon: '▦', label: '用户故事看板' },
+      { view: 'gantt', icon: '▤', label: '甘特图' },
+      { view: 'members', icon: '▥', label: '成员任务图' },
+      { view: 'profiles', icon: '▤', label: '成员画像' },
+      { view: 'uml', icon: '◇', label: 'UML 图' }
+    ]
+  },
+  {
+    title: '智能协作',
+    topGap: true,
+    items: [
+      { view: 'ai', icon: '✦', label: 'AI 工作台' },
+      { view: 'meetings', icon: '◉', label: '会议工作区' },
+      { view: 'submit-agent', icon: '↗', label: '任务提交分析' },
+      { view: 'profile-agent', icon: '◌', label: '成员画像分析' },
+      { view: 'drawing-agent', icon: '✎', label: 'Planning Agent · 项目规划' },
+      { view: 'project-generator', icon: '✚', label: '智能生成项目图' },
+      { view: 'review', icon: '✓', label: '提案审核中心' }
+    ]
+  }
 ]
 const scopedRoute = computed(() => Boolean(route.meta.projectScoped))
 const activeProject = computed(() => projects.currentProject)
@@ -79,8 +102,20 @@ function go(name) {
     </div>
     <nav aria-label="功能导航">
       <template v-for="group in navGroups" :key="group.title">
-        <div class="navtitle">{{ group.title }}</div>
-        <div v-for="[view, icon, label] in group.items" :key="view" class="navitem" :class="{ active: route.meta.legacyName === view || route.name === view }" :data-view="view" @click="go(view)"><span class="navicon">{{ icon }}</span>{{ label }}</div>
+        <div class="navtitle" :style="group.topGap ? 'margin-top:24px' : ''">{{ group.title }}</div>
+        <div
+          v-for="item in group.items"
+          :key="item.view"
+          class="navitem"
+          :class="{ active: route.meta.legacyName === item.view || route.name === item.view }"
+          :data-view="item.view"
+          @click="go(item.view)"
+          @keydown.enter.prevent="go(item.view)"
+          @keydown.space.prevent="go(item.view)"
+          role="link"
+          tabindex="0"
+          :aria-current="route.meta.legacyName === item.view || route.name === item.view ? 'page' : undefined"
+        ><span class="navicon" aria-hidden="true">{{ item.icon }}</span>{{ item.label }}</div>
       </template>
     </nav>
     <div class="sidebottom"><span class="eyebrow">{{ activeProject?.id || 'PROJECT' }}</span><p class="small">{{ activeProject?.name || (session.currentUser ? '请选择项目' : '工作区') }}</p></div>
