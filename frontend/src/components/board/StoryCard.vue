@@ -9,7 +9,7 @@ import { memberLabel } from '@/data/memberIdentity'
 /* 看板卡片:.card[data-id][draggable] + 子任务工时加权进度徽章 .subprog(血缘口径保留)
    map 模式:加 .mapcard 固定卡高 + 状态旁显示 Sprint(对齐 legacy 新版卡片);
      可拖到别的格子里改「骨干活动 / 发布切片」(旧版原型是 draggable=false,即地图只读)。
-   compact 总览模式:降级为单行小矩形 .chip(马甲标记 + 编号 + 标题),标题换行显示不截断。
+   compact 总览模式:小矩形 .chip(马甲标记 + 编号 + 标题),地图中标题独立排列并限行。
    skin:马甲呈现({tone,glyph,label,detail}),由 StoryMapGrid 计算后传入 —— 卡片自身不认识"马甲"这个概念,
      也保证状态看板(不传 skin)保持原样。
    只读账号:卡片(编辑入口)禁用且不可拖拽,保持可见并说明原因 */
@@ -46,7 +46,7 @@ function onDragStart(e) {
 </script>
 
 <template>
-  <!-- 总览:单行小矩形 -->
+  <!-- 总览:地图中编号/优先级在上，标题在下 -->
   <button
     v-if="compact"
     type="button"
@@ -63,7 +63,8 @@ function onDragStart(e) {
   >
     <i class="chipmark" aria-hidden="true">{{ skin ? skin.glyph : '·' }}</i>
     <b class="chipid">{{ story.id }}</b>
-    <span class="chiptitle">{{ story.title }}</span>
+    <span class="chiptitle" :title="map ? story.title : undefined">{{ story.title }}</span>
+    <span class="tag chippriority" :class="story.priority">{{ story.priority }}</span>
   </button>
 
   <!-- 详细:原有卡片,马甲只增一条左侧色条 + 一个字形标记 -->
@@ -85,7 +86,7 @@ function onDragStart(e) {
       <span v-if="skin" class="sking" :title="skinText">{{ skin.glyph }}</span>
       <span class="id">{{ story.id }}</span><span class="tag" :class="story.priority">{{ story.priority }}</span>
     </div>
-    <h3>{{ story.title }}</h3>
+    <h3 :title="map ? story.title : undefined">{{ story.title }}</h3>
     <p class="carddesc">{{ story.description }}</p>
     <p v-if="map" class="mapstatus">{{ statuses[story.status] }} · Sprint {{ story.sprint }}</p>
     <div class="cardfoot">

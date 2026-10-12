@@ -37,52 +37,57 @@ public class ProfileAgentController {
 
     /** 录入一条活动事实(commit/pr/review/bugfix/task_done/note) */
     @PostMapping("/activities")
-    public ProfileAgentDtos.ActivityOut addActivity(@Valid @RequestBody ProfileAgentDtos.ActivityIn in) {
+    public ProfileAgentDtos.ActivityOut addActivity(@RequestParam String projectId,
+                                                    @Valid @RequestBody ProfileAgentDtos.ActivityIn in) {
         User actor = Roles.writer();
-        return service.addActivity(in, actor);
+        return service.addActivity(projectId, in, actor);
     }
 
     /** 批量导入活动事实(单次 ≤200 条;source=import) */
     @PostMapping("/activities/import")
     public List<ProfileAgentDtos.ActivityOut> importActivities(
+            @RequestParam String projectId,
             @Valid @RequestBody List<ProfileAgentDtos.ActivityIn> items) {
         User actor = Roles.writer();
-        return service.importActivities(items, actor);
+        return service.importActivities(projectId, items, actor);
     }
 
     /** 贡献活动热力图(按日聚合,前端画绿格子;文档 4.10) */
     @GetMapping("/heatmap")
     public List<Map<String, Object>> heatmap(
+            @RequestParam String projectId,
             @RequestParam(required = false) Integer userId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
-        return service.heatmap(userId, start, end);
+        return service.heatmap(projectId, userId, start, end);
     }
 
     /** 活动列表(可按成员/时间范围过滤) */
     @GetMapping("/activities")
     public List<ProfileAgentDtos.ActivityOut> activities(
+            @RequestParam String projectId,
             @RequestParam(required = false) Integer userId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
-        return service.listActivities(userId, start, end);
+        return service.listActivities(projectId, userId, start, end);
     }
 
     /** 任务难度评估(AI 评估 + 人工覆盖优先) */
     @GetMapping("/difficulty")
-    public List<ProfileAgentDtos.DifficultyOut> difficulty() {
+    public List<ProfileAgentDtos.DifficultyOut> difficulty(@RequestParam String projectId) {
         Roles.any();
-        return service.assessDifficulty(null, null);
+        return service.assessDifficulty(projectId, null, null, false);
     }
 
     /** 人工修正任务难度(admin/owner) */
     @PatchMapping("/difficulty/{taskId}")
     public ProfileAgentDtos.DifficultyOut overrideDifficulty(@PathVariable String taskId,
+                                                             @RequestParam String projectId,
                                                              @Valid @RequestBody ProfileAgentDtos.DifficultyIn in) {
         Roles.reviewer();
-        return service.overrideDifficulty(taskId, in);
+        return service.overrideDifficulty(projectId, taskId, in);
     }
 
     /** 时间范围对比分析(本期 vs 上期,文档 4.9) */
@@ -90,17 +95,19 @@ public class ProfileAgentController {
     public Map<String, Object> compare(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate prevStart,
                                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate prevEnd,
                                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                       @RequestParam String projectId) {
         Roles.any();
-        return service.comparePeriods(prevStart, prevEnd, start, end);
+        return service.comparePeriods(projectId, prevStart, prevEnd, start, end);
     }
 
     /** 只读预览分析结果(不落运行记录;正式分析用 POST /analysis/run) */
     @GetMapping("/analysis")
     public Map<String, Object> analysis(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-                                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+                                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                        @RequestParam String projectId) {
         Roles.any();
-        return service.analyze(start, end);
+        return service.analyze(projectId, start, end, false, null);
     }
 
     /**
@@ -114,11 +121,12 @@ public class ProfileAgentController {
     @PostMapping("/analysis/run")
     public Map<String, Object> runAnalysis(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                           @RequestParam String projectId,
                                            @RequestParam(required = false) Integer userId) {
         // 触发分析会落库(运行记录/画像快照)并消耗 LLM 额度 → 只读角色 viewer 必须拒绝。
         // 此前 Roles.any() 允许 viewer,与本类注释"触发分析:admin/owner(member 可看本人分析)"及 US02 只读约束冲突。
         User actor = Roles.writer();
-        return service.runAnalysis(start, end, actor, userId);
+        return service.runAnalysis(projectId, start, end, actor, userId);
     }
 
     /** 分析运行记录(最近 20 条,失败留痕) */
@@ -131,11 +139,12 @@ public class ProfileAgentController {
     /** 把团队风险提交为待审建议(进统一 AI 建议审核中心,admin/owner 审核后才执行) */
     @PostMapping("/risks/submit-suggestions")
     public List<String> submitRiskSuggestions(
+            @RequestParam String projectId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
             @RequestParam(required = false) String agent) {
         User actor = Roles.writer();
-        return service.submitRiskSuggestions(start, end, agent, actor);
+        return service.submitRiskSuggestions(projectId, start, end, agent, actor);
     }
 
     /** 能力画像快照(按时间查看画像变化,文档 4.7) */

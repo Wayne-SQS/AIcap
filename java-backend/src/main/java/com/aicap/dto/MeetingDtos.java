@@ -17,12 +17,13 @@ public final class MeetingDtos {
     }
 
     /** POST /api/meetings(MeetingIn;FastAPI extra=forbid → 未知字段拒绝,不加 ignoreUnknown) */
-    public record MeetingIn(@NotBlank @Size(max = 200) String title,
+    public record MeetingIn(@NotBlank @Size(max = 20) @JsonProperty("project_id") String projectId,
+                            @NotBlank @Size(max = 200) String title,
                             @NotBlank @Size(max = 16000) String transcript) {
     }
 
     /** 会议输出(MeetingOut) */
-    public record MeetingOut(String id, String title, String transcript,
+    public record MeetingOut(String id, @JsonProperty("project_id") String projectId, String title, String transcript,
                              @JsonProperty("created_by") Integer createdBy,
                              @JsonProperty("created_at") LocalDateTime createdAt) {
     }

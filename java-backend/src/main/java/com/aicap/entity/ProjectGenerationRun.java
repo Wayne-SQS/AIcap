@@ -14,6 +14,7 @@ public class ProjectGenerationRun {
     @TableId(type = IdType.INPUT)
     private String id;
     private Integer requestedBy;
+    private String projectId;
     private String mode;
     private String strategy;
     private String sourceName;

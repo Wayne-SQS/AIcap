@@ -157,9 +157,12 @@ public class AgentJobs {
             if (meeting == null) {
                 throw new AgentError("internal_error", "会议不存在，无法分析");
             }
+            if (meeting.getProjectId() == null || meeting.getProjectId().isBlank()) {
+                throw new AgentError("project_context_missing", "会议缺少 projectId，无法分析");
+            }
             emit(runId, token, "started", startedDetail(run));
             client.setModelOverride(run.getModel());
-            ObjectNode analysis = runner.analyze(meeting.getTranscript(), run.getRequestedBy(), client,
+            ObjectNode analysis = runner.analyze(meeting.getProjectId(), meeting.getTranscript(), run.getRequestedBy(), client,
                     (kind, detail) -> emit(runId, token, kind, detail),
                     () -> requireActive(runId, token));
             complete(runId, token, analysis);
@@ -256,7 +259,7 @@ public class AgentJobs {
             if (user == null || !AgentTools.WRITER_ROLES.contains(user.getRole())) {
                 throw new AgentError("permission_changed", "发起人已失去提交权限");
             }
-            Set<String> existingTitles = existingTitlePool();
+            Set<String> existingTitles = existingTitlePool(run.getMeetingId());
             List<String> ids = new ArrayList<>();
             List<ObjectNode> skipped = new ArrayList<>();
             ArrayNode proposals = (ArrayNode) analysis.path("proposals");
@@ -278,7 +281,7 @@ public class AgentJobs {
                         proposal.path("evidence").path("quote").asText(""),
                         proposal.path("note").asText("") + "\n初始优先级 Could 为系统默认，待审核确认。",
                         changes);
-                Suggestion suggestion = meetingService.stage(in, user).suggestion();
+                Suggestion suggestion = meetingService.stage(meetingMapper.selectById(run.getMeetingId()).getProjectId(), in, user).suggestion();
                 ids.add(suggestion.getId());
             }
             ObjectNode result = analysis.deepCopy();
@@ -377,9 +380,13 @@ public class AgentJobs {
     }
 
     /** 已有标题池(故事 + 需求池 + 待审建议的 title),用于去重(对齐 jobs.py final 段) */
-    private Set<String> existingTitlePool() {
+    private Set<String> existingTitlePool(String meetingId) {
+        Meeting meeting = meetingMapper.selectById(meetingId);
+        if (meeting == null || meeting.getProjectId() == null || meeting.getProjectId().isBlank()) {
+            throw new IllegalStateException("会议缺少 projectId，无法生成建议");
+        }
         Set<String> titles = new LinkedHashSet<>();
-        for (Story s : storyMapper.selectList(null)) {
+        for (Story s : storyMapper.selectList(new QueryWrapper<Story>().eq("project_id", meeting.getProjectId()))) {
             if (s.getTitle() != null) titles.add(s.getTitle().trim().toLowerCase(Locale.ROOT));
         }
         for (PoolItem p : poolItemMapper.selectList(null)) {

@@ -45,6 +45,7 @@ public class MeetingAudioService {
     private static final int MAX_DURATION_MS = 6 * 60 * 60 * 1000;
 
     private final MeetingAudioMapper audioMapper;
+    private final MeetingService meetingService;
     private final MeetingMapper meetingMapper;
 
     @Value("${aicap.audio.dir:./data/audio}")
@@ -54,11 +55,9 @@ public class MeetingAudioService {
     private long maxBytes;
 
     /** 上传:写盘 + 入库,任一步失败都不留半份数据 */
-    public MeetingAudioDtos.AudioOut store(String meetingId, MultipartFile file, String source,
+    public MeetingAudioDtos.AudioOut store(String projectId, String meetingId, MultipartFile file, String source,
                                            Integer durationMs, User actor) {
-        if (meetingMapper.selectById(meetingId) == null) {
-            throw ApiException.notFound("会议不存在");
-        }
+        meetingService.requireMeeting(projectId, meetingId);
         if (file == null || file.isEmpty()) {
             throw ApiException.unprocessable("请选择或录制一段音频后再提交");
         }
@@ -122,10 +121,8 @@ public class MeetingAudioService {
         return toOut(audio);
     }
 
-    public List<MeetingAudioDtos.AudioOut> list(String meetingId) {
-        if (meetingMapper.selectById(meetingId) == null) {
-            throw ApiException.notFound("会议不存在");
-        }
+    public List<MeetingAudioDtos.AudioOut> list(String projectId, String meetingId) {
+        meetingService.requireMeeting(projectId, meetingId);
         List<MeetingAudio> rows = audioMapper.selectList(new QueryWrapper<MeetingAudio>()
                 .eq("meeting_id", meetingId).orderByDesc("created_at").orderByDesc("id"));
         List<MeetingAudioDtos.AudioOut> out = new ArrayList<>();
@@ -136,9 +133,10 @@ public class MeetingAudioService {
     }
 
     /** 读取音频字节(回放/下载) */
-    public LoadedAudio load(String audioId) {
+    public LoadedAudio load(String projectId, String audioId) {
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
+        meetingService.requireMeeting(projectId, audio.getMeetingId());
         Path path = resolveInsideRoot(audio.getStoragePath());
         if (!Files.exists(path)) throw ApiException.notFound("音频文件已丢失，请重新上传");
         try {
@@ -149,12 +147,13 @@ public class MeetingAudioService {
     }
 
     /** 删除:仅 admin/owner;先删库再删盘,盘上缺失不报错 */
-    public void delete(String audioId, User actor) {
+    public void delete(String projectId, String audioId, User actor) {
         if (!Set.of("admin", "owner").contains(actor.getRole())) {
             throw ApiException.forbidden("仅管理员/负责人可删除会议音频");
         }
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
+        meetingService.requireMeeting(projectId, audio.getMeetingId());
         audioMapper.deleteById(audioId);
         try {
             Files.deleteIfExists(resolveInsideRoot(audio.getStoragePath()));

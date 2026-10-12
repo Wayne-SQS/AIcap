@@ -4,6 +4,7 @@ import { api } from '@/api/client'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 
 export function installWindowBridge({ router, app }) {
   window.api = api
@@ -12,7 +13,9 @@ export function installWindowBridge({ router, app }) {
   window.renderAll = () => {}
   window.loadAll = async () => {
     const project = useProjectStore()
-    await project.loadAll()
+    const projects = useProjectsStore()
+    await projects.loadProjects()
+    await project.loadAll(projects.currentProjectId)
     // 对齐旧版 loadAll 猴子补丁链:在线时一并刷新会议/建议/Agent 配置
     const session = useSessionStore()
     if (session.apiMode && session.currentUser) {

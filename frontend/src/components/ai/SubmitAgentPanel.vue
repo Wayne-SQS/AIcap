@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { AGENT_UPDATED_EVENT } from '@/composables/useAgentRefresh'
@@ -13,6 +14,7 @@ import { profileAgentApi } from '@/api/profileAgent'
    - 推断与风险:来自画像分析(AI 推断,带证据)
    - 生成协调建议 → 送审:真实调用后端,进入「AI 审核中心」走人工审核 */
 const session = useSessionStore()
+const projects = useProjectsStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
@@ -73,7 +75,7 @@ async function loadActivities() {
   activitiesLoading.value = true
   activitiesError.value = ''
   try {
-    const rows = await profileAgentApi.activities({ start: rangeStart.value, end: rangeEnd.value })
+    const rows = await profileAgentApi.activities({ start: rangeStart.value, end: rangeEnd.value }, projects.currentProjectId)
     rows.sort((a, b) => (b.happened_at || '').localeCompare(a.happened_at || ''))
     activities.value = rows
   } catch (e) {
@@ -113,7 +115,7 @@ async function loadAnalysis() {
   analysisLoading.value = true
   analysisError.value = ''
   try {
-    analysis.value = await profileAgentApi.analysis(rangeStart.value, rangeEnd.value)
+    analysis.value = await profileAgentApi.analysis(rangeStart.value, rangeEnd.value, projects.currentProjectId)
   } catch (e) {
     analysisError.value = e.message || '分析加载失败'
     analysis.value = null
@@ -167,7 +169,7 @@ async function submitSuggestions() {
   if (!risks.value.length) { notify('当前时间范围内没有可送审的团队风险'); return }
   submitting.value = true
   try {
-    const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value, '任务提交智能体')
+    const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value, '任务提交智能体', projects.currentProjectId)
     notify(`已生成 ${ids.length} 条协调建议并送审,前往「AI 审核中心」处理`)
   } catch (e) {
     notify(e.message || '提交失败')
@@ -194,6 +196,22 @@ watch(() => online.value, v => {
   loadActivities()
   loadAnalysis()
 }, { immediate: true })
+
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous) return
+  activities.value = []
+  analysis.value = null
+  activitiesError.value = ''
+  analysisError.value = ''
+  activeUid.value = null
+  showAll.value = false
+  lastSync.value = null
+  if (next && online.value) {
+    checkGithub()
+    loadActivities()
+    loadAnalysis()
+  }
+})
 
 /* 成员把任务标记完成 → useAgentRefresh 触发智能体读仓库并评估 → 广播本事件。
    面板已挂载时立即重新拉取(活动列表 = 智能体找到的提交物),不用刷新整页 */

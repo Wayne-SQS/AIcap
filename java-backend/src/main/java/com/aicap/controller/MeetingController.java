@@ -56,15 +56,15 @@ public class MeetingController {
     }
 
     @GetMapping("/meetings")
-    public List<MeetingDtos.MeetingOut> listMeetings() {
+    public List<MeetingDtos.MeetingOut> listMeetings(@RequestParam String projectId) {
         Roles.any();
-        return meetingService.listMeetings().stream().map(this::toOut).toList();
+        return meetingService.listMeetings(projectId).stream().map(this::toOut).toList();
     }
 
     @GetMapping("/meetings/{meetingId}")
-    public MeetingDtos.MeetingOut getMeeting(@PathVariable String meetingId) {
+    public MeetingDtos.MeetingOut getMeeting(@PathVariable String meetingId, @RequestParam String projectId) {
         Roles.any();
-        return toOut(meetingService.getMeeting(meetingId));
+        return toOut(meetingService.requireMeeting(projectId, meetingId));
     }
 
     /**
@@ -80,9 +80,9 @@ public class MeetingController {
      * 这样既避免"事务回滚了但文件已删",也不需要在 controller 里手工管理事务边界。
      */
     @DeleteMapping("/meetings/{meetingId}")
-    public MeetingDtos.DeleteOut deleteMeeting(@PathVariable String meetingId) {
+    public MeetingDtos.DeleteOut deleteMeeting(@PathVariable String meetingId, @RequestParam String projectId) {
         Roles.reviewer();
-        MeetingService.MeetingDeletion deletion = meetingService.deleteMeeting(meetingId);
+        MeetingService.MeetingDeletion deletion = meetingService.deleteMeeting(projectId, meetingId);
         int audioFilesDeleted = audioService.deleteStoredFiles(deletion.audioStoragePaths());
         return new MeetingDtos.DeleteOut(meetingId, true, audioFilesDeleted,
                 deletion.suggestionsDeleted(), deletion.runsDeleted());
@@ -91,50 +91,51 @@ public class MeetingController {
     // ---------- suggestions ----------
 
     @PostMapping("/suggestions")
-    public MeetingDtos.SuggestionOut submitSuggestion(@Valid @RequestBody MeetingDtos.SuggestionIn in) {
-        var holder = meetingService.submitSuggestionIdempotent(in, Roles.writer());
-        return toOut(holder.suggestion(), holder.record());
+    public MeetingDtos.SuggestionOut submitSuggestion(@RequestParam String projectId, @Valid @RequestBody MeetingDtos.SuggestionIn in) {
+        var holder = meetingService.submitSuggestionIdempotent(projectId, in, Roles.writer());
+        return toOut(projectId, holder.suggestion(), holder.record());
     }
 
     @GetMapping("/suggestions")
     public List<MeetingDtos.SuggestionOut> listSuggestions(
-            @RequestParam(required = false) String meetingId) {
+            @RequestParam String projectId, @RequestParam(required = false) String meetingId) {
         Roles.any();
         List<MeetingDtos.SuggestionOut> out = new ArrayList<>();
-        for (MeetingSuggestionRecord r : meetingService.listRecords(meetingId)) {
+        for (MeetingSuggestionRecord r : meetingService.listRecords(projectId, meetingId)) {
             if (!StringUtils.hasText(r.getSuggestionId())) continue;
             Suggestion s = suggestionMapper.selectById(r.getSuggestionId());
-            if (s != null) out.add(toOut(s, r));
+            if (s != null) out.add(toOut(projectId, s, r));
         }
         return out;
     }
 
     @GetMapping("/suggestions/{suggestionId}")
-    public MeetingDtos.SuggestionOut getSuggestion(@PathVariable String suggestionId) {
+    public MeetingDtos.SuggestionOut getSuggestion(@PathVariable String suggestionId, @RequestParam String projectId) {
         Roles.any();
-        MeetingSuggestionRecord record = meetingService.getRecordBySuggestionId(suggestionId);
+        MeetingSuggestionRecord record = meetingService.getRecordBySuggestionId(projectId, suggestionId);
         Suggestion suggestion = suggestionMapper.selectById(suggestionId);
-        return toOut(suggestion, record);
+        return toOut(projectId, suggestion, record);
     }
 
     @PostMapping("/suggestions/{suggestionId}/review")
-    public MeetingDtos.SuggestionOut review(@PathVariable String suggestionId,
+    public MeetingDtos.SuggestionOut review(@PathVariable String suggestionId, @RequestParam String projectId,
                                             @Valid @RequestBody MeetingDtos.ReviewIn in) {
-        var holder = meetingService.review(suggestionId, in, Roles.reviewer());
-        return toOut(holder.suggestion(), holder.record());
+        var holder = meetingService.review(projectId, suggestionId, in, Roles.reviewer());
+        return toOut(projectId, holder.suggestion(), holder.record());
     }
 
     // ---------- 组装 ----------
 
     private MeetingDtos.MeetingOut toOut(Meeting m) {
-        return new MeetingDtos.MeetingOut(m.getId(), m.getTitle(), m.getTranscript(),
+        return new MeetingDtos.MeetingOut(m.getId(), m.getProjectId(), m.getTitle(), m.getTranscript(),
                 m.getCreatedBy(), m.getCreatedAt());
     }
 
     /** 组装 SuggestionOut(对齐 FastAPI _out:agent_run_id 推导 + approved_changes) */
-    private MeetingDtos.SuggestionOut toOut(Suggestion s, MeetingSuggestionRecord record) {
+    private MeetingDtos.SuggestionOut toOut(String projectId, Suggestion s, MeetingSuggestionRecord record) {
         // 非会议来源(如画像智能体)的建议没有所属会议,meeting 字段置空而不是 404
-        Meeting meeting = record.getMeetingId() == null ? null : meetingService.getMeeting(record.getMeetingId());
+        Meeting meeting = record.getMeetingId() == null ? null
+                : meetingService.requireMeeting(projectId, record.getMeetingId());
 
         String agentRunId = null;
         String[] parts = record.getClientRequestId().split(":");

@@ -12,6 +12,8 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
 import com.aicap.service.IdAllocator;
+import com.aicap.service.ProjectAccessService;
+import com.aicap.service.TaskStoryRelationService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -45,12 +47,15 @@ public class StoryController {
     private final UserMapper userMapper;
     /** 编号分配:原为本类私有 nextStoryId(),与 TaskPoolController 的同名方法逐字重复,已集中 */
     private final IdAllocator idAllocator;
+    private final ProjectAccessService projectAccess;
+    private final TaskStoryRelationService taskStoryRelations;
 
     // ---------- 工具 ----------
 
     @Transactional
-    void addLog(String storyId, String logType, String detail, Integer userId) {
+    void addLog(String projectId, String storyId, String logType, String detail, Integer userId) {
         StoryLog log = new StoryLog();
+        log.setProjectId(projectId);
         log.setStoryId(storyId);
         log.setLogType(logType);
         log.setDetail(detail);
@@ -59,7 +64,7 @@ public class StoryController {
         storyLogMapper.insert(log);
     }
 
-    private void checkOwner(Integer ownerId) {
+    private void checkOwner(String projectId, Integer ownerId) {
         if (ownerId != null && userMapper.selectById(ownerId) == null) {
             throw ApiException.badRequest("负责人不存在");
         }
@@ -69,9 +74,9 @@ public class StoryController {
 
     /** GET /api/stories/logs 最近 50 条(对齐 recent_logs) */
     @GetMapping("/logs")
-    public List<StoryDtos.LogOut> recentLogs() {
-        Roles.any();
-        List<StoryLog> logs = storyLogMapper.selectList(new QueryWrapper<StoryLog>().orderByDesc("id"));
+    public List<StoryDtos.LogOut> recentLogs(@RequestParam String projectId) {
+        projectAccess.requireMember(projectId);
+        List<StoryLog> logs = storyLogMapper.selectList(new QueryWrapper<StoryLog>().eq("project_id", ProjectAccessService.normalize(projectId)).orderByDesc("id"));
         return logs.stream().limit(50)
                 .map(l -> new StoryDtos.LogOut(l.getId(), l.getStoryId(), l.getLogType(),
                         l.getDetail(), l.getCreatedAt()))
@@ -85,9 +90,10 @@ public class StoryController {
                                          @RequestParam(required = false) Integer status,
                                          @RequestParam(required = false) Integer activity,
                                          @RequestParam(required = false) String priority,
-                                         @RequestParam(required = false) String q) {
-        Roles.any();
-        QueryWrapper<Story> qw = new QueryWrapper<>();
+                                         @RequestParam(required = false) String q,
+                                         @RequestParam String projectId) {
+        projectAccess.requireMember(projectId);
+        QueryWrapper<Story> qw = new QueryWrapper<Story>().eq("project_id", ProjectAccessService.normalize(projectId));
         if (owner != null) qw.eq("owner_id", owner);
         if (sprint != null) qw.eq("sprint", sprint);
         if (status != null) qw.eq("status", status);
@@ -95,20 +101,23 @@ public class StoryController {
         if (StringUtils.hasText(priority)) qw.eq("priority", priority);
         if (StringUtils.hasText(q)) {
             String like = "%" + q + "%";
-            qw.and(w -> w.like("id", like).or().like("title", like));
+            qw.and(w -> w.like("code", like).or().like("title", like));
         }
-        qw.orderByAsc("id");
+        qw.orderByAsc("code");
         return StoryDtos.toOutList(storyMapper.selectList(qw));
     }
 
     /** POST /api/stories 新建(admin/owner/member) */
     @PostMapping("")
     @Transactional
-    public StoryDtos.StoryOut create(@Valid @RequestBody StoryDtos.StoryIn body) {
+    public StoryDtos.StoryOut create(@Valid @RequestBody StoryDtos.StoryIn body, @RequestParam String projectId) {
         User user = Roles.writer();
-        checkOwner(body.ownerId());
-        String sid = idAllocator.nextStoryId();
+        projectAccess.requireWriter(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        checkOwner(scopedProjectId, body.ownerId());
+        String sid = idAllocator.nextStoryId(scopedProjectId);
         Story story = new Story();
+        story.setProjectId(scopedProjectId);
         story.setId(sid);
         story.setTitle(body.title().trim());
         story.setDescription(body.description() == null ? "" : body.description());
@@ -120,7 +129,7 @@ public class StoryController {
         story.setOwnerId(body.ownerId());
         story.setCreatedAt(LocalDateTime.now());
         storyMapper.insert(story);
-        addLog(sid, "create", story.getTitle(), user.getId());
+        addLog(scopedProjectId, sid, "create", story.getTitle(), user.getId());
         return StoryDtos.toOut(story);
     }
 
@@ -128,16 +137,19 @@ public class StoryController {
     @PatchMapping("/{storyId}")
     @Transactional
     public StoryDtos.StoryOut patch(@PathVariable String storyId,
-                                    @Valid @RequestBody StoryDtos.StoryPatch body) {
+                                    @Valid @RequestBody StoryDtos.StoryPatch body,
+                                    @RequestParam String projectId) {
         User user = Roles.writer();
-        Story story = storyMapper.selectById(storyId);
+        projectAccess.requireWriter(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        Story story = storyMapper.selectOne(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("code", storyId));
         if (story == null) {
             throw ApiException.notFound("故事不存在");
         }
         Integer oldStatus = story.getStatus();
         boolean changed = false;
         if (body.ownerId() != null && !body.ownerId().equals(story.getOwnerId())) {
-            checkOwner(body.ownerId());
+            checkOwner(scopedProjectId, body.ownerId());
             story.setOwnerId(body.ownerId());
             changed = true;
         }
@@ -156,9 +168,9 @@ public class StoryController {
         }
         storyMapper.updateById(story);
         if (body.status() != null && oldStatus != body.status()) {
-            addLog(storyId, "move", story.getTitle() + " → 状态 " + story.getStatus(), user.getId());
+            addLog(scopedProjectId, storyId, "move", story.getTitle() + " → 状态 " + story.getStatus(), user.getId());
         } else {
-            addLog(storyId, "edit", story.getTitle(), user.getId());
+            addLog(scopedProjectId, storyId, "edit", story.getTitle(), user.getId());
         }
         return StoryDtos.toOut(story);
     }
@@ -167,9 +179,12 @@ public class StoryController {
     @DeleteMapping("/{storyId}")
     @Transactional
     public StoryDtos.DeleteOut delete(@PathVariable String storyId,
-                                      @RequestParam(defaultValue = "keep") String undone) {
+                                      @RequestParam(defaultValue = "keep") String undone,
+                                      @RequestParam String projectId) {
         User user = Roles.reviewer();
-        Story story = storyMapper.selectById(storyId);
+        projectAccess.requireOwner(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        Story story = storyMapper.selectOne(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("code", storyId));
         if (story == null) {
             throw ApiException.notFound("故事不存在");
         }
@@ -177,7 +192,7 @@ public class StoryController {
             throw ApiException.badRequest("undone 策略仅支持 cancel/keep/detach");
         }
         List<Task> subs = taskMapper.selectList(
-                new QueryWrapper<Task>().eq("kanban_card_id", storyId));
+                new QueryWrapper<Task>().eq("project_id", scopedProjectId).eq("kanban_card_id", storyId));
         List<Task> undoneRows = subs.stream()
                 .filter(t -> t.getStatus() == null || (t.getStatus() != 2 && t.getStatus() != 3))
                 .toList();
@@ -192,9 +207,10 @@ public class StoryController {
             }
             taskMapper.updateById(t);
         }
-        storyMapper.deleteById(storyId);
+        taskStoryRelations.removeStory(scopedProjectId, story.getInternalId());
+        storyMapper.delete(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("code", storyId));
         String detail = story.getTitle() + " · 子任务级联:" + undone + "(" + undoneRows.size() + " 条)";
-        addLog(storyId, "del", detail, user.getId());
+        addLog(scopedProjectId, storyId, "del", detail, user.getId());
         return new StoryDtos.DeleteOut(true, undone, undoneRows.size());
     }
 }

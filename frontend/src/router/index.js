@@ -1,30 +1,39 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { useProjectsStore } from '@/stores/projects'
 
-// hash 路由:构建产物可用任意静态服务器直接伺服,无需 SPA fallback;
-// 路由 name 沿用旧版 go(v) 的 view key,E2E 兼容桥 window.go 即 router.push({name})
-const routes = [
-  { path: '/', redirect: { name: 'overview' } },
-  { path: '/overview', name: 'overview', component: () => import('@/views/OverviewView.vue') },
-  { path: '/pool', name: 'pool', component: () => import('@/views/PoolView.vue') },
-  { path: '/board', name: 'board', component: () => import('@/views/BoardView.vue') },
-  { path: '/gantt', name: 'gantt', component: () => import('@/views/GanttView.vue') },
-  { path: '/members', name: 'members', component: () => import('@/views/MembersView.vue') },
-  { path: '/profiles', name: 'profiles', component: () => import('@/views/ProfilesView.vue') },
-  { path: '/uml', name: 'uml', component: () => import('@/views/UmlView.vue') },
-  { path: '/ai', name: 'ai', component: () => import('@/views/AiView.vue') },
-  { path: '/drawing-agent', name: 'drawing-agent', component: () => import('@/views/DrawingAgentView.vue') },
-  { path: '/project-generator', name: 'project-generator', component: () => import('@/views/ProjectGeneratorView.vue') },
-  { path: '/review', name: 'review', component: () => import('@/views/ReviewView.vue') }
+const workspaceViews = [
+  ['overview', 'overview', '项目总览'], ['pool', 'pool', '需求池'], ['board', 'board', '用户故事看板'],
+  ['gantt', 'gantt', '甘特图'], ['members', 'members', '成员任务图'], ['profiles', 'profiles', '成员画像'],
+  ['uml', 'uml', 'UML 图'], ['ai', 'ai', 'AI 助手'], ['drawing-agent', 'drawing-agent', '画图智能体'],
+  ['project-generator', 'project-generator', '智能生成项目图'], ['review', 'review', 'AI 审核中心']
 ]
 
-const router = createRouter({
-  history: createWebHashHistory(),
-  routes
-})
+const routes = [
+  { path: '/', redirect: { name: 'projects' } },
+  { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
+  { path: '/projects/new', name: 'project-new', component: () => import('@/views/ProjectGeneratorView.vue'), meta: { generatorContext: 'create', label: '新建项目' } },
+  { path: '/projects/:projectId', redirect: to => ({ name: 'project-overview', params: { projectId: to.params.projectId } }) },
+  ...workspaceViews.map(([name, legacyName, label]) => ({
+    path: `/projects/:projectId/${name}`,
+    name: `project-${name}`,
+    component: () => import(`@/views/${name === 'overview' ? 'OverviewView' : name === 'pool' ? 'PoolView' : name === 'board' ? 'BoardView' : name === 'gantt' ? 'GanttView' : name === 'members' ? 'MembersView' : name === 'profiles' ? 'ProfilesView' : name === 'uml' ? 'UmlView' : name === 'ai' ? 'AiView' : name === 'drawing-agent' ? 'DrawingAgentView' : name === 'project-generator' ? 'ProjectGeneratorView' : 'ReviewView'}.vue`),
+    meta: { legacyName, label, projectScoped: true }
+  })),
+  ...workspaceViews.map(([name, legacyName]) => ({
+    path: `/${name}`,
+    name: legacyName,
+    component: () => import(`@/views/${name === 'overview' ? 'OverviewView' : name === 'pool' ? 'PoolView' : name === 'board' ? 'BoardView' : name === 'gantt' ? 'GanttView' : name === 'members' ? 'MembersView' : name === 'profiles' ? 'ProfilesView' : name === 'uml' ? 'UmlView' : name === 'ai' ? 'AiView' : name === 'drawing-agent' ? 'DrawingAgentView' : name === 'project-generator' ? 'ProjectGeneratorView' : 'ReviewView'}.vue`)
+  }))
+]
 
-// 对应旧版 go() 的 window.scrollTo({top:0})
-router.afterEach(() => {
-  window.scrollTo({ top: 0 })
+const router = createRouter({ history: createWebHashHistory(), routes })
+router.beforeEach(to => {
+  if (!to.meta.projectScoped) return
+  const projectId = String(to.params.projectId || '').trim().toUpperCase()
+  if (!projectId) return { name: 'projects' }
+  const projects = useProjectsStore()
+  projects.currentProjectId = projectId
+  projects.persistSelection()
 })
-
+router.afterEach(() => { window.scrollTo({ top: 0 }) })
 export default router

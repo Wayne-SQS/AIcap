@@ -3,6 +3,7 @@ package com.aicap.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,6 +14,8 @@ import java.time.LocalDateTime;
 public class Meeting {
     @TableId(type = IdType.INPUT)
     private String id;            // UUID 36
+    @TableField("project_id")
+    private String projectId;
     private String title;
     private String transcript;
     private Integer createdBy;

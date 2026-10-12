@@ -177,8 +177,11 @@ public class AgentRunner {
     }
 
     /** 主入口:返回校验通过的分析 JSON(尚未落建议) */
-    public ObjectNode analyze(String transcript, int userId, ModelClient client,
+    public ObjectNode analyze(String projectId, String transcript, int userId, ModelClient client,
                               Emitter emit, ActiveCheck ensureActive) throws AgentError {
+        if (projectId == null || projectId.isBlank()) {
+            throw new AgentError("project_context_missing", "Agent Run 缺少 projectId");
+        }
         long startNanos = System.nanoTime();
         List<Segment> segments = validator.segmentsFor(transcript);
         ActiveCheck active = () -> {
@@ -189,7 +192,9 @@ public class AgentRunner {
             }
         };
 
-        JsonNode context = tools.execute("project_summary", mapper.createObjectNode(), userId);
+        ObjectNode projectArgs = mapper.createObjectNode();
+        projectArgs.put("project_id", projectId);
+        JsonNode context = tools.execute("project_summary", projectArgs, userId, projectId);
         emit.emit("context", context);
 
         List<JsonNode> messages = new ArrayList<>();
@@ -237,7 +242,7 @@ public class AgentRunner {
                     } catch (Exception e) {
                         throw new AgentError("invalid_tool_arguments", "模型工具参数不是 JSON");
                     }
-                    JsonNode result = tools.execute(call.name(), args, userId);
+                    JsonNode result = tools.execute(call.name(), args, userId, projectId);
                     called.add(call.name());
                     ObjectNode toolDetail = mapper.createObjectNode();
                     toolDetail.put("name", call.name());

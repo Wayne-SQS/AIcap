@@ -31,16 +31,17 @@ public class PlanningAgentJobs {
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 
-    public PlanningAgentRun queue(String text, int user) {
+    public PlanningAgentRun queue(String projectId, String text, int user) {
         PlanningAgentRun run = new PlanningAgentRun();
         run.setId(UUID.randomUUID().toString());
         run.setRequestedBy(user);
+        run.setProjectId(projectId);
         run.setRequestText(text);
         run.setStatus("queued");
         run.setAttempt(1);
         run.setModel(props.getModel());
         run.setPromptVersion("planning-owner-v1");
-        run.setContextJson(tools.contextSnapshot().toString());
+        run.setContextJson(tools.contextSnapshot(projectId).toString());
         run.setCreatedAt(LocalDateTime.now());
         run.setUpdatedAt(LocalDateTime.now());
         tx.executeWithoutResult(status -> {
@@ -61,7 +62,7 @@ public class PlanningAgentJobs {
         event(run, "running", "画图智能体开始读取项目数据并分析");
         try {
             client.setModelOverride(run.getModel());
-            ObjectNode result = runner.analyze(run.getRequestText(), client,
+            ObjectNode result = runner.analyze(run.getProjectId(), run.getRequestText(), client,
                     (kind, detail) -> event(run, kind, detail));
             run.setResultJson(result.toString());
             event(run, "plan_generated", "已生成结构化修改方案");

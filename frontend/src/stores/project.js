@@ -3,6 +3,8 @@ import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
+import { projectsApi } from '@/api/projects'
+import { useProjectsStore } from '@/stores/projects'
 import { milestonesApi } from '@/api/milestones'
 import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
@@ -24,11 +26,15 @@ function validStory(x) {
     [null, 0, 1, 2, 3, 4].includes(x.owner) && [1, 2, 3, 4, 5].includes(x.activity)
 }
 
-function loadStories() {
+function scopedKey(base, projectId) {
+  return `${base}-${projectId || 'none'}`
+}
+
+function loadStories(projectId) {
   let ok = true
   let stories = structuredClone(SEED)
   try {
-    const saved = JSON.parse(localStorage.getItem(STORIES_KEY))
+    const saved = JSON.parse(localStorage.getItem(scopedKey(STORIES_KEY, projectId)))
     if (Array.isArray(saved) && saved.length && saved.every(validStory)) {
       // 旧基线(M01–M23)存量缓存:与 US01–US37 新基线不同源,直接落回种子而不是混着用
       const legacy = saved.every(x => /^M\d+$/.test(x.id))
@@ -39,9 +45,9 @@ function loadStories() {
   return { stories, storageOK: ok }
 }
 
-function loadPool() {
+function loadPool(projectId) {
   try {
-    const sl = JSON.parse(localStorage.getItem(POOL_KEY))
+    const sl = JSON.parse(localStorage.getItem(scopedKey(POOL_KEY, projectId)))
     if (Array.isArray(sl) && sl.length) return sl
   } catch { /* ignore */ }
   return structuredClone(POOL_SEED)
@@ -53,17 +59,17 @@ function validTask(t) {
     t.w[0] >= 1 && t.w[1] <= 6 && t.w[0] <= t.w[1] && Number.isFinite(Number(t.h))
 }
 
-function loadTasks() {
+function loadTasks(projectId) {
   try {
-    const saved = JSON.parse(localStorage.getItem(TASKS_KEY))
+    const saved = JSON.parse(localStorage.getItem(scopedKey(TASKS_KEY, projectId)))
     if (Array.isArray(saved) && saved.length && saved.every(validTask)) return saved
   } catch { /* ignore */ }
   return structuredClone(TASKS)
 }
 
-function loadLog() {
+function loadLog(projectId) {
   try {
-    const sl = JSON.parse(localStorage.getItem(LOG_KEY))
+    const sl = JSON.parse(localStorage.getItem(scopedKey(LOG_KEY, projectId)))
     if (Array.isArray(sl)) return sl.slice(-50)
   } catch { /* ignore */ }
   return []
@@ -85,13 +91,14 @@ export function taskRefs(value) {
 
 export const useProjectStore = defineStore('project', {
   state: () => {
-    const init = loadStories()
+    const projectId = useProjectsStore().currentProjectId
+    const init = loadStories(projectId)
     return {
       stories: init.stories,
       storageOK: init.storageOK,
-      tasks: loadTasks(),
-      pool: loadPool(),
-      log: loadLog(),
+      tasks: loadTasks(projectId),
+      pool: loadPool(projectId),
+      log: loadLog(projectId),
       members: structuredClone(MEMBERS),
       milestones: structuredClone(MILESTONES),
       serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
@@ -185,7 +192,13 @@ export const useProjectStore = defineStore('project', {
       if (task.status === 1 || task.progress > 0) return '进行中'
       return '待办'
     },
-    taskById: s => id => s.tasks.find(t => t.id === id) || null,
+    /* 任务业务编号(code)与数据库内部主键(internal_id)是两套标识。
+       视图和接口仍以 Txx 业务编号互相引用，因此查找时兼容两种返回字段及字符串/数字类型。 */
+    taskById: s => id => {
+      const key = String(id ?? '')
+      return s.tasks.find(t => [t.id, t.code, t.internalId, t.internal_id]
+        .some(value => value != null && String(value) === key)) || null
+    },
     taskName: s => id => {
       const t = s.tasks.find(x => x.id === id)
       return t ? `${id} ${t.name}` : id
@@ -196,7 +209,7 @@ export const useProjectStore = defineStore('project', {
       ? task.sprints : derivedTaskSprints(task.w[0], task.w[1])).map(s => 'S' + s).join(' / '),
     predecessorsOf: s => id => taskRefs((s.tasks.find(t => t.id === id) || {}).dependsOn),
     dependentsOf: s => id => s.tasks.filter(t => taskRefs(t.dependsOn).includes(id)).map(t => t.id),
-    storiesForTask: s => task => taskRefs(task.story)
+    storiesForTask: s => task => (Array.isArray(task.storyRefs) && task.storyRefs.length ? task.storyRefs : taskRefs(task.story))
       .map(id => s.stories.find(x => x.id === id.toUpperCase())).filter(Boolean),
 
     /* ==================== Sprint 位移规则(唯一住处) ====================
@@ -237,10 +250,14 @@ export const useProjectStore = defineStore('project', {
       }
     },
     mapTask(t) {
+      const code = t.code || t.id || ''
       return {
-        id: t.id, name: t.name, owner: memberIndex(t.owner_id), h: t.hours,
+        id: code, code, internalId: t.internal_id ?? t.internalId ?? null,
+        name: t.name, description: t.description || t.task_description || t.details || t.content || '',
+        owner: memberIndex(t.owner_id), h: t.hours,
         eh: t.estimated_hours != null ? t.estimated_hours : t.hours,
         w: [t.week_start, t.week_end], story: t.story_ref || '',
+        storyRefs: Array.isArray(t.story_refs) && t.story_refs.length ? t.story_refs : (t.story_ref ? taskRefs(t.story_ref) : []),
         card: t.kanban_card_id || null, type: t.task_type || 'feature',
         dependsOn: t.depends_on || '',
         priority: t.priority || 'Should',
@@ -283,15 +300,26 @@ export const useProjectStore = defineStore('project', {
       })
       this.members.sort((a, b) => a.id - b.id)
     },
-    async loadAll() {
-      const [st, tk, pl, lg, users] = await Promise.all([
-        storiesApi.list(), tasksApi.list(), poolApi.list(), storiesApi.logs(), authApi.users()
+    async loadAll(projectId = useProjectsStore().currentProjectId) {
+      const projects = useProjectsStore()
+      const activeProjectId = projectId || projects.currentProjectId
+      if (!activeProjectId) throw new Error('请先选择项目')
+      projects.currentProjectId = activeProjectId
+      projects.persistSelection()
+      const [st, tk, pl, lg, projectMembers, users] = await Promise.all([
+        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId), storiesApi.logs(activeProjectId), projectsApi.members(activeProjectId), authApi.users()
       ])
       let milestoneRows = []
-      try { milestoneRows = await milestonesApi.list() } catch { milestoneRows = [] }
+      try { milestoneRows = await milestonesApi.list(activeProjectId) } catch { milestoneRows = [] }
       this.stories = st.map(this.mapStory)
       this.tasks = tk.map(this.mapTask)
-      this.mergeMembers(users)
+      const memberLinks = Array.isArray(projectMembers) ? projectMembers : []
+      const memberIds = new Set(memberLinks.map(member => Number(member.user_id)).filter(Number.isInteger))
+      const scopedUsers = Array.isArray(users) ? users.filter(user => memberIds.has(Number(user.id))) : []
+      this.mergeMembers(scopedUsers.map(user => {
+        const link = memberLinks.find(member => Number(member.user_id) === Number(user.id))
+        return link ? { ...user, capacity_hours: link.capacity_hours ?? user.capacity_hours, role: link.project_role || user.role } : user
+      }))
       this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
          与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
@@ -347,35 +375,36 @@ export const useProjectStore = defineStore('project', {
       this.savehint = '已连接后端 · 登录后加载正式项目数据'
     },
     restoreLocal() {
-      const init = loadStories()
+      const projectId = useProjectsStore().currentProjectId
+      const init = loadStories(projectId)
       this.stories = init.stories
-      this.pool = loadPool()
-      this.tasks = loadTasks()
+      this.pool = loadPool(projectId)
+      this.tasks = loadTasks(projectId)
       this.members = structuredClone(MEMBERS)
       this.milestones = structuredClone(MILESTONES)
-      this.log = loadLog()
+      this.log = loadLog(projectId)
       this.serverSync = false
       this.savehint = '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     },
     persist() {
       try {
-        localStorage.setItem(STORIES_KEY, JSON.stringify(this.stories))
+        localStorage.setItem(scopedKey(STORIES_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.stories))
         this.storageOK = true
       } catch { this.storageOK = false }
     },
     persistTasks() {
       try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(this.tasks))
+        localStorage.setItem(scopedKey(TASKS_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.tasks))
         this.storageOK = true
       } catch { this.storageOK = false }
     },
     persistPool() {
-      try { localStorage.setItem(POOL_KEY, JSON.stringify(this.pool)) } catch { /* ignore */ }
+      try { localStorage.setItem(scopedKey(POOL_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.pool)) } catch { /* ignore */ }
     },
     addlog(type, id, detail) {
       this.log.push({ t: new Date().toLocaleTimeString('zh-CN', { hour12: false }), type, id, detail: detail || '' })
       if (this.log.length > 50) this.log = this.log.slice(-50)
-      try { localStorage.setItem(LOG_KEY, JSON.stringify(this.log)) } catch { /* ignore */ }
+      try { localStorage.setItem(scopedKey(LOG_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.log)) } catch { /* ignore */ }
     },
     /** 一致性自检(只告警不改数):编号重复、负责人/工时/周次非法、关联 Story 缺失、挂载看板卡不存在、
      *  Sprint 口径不一致、子任务全完成但故事未标记完成、成员下标不连续、旧版 M 编号残留 */

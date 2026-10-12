@@ -9,6 +9,7 @@ import com.aicap.mapper.ProfileSnapshotMapper;
 import com.aicap.mapper.SuggestionMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.service.ProjectScopedResolver;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -47,6 +48,7 @@ public class ProfileToolRegistry {
     private final ProfileSnapshotMapper snapshotMapper;
     private final ProfileCorrectionMapper correctionMapper;
     private final SuggestionMapper suggestionMapper;
+    private final ProjectScopedResolver resolver;
 
     public ProfileToolRegistry(ObjectMapper objectMapper,
                                TaskMapper taskMapper,
@@ -56,7 +58,8 @@ public class ProfileToolRegistry {
                                DifficultyAssessmentMapper difficultyMapper,
                                ProfileSnapshotMapper snapshotMapper,
                                ProfileCorrectionMapper correctionMapper,
-                               SuggestionMapper suggestionMapper) {
+                               SuggestionMapper suggestionMapper,
+                               ProjectScopedResolver resolver) {
         this.objectMapper = objectMapper;
         this.taskMapper = taskMapper;
         this.activityMapper = activityMapper;
@@ -66,29 +69,35 @@ public class ProfileToolRegistry {
         this.snapshotMapper = snapshotMapper;
         this.correctionMapper = correctionMapper;
         this.suggestionMapper = suggestionMapper;
+        this.resolver = resolver;
         registerTools();
     }
 
     private void registerTools() {
         // 1. 查任务(单个/全部)
         tools.put("query_tasks", new Tool("query_tasks",
-                "查询任务列表。可按 taskId 精确查询,或不带参数查全部任务(含名称/状态/工时/依赖/负责人/计划周)",
-                "{\"taskId\":\"string,可选,如 T01\"}",
+                "查询指定项目的任务列表。必须提供 projectId;可按 taskId 精确查询",
+                "{\"projectId\":\"string,必填,如 Pxxx\",\"taskId\":\"string,可选,如 T01\"}",
                 args -> {
+                    String projectId = strArg(args, "projectId");
+                    if (projectId == null || projectId.isBlank()) return err("projectId 必填");
                     String taskId = strArg(args, "taskId");
                     if (taskId != null) {
-                        var t = taskMapper.selectById(taskId);
+                        var t = resolver.findTask(projectId, taskId);
                         return toJson(t == null ? Map.of("found", false, "taskId", taskId)
                                 : Map.of("found", true, "task", t));
                     }
-                    return toJson(Map.of("tasks", taskMapper.selectList(null)));
+                    return toJson(Map.of("tasks", taskMapper.selectList(new QueryWrapper<com.aicap.entity.Task>().eq("project_id", projectId))));
                 }));
 
         // 2. 查活动事实
         tools.put("query_activities", new Tool("query_activities",
-                "查询成员活动事实(commit/pr/review/bugfix/task_done/note)。可按 userId 与起止日期过滤;发现'7天无活动'等疑点时应先调用本工具核实",
+                "查询当前项目成员活动事实(commit/pr/review/bugfix/task_done/note)。必须提供 projectId;可按 userId 与起止日期过滤;发现'7天无活动'等疑点时应先调用本工具核实",
                 "{\"userId\":\"int,可选\",\"start\":\"yyyy-MM-dd,可选\",\"end\":\"yyyy-MM-dd,可选\"}",
                 args -> {
+                    String projectId = strArg(args, "projectId");
+                    if (projectId == null || projectId.isBlank()) return err("projectId 必填");
+                    var taskIds = projectTaskIds(projectId);
                     var qw = new QueryWrapper<com.aicap.entity.ActivityRecord>();
                     Integer uid = intArg(args, "userId");
                     if (uid != null) qw.eq("user_id", uid);
@@ -97,7 +106,7 @@ public class ProfileToolRegistry {
                     LocalDate end = dateArg(args, "end");
                     if (end != null) qw.le("happened_at", end.atTime(23, 59, 59));
                     qw.orderByDesc("happened_at").last("LIMIT 200");
-                    List<com.aicap.entity.ActivityRecord> list = activityMapper.selectList(qw);
+                    List<com.aicap.entity.ActivityRecord> list = activityMapper.selectList(qw).stream().filter(a -> a.getTaskId() == null || taskIds.contains(a.getTaskId())).toList();
                     Map<String, Object> res = new LinkedHashMap<>();
                     res.put("count", list.size());
                     res.put("activities", list);
@@ -133,14 +142,17 @@ public class ProfileToolRegistry {
 
         // 5. 查已有难度评估(含人工修正——评估同类任务前必须先看,避免推翻人工结论)
         tools.put("query_difficulty_history", new Tool("query_difficulty_history",
-                "查询任务的历史难度评估(含人工修正记录)。人工修正(manual)永远优先于 AI 结论",
+                "查询当前项目任务的历史难度评估(含人工修正记录)。必须提供 projectId;人工修正(manual)永远优先于 AI 结论",
                 "{\"taskId\":\"string,可选\"}",
                 args -> {
+                    String projectId = strArg(args, "projectId");
+                    if (projectId == null || projectId.isBlank()) return err("projectId 必填");
+                    var taskIds = projectTaskIds(projectId);
                     var qw = new QueryWrapper<com.aicap.entity.DifficultyAssessment>();
                     String taskId = strArg(args, "taskId");
                     if (taskId != null) qw.eq("task_id", taskId);
                     qw.orderByDesc("id").last("LIMIT 100");
-                    return toJson(Map.of("assessments", difficultyMapper.selectList(qw)));
+                    return toJson(Map.of("assessments", difficultyMapper.selectList(qw).stream().filter(a -> taskIds.contains(a.getTaskId())).toList()));
                 }));
 
         // 6. 查历史画像快照(记忆检索:评估前检索该成员最近的画像)
@@ -169,9 +181,12 @@ public class ProfileToolRegistry {
 
         // 8. 查 GitHub 真实活动(US34 同步后的 commit/PR/Review/Issue;验收标准 2:发现"7 天无活动"时应先查 Git 核实再下结论)
         tools.put("query_git_commits", new Tool("query_git_commits",
-                "查询 GitHub 同步来的真实代码活动(commit/pr/review/note,source=github)。发现成员'长期无活动'时,必须先调用本工具核实是否真有 Git 提交,而不是直接下'停滞'结论。数据由 GitHub 同步任务写入;未接入/未同步时返回空并说明",
+                "查询当前项目 GitHub 同步来的真实代码活动(commit/pr/review/note,source=github)。必须提供 projectId。发现成员'长期无活动'时,必须先调用本工具核实是否真有 Git 提交,而不是直接下'停滞'结论。数据由 GitHub 同步任务写入;未接入/未同步时返回空并说明",
                 "{\"userId\":\"int,可选\",\"start\":\"yyyy-MM-dd,可选\",\"end\":\"yyyy-MM-dd,可选\"}",
                 args -> {
+                    String projectId = strArg(args, "projectId");
+                    if (projectId == null || projectId.isBlank()) return err("projectId 必填");
+                    var taskIds = projectTaskIds(projectId);
                     var qw = new QueryWrapper<com.aicap.entity.ActivityRecord>()
                             .eq("source", "github");
                     Integer uid = intArg(args, "userId");
@@ -181,7 +196,7 @@ public class ProfileToolRegistry {
                     LocalDate end = dateArg(args, "end");
                     if (end != null) qw.le("happened_at", end.atTime(23, 59, 59));
                     qw.orderByDesc("happened_at").last("LIMIT 200");
-                    List<com.aicap.entity.ActivityRecord> list = activityMapper.selectList(qw);
+                    List<com.aicap.entity.ActivityRecord> list = activityMapper.selectList(qw).stream().filter(a -> a.getTaskId() == null || taskIds.contains(a.getTaskId())).toList();
                     Map<String, Object> res = new LinkedHashMap<>();
                     res.put("github_sync_available", true);
                     res.put("count", list.size());
@@ -207,7 +222,8 @@ public class ProfileToolRegistry {
     }
 
     /** 执行一次工具调用;任何异常转成 ok=false 的结果返回给模型(而不是炸掉整个循环) */
-    public ToolCall invoke(String name, String argsJson) {
+    public ToolCall invoke(String name, String argsJson, String projectId) {
+        if (projectId == null || projectId.isBlank()) return new ToolCall(name, argsJson, toJson(Map.of("error", "projectId 必填")), false, "project_context_missing");
         Tool tool = tools.get(name);
         if (tool == null) {
             return new ToolCall(name, argsJson, toJson(Map.of("error", "未知工具: " + name)), false, "unknown_tool");
@@ -254,6 +270,11 @@ public class ProfileToolRegistry {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private java.util.Set<String> projectTaskIds(String projectId) {
+        return taskMapper.selectList(new QueryWrapper<com.aicap.entity.Task>().eq("project_id", projectId))
+                .stream().map(com.aicap.entity.Task::getId).collect(java.util.stream.Collectors.toSet());
     }
 
     private String err(String msg) {

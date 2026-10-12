@@ -9,6 +9,30 @@
 --           → meeting_audio(会议录音/上传的 mp3 元数据,文件落盘)
 -- ============================================================
 
+CREATE TABLE IF NOT EXISTS `projects` (
+  `id` varchar(20) NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `description` text NOT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'ACTIVE',
+  `start_date` date DEFAULT NULL,
+  `end_date` date DEFAULT NULL,
+  `total_sprints` int NOT NULL DEFAULT 0,
+  `created_by` int DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`), KEY `ix_projects_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `project_members` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `user_id` int NOT NULL,
+  `project_role` varchar(20) NOT NULL,
+  `capacity_hours` int NOT NULL DEFAULT 60,
+  `joined_at` datetime NOT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uq_project_members_project_user` (`project_id`,`user_id`), KEY `ix_project_members_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `users` (
   `id` int NOT NULL AUTO_INCREMENT,
   `username` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -22,7 +46,9 @@ CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `stories` (
-  `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `internal_id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `acceptance` text COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -32,32 +58,41 @@ CREATE TABLE IF NOT EXISTS `stories` (
   `status` int NOT NULL,
   `owner_id` int DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`internal_id`),
+  UNIQUE KEY `uq_stories_project_code` (`project_id`,`code`),
   KEY `owner_id` (`owner_id`),
   CONSTRAINT `stories_ibfk_1` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `tasks` (
-  `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `internal_id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `owner_id` int NOT NULL,
   `hours` int NOT NULL,
   `week_start` int NOT NULL,
   `week_end` int NOT NULL,
+  `story_internal_id` bigint DEFAULT NULL,
   `story_ref` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `story_ref_legacy` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `kanban_card_id` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '所属看板卡 ID(强外键;管理类任务为 NULL)',
   `estimated_hours` int NOT NULL DEFAULT '0' COMMENT '预估工时(加权进度分母)',
   `task_type` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'feature' COMMENT '任务类型:feature=开发任务挂卡 / management=管理任务',
   `status` int NOT NULL DEFAULT '0' COMMENT '任务状态:0待办 1进行中 2完成 3已取消',
   `depends_on` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '前置任务 ID(逗号分隔的 Txx)',
+  `depends_on_legacy` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `progress` int NOT NULL DEFAULT '0' COMMENT '完成百分比 0..100',
   `blocked` int NOT NULL DEFAULT '0' COMMENT '是否阻塞:0否 1是',
-  PRIMARY KEY (`id`),
-  KEY `fk_task_kanban_card` (`kanban_card_id`),
-  CONSTRAINT `fk_task_kanban_card` FOREIGN KEY (`kanban_card_id`) REFERENCES `stories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+  `kanban_card_id_legacy` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`internal_id`),
+  UNIQUE KEY `uq_tasks_project_code` (`project_id`,`code`),
+  KEY `ix_tasks_story` (`story_internal_id`),
+  KEY `fk_task_kanban_card` (`kanban_card_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `pool_items` (
+  `project_id` varchar(20) DEFAULT NULL,
   `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -81,6 +116,7 @@ CREATE TABLE IF NOT EXISTS `suggestions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `meetings` (
+  `project_id` varchar(20) DEFAULT NULL,
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `transcript` text COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -158,7 +194,10 @@ CREATE TABLE IF NOT EXISTS `meeting_agent_events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `story_logs` (
+  `project_id` varchar(20) DEFAULT NULL,
   `id` int NOT NULL AUTO_INCREMENT,
+  `story_internal_id` bigint DEFAULT NULL,
+  `story_code_snapshot` varchar(20) DEFAULT NULL,
   `story_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `log_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `detail` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -171,6 +210,9 @@ CREATE TABLE IF NOT EXISTS `story_logs` (
 -- 元素形如 {"name":"Java","level":5}(level 1..5,1=了解 5=精通)
 CREATE TABLE IF NOT EXISTS `member_profiles` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) DEFAULT NULL,
+  `task_internal_id` bigint DEFAULT NULL,
+  `task_code_snapshot` varchar(20) DEFAULT NULL,
   `user_id` int NOT NULL,
   `title` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '岗位/画像标题',
   `tech_stack` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON 数组:熟悉的技术栈',
@@ -229,13 +271,15 @@ CREATE TABLE IF NOT EXISTS `activity_records` (
   KEY `ix_activity_records_user_time` (`user_id`,`happened_at`),
   KEY `ix_activity_records_task` (`task_id`),
   CONSTRAINT `activity_records_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `activity_records_ibfk_2` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`),
   CONSTRAINT `activity_records_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 任务难度评估(AI 依据工时/依赖/核心模块/返工等生成,必须带依据;人工可修正覆盖)
 CREATE TABLE IF NOT EXISTS `difficulty_assessments` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) DEFAULT NULL,
+  `task_internal_id` bigint DEFAULT NULL,
+  `task_code_snapshot` varchar(20) DEFAULT NULL,
   `task_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `level` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'low/medium/high/extreme',
   `score` int NOT NULL DEFAULT '0' COMMENT '难度分 0..100',
@@ -243,8 +287,7 @@ CREATE TABLE IF NOT EXISTS `difficulty_assessments` (
   `assessed_by` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ai' COMMENT 'ai=智能体LLM / rules=规则引擎降级 / manual=人工(永远优先)',
   `created_at` datetime NOT NULL,
   PRIMARY KEY (`id`),
-  KEY `ix_difficulty_task` (`task_id`),
-  CONSTRAINT `difficulty_assessments_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `tasks` (`id`)
+  KEY `ix_difficulty_task` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 动态能力画像快照(按时间范围整包 JSON;区分 objective=事实 与 inference=AI 推断)
@@ -305,13 +348,17 @@ CREATE TABLE IF NOT EXISTS planning_agent_runs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `milestones` (
-  `id` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `internal_id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `week` int NOT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'planned',
   `related_task_ids` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`),
+  `related_task_ids_legacy` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`internal_id`),
+  UNIQUE KEY `uq_milestones_project_code` (`project_id`,`code`),
   KEY `ix_milestones_week` (`week`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -324,7 +371,7 @@ CREATE TABLE IF NOT EXISTS planning_agent_events (
 CREATE TABLE IF NOT EXISTS project_generation_runs (
   id varchar(36) NOT NULL, requested_by int NOT NULL, mode varchar(30) NOT NULL,
   strategy varchar(20) NOT NULL, source_name varchar(255) DEFAULT NULL,
-  request_text varchar(4000) DEFAULT NULL, status varchar(30) NOT NULL,
+  request_text text DEFAULT NULL, status varchar(30) NOT NULL,
   attempt int NOT NULL, model varchar(200) NOT NULL, prompt_version varchar(40) NOT NULL,
   draft_json longtext, error_code varchar(60) DEFAULT NULL,
   error_message varchar(500) DEFAULT NULL, created_at datetime NOT NULL,
@@ -336,4 +383,44 @@ CREATE TABLE IF NOT EXISTS project_generation_events (
   id int NOT NULL AUTO_INCREMENT, run_id varchar(36) NOT NULL, attempt int NOT NULL,
   kind varchar(40) NOT NULL, detail_json longtext NOT NULL, created_at datetime(6) NOT NULL,
   PRIMARY KEY (id), KEY ix_project_generation_events_run_id (run_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ 内部主键迁移影子结构 ============
+CREATE TABLE IF NOT EXISTS migration_anomalies (
+  id bigint NOT NULL AUTO_INCREMENT, phase varchar(40) NOT NULL,
+  entity_type varchar(40) NOT NULL, project_id varchar(20) DEFAULT NULL,
+  source_code varchar(100) DEFAULT NULL, related_code varchar(100) DEFAULT NULL,
+  reason varchar(500) NOT NULL, created_at datetime NOT NULL,
+  PRIMARY KEY (id), KEY ix_migration_anomalies_phase (phase),
+  KEY ix_migration_anomalies_project (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS task_story_relations (
+  internal_id bigint NOT NULL AUTO_INCREMENT,
+  project_id varchar(20) NOT NULL,
+  task_internal_id bigint NOT NULL,
+  story_internal_id bigint NOT NULL,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY (internal_id),
+  UNIQUE KEY uq_task_story_relations (project_id,task_internal_id,story_internal_id),
+  KEY ix_task_story_relations_project (project_id),
+  KEY ix_task_story_relations_task (task_internal_id),
+  KEY ix_task_story_relations_story (story_internal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS task_dependencies (
+  id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL,
+  predecessor_task_internal_id bigint NOT NULL, successor_task_internal_id bigint NOT NULL,
+  created_at datetime NOT NULL, PRIMARY KEY (id),
+  UNIQUE KEY uq_task_dependencies (project_id,predecessor_task_internal_id,successor_task_internal_id),
+  KEY ix_task_dependencies_predecessor (predecessor_task_internal_id),
+  KEY ix_task_dependencies_successor (successor_task_internal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS milestone_tasks (
+  id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL,
+  milestone_internal_id bigint NOT NULL, task_internal_id bigint NOT NULL,
+  created_at datetime NOT NULL, PRIMARY KEY (id),
+  UNIQUE KEY uq_milestone_tasks (project_id,milestone_internal_id,task_internal_id),
+  KEY ix_milestone_tasks_milestone (milestone_internal_id), KEY ix_milestone_tasks_task (task_internal_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

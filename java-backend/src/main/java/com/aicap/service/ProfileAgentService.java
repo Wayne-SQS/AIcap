@@ -22,6 +22,8 @@ import com.aicap.mapper.ProfileSnapshotMapper;
 import com.aicap.mapper.SuggestionMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.service.ProjectScopedResolver;
+import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +73,7 @@ public class ProfileAgentService {
     private final MemberProfileMapper memberProfileMapper;
     private final ObjectMapper objectMapper;
     private final com.aicap.profile.ProfileAgentBrain brain;   // LLM 内核(未配置密钥时自动降级规则引擎)
+    private final ProjectScopedResolver projectScopedResolver;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     /** 活动类型:commit/pr/review/bugfix/task_done/note/test(设计文档 4.2 测试维度) */
@@ -93,7 +96,7 @@ public class ProfileAgentService {
 
     // ---------- 活动录入 ----------
 
-    public ProfileAgentDtos.ActivityOut addActivity(ProfileAgentDtos.ActivityIn in, User actor) {
+    public ProfileAgentDtos.ActivityOut addActivity(String projectId, ProfileAgentDtos.ActivityIn in, User actor) {
         if (!ACTIVITY_TYPES.contains(in.activityType())) {
             throw ApiException.unprocessable("activity_type 必须是 " + ACTIVITY_TYPES + " 之一");
         }
@@ -106,7 +109,7 @@ public class ProfileAgentService {
             throw ApiException.notFound("成员不存在");
         }
         if (in.taskId() != null && !in.taskId().isBlank()) {
-            if (taskMapper.selectById(in.taskId()) == null) throw ApiException.notFound("任务不存在: " + in.taskId());
+            if (projectScopedResolver.findTask(projectId, in.taskId()) == null) throw ApiException.notFound("任务不存在: " + in.taskId());
         } else {
             in = new ProfileAgentDtos.ActivityIn(in.userId(), null, in.activityType(),
                     in.title(), in.detail(), in.module(), in.happenedAt());
@@ -123,8 +126,15 @@ public class ProfileAgentService {
         }
 
         ActivityRecord r = new ActivityRecord();
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        r.setProjectId(scopedProjectId);
         r.setUserId(in.userId());
         r.setTaskId(in.taskId());
+        if (in.taskId() != null && !in.taskId().isBlank()) {
+            Task task = projectScopedResolver.requireTask(scopedProjectId, in.taskId());
+            r.setTaskInternalId(task.getInternalId());
+            r.setTaskCodeSnapshot(task.getId());
+        }
         r.setActivityType(in.activityType());
         r.setTitle(in.title());
         r.setDetail(in.detail());
@@ -146,6 +156,17 @@ public class ProfileAgentService {
         return activityMapper.selectList(qw).stream().map(this::toOut).toList();
     }
 
+    public List<ProfileAgentDtos.ActivityOut> listActivities(String projectId, Integer userId,
+                                                              LocalDate start, LocalDate end) {
+        QueryWrapper<ActivityRecord> qw = new QueryWrapper<ActivityRecord>()
+                .eq("project_id", ProjectAccessService.normalize(projectId))
+                .eq(userId != null, "user_id", userId)
+                .ge(start != null, "happened_at", start == null ? null : start.atStartOfDay())
+                .le(end != null, "happened_at", end == null ? null : end.atTime(23, 59, 59))
+                .orderByDesc("happened_at").last("LIMIT 1000");
+        return activityMapper.selectList(qw).stream().map(this::toOut).toList();
+    }
+
     private ProfileAgentDtos.ActivityOut toOut(ActivityRecord r) {
         return new ProfileAgentDtos.ActivityOut(r.getId(), r.getUserId(), r.getTaskId(),
                 r.getActivityType(), r.getTitle(), r.getDetail(), r.getModule(), r.getSource(),
@@ -155,24 +176,26 @@ public class ProfileAgentService {
     /** 批量导入活动事实(文档 4.2:提交/Review 等活动批量接入;source=import)。
      *  事务性:任一条校验失败则整体回滚,避免中途失败导致部分入库、数据不完整。 */
     @Transactional
-    public List<ProfileAgentDtos.ActivityOut> importActivities(List<ProfileAgentDtos.ActivityIn> items, User actor) {
+    public List<ProfileAgentDtos.ActivityOut> importActivities(String projectId, List<ProfileAgentDtos.ActivityIn> items, User actor) {
         if (items == null || items.isEmpty()) throw ApiException.badRequest("导入列表不能为空");
         if (items.size() > 200) throw ApiException.unprocessable("单次最多导入 200 条");
         List<ProfileAgentDtos.ActivityOut> out = new ArrayList<>();
         for (ProfileAgentDtos.ActivityIn in : items) {
-            out.add(addActivity(in, actor));
+            out.add(addActivity(projectId, in, actor));
         }
         return out;
     }
 
     /** 贡献活动热力图(文档 4.10):按日聚合活动类型计数,前端画绿格子 */
-    public List<Map<String, Object>> heatmap(Integer userId, LocalDate start, LocalDate end) {
+    public List<Map<String, Object>> heatmap(String projectId, Integer userId, LocalDate start, LocalDate end) {
         validateRange(start, end);   // M2: 时间范围上限与顺序校验
+        Set<String> taskIds = projectTaskIds(projectId);
         List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
                 .eq(userId != null, "user_id", userId)
                 .ge("happened_at", start.atStartOfDay())
                 .le("happened_at", end.atTime(23, 59, 59))
-                .orderByAsc("happened_at"));
+                .orderByAsc("happened_at")).stream()
+                .filter(a -> a.getProjectId() == null || ProjectAccessService.normalize(projectId).equals(a.getProjectId())).toList();
         // 连续按天铺满区间,无活动日为 0
         Map<LocalDate, Map<String, Integer>> byDay = new LinkedHashMap<>();
         for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
@@ -205,7 +228,7 @@ public class ProfileAgentService {
 
     /** AI 评估:依据任务工时/依赖/阻塞/进度等可量化因素,逐条给出依据。 */
     public List<ProfileAgentDtos.DifficultyOut> assessDifficulty(LocalDate start, LocalDate end) {
-        return assessDifficulty(start, end, false);
+        throw ApiException.badRequest("项目级难度评估必须提供 projectId");
     }
 
     /**
@@ -215,12 +238,18 @@ public class ProfileAgentService {
      * - llmAndPersist=true(正式分析,POST /analysis/run、送审):LLM 内核优先,失败降级规则引擎,落库留痕。
      */
     public List<ProfileAgentDtos.DifficultyOut> assessDifficulty(LocalDate start, LocalDate end, boolean llmAndPersist) {
-        List<Task> tasks = taskMapper.selectList(null);
+        throw ApiException.badRequest("项目级难度评估必须提供 projectId");
+    }
+
+    public List<ProfileAgentDtos.DifficultyOut> assessDifficulty(String projectId, LocalDate start, LocalDate end,
+                                                                  boolean llmAndPersist) {
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        List<Task> tasks = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId));
         Map<String, Integer> downstream = downstreamCounts(tasks);   // 4.5: 被后续任务依赖数
         List<ProfileAgentDtos.DifficultyOut> out = new ArrayList<>();
         for (Task t : tasks) {
             if (t.getStatus() != null && t.getStatus() == 3) continue; // 已取消不评估
-            DifficultyAssessment manual = latestAssessment(t.getId(), "manual");
+            DifficultyAssessment manual = latestAssessment(scopedProjectId, t.getId(), "manual");
             if (manual != null) { // 人工评估优先,不覆盖
                 out.add(toDifficultyOut(manual));
                 continue;
@@ -228,17 +257,20 @@ public class ProfileAgentService {
             // H3 修复:按任务粒度加锁,同一任务的评估串行化,防并发重复评估/重复落库
             Object lock = taskLocks.computeIfAbsent(t.getId(), k -> new Object());
             synchronized (lock) {
-                DifficultyAssessment existing = latestAssessment(t.getId(), "ai", "rules");
+                DifficultyAssessment existing = latestAssessment(scopedProjectId, t.getId(), "ai", "rules");
                 if (existing != null) {   // 已有智能体/规则评估则复用,不重复扣费
                     out.add(toDifficultyOut(existing));
                     continue;
                 }
                 if (!llmAndPersist) {
                     // 只读预览:规则引擎即时算(assessed_by=rules),不落库、不调 LLM
-                    out.add(toDifficultyOut(ruleEngineAssessment(t, false, downstream.getOrDefault(t.getId(), 0))));
+                out.add(toDifficultyOut(bindTask(ruleEngineAssessment(t, false, downstream.getOrDefault(t.getId(), 0)), scopedProjectId, t)));
                     continue;
                 }
-                DifficultyAssessment ai = buildAiAssessment(t, downstream.getOrDefault(t.getId(), 0));   // LLM 内核优先,失败降级规则引擎
+                DifficultyAssessment ai = buildAiAssessment(scopedProjectId, t, downstream.getOrDefault(t.getId(), 0));   // LLM 内核优先,失败降级规则引擎
+                ai.setProjectId(scopedProjectId);
+                ai.setTaskInternalId(t.getInternalId());
+                ai.setTaskCodeSnapshot(t.getId());
                 difficultyMapper.insert(ai);
                 out.add(toDifficultyOut(ai));
             }
@@ -258,14 +290,19 @@ public class ProfileAgentService {
     }
 
     /** 人工修正难度(覆盖 AI 结论;assessed_by=manual 永远优先) */
-    public ProfileAgentDtos.DifficultyOut overrideDifficulty(String taskId, ProfileAgentDtos.DifficultyIn in) {
-        if (taskMapper.selectById(taskId) == null) throw ApiException.notFound("任务不存在: " + taskId);
+    public ProfileAgentDtos.DifficultyOut overrideDifficulty(String projectId, String taskId, ProfileAgentDtos.DifficultyIn in) {
+        if (projectScopedResolver.findTask(projectId, taskId) == null) throw ApiException.notFound("任务不存在: " + taskId);
         List<String> levels = List.of("low", "medium", "high", "extreme");
         if (!levels.contains(in.level())) {
             throw ApiException.unprocessable("level 必须是 low/medium/high/extreme 之一");
         }
         DifficultyAssessment a = new DifficultyAssessment();
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        Task task = projectScopedResolver.requireTask(scopedProjectId, taskId);
+        a.setProjectId(scopedProjectId);
         a.setTaskId(taskId);
+        a.setTaskInternalId(task.getInternalId());
+        a.setTaskCodeSnapshot(task.getId());
         a.setLevel(in.level());
         a.setScore(in.score() == null ? defaultScore(in.level()) : in.score());
         // L6 修复:人工修正可附理由,进入记忆时能区分修正动机
@@ -281,14 +318,17 @@ public class ProfileAgentService {
      * 难度评估:LLM 内核(推理+工具+记忆)优先;未配置密钥/调用失败/输出不合法 → 降级规则引擎。
      * LLM 结论带 confidence 与 evidence_refs,存入 basis 供追溯(可解释验收)。
      */
-    private DifficultyAssessment buildAiAssessment(Task t, int downstreamCount) {
+    private DifficultyAssessment buildAiAssessment(String projectId, Task t, int downstreamCount) {
         // 1) LLM 内核
-        com.aicap.profile.ProfileAgentBrain.DifficultyConclusion c = brain.assessDifficulty(t, downstreamCount);
+        com.aicap.profile.ProfileAgentBrain.DifficultyConclusion c = brain.assessDifficulty(projectId, t, downstreamCount);
         if (c != null) {
             List<String> basis = new ArrayList<>(c.basis());
             basis.add("[confidence=" + c.confidence() + ", evidence=" + c.evidenceRefs() + "]");
             DifficultyAssessment a = new DifficultyAssessment();
+            a.setProjectId(ProjectAccessService.normalize(projectId));
             a.setTaskId(t.getId());
+            a.setTaskInternalId(t.getInternalId());
+            a.setTaskCodeSnapshot(t.getId());
             a.setLevel(c.level());
             a.setScore(c.score());
             a.setBasis(writeJson(basis));
@@ -330,6 +370,8 @@ public class ProfileAgentService {
         if (basis.isEmpty()) basis.add("任务要素简单,无显著复杂因素(+0)");
 
         DifficultyAssessment a = new DifficultyAssessment();
+        a.setTaskInternalId(t.getInternalId());
+        a.setTaskCodeSnapshot(t.getId());
         a.setTaskId(t.getId());
         a.setLevel(level);
         a.setScore(Math.min(score, 100));
@@ -337,6 +379,13 @@ public class ProfileAgentService {
         a.setAssessedBy("rules");   // L5: 与 LLM 的 ai 区分,规则引擎结论不干扰 LLM 历史记忆
         a.setCreatedAt(LocalDateTime.now());
         return a;
+    }
+
+    private DifficultyAssessment bindTask(DifficultyAssessment assessment, String projectId, Task task) {
+        assessment.setProjectId(projectId);
+        assessment.setTaskInternalId(task.getInternalId());
+        assessment.setTaskCodeSnapshot(task.getId());
+        return assessment;
     }
 
     private int defaultScore(String level) {
@@ -349,8 +398,9 @@ public class ProfileAgentService {
     }
 
     /** 查某任务指定评估来源的最新一条(支持多来源,如 ai/rules) */
-    private DifficultyAssessment latestAssessment(String taskId, String... by) {
+    private DifficultyAssessment latestAssessment(String projectId, String taskId, String... by) {
         QueryWrapper<DifficultyAssessment> qw = new QueryWrapper<DifficultyAssessment>().eq("task_id", taskId);
+        if (projectId != null && !projectId.isBlank()) qw.eq("project_id", ProjectAccessService.normalize(projectId));
         if (by.length == 1) qw.eq("assessed_by", by[0]);
         else if (by.length > 1) qw.in("assessed_by", List.of(by));
         qw.orderByDesc("id").last("LIMIT 1");
@@ -372,12 +422,12 @@ public class ProfileAgentService {
 
     /** 文档 4.11:整包分析结果(只读预览:复用已存难度评估,成员/风险走规则引擎,不调 LLM、不落库) */
     public Map<String, Object> analyze(LocalDate start, LocalDate end) {
-        return analyze(start, end, false, null);
+        throw ApiException.badRequest("项目级画像分析必须提供 projectId");
     }
 
     /** 全团队成员分析(不带范围收窄) */
     public Map<String, Object> analyze(LocalDate start, LocalDate end, boolean useLlm) {
-        return analyze(start, end, useLlm, null);
+        throw ApiException.badRequest("项目级画像分析必须提供 projectId");
     }
 
     /**
@@ -390,8 +440,9 @@ public class ProfileAgentService {
      * 该范围下跳过 LLM 团队风险归因(只喂一个人的事实会得出错的团队结论),团队风险走规则引擎,
      * 返回结果带 scope 字段如实标出本次范围。
      */
-    public Map<String, Object> analyze(LocalDate start, LocalDate end, boolean useLlm, Integer onlyUserId) {
+    public Map<String, Object> analyze(String projectId, LocalDate start, LocalDate end, boolean useLlm, Integer onlyUserId) {
         validateRange(start, end);   // M2: 时间范围上限与顺序校验
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
         List<User> allUsers = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"));
         List<User> users = allUsers;
         if (onlyUserId != null) {
@@ -400,16 +451,16 @@ public class ProfileAgentService {
                 throw ApiException.notFound("成员不存在: " + onlyUserId);
             }
         }
-        List<Task> tasks = taskMapper.selectList(null);
+        List<Task> tasks = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId));
         Map<String, ProfileAgentDtos.DifficultyOut> diffByTask = new HashMap<>();
-        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(start, end, useLlm)) {
+        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(scopedProjectId, start, end, useLlm)) {
             diffByTask.put(d.taskId(), d);
         }
 
         List<Map<String, Object>> members = new ArrayList<>();
         List<Map<String, Object>> teamRisks = new ArrayList<>();
         for (User u : users) {
-            members.add(memberAnalysis(u, tasks, diffByTask, start, end, useLlm));
+            members.add(memberAnalysis(projectId, u, tasks, diffByTask, start, end, useLlm));
         }
         // ---- LLM 内核优先:团队风险归因;失败/未配置 → 规则引擎降级 ----
         // 单人范围(onlyUserId!=null)不调 LLM:团队风险必须看全体成员,只看一个人会把
@@ -429,7 +480,7 @@ public class ProfileAgentService {
                         "status", t.getStatus() == null ? 0 : t.getStatus(),
                         "owner_id", t.getOwnerId() == null ? 0 : t.getOwnerId(),
                         "hours", t.getHours() == null ? 0 : t.getHours())).toList());
-                List<Map<String, Object>> llmRisks = brain.teamRisks(teamFacts);
+                List<Map<String, Object>> llmRisks = brain.teamRisks(projectId, teamFacts);
                 if (llmRisks != null) {
                     // H5 修复:过滤幻觉实体——LLM 引用的 user_id/task_id 必须在真实集合内,否则丢弃该条
                     Set<Integer> userIds = users.stream().map(User::getId).collect(Collectors.toSet());
@@ -483,14 +534,14 @@ public class ProfileAgentService {
     /** 文档 4.9:时间范围对比分析(本期 vs 上期)。
      *  输出每名成员两个周期的活动量/Review/缺陷修复/完成任务/难度承担对比,
      *  以及预计工时(任务分配工时)与完成率;实际完成工时缺数据源时如实说明。 */
-    public Map<String, Object> comparePeriods(LocalDate prevStart, LocalDate prevEnd,
+    public Map<String, Object> comparePeriods(String projectId, LocalDate prevStart, LocalDate prevEnd,
                                               LocalDate curStart, LocalDate curEnd) {
         validateRange(prevStart, prevEnd);   // M2
         validateRange(curStart, curEnd);     // M2
         List<User> users = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"));
-        List<Task> tasks = taskMapper.selectList(null);
+        List<Task> tasks = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", ProjectAccessService.normalize(projectId)));
         Map<String, ProfileAgentDtos.DifficultyOut> diffByTask = new HashMap<>();
-        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(null, null, false)) {  // H2: 只读,不调 LLM
+        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(projectId, null, null, false)) {  // H2: 只读,不调 LLM
             diffByTask.put(d.taskId(), d);
         }
 
@@ -580,7 +631,7 @@ public class ProfileAgentService {
         changes.add(label + " " + ps + " → " + cs);
     }
 
-    private Map<String, Object> memberAnalysis(User u, List<Task> tasks,
+    private Map<String, Object> memberAnalysis(String projectId, User u, List<Task> tasks,
                                                Map<String, ProfileAgentDtos.DifficultyOut> diffByTask,
                                                LocalDate start, LocalDate end, boolean useLlm) {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -852,7 +903,7 @@ public class ProfileAgentService {
         portrait.put("recommended_task_types", buildRecommendations(mp, mainModule));
 
         // ---- LLM 内核优先:成员分析由大脑(推理+工具+记忆)生成;失败/未配置/预览模式 → 规则引擎降级 ----
-        Map<String, Object> brainOut = useLlm ? brain.memberAnalysis(u.getId(), objective) : null;
+        Map<String, Object> brainOut = useLlm ? brain.memberAnalysis(projectId, u.getId(), objective) : null;
         if (brainOut != null) {
             @SuppressWarnings("unchecked")
             List<String> llmInference = (List<String>) brainOut.get("ai_inference");
@@ -1095,7 +1146,7 @@ public class ProfileAgentService {
 
     /** 触发一次分析:同步执行并留痕(小数据量同步即可;失败落库可重试) */
     public Map<String, Object> runAnalysis(LocalDate start, LocalDate end, User user) {
-        return runAnalysis(start, end, user, null);
+        throw ApiException.badRequest("项目级画像分析必须提供 projectId");
     }
 
     /**
@@ -1103,7 +1154,7 @@ public class ProfileAgentService {
      * 成员完成任务后前端只传提交者 —— 每次完成任务的 LLM 成本从「5 次成员画像 + 1 次团队风险」
      * 降到「1 次成员画像」,且只对提交者的提交物做评估。
      */
-    public Map<String, Object> runAnalysis(LocalDate start, LocalDate end, User user, Integer onlyUserId) {
+    public Map<String, Object> runAnalysis(String projectId, LocalDate start, LocalDate end, User user, Integer onlyUserId) {
         validateRange(start, end);   // M2
         /* M4 修复:限流防刷额度,但两条通道分开计数——
            全团队分析(6 次 LLM 调用)30 秒/人;单人评估(1 次调用)只做 3 秒双击去抖,
@@ -1132,7 +1183,7 @@ public class ProfileAgentService {
         brain.startRecording();
         try {
             // 可观测:录制本轮分析的每步 thought/action/observation/tokens(验收标准 3:决策可回溯)
-            Map<String, Object> result = analyze(start, end, true, onlyUserId);
+            Map<String, Object> result = analyze(projectId, start, end, true, onlyUserId);
             Map<String, Object> observability = brain.collectSteps();
             result.put("observability", observability);
             @SuppressWarnings("unchecked")
@@ -1329,10 +1380,10 @@ public class ProfileAgentService {
      * 复用 suggestions 表(kind=profile),证据=风险事实,影响对象=相关成员/任务,
      * change_json=建议落入需求池的条目内容。人工审核通过后才会写入正式数据。
      */
-    public List<String> submitRiskSuggestions(LocalDate start, LocalDate end, String agent, User user) {
+    public List<String> submitRiskSuggestions(String projectId, LocalDate start, LocalDate end, String agent, User user) {
         // 送审是正式动作:走 runAnalysis(与"触发正式分析"同一条路)——
         // 留 profile_agent_runs 痕迹 + 受 30 秒限流;此前直接 analyze(...) 会绕过限流且事后无记录可查
-        Map<String, Object> result = runAnalysis(start, end, user);
+        Map<String, Object> result = runAnalysis(projectId, start, end, user, null);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> risks = (List<Map<String, Object>>) result.get("team_risks");
         List<String> ids = new ArrayList<>();
@@ -1433,6 +1484,12 @@ public class ProfileAgentService {
 
     private long daysBetween(LocalDate a, LocalDate b) {
         return Math.max(1, b.toEpochDay() - a.toEpochDay() + 1);
+    }
+
+    private Set<String> projectTaskIds(String projectId) {
+        return taskMapper.selectList(new QueryWrapper<Task>()
+                        .eq("project_id", ProjectAccessService.normalize(projectId)))
+                .stream().map(Task::getId).collect(Collectors.toSet());
     }
 
     private String writeJson(Object o) {

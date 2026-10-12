@@ -1,6 +1,7 @@
 <script setup>
 import { watch } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 import MeetingPanel from '@/components/ai/MeetingPanel.vue'
 import SubmitAgentPanel from '@/components/ai/SubmitAgentPanel.vue'
 import ProfileAgentPanel from '@/components/ai/ProfileAgentPanel.vue'
@@ -8,11 +9,22 @@ import ChatBox from '@/components/ai/ChatBox.vue'
 
 /* AI 助手视图:只承载会议智能体；Planning Agent 独立为画图智能体页面。 */
 const meeting = useMeetingStore()
+const projects = useProjectsStore()
 
 /* bootstrap 完成后 online 才为 true:watch 保证登录态就绪后拉取会议数据 */
 watch(() => meeting.online, v => {
   if (v) meeting.loadAll().catch(() => { /* 网络异常时面板呈现空态,可手动刷新 */ })
 }, { immediate: true })
+
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous) return
+  meeting.meetings = []
+  meeting.suggestions = []
+  meeting.selected = ''
+  meeting.agentRun = null
+  meeting.agentError = ''
+  if (next && meeting.online) meeting.loadAll().catch(() => { /* 面板呈现空态,可手动刷新 */ })
+})
 </script>
 
 <template>

@@ -16,7 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -75,11 +77,44 @@ class ProjectGenerationImportServiceTest {
     }
 
     @Test
+    void explicitExcelDependencyIsMarkedForConservativeCycleHandling() {
+        var draft=importer.parse(csv("task_id,task_name,hours,depends_on\nT01,登录接口,8,T01\n"));
+        assertEquals("T01",draft.path("tasks").get(0).path("depends_on").asText());
+        assertTrue(draft.path("tasks").get(0).path("_import_dependencies_explicit").asBoolean());
+    }
+
+    @Test
     void ConflictingOwnerIdAndNameIsRejected() {
         when(users.selectList(any(Wrapper.class))).thenReturn(List.of(sun));
         ApiException error = assertThrows(ApiException.class,
                 () -> importer.parse(csv("title,hours,owner_id,owner_name\n注册后端,12,2,孙秋实\n")));
         assertEquals("负责人编号与姓名不一致：2 / 孙秋实", error.getMessage());
+    }
+
+    @Test
+    void storySprintAcceptsNumericAndCommonLabels() {
+        var draft = importer.parse(csv("story_id,title,sprint\nS1,登录,1\nS2,查询,Sprint 2\nS3,统计,Sprint3\n"));
+
+        assertEquals(1, draft.path("stories").get(0).path("sprint").asInt());
+        assertEquals(2, draft.path("stories").get(1).path("sprint").asInt());
+        assertEquals(3, draft.path("stories").get(2).path("sprint").asInt());
+        assertTrue(draft.path("stories").get(1).path("_import_sprint_explicit").asBoolean());
+    }
+
+    @Test
+    void missingStorySprintRemainsMissingForLaterInference() {
+        var draft = importer.parse(csv("story_id,title,description\nS1,登录,账号登录\n"));
+
+        assertFalse(draft.path("stories").get(0).has("sprint"));
+        assertFalse(draft.path("stories").get(0).path("_import_sprint_explicit").asBoolean());
+    }
+
+    @Test
+    void invalidStorySprintIsNotSilentlyChangedToSprintOne() {
+        ApiException error = assertThrows(ApiException.class,
+                () -> importer.parse(csv("story_id,title,sprint\nS1,登录,第一阶段\n")));
+
+        assertTrue(error.getMessage().contains("Sprint 不合法"));
     }
 
     private User member(int id, String name) {

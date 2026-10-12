@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
 import { meetingsApi } from '@/api/meetings'
 import { suggestionsApi } from '@/api/suggestions'
 import { agentApi } from '@/api/agent'
@@ -37,8 +38,10 @@ export const useMeetingStore = defineStore('meeting', {
   actions: {
     async loadAll() {
       if (!this.online) return
+      const projectId = useProjectsStore().currentProjectId
+      if (!projectId) { this.meetings = []; this.suggestions = []; this.selected = ''; this.agentRun = null; return }
       const [meetings, suggestions, config] = await Promise.all([
-        meetingsApi.list(), suggestionsApi.list(), agentApi.config().catch(() => null)
+        meetingsApi.list(projectId), suggestionsApi.list(projectId), agentApi.config().catch(() => null)
       ])
       this.meetings = meetings
       this.suggestions = suggestions
@@ -53,7 +56,7 @@ export const useMeetingStore = defineStore('meeting', {
       this.agentError = ''
     },
     async saveMeeting(values) {
-      const meeting = await meetingsApi.create(values)
+      const meeting = await meetingsApi.create(values, useProjectsStore().currentProjectId)
       this.selected = meeting.id
       this.meetings.unshift(meeting)
       return meeting
@@ -62,7 +65,7 @@ export const useMeetingStore = defineStore('meeting', {
        成功后再改本地态,失败(403/404/网络)保持列表与选中不变;
        删除后重新拉取列表并把选中复位为空,转写区与分析面板回到「未选择会议」 */
     async removeMeeting(id) {
-      const result = await meetingsApi.remove(id)
+      const result = await meetingsApi.remove(id, useProjectsStore().currentProjectId)
       this.selected = ''
       this.agentRun = null
       this.agentError = ''
@@ -82,7 +85,7 @@ export const useMeetingStore = defineStore('meeting', {
         this.submission = { fingerprint, key: crypto.randomUUID() }
       }
       body.client_request_id = this.submission.key
-      const suggestion = await suggestionsApi.create(body)
+      const suggestion = await suggestionsApi.create(body, useProjectsStore().currentProjectId)
       this.suggestions = [suggestion, ...this.suggestions.filter(s => s.id !== suggestion.id)]
       return suggestion
     },
@@ -90,7 +93,7 @@ export const useMeetingStore = defineStore('meeting', {
       const payload = changes
         ? { decision: 'modify_and_approve', reason, changes }
         : { decision, reason }
-      const result = await suggestionsApi.review(id, payload)
+      const result = await suggestionsApi.review(id, payload, useProjectsStore().currentProjectId)
       this.suggestions = this.suggestions.map(s => s.id === id ? result : s)
       return result
     },
@@ -98,12 +101,12 @@ export const useMeetingStore = defineStore('meeting', {
     async refreshRun() {
       const id = this.selected
       if (!this.online || !id) return
-      const rows = await meetingsApi.runs(id)
-      const run = rows[0] ? await meetingsApi.getRun(rows[0].id) : null
+      const rows = await meetingsApi.runs(id, useProjectsStore().currentProjectId)
+      const run = rows[0] ? await meetingsApi.getRun(rows[0].id, useProjectsStore().currentProjectId) : null
       if (this.selected !== id) return  // 已切换会议,丢弃过期结果
       this.agentRun = run
       if (run && ['awaiting_review', 'completed'].includes(run.status)) {
-        this.suggestions = await suggestionsApi.list()
+        this.suggestions = await suggestionsApi.list(useProjectsStore().currentProjectId)
       }
       return run
     },
@@ -113,8 +116,8 @@ export const useMeetingStore = defineStore('meeting', {
       this.agentLoading = true
       try {
         const run = retryId
-          ? await meetingsApi.retryRun(retryId)
-          : await meetingsApi.startRun(id)
+          ? await meetingsApi.retryRun(retryId, useProjectsStore().currentProjectId)
+          : await meetingsApi.startRun(id, useProjectsStore().currentProjectId)
         if (this.selected === id) this.agentRun = run
         return run
       } finally {
@@ -127,7 +130,7 @@ export const useMeetingStore = defineStore('meeting', {
       const meeting = await meetingsApi.create({
         title: original.title.slice(0, 190) + ' · 重新分析',
         transcript: original.transcript
-      })
+      }, useProjectsStore().currentProjectId)
       this.meetings.unshift(meeting)
       this.selected = meeting.id
       return meeting

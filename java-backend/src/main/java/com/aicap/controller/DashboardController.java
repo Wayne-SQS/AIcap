@@ -3,6 +3,7 @@ package com.aicap.controller;
 import com.aicap.entity.Story;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.security.Roles;
+import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,20 +22,23 @@ import java.util.Map;
 public class DashboardController {
 
     private final StoryMapper storyMapper;
+    private final ProjectAccessService projectAccess;
 
     @GetMapping("")
-    public Map<String, Object> dashboard() {
+    public Map<String, Object> dashboard(@org.springframework.web.bind.annotation.RequestParam String projectId) {
         Roles.any();
-        long total = storyMapper.selectCount(null);
-        long done = countStatus(2);
-        long doing = countStatus(1);
-        long todo = countStatus(0);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scopedProjectId);
+        long total = storyMapper.selectCount(new QueryWrapper<Story>().eq("project_id", scopedProjectId));
+        long done = countStatus(scopedProjectId, 2);
+        long doing = countStatus(scopedProjectId, 1);
+        long todo = countStatus(scopedProjectId, 0);
         int percent = total > 0 ? (int) Math.round(done * 100.0 / total) : 0;
 
         List<Map<String, Object>> bySprint = new ArrayList<>();
         for (int sp = 1; sp <= 4; sp++) {
-            long t = storyMapper.selectCount(new QueryWrapper<Story>().eq("sprint", sp));
-            long d = storyMapper.selectCount(new QueryWrapper<Story>().eq("sprint", sp).eq("status", 2));
+            long t = storyMapper.selectCount(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("sprint", sp));
+            long d = storyMapper.selectCount(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("sprint", sp).eq("status", 2));
             bySprint.add(Map.of(
                     "sprint", sp,
                     "total", t,
@@ -52,7 +56,7 @@ public class DashboardController {
         return body;
     }
 
-    private long countStatus(int status) {
-        return storyMapper.selectCount(new QueryWrapper<Story>().eq("status", status));
+    private long countStatus(String projectId, int status) {
+        return storyMapper.selectCount(new QueryWrapper<Story>().eq("project_id", projectId).eq("status", status));
     }
 }

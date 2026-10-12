@@ -8,6 +8,10 @@ import com.aicap.mapper.MemberProfileMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.mapper.ProjectMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.entity.Project;
+import com.aicap.entity.ProjectMember;
 import com.aicap.security.PasswordUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,10 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -51,6 +59,9 @@ public class DataSeeder implements ApplicationRunner {
     private final MemberProfileMapper profileMapper;
     private final PasswordUtil passwordUtil;
     private final ObjectMapper objectMapper;
+    private final ProjectMapper projectMapper;
+    private final ProjectMemberMapper projectMemberMapper;
+    private final DataSource dataSource;
 
     @Value("${aicap.seed-on-start:true}")
     private boolean seedOnStart;
@@ -176,9 +187,7 @@ public class DataSeeder implements ApplicationRunner {
             return;
         }
         seedUsers();
-        boolean migrated = migrateLegacyStorySeed();
-        seedStories();
-        seedTasks(migrated);
+        seedProjects();
         seedProfiles();
     }
 
@@ -188,7 +197,7 @@ public class DataSeeder implements ApplicationRunner {
         List<User> existing = userMapper.selectList(null);
         existing.sort((a, b) -> Integer.compare(a.getId(), b.getId()));
 
-        if (existing.isEmpty()) {
+        if (existing.isEmpty() && isInitialLegacyDatabase()) {
             for (UserRow row : USERS) {
                 userMapper.insert(newUser(row));
             }
@@ -245,11 +254,41 @@ public class DataSeeder implements ApplicationRunner {
         return user;
     }
 
+    private void seedProjects() {
+        if (projectMapper.selectById("P002") == null) {
+            Project p = new Project(); p.setId("P002"); p.setName("爱管理"); p.setDescription("正式规划数据待导入"); p.setStatus("ACTIVE"); p.setTotalSprints(0); p.setCreatedAt(LocalDateTime.now()); p.setUpdatedAt(LocalDateTime.now()); projectMapper.insert(p);
+        }
+        for (User user : userMapper.selectList(null)) {
+            for (String projectId : List.of("P002")) {
+                if (!List.of("admin", "owner").contains(user.getRole())) continue;
+                if (projectMemberMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ProjectMember>().eq("project_id", projectId).eq("user_id", user.getId())) > 0) continue;
+                ProjectMember member = new ProjectMember(); member.setProjectId(projectId); member.setUserId(user.getId()); member.setProjectRole("viewer".equals(user.getRole()) ? "viewer" : user.getRole()); member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours()); member.setJoinedAt(LocalDateTime.now()); projectMemberMapper.insert(member);
+            }
+        }
+    }
+
+    private boolean isInitialLegacyDatabase() {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM app_migrations WHERE name='P001_BASELINE_SEEDED'")) {
+            return rs.next() && rs.getInt(1) == 0;
+        } catch (Exception e) {
+            log.warn("无法判断是否为首次数据库初始化，跳过演示数据播种", e);
+            return false;
+        }
+    }
+
+    private void markBaselineSeeded() {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT IGNORE INTO app_migrations(name, applied_at) VALUES ('P001_BASELINE_SEEDED', NOW())");
+        } catch (Exception e) {
+            throw new IllegalStateException("无法记录 P001 初始数据迁移标记", e);
+        }
+    }
+
     // ---------- 故事 ----------
 
     /** 是否为旧的 M01–M23 演示基线(20..23 行且全部是 M1..M23) */
     private boolean isLegacyStorySeed() {
-        List<Story> stories = storyMapper.selectList(null);
+        List<Story> stories = storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001"));
         if (stories.size() < 20 || stories.size() > 23) {
             return false;
         }
@@ -272,10 +311,10 @@ public class DataSeeder implements ApplicationRunner {
             return false;
         }
         Set<String> legacyIds = new HashSet<>();
-        for (Story story : storyMapper.selectList(null)) {
+        for (Story story : storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001"))) {
             legacyIds.add(story.getId());
         }
-        for (Task task : taskMapper.selectList(null)) {
+        for (Task task : taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>().eq("project_id", "P001"))) {
             boolean touched = false;
             if (task.getKanbanCardId() != null && legacyIds.contains(task.getKanbanCardId())) {
                 task.setKanbanCardId(null);
@@ -295,7 +334,7 @@ public class DataSeeder implements ApplicationRunner {
             }
         }
         for (String id : legacyIds) {
-            storyMapper.deleteById(id);
+            storyMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001").eq("code", id));
         }
         insertStories();
         log.info("检测到旧故事基线 M01–M23({} 条),已替换为 US01–US37", legacyIds.size());
@@ -303,7 +342,7 @@ public class DataSeeder implements ApplicationRunner {
     }
 
     private void seedStories() {
-        if (storyMapper.selectCount(null) > 0) {
+        if (storyMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001")) > 0 || !isInitialLegacyDatabase()) {
             return;
         }
         insertStories();
@@ -314,6 +353,7 @@ public class DataSeeder implements ApplicationRunner {
         LocalDateTime now = LocalDateTime.now();
         for (StoryRow row : STORIES) {
             Story story = new Story();
+            story.setProjectId("P001");
             story.setId(row.id());
             story.setTitle(row.title());
             story.setDescription(row.description());
@@ -332,12 +372,13 @@ public class DataSeeder implements ApplicationRunner {
 
     private void seedTasks(boolean migrated) {
         Map<String, Task> existing = new LinkedHashMap<>();
-        for (Task task : taskMapper.selectList(null)) {
+        for (Task task : taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>().eq("project_id", "P001"))) {
             existing.put(task.getId(), task);
         }
-        if (existing.isEmpty()) {
+        if (existing.isEmpty() && isInitialLegacyDatabase()) {
             for (TaskRow row : TASKS) {
                 Task task = new Task();
+                task.setProjectId("P001");
                 task.setId(row.id());
                 applyTaskValues(task, row);
                 taskMapper.insert(task);
@@ -345,6 +386,7 @@ public class DataSeeder implements ApplicationRunner {
             log.info("已播种 {} 条任务(T01–T16,含依赖/进度/阻塞)", TASKS.size());
             return;
         }
+        if (existing.isEmpty()) return;
 
         boolean upgraded = false;
         for (TaskRow row : TASKS) {
@@ -357,6 +399,7 @@ public class DataSeeder implements ApplicationRunner {
                     continue;
                 }
                 Task created = new Task();
+                created.setProjectId("P001");
                 created.setId(row.id());
                 applyTaskValues(created, row);
                 taskMapper.insert(created);

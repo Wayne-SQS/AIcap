@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useReviewStore } from '@/stores/review'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import ReviewEditDialog from '@/components/review/ReviewEditDialog.vue'
@@ -14,6 +15,7 @@ import ReviewEditDialog from '@/components/review/ReviewEditDialog.vue'
 const review = useReviewStore()
 const meeting = useMeetingStore()
 const project = useProjectStore()
+const projects = useProjectsStore()
 const router = useRouter()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -30,8 +32,17 @@ watch(online, v => {
   if (v) meeting.loadAll().catch(() => { /* 可手动刷新 */ })
 }, { immediate: true })
 
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous || !meeting.online) return
+  meeting.meetings = []
+  meeting.suggestions = []
+  meeting.selected = ''
+  meeting.agentRun = null
+  meeting.loadAll().catch(() => { /* 可手动刷新 */ })
+})
+
 async function refresh() {
-  try { await meeting.loadAll(); await project.loadAll() }
+  try { await meeting.loadAll(); await project.loadAll(projects.currentProjectId) }
   catch (err) { notify('刷新失败：' + err.message) }
 }
 
@@ -54,7 +65,7 @@ async function serverDecide(id, decision) {
   try {
     const result = await meeting.review(id, decision, reason)
     notify(result.status === 'approved' ? '已采纳并创建需求 ' + result.pool_item_id : '已拒绝，未改变业务数据')
-    try { await project.loadAll() } catch (err) { notify('审核已保存，但刷新失败：' + err.message) }
+    try { await project.loadAll(projects.currentProjectId) } catch (err) { notify('审核已保存，但刷新失败：' + err.message) }
   } catch (err) { notify('审核未确认，请刷新核对后重试：' + err.message) }
   finally {
     meeting.busy = meeting.busy.filter(x => x !== id)
@@ -73,7 +84,7 @@ async function serverEdit(id) {
   try {
     await meeting.review(id, null, values.reason, values.changes)
     notify('修改已采纳，原始建议已保留；创建需求 ' + '（见需求池）')
-    try { await project.loadAll() } catch (err) { notify('审核已保存，刷新失败：' + err.message) }
+    try { await project.loadAll(projects.currentProjectId) } catch (err) { notify('审核已保存，刷新失败：' + err.message) }
   } catch (err) { notify('审核未确认，请刷新核对后重试：' + err.message) }
   finally {
     meeting.busy = meeting.busy.filter(x => x !== id)

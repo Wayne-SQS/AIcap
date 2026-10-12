@@ -5,7 +5,7 @@ import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
 /* UML 图(真实 SVG,移植自 legacy/index.html renderUML())
-   用例图:4 角色 / 15 用例,坐标与连线切点算法逐字沿用 legacy;
+   用例图:4 角色 / 功能级用例,Story 仅作为功能用例明细来源;
    时序图:「登录并加载项目工作台」14 条消息,参与者泳道与激活条沿用 legacy 几何。
 
    与 legacy 原版的差异(有意为之):
@@ -19,13 +19,13 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
    这里保持同一口径,只是数据源换成了响应式 store。 */
 
 const project = useProjectStore()
-const UML_LAYOUT_KEY = 'aiguanli-uml-layout-v2'
+const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${project.currentProjectId || 'none'}`)
 
 /* ==================== 用例图 ==================== */
 const MIN_USECASE_WIDTH = 140
 const MAX_USECASE_WIDTH = 220
-const USECASE_GAP_X = 72
-const USECASE_GAP_Y = 34
+const USECASE_GAP_X = 36
+const USECASE_GAP_Y = 48
 const USECASE_TOP = 112
 const SYSTEM_X = 175
 const SYSTEM_WIDTH = 850
@@ -39,11 +39,47 @@ const ACTORS = [
   { id: 'admin', name: '管理员', x: 72, y: 125, side: 'left' },
   { id: 'dri', name: '项目负责人 / DRI', x: 72, y: 405, side: 'left' },
   { id: 'member', name: '团队成员', x: 1105, y: 210, side: 'right' },
-  { id: 'viewer', name: '普通用户 / 数据查看者', x: 1105, y: 525, side: 'right' }
+  { id: 'ai', name: 'AI 助手', x: 1105, y: 525, side: 'right' }
 ]
 const actors = reactive(ACTORS.map(a => ({ ...a })))
 
 const usecaseLayout = reactive([])
+
+const FUNCTION_GROUPS = [
+  { id: 'project-management', name: '创建与管理项目', keywords: ['项目与成员范围', '项目层面', '实时项目进度'], actors: ['admin', 'dri'] },
+  { id: 'member-management', name: '管理项目成员', keywords: ['项目与成员范围', '成员 Bandwidth', '成员工作状态汇总'], actors: ['admin', 'dri'] },
+  { id: 'permission-management', name: '配置角色与权限', keywords: ['权限', '角色'], actors: ['admin'] },
+  { id: 'requirements-management', name: '维护需求池', keywords: ['需求池', 'PRD', '需求修改'], actors: ['dri', 'ai'] },
+  { id: 'story-management', name: '管理用户故事', keywords: ['史诗、故事', '故事修订', '故事修改'], actors: ['dri', 'member'] },
+  { id: 'story-map-management', name: '维护故事地图', keywords: ['用户故事地图', '活动和 Sprint', '四视图数据联动'], actors: ['dri', 'member'] },
+  { id: 'task-management', name: '创建和分配任务', keywords: ['任务拆分', '任务调整'], actors: ['dri', 'member'] },
+  { id: 'task-tracking', name: '更新任务状态', keywords: ['任务状态', '拖拽与 WIP'], actors: ['member', 'dri'] },
+  { id: 'gantt-management', name: '查看项目计划', keywords: ['甘特图', '智能排期'], actors: ['dri'] },
+  { id: 'workload-analysis', name: '分析成员工作量', keywords: ['成员任务图', '成员开发活动图', '过载'], actors: ['dri'] },
+  { id: 'progress-analysis', name: '查看项目进度', keywords: ['基础报表', '筛选与趋势分析', '进度预测'], actors: ['dri'] },
+  { id: 'ai-planning', name: '生成项目规划建议', keywords: ['AI PRD 拆解', 'AI 综合', 'AI 闭环'], actors: ['dri', 'ai'] },
+  { id: 'ai-review', name: '审核 AI 建议', keywords: ['建议修订', '建议审核中心', '会议到需求', '会议到任务'], actors: ['dri', 'ai'] },
+  { id: 'uml-management', name: '查看系统模型', keywords: ['UML', '图与任务影响'], actors: ['member', 'ai'] },
+  { id: 'collaboration-management', name: '管理会议与协作事项', keywords: ['会议', 'GitHub', '提交', '协调建议', '代码文档测试', '效率优化'], actors: ['dri', 'member', 'ai'] }
+]
+
+function storySearchText(story) {
+  return [story.title, story.activity, story.description, story.acceptance].filter(Boolean).join(' ')
+}
+
+function aggregateStories(stories) {
+  const remaining = new Set(stories.map(story => story.id))
+  const grouped = FUNCTION_GROUPS.map(group => ({
+    ...group,
+    stories: stories.filter(story => group.keywords.some(keyword => storySearchText(story).includes(keyword)))
+  }))
+  grouped.forEach(group => group.stories.forEach(story => remaining.delete(story.id)))
+  if (remaining.size) {
+    const fallback = grouped[grouped.length - 1]
+    fallback.stories.push(...stories.filter(story => remaining.has(story.id)))
+  }
+  return grouped
+}
 
 function usecaseLines(title) {
   const text = String(title || '未命名故事')
@@ -56,15 +92,15 @@ function usecaseLines(title) {
 function usecaseMetrics(title) {
   const lines = usecaseLines(title)
   const width = Math.min(MAX_USECASE_WIDTH, Math.max(MIN_USECASE_WIDTH, 54 + Math.max(...lines.map(line => line.length)) * 12))
-  const height = lines.length > 1 ? 82 : 66
+  const height = Math.max(66, 44 + lines.length * 14)
   return { lines, width, height, rx: width / 2, ry: height / 2 }
 }
 
-function autoUsecasePositions(stories) {
-  const count = stories.length
-  const columns = count <= 4 ? 1 : 2
+function autoUsecasePositions(usecases) {
+  const count = usecases.length
+  const columns = count <= 2 ? 1 : count <= 6 ? 2 : 3
   const rows = Math.max(1, Math.ceil(count / columns))
-  const items = stories.map(story => ({ story, metrics: usecaseMetrics(story.title) }))
+  const items = usecases.map(usecase => ({ usecase, metrics: usecaseMetrics(usecase.name) }))
   const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(
     ...items.filter((_, index) => index % columns === column).map(item => item.metrics.width),
     MIN_USECASE_WIDTH
@@ -87,7 +123,7 @@ function autoUsecasePositions(stories) {
     yByRow.push(y + height / 2)
     y += height + USECASE_GAP_Y
   }
-  return stories.map((story, index) => {
+  return usecases.map((usecase, index) => {
     const column = index % columns
     const row = Math.floor(index / columns)
     const metrics = items[index].metrics
@@ -97,13 +133,33 @@ function autoUsecasePositions(stories) {
 
 function syncUsecaseLayout(stories) {
   const current = new Map(usecaseLayout.map(item => [item.id, item]))
-  const positions = autoUsecasePositions(stories)
-  const next = stories.map((story, index) => {
-    const saved = current.get(story.id)
+  const groups = aggregateStories(stories)
+  const positions = autoUsecasePositions(groups)
+  const next = groups.map((group, index) => {
+    const saved = current.get(group.id)
     const position = positions[index]
     return saved
-      ? Object.assign(saved, { ref: story.id, storyId: story.id, stories: [story.id], fallback: story.title, type: 'core', ...position })
-      : { id: story.id, ref: story.id, storyId: story.id, stories: [story.id], fallback: story.title, type: 'core', ...position }
+      ? Object.assign(saved, {
+        ref: group.stories.length ? `关联 ${group.stories.length} 条故事` : '暂无关联故事',
+        storyId: group.stories[0]?.id || '',
+        stories: group.stories.map(story => story.id),
+        fallback: group.name,
+        name: group.name,
+        actorIds: group.actors,
+        type: 'core',
+        ...position
+      })
+      : {
+        id: group.id,
+        ref: group.stories.length ? `关联 ${group.stories.length} 条故事` : '暂无关联故事',
+        storyId: group.stories[0]?.id || '',
+        stories: group.stories.map(story => story.id),
+        fallback: group.name,
+        name: group.name,
+        actorIds: group.actors,
+        type: 'core',
+        ...position
+      }
   })
   usecaseLayout.splice(0, usecaseLayout.length, ...next)
 }
@@ -123,30 +179,23 @@ const usecaseBounds = computed(() => {
 
 /* 角色 → 用例 的关联(用例图连线) */
 const relationIds = computed(() => {
-  const ids = usecaseLayout.map(item => item.id)
-  return {
-    admin: ids.slice(0, 2),
-    dri: ids,
-    member: ids.slice(0, Math.min(ids.length, 3)),
-    viewer: ids.slice(0, Math.min(ids.length, 1))
-  }
+  return Object.fromEntries(actors.map(actor => [
+    actor.id,
+    usecaseLayout.filter(item => item.actorIds?.includes(actor.id)).map(item => item.id)
+  ]))
 })
 
 const LEGEND = [
   ['admin', '管理员'],
   ['dri', '项目负责人 / DRI'],
   ['member', '团队成员'],
-  ['viewer', '普通用户 / 数据查看者']
+  ['ai', 'AI 助手']
 ]
 
 const STATUS_TXT = { 0: '待办', 1: '进行中', 2: '已完成' }
 
-/* 用例名取自故事标题(响应式):故事数据变化时用例名与明细同步更新 */
-function storyTitle(id, fallback) {
-  return project.stories.find(s => s.id === id)?.title || fallback
-}
-
-const usecases = computed(() => usecaseLayout.map(u => ({ ...u, name: storyTitle(u.storyId, u.fallback), ref: u.storyId })))
+/* 用例名来自前端功能聚合;原始 Story 只在点击后的明细区域展示。 */
+const usecases = computed(() => usecaseLayout.map(u => ({ ...u, name: u.name || u.fallback })))
 const usecaseById = computed(() => Object.fromEntries(usecases.value.map(u => [u.id, u])))
 const actorById = computed(() => Object.fromEntries(actors.map(a => [a.id, a])))
 
@@ -341,16 +390,21 @@ onMounted(() => {
   if (sequenceZoomMode.value === 'fit') sequenceFitToCanvas()
 })
 
+function resetUmlLayout() {
+  actors.splice(0, actors.length, ...ACTORS.map(actor => ({ ...actor })))
+  participants.splice(0, participants.length, ...PARTICIPANTS.map(participant => ({ ...participant })))
+  usecaseLayout.splice(0, usecaseLayout.length)
+}
 function loadUmlLayout() {
   try {
-    const saved = JSON.parse(localStorage.getItem(UML_LAYOUT_KEY))
+    const saved = JSON.parse(localStorage.getItem(umlLayoutKey.value))
     saved?.actors?.forEach(pos => { const item = actors.find(a => a.id === pos.id); if (item) Object.assign(item, pos) })
     saved?.usecases?.forEach(pos => { const item = usecaseLayout.find(u => u.id === pos.id); if (item) Object.assign(item, pos) })
     saved?.participants?.forEach(pos => { const item = participants.find(p => p.id === pos.id); if (item) item.x = pos.x })
   } catch { /* invalid layout falls back to defaults */ }
 }
 function saveUmlLayout() {
-  localStorage.setItem(UML_LAYOUT_KEY, JSON.stringify({
+  localStorage.setItem(umlLayoutKey.value, JSON.stringify({
     actors: actors.map(({ id, x, y }) => ({ id, x, y })),
     usecases: usecaseLayout.map(({ id, x, y }) => ({ id, x, y })),
     participants: participants.map(({ id, x }) => ({ id, x }))
@@ -359,6 +413,12 @@ function saveUmlLayout() {
 watch(() => project.stories.map(story => story.id), ids => {
   syncUsecaseLayout(ids.map(id => project.stories.find(story => story.id === id)).filter(Boolean))
 }, { immediate: true })
+watch(() => project.currentProjectId, async () => {
+  resetUmlLayout()
+  syncUsecaseLayout(project.stories)
+  await nextTick()
+  loadUmlLayout()
+})
 loadUmlLayout()
 
 function svgPoint(event, svg) {
@@ -386,7 +446,11 @@ function moveLayout(event) {
   const point = svgPoint(event, drag.svg)
   drag.moved = true
   if (drag.diagram === 'usecase') {
-    updateUmlLayout('usecase', drag.id, { x: Math.max(271, Math.min(929, point.x - drag.dx)), y: Math.max(64, Math.min(586, point.y - drag.dy)) })
+    const boundary = usecaseBounds.value.boundary
+    updateUmlLayout('usecase', drag.id, {
+      x: Math.max(boundary.x + 80, Math.min(boundary.x + boundary.width - 80, point.x - drag.dx)),
+      y: Math.max(boundary.y + 64, Math.min(boundary.y + boundary.height - 58, point.y - drag.dy))
+    })
   } else if (drag.diagram === 'actor') {
     const actor = actors.find(a => a.id === drag.id)
     const minX = actor.side === 'left' ? 42 : 1055, maxX = actor.side === 'left' ? 145 : 1158
@@ -424,8 +488,8 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
     </div>
 
     <p class="uml-note">
-      用例图按当前正式需求（{{ project.stories.length }} 条故事）动态生成；新增、删除或重命名 Story 时，用例节点与标题同步更新。
-      角色关联按当前故事顺序自动派生，节点可拖动并保存布局。
+      用例图按当前正式需求聚合为 {{ usecases.length }} 个系统功能；点击功能用例可查看其关联的原始 Story。
+      Story 新增、删除或重命名后，功能用例明细同步更新；节点可拖动并保存布局。
       时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
     </p>
 
@@ -458,8 +522,8 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
            @click.stop="onUsecaseClick(u.id)"
            @keydown.enter.prevent="toggleUc(u.id)" @keydown.space.prevent="toggleUc(u.id)">
           <ellipse class="usecase" :class="u.type" :cx="u.x" :cy="u.y" :rx="u.rx" :ry="u.ry" />
-          <text class="usecase-label" :x="u.x" :y="u.y - 3">
-            <tspan :x="u.x">{{ u.name }}</tspan>
+          <text class="usecase-label" :x="u.x" :y="u.y - (u.lines.length > 1 ? 10 : 3)">
+            <tspan v-for="(line, index) in u.lines" :key="`${u.id}-line-${index}`" :x="u.x" :dy="index === 0 ? 0 : 14">{{ line }}</tspan>
             <tspan class="story-ref" :x="u.x" dy="15">{{ u.ref }}</tspan>
           </text>
         </g>
@@ -477,8 +541,8 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
           </g>
         </g>
 
-        <g class="legend-object" transform="translate(175 636)">
-          <rect class="legend-bg" width="850" height="44" />
+        <g class="legend-object" :transform="`translate(${usecaseBounds.boundary.x} ${usecaseBounds.legendY})`">
+          <rect class="legend-bg" :width="usecaseBounds.boundary.width" :height="LEGEND_HEIGHT" />
           <text class="legend-title" x="18" y="27">连线图例</text>
           <g v-for="(item, index) in LEGEND" :key="item[0]" class="legend-item" :transform="`translate(${128 + index * 176} 0)`">
             <line class="legend-line" :class="item[0]" x1="0" y1="22" x2="32" y2="22" />
@@ -580,18 +644,18 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
 .uml-svg .association.admin{stroke:#2f6b4f}
 .uml-svg .association.dri{stroke:#3f6f8f}
 .uml-svg .association.member{stroke:#b85f2d}
-.uml-svg .association.viewer{stroke:#6b7f8f}
+.uml-svg .association.ai{stroke:#6b7f8f}
 .uml-svg .actor-stroke{fill:none;stroke:var(--ink);stroke-width:2.2;stroke-linecap:square}
 .uml-svg .actor-head{fill:var(--blue);stroke:var(--ink);stroke-width:2.2}
 .uml-svg .actor-label-object,.uml-svg .legend-object{overflow:visible;pointer-events:none}
 .uml-svg .actor-name{fill:var(--ink);font:700 11px/1.25 Arial,"Microsoft YaHei",sans-serif;text-anchor:middle}
 .uml-svg .actor-key{stroke:var(--paper);stroke-width:2}
-.uml-svg .actor-key.admin{fill:#2f6b4f}.uml-svg .actor-key.dri{fill:#3f6f8f}.uml-svg .actor-key.member{fill:#b85f2d}.uml-svg .actor-key.viewer{fill:#6b7f8f}
+.uml-svg .actor-key.admin{fill:#2f6b4f}.uml-svg .actor-key.dri{fill:#3f6f8f}.uml-svg .actor-key.member{fill:#b85f2d}.uml-svg .actor-key.ai{fill:#6b7f8f}
 .uml-svg .legend-bg{fill:var(--paper-2);stroke:var(--line);stroke-width:1.2}
 .uml-svg .legend-title{fill:var(--muted);font:700 10px Arial,"Microsoft YaHei",sans-serif}
 .uml-svg .legend-label{fill:var(--ink);font:10.5px Arial,"Microsoft YaHei",sans-serif}
 .uml-svg .legend-line{fill:none;stroke-width:3}
-.uml-svg .legend-line.admin{stroke:#2f6b4f}.uml-svg .legend-line.dri{stroke:#3f6f8f}.uml-svg .legend-line.member{stroke:#b85f2d}.uml-svg .legend-line.viewer{stroke:#6b7f8f}
+.uml-svg .legend-line.admin{stroke:#2f6b4f}.uml-svg .legend-line.dri{stroke:#3f6f8f}.uml-svg .legend-line.member{stroke:#b85f2d}.uml-svg .legend-line.ai{stroke:#6b7f8f}
 .uml-svg .usecase{stroke:var(--ink);stroke-width:2}
 .uml-svg .usecase.core{fill:var(--green)}
 .uml-svg .usecase.observe{fill:var(--paper)}

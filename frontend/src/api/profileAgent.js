@@ -2,44 +2,49 @@ import { api } from './client'
 
 /* AI 任务提交与成员能力画像智能体:分析/活动/难度/快照/运行记录 */
 export const profileAgentApi = {
+  scoped: (path, projectId) => {
+    const id = String(projectId || '').trim()
+    if (!id) throw new Error('当前项目未选择，无法读取项目画像数据')
+    return `${path}${path.includes('?') ? '&' : '?'}projectId=${encodeURIComponent(id)}`
+  },
   /** 整包分析(只读预览) */
-  analysis: (start, end) => api(`/api/profile-agent/analysis?start=${start}&end=${end}`),
+  analysis: (start, end, projectId) => api(profileAgentApi.scoped(`/api/profile-agent/analysis?start=${start}&end=${end}`, projectId)),
   /** 正式分析(留痕,可重试);传 userId 时只评估这一名成员(只评估某人的提交物) */
-  run: (start, end, userId) => api(`/api/profile-agent/analysis/run?start=${start}&end=${end}${userId != null ? `&userId=${userId}` : ''}`, { method: 'POST' }),
+  run: (start, end, userId, projectId) => api(profileAgentApi.scoped(`/api/profile-agent/analysis/run?start=${start}&end=${end}${userId != null ? `&userId=${userId}` : ''}`, projectId), { method: 'POST' }),
   /** 运行记录 */
   runs: () => api('/api/profile-agent/runs'),
   /** 活动列表 */
-  activities: (params = {}) => {
+  activities: (params = {}, projectId) => {
     const qs = new URLSearchParams()
     if (params.userId != null) qs.set('userId', params.userId)
     if (params.start) qs.set('start', params.start)
     if (params.end) qs.set('end', params.end)
     const q = qs.toString()
-    return api('/api/profile-agent/activities' + (q ? '?' + q : ''))
+    return api(profileAgentApi.scoped('/api/profile-agent/activities' + (q ? '?' + q : ''), projectId))
   },
   /** 录入活动事实 */
-  addActivity: payload => api('/api/profile-agent/activities', { method: 'POST', body: JSON.stringify(payload) }),
+  addActivity: (payload, projectId) => api(profileAgentApi.scoped('/api/profile-agent/activities', projectId), { method: 'POST', body: JSON.stringify(payload) }),
   /** 任务难度(AI 评估+人工覆盖) */
-  difficulty: () => api('/api/profile-agent/difficulty'),
+  difficulty: projectId => api(profileAgentApi.scoped('/api/profile-agent/difficulty', projectId)),
   /** 人工修正难度 */
-  overrideDifficulty: (taskId, payload) =>
-    api(`/api/profile-agent/difficulty/${taskId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  overrideDifficulty: (taskId, payload, projectId) =>
+    api(profileAgentApi.scoped(`/api/profile-agent/difficulty/${taskId}`, projectId), { method: 'PATCH', body: JSON.stringify(payload) }),
   /** 团队风险 → 送审(统一 AI 建议审核中心);agent 为送审来源标识,默认「画像智能体」 */
-  submitRiskSuggestions: (start, end, agent = '画像智能体') =>
-    api(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}&agent=${encodeURIComponent(agent)}`, { method: 'POST' }),
+  submitRiskSuggestions: (start, end, agent = '画像智能体', projectId) =>
+    api(profileAgentApi.scoped(`/api/profile-agent/risks/submit-suggestions?start=${start}&end=${end}&agent=${encodeURIComponent(agent)}`, projectId), { method: 'POST' }),
   /** 画像快照 */
   snapshots: (userId = null) => api('/api/profile-agent/snapshots' + (userId != null ? `?userId=${userId}` : '')),
   /** 画像快照趋势(变化原因) */
   snapshotTrend: (userId = null) => api('/api/profile-agent/snapshots/trend' + (userId != null ? `?userId=${userId}` : '')),
   /** 贡献绿格子热力图(按日聚合) */
-  heatmap: (start, end, userId = null) => {
+  heatmap: (start, end, userId = null, projectId) => {
     let q = `start=${start}&end=${end}`
     if (userId != null) q += `&userId=${userId}`
-    return api(`/api/profile-agent/heatmap?${q}`)
+    return api(profileAgentApi.scoped(`/api/profile-agent/heatmap?${q}`, projectId))
   },
   /** 时间范围对比(本期 vs 上期) */
-  compare: (prevStart, prevEnd, start, end) =>
-    api(`/api/profile-agent/analysis/compare?prevStart=${prevStart}&prevEnd=${prevEnd}&start=${start}&end=${end}`),
+  compare: (prevStart, prevEnd, start, end, projectId) =>
+    api(profileAgentApi.scoped(`/api/profile-agent/analysis/compare?prevStart=${prevStart}&prevEnd=${prevEnd}&start=${start}&end=${end}`, projectId)),
   /** 提交画像纠正(本人或 admin/owner) */
   addCorrection: (userId, field, correctedValue, reason = '') =>
     api(`/api/profile-agent/corrections?userId=${userId}&field=${encodeURIComponent(field)}&correctedValue=${encodeURIComponent(correctedValue)}&reason=${encodeURIComponent(reason)}`, { method: 'POST' }),

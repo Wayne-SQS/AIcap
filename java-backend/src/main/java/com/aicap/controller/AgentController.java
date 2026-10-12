@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -31,26 +32,26 @@ public class AgentController {
     }
 
     @PostMapping("/meetings/{meetingId}/runs")
-    public Map<String, Object> startRun(@PathVariable String meetingId) {
+    public Map<String, Object> startRun(@PathVariable String meetingId, @RequestParam String projectId) {
         User user = Roles.writer();
-        return agentService.createRun(meetingId, user);
+        return agentService.createRun(projectId, meetingId, user);
     }
 
     @GetMapping("/meetings/{meetingId}/runs")
-    public List<Map<String, Object>> meetingRuns(@PathVariable String meetingId) {
+    public List<Map<String, Object>> meetingRuns(@PathVariable String meetingId, @RequestParam String projectId) {
         Roles.any();
-        return agentService.listRuns(meetingId);
+        return agentService.listRuns(projectId, meetingId);
     }
 
     @GetMapping("/agent-runs/{runId}")
-    public Map<String, Object> getRun(@PathVariable String runId) {
+    public Map<String, Object> getRun(@PathVariable String runId, @RequestParam String projectId) {
         Roles.any();
-        return agentService.getRun(runId);
+        return agentService.getRun(projectId, runId);
     }
 
     @PostMapping("/agent-runs/{runId}/retry")
-    public Map<String, Object> retryRun(@PathVariable String runId) {
+    public Map<String, Object> retryRun(@PathVariable String runId, @RequestParam String projectId) {
         User user = Roles.writer();
-        return agentService.retryRun(runId, user);
+        return agentService.retryRun(projectId, runId, user);
     }
 }

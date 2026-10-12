@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { useToast } from '@/composables/useToast'
@@ -7,6 +8,7 @@ import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { agentApi } from '@/api/agent'
 import { derivedTaskSprints } from '@/data/seed'
+import { memberUserId } from '@/data/memberIdentity'
 
 const saving = reactive(new Set())
 
@@ -69,6 +71,7 @@ function analysisFromReport(report, impacts = []) {
 
 export function useProjectActions() {
   const project = useProjectStore()
+  const projects = useProjectsStore()
   const session = useSessionStore()
   const { guard } = usePermissionGuard()
   const { notify } = useToast()
@@ -106,7 +109,7 @@ export function useProjectActions() {
     if (end > task.w[1]) addImpact(report, 'delayRisk', `${task.id} 预计延期 ${end - task.w[1]} 周：W${task.w[0]}-W${task.w[1]} → W${start}-W${end}`, task.id)
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_SCHEDULE', task_id: taskId, start_week: start, end_week: end }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_SCHEDULE', task_id: taskId, start_week: start, end_week: end }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function analyzeTaskOwner(taskId, ownerId) {
@@ -125,7 +128,7 @@ export function useProjectActions() {
     const impacts = [{ entity: task.id, kind: 'task_owner', before: beforeOwner?.name || '未分配', after: target.name, detail: `目标成员 ${target.name} 的六周负载将重新计算` }]
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_OWNER', task_id: taskId, to_owner_id: target.id + 1 }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_OWNER', task_id: taskId, to_owner_id: memberUserId(target.id) }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function analyzeStorySprint(storyId, sprint) {
@@ -138,7 +141,7 @@ export function useProjectActions() {
     const impacts = [{ entity: story.id, kind: 'story_sprint', before: story.sprint, after: Number(sprint), detail: '关联任务排期保持不变' }]
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_STORY_SPRINT', story_id: storyId, sprint: Number(sprint) }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_STORY_SPRINT', story_id: storyId, sprint: Number(sprint) }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function run(key, action, optimistic, rollback, save) {
@@ -148,7 +151,7 @@ export function useProjectActions() {
     optimistic()
     try {
       await save(session.apiMode)
-      if (session.apiMode) await project.loadAll()
+      if (session.apiMode) await project.loadAll(projects.currentProjectId)
       else project.checkConsistency()
       notify('已更新')
       return { ok: true }
@@ -168,7 +171,7 @@ export function useProjectActions() {
     if (story.sprint === next.sprint && story.activity === next.activity) return { ok: true, unchanged: true }
     const before = { sprint: story.sprint, activity: story.activity }
     return run(`story:${storyId}`, '调整故事位置', () => Object.assign(story, next), () => Object.assign(story, before), async online => {
-      if (online) await storiesApi.patch(storyId, next)
+      if (online) await storiesApi.patch(storyId, next, projects.currentProjectId)
       else {
         project.addlog('move', storyId, `移动到 Sprint ${next.sprint} / A${next.activity}`)
         project.persist()
@@ -188,7 +191,7 @@ export function useProjectActions() {
     const before = { w: [...task.w], sprints: [...task.sprints] }
     const nextSprints = derivedTaskSprints(start, end)
     return run(`task:${taskId}`, '调整任务排期', () => { task.w = [start, end]; task.sprints = nextSprints }, () => { task.w = before.w; task.sprints = before.sprints }, async online => {
-      if (online) await tasksApi.patch(taskId, { week_start: start, week_end: end })
+      if (online) await tasksApi.patch(taskId, { week_start: start, week_end: end }, projects.currentProjectId)
       else {
         project.addlog('edit', taskId, `排期 W${start}-W${end}`)
         project.persistTasks()
@@ -203,7 +206,7 @@ export function useProjectActions() {
     if (task.owner === owner.id) return { ok: true, unchanged: true }
     const before = task.owner
     return run(`task:${taskId}`, '调整任务负责人', () => { task.owner = owner.id }, () => { task.owner = before }, async online => {
-      if (online) await tasksApi.patch(taskId, { owner_id: owner.id + 1 })
+      if (online) await tasksApi.patch(taskId, { owner_id: memberUserId(owner.id) }, projects.currentProjectId)
       else {
         project.addlog('edit', taskId, `负责人改为 ${owner.name}`)
         project.persistTasks()

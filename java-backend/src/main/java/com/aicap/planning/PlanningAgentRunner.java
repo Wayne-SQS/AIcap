@@ -37,11 +37,11 @@ public class PlanningAgentRunner {
             不确定目标实体时不要猜 ID，应通过工具查询并在 answer 中说明无法确定。
             """;
 
-    public ObjectNode analyze(String request, ModelClient client) throws AgentError {
-        return analyze(request, client, (kind, detail) -> { });
-    }
+    public ObjectNode analyze(String request, ModelClient client) throws AgentError { throw new AgentError("project_context_missing", "projectId 必填"); }
 
-    public ObjectNode analyze(String request, ModelClient client, BiConsumer<String, String> eventSink) throws AgentError {
+    public ObjectNode analyze(String projectId, String request, ModelClient client) throws AgentError { return analyze(projectId, request, client, (kind, detail) -> { }); }
+
+    public ObjectNode analyze(String projectId, String request, ModelClient client, BiConsumer<String, String> eventSink) throws AgentError {
         List<JsonNode> messages = new ArrayList<>();
         messages.add(message("system", PROMPT));
         messages.add(message("user", request));
@@ -56,7 +56,7 @@ public class PlanningAgentRunner {
                         eventSink.accept("tool_call", "调用只读工具 " + toolName);
                         JsonNode arguments = mapper.readTree(call.path("function").path("arguments").asText("{}"));
                         ObjectNode toolMessage = message("tool", mapper.writeValueAsString(
-                                tools.execute(toolName, arguments)));
+                                tools.execute(projectId, toolName, arguments)));
                         toolMessage.put("tool_call_id", call.path("id").asText());
                         messages.add(toolMessage);
                     } catch (Exception e) {
@@ -67,7 +67,7 @@ public class PlanningAgentRunner {
                 continue;
             }
             ModelClient.Completion finalCompletion = client.complete(messages, tools.definitions(), true);
-            return validator.validate(finalCompletion.message().path("content").asText("{}"));
+            return validator.validate(projectId, finalCompletion.message().path("content").asText("{}"));
         }
         throw new AgentError("step_limit", "规划分析达到轮数上限");
     }

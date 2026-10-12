@@ -1,14 +1,21 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { projectGeneratorApi } from '@/api/projectGenerator'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 
 const project = useProjectStore()
+const projects = useProjectsStore()
+const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const { notify } = useToast()
 const mode = ref('detailed')
+const createMode = computed(() => route.meta.generatorContext === 'create')
+const projectForm = ref({ name: '', description: '', total_sprints: 3 })
 const prompt = ref('')
 const file = ref(null)
 const strategy = ref('merge')
@@ -20,7 +27,9 @@ const storyDialog = ref(null)
 const editingStory = ref(null)
 const storyForm = ref({ id: '', title: '', sprint: 1, priority: 'Should', acceptance: '' })
 let timer = null
-const currentRunKey = 'aiguanli_project_generator_run_id'
+let refreshSequence = 0
+const activeRunId = ref(null)
+const currentRunKey = computed(() => createMode.value ? 'aiguanli_project_generator_run_id-new' : `aiguanli_project_generator_run_id-${projects.currentProjectId || 'none'}`)
 
 const modeText = {
   detailed: { title: '详细自然语言生成', hint: '描述目标、范围、成员分工和交付节奏，由模型生成完整规划草案。' },
@@ -29,7 +38,7 @@ const modeText = {
 }
 const activeMode = computed(() => modeText[mode.value])
 const draft = computed(() => run.value?.draft)
-const canGenerate = computed(() => mode.value === 'excel' ? Boolean(file.value) : prompt.value.trim().length > 0)
+const canGenerate = computed(() => (!createMode.value || projectForm.value.name.trim()) && (mode.value === 'excel' ? Boolean(file.value) : prompt.value.trim().length > 0))
 const canEditDraft = computed(() => run.value?.status === 'waiting_confirmation' && !session.isViewer)
 const sprintOptions = computed(() => (draft.value?.sprints || []).map(item => Number(item.sprint)).filter(Number.isInteger))
 const linkedStoryTasks = computed(() => {
@@ -49,7 +58,7 @@ const eventSteps = computed(() => (run.value?.events || []).map(event => {
   return { kind: event.kind, message: detail.message || event.kind }
 }))
 
-function rememberRun(id) { if (id) localStorage.setItem(currentRunKey, id); else localStorage.removeItem(currentRunKey) }
+function rememberRun(id) { if (id) localStorage.setItem(currentRunKey.value, id); else localStorage.removeItem(currentRunKey.value) }
 function selectMode(key) { mode.value = key; run.value = null; rememberRun(null); clearTimeout(timer) }
 function onFile(event) { file.value = event.target.files?.[0] || null }
 async function openStoryEditor(story) {
@@ -69,9 +78,12 @@ async function saveStoryDraft() {
   if (!form.title.trim() || !form.acceptance.trim()) { notify('故事名称和验收标准不能为空'); return }
   savingStory.value = true
   try {
-    run.value = await projectGeneratorApi.updateStory(run.value.id, editingStory.value.id, {
+    const changes = {
       title: form.title.trim(), sprint: Number(form.sprint), priority: form.priority, acceptance: form.acceptance.trim()
-    })
+    }
+    run.value = createMode.value
+      ? await projectGeneratorApi.updateStoryNew(run.value.id, editingStory.value.id, changes)
+      : await projectGeneratorApi.updateStory(run.value.id, editingStory.value.id, changes, projects.currentProjectId)
     closeStoryEditor()
     notify('故事草案已保存并重新校验')
   } catch (error) { notify('草案保存失败：' + error.message) }
@@ -79,7 +91,12 @@ async function saveStoryDraft() {
 }
 async function refresh(id = run.value?.id) {
   if (!id) return
-  run.value = await projectGeneratorApi.get(id)
+  const sequence = ++refreshSequence
+  const requestedId = id
+  const nextRun = createMode.value ? await projectGeneratorApi.getNew(requestedId) : await projectGeneratorApi.get(requestedId, projects.currentProjectId)
+  if (sequence !== refreshSequence || activeRunId.value !== requestedId) return
+  run.value = nextRun
+  if (run.value.status === 'failed') run.value = { ...run.value, draft: null }
   mode.value = run.value.mode === 'overview' ? 'overview' : (run.value.mode === 'excel' ? 'excel' : 'detailed')
   strategy.value = run.value.strategy || 'merge'
   rememberRun(run.value.id)
@@ -90,14 +107,24 @@ async function generate() {
   if (!canGenerate.value || busy.value) return
   busy.value = true
   replaceConfirmed.value = false
+  clearTimeout(timer)
+  refreshSequence++
+  activeRunId.value = null
+  run.value = null
+  rememberRun(null)
   try {
-    run.value = mode.value === 'excel'
-      ? await projectGeneratorApi.importFile(file.value, strategy.value)
-      : await projectGeneratorApi.create(mode.value, prompt.value.trim(), strategy.value)
+    run.value = createMode.value
+      ? (mode.value === 'excel'
+          ? await projectGeneratorApi.importNew(file.value, projectForm.value)
+          : await projectGeneratorApi.createNew(mode.value, prompt.value.trim(), projectForm.value))
+      : (mode.value === 'excel'
+          ? await projectGeneratorApi.importFile(file.value, strategy.value, projects.currentProjectId)
+          : await projectGeneratorApi.create(mode.value, prompt.value.trim(), strategy.value, projects.currentProjectId))
+    activeRunId.value = run.value.id
     rememberRun(run.value.id)
     await refresh(run.value.id)
     notify(mode.value === 'excel' ? '表格已解析为项目草案' : '生成请求已提交')
-  } catch (error) { notify('生成失败：' + error.message) }
+  } catch (error) { clearTimeout(timer); refreshSequence++; activeRunId.value = null; run.value = null; rememberRun(null); notify('生成失败：' + error.message) }
   finally { busy.value = false }
 }
 async function confirm() {
@@ -105,24 +132,37 @@ async function confirm() {
   if (strategy.value === 'replace' && !replaceConfirmed.value) { notify('请先确认替换现有 Story 和 Task'); return }
   busy.value = true
   try {
-    run.value = await projectGeneratorApi.confirm(run.value.id, replaceConfirmed.value)
-    await project.loadAll()
-    notify('项目规划已写入，四类视图已刷新')
+    run.value = createMode.value
+      ? await projectGeneratorApi.confirmNew(run.value.id)
+      : await projectGeneratorApi.confirm(run.value.id, replaceConfirmed.value, projects.currentProjectId)
+    if (createMode.value) {
+      const projectId = run.value.project_id
+      if (!projectId) throw new Error('后端未返回新项目编号')
+      await projects.loadProjects()
+      await projects.selectProject(projectId)
+      await project.loadAll(projectId)
+      rememberRun(null)
+      notify(`${projectId} 新项目已创建`)
+      await router.push({ name: 'project-overview', params: { projectId } })
+    } else {
+      await project.loadAll(projects.currentProjectId)
+      notify('项目规划已写入，四类视图已刷新')
+    }
   } catch (error) { await refresh(run.value.id).catch(() => {}); notify('执行失败：' + error.message) }
   finally { busy.value = false }
 }
 async function cancel() {
   if (!run.value || busy.value) return
   busy.value = true
-  try { run.value = await projectGeneratorApi.cancel(run.value.id); notify('已取消，正式项目数据未修改') }
+  try { run.value = createMode.value ? await projectGeneratorApi.cancelNew(run.value.id) : await projectGeneratorApi.cancel(run.value.id, projects.currentProjectId); notify('已取消，正式项目数据未修改') }
   catch (error) { notify(error.message) }
   finally { busy.value = false }
 }
 function reset() { clearTimeout(timer); closeStoryEditor(); rememberRun(null); prompt.value = ''; file.value = null; run.value = null; replaceConfirmed.value = false }
 onMounted(async () => {
-  const savedRunId = localStorage.getItem(currentRunKey)
+  const savedRunId = localStorage.getItem(currentRunKey.value)
   if (!savedRunId) return
-  try { await refresh(savedRunId) }
+  try { activeRunId.value = savedRunId; await refresh(savedRunId) }
   catch { rememberRun(null) }
 })
 onUnmounted(() => { clearTimeout(timer); storyDialog.value?.close() })
@@ -140,15 +180,86 @@ onUnmounted(() => { clearTimeout(timer); storyDialog.value?.close() })
     <div class="generator-layout">
       <section class="generator-form">
         <div class="h-sec">{{ activeMode.title }}</div>
-        <p class="generator-hint">{{ activeMode.hint }}</p>
-        <textarea v-if="mode !== 'excel'" v-model="prompt" rows="9" maxlength="4000" :placeholder="mode === 'detailed' ? '例如：规划一个客户工单系统，包含管理员、客服和主管，分 3 个 Sprint 交付。' : '例如：做一个面向小团队的客户工单系统，6 周完成。'" />
+        <div v-if="createMode && mode === 'detailed'" class="generator-detailed-form">
+          <section class="generator-form-block generator-basics" aria-labelledby="generator-basics-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-basics-title">项目基础信息</h2>
+              <span>定义项目名称、范围和迭代周期</span>
+            </div>
+            <div class="generator-basic-fields">
+              <label class="generator-field generator-name-field"><span>项目名称</span><input v-model="projectForm.name" maxlength="200" required placeholder="例如：客户工单系统"></label>
+              <label class="generator-field generator-description-field"><span>项目描述</span><textarea v-model="projectForm.description" rows="3" maxlength="1000" placeholder="描述项目目标和范围"></textarea></label>
+              <label class="generator-field generator-sprint-field"><span>Sprint 数量</span><input v-model.number="projectForm.total_sprints" type="number" min="1" max="6"></label>
+            </div>
+          </section>
+          <section class="generator-form-block generator-requirements generator-detailed-requirements" aria-labelledby="generator-requirements-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-requirements-title">详细自然语言需求</h2>
+              <span>描述项目目标、主要功能、成员分工和交付节奏，模型将据此生成完整规划草案。</span>
+            </div>
+            <textarea v-model="prompt" rows="7" maxlength="4000" placeholder="例如：规划一个客户工单系统，包含管理员、客服和主管，分 3 个 Sprint 交付。"></textarea>
+          </section>
+        </div>
+        <div v-else-if="createMode && mode === 'excel'" class="generator-detailed-form generator-excel-form">
+          <section class="generator-form-block generator-basics" aria-labelledby="generator-excel-basics-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-excel-basics-title">项目基础信息</h2>
+              <span>定义项目名称、范围和迭代周期</span>
+            </div>
+            <div class="generator-basic-fields">
+              <label class="generator-field generator-name-field"><span>项目名称</span><input v-model="projectForm.name" maxlength="200" required placeholder="例如：客户工单系统"></label>
+              <label class="generator-field generator-description-field"><span>项目描述</span><textarea v-model="projectForm.description" rows="3" maxlength="1000" placeholder="描述项目目标和范围"></textarea></label>
+              <label class="generator-field generator-sprint-field"><span>Sprint 数量</span><input v-model.number="projectForm.total_sprints" type="number" min="1" max="6"></label>
+            </div>
+          </section>
+          <section class="generator-form-block generator-import" aria-labelledby="generator-import-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-import-title">导入 Excel / CSV 文件</h2>
+              <span>上传包含 Story、Task、排期等信息的 .xlsx 或 .csv 文件。</span>
+            </div>
+            <label class="generator-file-box">
+              <input class="generator-file-input" type="file" accept=".csv,.xlsx" @change="onFile">
+              <span class="generator-file-action">选择文件</span>
+              <span class="generator-file-status" :class="{ 'has-file': file }" :title="file?.name || '尚未选择文件'">{{ file?.name || '尚未选择文件' }}</span>
+              <small>支持 .xlsx / .csv</small>
+            </label>
+          </section>
+        </div>
+        <div v-else-if="createMode && mode === 'overview'" class="generator-detailed-form generator-overview-form">
+          <section class="generator-form-block generator-basics" aria-labelledby="generator-overview-basics-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-overview-basics-title">项目基础信息</h2>
+              <span>定义项目名称、范围和迭代周期</span>
+            </div>
+            <div class="generator-basic-fields">
+              <label class="generator-field generator-name-field"><span>项目名称</span><input v-model="projectForm.name" maxlength="200" required placeholder="例如：客户工单系统"></label>
+              <label class="generator-field generator-description-field"><span>项目描述</span><textarea v-model="projectForm.description" rows="3" maxlength="1000" placeholder="描述项目目标和范围"></textarea></label>
+              <label class="generator-field generator-sprint-field"><span>Sprint 数量</span><input v-model.number="projectForm.total_sprints" type="number" min="1" max="6"></label>
+            </div>
+          </section>
+          <section class="generator-form-block generator-requirements generator-overview-requirements" aria-labelledby="generator-overview-requirements-title">
+            <div class="generator-block-heading">
+              <h2 id="generator-overview-requirements-title">概略自然语言需求</h2>
+              <span>描述项目方向、核心功能和交付目标，模型将自动补全 Story、Task、负责人、依赖和里程碑。</span>
+            </div>
+            <textarea v-model="prompt" rows="6" maxlength="4000" placeholder="例如：做一个面向小团队的客户工单系统，6 周完成。"></textarea>
+          </section>
+          <p class="generator-note generator-overview-note">新建模式只会生成新项目草案，确认后分配新的 Project ID，不会合并或替换现有项目。</p>
+        </div>
         <template v-else>
-          <label class="generator-upload"><input type="file" accept=".csv,.xlsx" @change="onFile">选择 Excel / CSV 文件</label>
-          <p class="small">{{ file?.name || '尚未选择文件' }}</p>
-          <p class="generator-note">表头可使用 title/name、hours、owner_name 或 owner_id、week_start、week_end、story_ref、depends_on；没有 hours 的行按 Story 导入。普通用户推荐直接填写 owner_name，owner_id 作为兼容方式保留。</p>
+          <p class="generator-hint">{{ activeMode.hint }}</p>
+          <textarea v-if="mode !== 'excel'" v-model="prompt" rows="9" maxlength="4000" :placeholder="mode === 'detailed' ? '例如：规划一个客户工单系统，包含管理员、客服和主管，分 3 个 Sprint 交付。' : '例如：做一个面向小团队的客户工单系统，6 周完成。'" />
         </template>
-        <label class="generator-strategy"><span>写入策略</span><select v-model="strategy" :disabled="Boolean(run)"><option value="merge">合并到现有项目</option><option value="replace">替换现有 Story / Task</option></select></label>
-        <p v-if="strategy === 'replace'" class="planning-error">替换会在确认时清空现有 Story 和 Task。生成草案阶段不会修改业务数据。</p>
+        <template v-if="mode === 'excel' && !createMode">
+          <label class="generator-file-box">
+            <input class="generator-file-input" type="file" accept=".csv,.xlsx" @change="onFile">
+            <span class="generator-file-action">选择文件</span>
+            <span class="generator-file-status" :class="{ 'has-file': file }" :title="file?.name || '尚未选择文件'">{{ file?.name || '尚未选择文件' }}</span>
+            <small>支持 .xlsx / .csv</small>
+          </label>
+        </template>
+        <label v-if="!createMode" class="generator-strategy"><span>写入策略</span><select v-model="strategy" :disabled="Boolean(run)"><option value="merge">合并到现有项目</option><option value="replace">替换现有 Story / Task</option></select></label>
+        <p v-if="!createMode && strategy === 'replace'" class="planning-error">替换会在确认时清空现有 Story 和 Task。生成草案阶段不会修改业务数据。</p>
         <div class="generator-actions"><button type="button" @click="reset">清空</button><button type="button" class="primary" :disabled="!canGenerate || busy" @click="generate">{{ busy ? '处理中…' : '生成项目图草案' }}</button></div>
       </section>
       <aside class="generator-output">
@@ -178,14 +289,13 @@ onUnmounted(() => { clearTimeout(timer); storyDialog.value?.close() })
             <div v-if="draft.warnings?.length" class="planning-warnings"><b>校验提示</b><div v-for="warning in draft.warnings" :key="warning">{{ warning }}</div></div>
           </div>
           <div v-if="run.status === 'waiting_confirmation'" class="generator-confirm-bar">
-            <label v-if="strategy === 'replace'" class="generator-replace-confirm"><input v-model="replaceConfirmed" type="checkbox"> 我确认替换当前全部 Story 和 Task</label>
-            <div v-if="!session.isViewer" class="planning-actions"><button type="button" :disabled="busy" @click="cancel">取消生成</button><button type="button" class="primary" :disabled="busy || (strategy === 'replace' && !replaceConfirmed)" @click="confirm">确认写入项目</button></div>
+            <label v-if="!createMode && strategy === 'replace'" class="generator-replace-confirm"><input v-model="replaceConfirmed" type="checkbox"> 我确认替换当前全部 Story 和 Task</label>
+            <div v-if="!session.isViewer" class="planning-actions"><button type="button" :disabled="busy" @click="cancel">取消生成</button><button type="button" class="primary" :disabled="busy || (!createMode && strategy === 'replace' && !replaceConfirmed)" @click="confirm">{{ createMode ? '确认创建新项目' : '确认写入项目' }}</button></div>
             <p v-else class="small">只读角色可以审阅草案，但不能写入项目。</p>
           </div>
         </template>
       </div>
     </section>
-    <div class="generator-source-note"><b>智能体边界</b><span>会议智能体处理会议内容；画图智能体修改已有规划；智能生成项目图从零创建规划。</span><span>当前数据：{{ project.stories.length }} Story · {{ project.tasks.length }} Task · {{ project.members.length }} 成员</span></div>
     <dialog ref="storyDialog" class="generator-story-dialog" aria-labelledby="generator-story-dialog-title" @cancel.prevent="closeStoryEditor">
       <header><h2 id="generator-story-dialog-title">编辑用户故事草案</h2><button type="button" aria-label="关闭" @click="closeStoryEditor">×</button></header>
       <form class="generator-story-form" @submit.prevent="saveStoryDraft">
@@ -202,3 +312,310 @@ onUnmounted(() => { clearTimeout(timer); storyDialog.value?.close() })
     </dialog>
   </section>
 </template>
+
+<style scoped>
+.project-generator-view > .hero {
+  margin-bottom: 22px;
+}
+
+.generator-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.generator-mode-tabs button {
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.generator-mode-tabs button:last-child {
+  border-right: 2px solid var(--ink);
+}
+
+.generator-mode-tabs button:hover {
+  background: var(--paper-2);
+}
+
+.generator-mode-tabs button.active {
+  border-color: var(--ink);
+  background: var(--green);
+  box-shadow: inset 0 -4px 0 var(--ink);
+  font-weight: 800;
+}
+
+.generator-mode-tabs button:focus-visible {
+  outline: 3px solid #c1662a;
+  outline-offset: 2px;
+}
+
+.generator-form,
+.generator-output {
+  padding: 18px;
+}
+
+.generator-form > .h-sec,
+.generator-output > .h-sec {
+  margin: 2px 0 16px;
+}
+
+.generator-detailed-form {
+  display: grid;
+  gap: 18px;
+}
+
+.generator-form-block {
+  min-width: 0;
+}
+
+.generator-form-block + .generator-form-block {
+  padding-top: 18px;
+  border-top: 2px solid var(--line);
+}
+
+.generator-block-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.generator-block-heading h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--ink);
+  font: 700 14px/1.3 var(--mono);
+  letter-spacing: 1px;
+}
+
+.generator-block-heading span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.generator-basic-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.generator-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.generator-field > span {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.generator-field input,
+.generator-field textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.generator-name-field {
+  max-width: 560px;
+}
+
+.generator-description-field textarea {
+  min-height: 96px;
+}
+
+.generator-sprint-field {
+  width: 132px;
+}
+
+.generator-sprint-field input {
+  height: 40px;
+}
+
+.generator-requirements > textarea {
+  min-height: 238px;
+  padding: 12px 14px;
+  line-height: 1.65;
+}
+
+.generator-detailed-requirements > textarea {
+  min-height: 360px;
+  padding: 12px 14px;
+  overflow: auto;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.generator-overview-requirements > textarea {
+  min-height: 196px;
+}
+
+.generator-overview-note {
+  margin: 0;
+}
+
+.generator-file-box {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 116px;
+  padding: 16px;
+  border: 2px dashed var(--ink);
+  background: var(--paper-2);
+  cursor: pointer;
+}
+
+.generator-file-box:focus-within {
+  outline: 3px solid #c1662a;
+  outline-offset: 3px;
+}
+
+.generator-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.generator-file-action {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border: 2px solid var(--ink);
+  background: var(--green);
+  box-shadow: 2px 2px 0 var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.generator-file-box:hover .generator-file-action {
+  background: var(--green-2);
+}
+
+.generator-file-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generator-file-status.has-file {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.generator-file-box small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font: 11px/1.4 var(--mono);
+}
+
+.generator-actions {
+  align-items: stretch;
+  padding-top: 2px;
+}
+
+.generator-actions button {
+  min-width: 104px;
+  min-height: 40px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.generator-actions .primary {
+  min-width: 190px;
+}
+
+.generator-output .generator-graph-list {
+  gap: 10px;
+}
+
+.generator-output .generator-graph-list > div {
+  padding: 11px 12px;
+}
+
+.generator-output .generator-empty {
+  margin-top: 10px;
+}
+
+@media (max-width: 800px) {
+  .generator-mode-tabs {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .generator-mode-tabs button,
+  .generator-mode-tabs button:last-child {
+    border: 2px solid var(--ink);
+  }
+
+  .generator-form,
+  .generator-output {
+    padding: 14px;
+  }
+
+  .generator-block-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .generator-block-heading span {
+    text-align: left;
+  }
+
+  .generator-name-field {
+    max-width: none;
+  }
+
+  .generator-file-box {
+    grid-template-columns: 1fr;
+  }
+
+  .generator-file-status,
+  .generator-file-box small {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .generator-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .generator-actions button,
+  .generator-actions .primary {
+    width: 100%;
+    min-width: 0;
+  }
+}
+</style>
