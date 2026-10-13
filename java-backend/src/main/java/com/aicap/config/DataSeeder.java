@@ -201,13 +201,20 @@ public class DataSeeder implements ApplicationRunner {
         for (int i = 0; i < aligned; i++) {
             User user = existing.get(i);
             UserRow row = USERS.get(i);
+            /* 容量只在**缺失(null)**时补种子值 —— 绝不能拿它跟种子比对。
+               旧判据 `user.getCapacityHours() != row.capacityHours()` 让"容量不等于种子值"
+               也算需要对齐,于是 PATCH /capacity 设成 0 或清成未配置之后,**每次重启都会被改回 60**:
+               US27 要的"设置、保存和读取"根本存不住。存量库一次性迁移(补列时全为 60 → 按基线写 48/54)
+               早已完成,这里保留 null 兜底即可。 */
+            boolean needsCapacity = user.getCapacityHours() == null;
             if (!row.displayName().equals(user.getDisplayName()) || !row.role().equals(user.getRole())
-                    || !row.color().equals(user.getColor())
-                    || user.getCapacityHours() == null || user.getCapacityHours() != row.capacityHours()) {
+                    || !row.color().equals(user.getColor()) || needsCapacity) {
                 user.setDisplayName(row.displayName());
                 user.setRole(row.role());
                 user.setColor(row.color());
-                user.setCapacityHours(row.capacityHours());
+                if (needsCapacity) {
+                    user.setCapacityHours(row.capacityHours());
+                }
                 userMapper.updateById(user);
                 changed = true;
             }

@@ -16,6 +16,8 @@ import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/d
    - 离线:落回 seed.js 的 US01–US37 基线(与后端 DataSeeder 同源)。
    - 血缘口径保持:v2 的「看板↔甘特强制血缘」不变(subTasksOf/cardPct/groupPct),
      此处新增 mcc 新版引入的共享只读选择器(任务状态/负载/依赖/一致性自检),四视图共用一套算法。
+   - **容量三态**(US11/US27,口径见 capacityOf):未配置(null)≠ 确认为零(0)≠ 正常(>0)。
+     判定一律走 capacityOf / utilization,负载率显示走 loadRateText / loadRateWidth。
 */
 
 function validStory(x) {
@@ -77,6 +79,27 @@ function weeklyHoursOf(task, out) {
   let remainder = task.h - base * count
   for (let w = start; w <= end; w++) out[w - 1] += base + (remainder-- > 0 ? 1 : 0)
   return out
+}
+
+/**
+ * 容量读数 → { known, hours }。**判定容量必须走这里,不要只取数字。**
+ *
+ * 口径来自 `docs/项目侧交接_会议Agent接入_v0.1.md:56`:
+ * 「无容量数据返回 unknown,**不当作零或无限容量**;容量为零时避免除零。」
+ * 即三态必须分开:
+ *   - `null` / `undefined` / 空串 / 非法值 → `{known:false}`「未配置」:信息不足,不判超载,负载率显示「—」
+ *   - `0`                                → `{known:true, hours:0}`「确认为零」:任何 >0 工时都是超载
+ *   - `>0`                               → `{known:true, hours:n}` 正常
+ *
+ * 旧实现把三者塌成一个数(`Math.max(0, Number(x) || 0)`),于是"零容量"被当成"没有上限",
+ * 负载率显示 0%、「充足」—— 这正是 US11 评审未通过的根因。
+ */
+export function capacityOf(member) {
+  const raw = member ? member.capacity : null
+  if (raw === null || raw === undefined || raw === '') return { known: false, hours: 0 }
+  const hours = Number(raw)
+  if (!Number.isFinite(hours) || hours < 0) return { known: false, hours: 0 }
+  return { known: true, hours }
 }
 
 /** 任务引用字段(T 编号 / US 编号)统一解析:逗号分隔 + 去空白 */
@@ -147,18 +170,39 @@ export const useProjectStore = defineStore('project', {
       return tail && tail !== m.role ? `${ROLE_TXT[m.roleKey] || m.roleKey} · ${tail}` : m.role
     },
     memberTasks: s => id => s.tasks.filter(t => t.owner === id),
-    capacityHours: s => id => Math.max(0, Number((s.members.find(x => x.id === id) || {}).capacity) || 0),
+    /** 容量读数 { known, hours } —— 判定容量的唯一入口(三态见模块头 capacityOf) */
+    capacityOf: s => id => capacityOf(s.members.find(x => x.id === id)),
+    /** 六周可用容量(小时);未配置时回落 0 —— 仅供展示,判定请用 capacityOf / utilization */
+    capacityHours: s => id => capacityOf(s.members.find(x => x.id === id)).hours,
     allocatedHours: s => id => s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0),
+    /** 利用率:未配置 → NaN(未知);零容量且有工时 → Infinity;零容量且无工时 → 0;其余 = 已分配 / 容量 */
     utilization: s => id => {
-      const cap = Number((s.members.find(x => x.id === id) || {}).capacity) || 0
-      return cap ? s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      const cap = capacityOf(s.members.find(x => x.id === id))
+      const alloc = s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0)
+      if (!cap.known) return NaN
+      if (cap.hours === 0) return alloc > 0 ? Infinity : 0
+      return alloc / cap.hours
     },
-    /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
+    /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用。
+        「未配置」单列一态(灰),但它不是负载档位,故不进 .load-legend 的 4 档图例。 */
     capacityStatus: () => utilization => {
+      if (Number.isNaN(utilization)) return { key: 'unset', label: '未配置' }
       if (utilization > 1) return { key: 'over', label: '超载' }
       if (utilization >= .8) return { key: 'busy', label: '偏忙' }
       if (utilization >= .6) return { key: 'normal', label: '正常' }
       return { key: 'low', label: '充足' }
+    },
+    /** 负载率显示:未配置 →「—」;零容量且有工时 →「∞」;其余「N%」 */
+    loadRateText: () => utilization => {
+      if (Number.isNaN(utilization)) return '—'
+      if (!Number.isFinite(utilization)) return '∞'
+      return Math.round(utilization * 100) + '%'
+    },
+    /** 负载率进度条宽度(0..100):未配置 → 0;零容量满溢 → 100 */
+    loadRateWidth: () => utilization => {
+      if (Number.isNaN(utilization)) return 0
+      if (!Number.isFinite(utilization)) return 100
+      return Math.max(0, Math.min(100, Math.round(utilization * 100)))
     },
     memberWeeklyLoad: s => id => {
       const out = Array(6).fill(0)
@@ -268,7 +312,10 @@ export const useProjectStore = defineStore('project', {
           ...m,
           name: u.display_name || u.username,
           roleKey: u.role || m.roleKey,
-          capacity: u.capacity_hours || m.capacity
+          /* 容量三态原样透传:后端给 null 表示「未配置」,不得回落成种子里的 60。
+             旧写法 `u.capacity_hours || m.capacity` 会把 0 和 null 一起吞掉 ——
+             这是"零容量不可达"的最后一道闸门(后端真发 0 也会在这里变回 60)。 */
+          capacity: u.capacity_hours === undefined ? m.capacity : u.capacity_hours
         }
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
@@ -277,7 +324,7 @@ export const useProjectStore = defineStore('project', {
         if (!this.members.some(m => m.id === idx)) {
           this.members.push({
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
-            roleKey: u.role, tag: '', capacity: u.capacity_hours || 60,
+            roleKey: u.role, tag: '', capacity: u.capacity_hours === undefined ? null : u.capacity_hours,
             accent: MEMBER_COLORS[idx] || 'gray'
           })
         }
@@ -430,7 +477,19 @@ export const useProjectStore = defineStore('project', {
       if (memberIds.some((id, i) => id !== i)) {
         errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
       }
-      this.members.forEach(m => { if ((Number(m.capacity) || 0) <= 0) errors.push(`成员 ${m.name} 容量无效`) })
+      /* 容量自检按三态分开:旧写法 `(Number(m.capacity) || 0) <= 0` 把「未配置」和
+         「确认为 0」都报成"容量无效"错误 —— 与负载视图把它们显示成两种状态自相矛盾。
+         现在:未配置 → 告警(信息缺口,可继续用);确认为 0 → 合法,不报;
+         只有负数/非数字才是真错误。 */
+      this.members.forEach(m => {
+        const raw = m.capacity
+        const blank = raw === null || raw === undefined || raw === ''
+        if (!blank && !(Number(raw) >= 0)) {
+          errors.push(`成员 ${m.name} 容量无效：${raw}`)
+        } else if (!capacityOf(m).known) {
+          warnings.push(`成员 ${m.name} 容量未配置`)
+        }
+      })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)
       const result = { warnings, errors }

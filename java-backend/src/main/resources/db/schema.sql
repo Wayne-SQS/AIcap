@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `color` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `capacity_hours` int NOT NULL DEFAULT '60' COMMENT '六周可用容量(小时),成员负载视图分母',
+  `capacity_hours` int DEFAULT NULL COMMENT '六周可用容量(小时),成员负载视图分母;NULL=未配置(不判超载),0=确认无可用(任何负载即超载)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `ix_users_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

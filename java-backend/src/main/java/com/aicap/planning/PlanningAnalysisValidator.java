@@ -201,13 +201,23 @@ public class PlanningAnalysisValidator {
 
     private void analyzeOwnerLoad(Task task, User target, ArrayNode warnings) {
         if (task.getHours() == null || task.getHours() <= 0) return;
+        /* 容量三态 + **单位对齐**:load[] 是「每周工时」,而 capacity_hours 是「六周总容量」。
+           旧写法 `after > getCapacityHours()` 拿周工时去比 60h 总容量,阈值等于放宽 6 倍 ——
+           周负荷 30h(实际 3 倍超载)也不报,同一处消息却把它写成「周容量」。
+           未配置 → 不判超载但要说明;确认为 0 → 周容量为 0,任何 >0 工时都超限。 */
+        Integer capacity = target.getCapacityHours();
+        if (capacity == null || capacity < 0) {
+            warnings.add("成员负载：" + target.getDisplayName() + " 容量未配置，无法判断是否超限");
+            return;
+        }
         int[] load = weeklyLoad(target.getId());
+        int weeklyCapacity = capacity / 6;
         int start = Math.max(1, task.getWeekStart()); int end = Math.min(6, task.getWeekEnd());
         int count = Math.max(1, end - start + 1); int base = task.getHours() / count; int remainder = task.getHours() % count;
         for (int week = start; week <= end; week++) {
             int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
-            if (after > target.getCapacityHours()) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
-                    + " 调整后 " + after + "h / 周容量 " + target.getCapacityHours() + "h");
+            if (after > weeklyCapacity) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
+                    + " 调整后 " + after + "h / 周容量 " + weeklyCapacity + "h");
         }
     }
 

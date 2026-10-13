@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `frontend/` | **现行**前端:Vue3 + Vite + Pinia(像素风,15 视图) |
 | `java-backend/` | **现行**平台后端:Java 23 + Spring Boot 3.5 + MyBatis-Plus(8080) |
 | `ai-service/` | **现行**会议 Agent:Python + FastAPI + **LangGraph**(8090)。五类会议的类型化分析 + 音频转写/说话人分离;写库一律回 Java 业务接口 |
-| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100)。进度口径以它自己的 `README.md` 状态表为准——当前 **S5′**:S4′.2 的有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 七端点之上,又在循环前接上了规划相 `orchestrator.plan()`(真实实现:路由 + 反问阈值 + `routing_logs` + 触发型工具,**只有 `plan()`,没有 `execute()`**);`report.build_report()` 是**唯一**未落地项(`raise NotImplementedError("复盘报告属 S8′")`)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
+| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100)。进度看契约 §8(见文末「设计文档的定位」),本层 `README.md` 的状态表是它的镜像——当前 **S5′**:S4′.2 的有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 侧会话/事件/检查点端点之上,又在循环前接上了规划相 `orchestrator.plan()`(真实实现:路由 + 反问阈值 + 触发型工具,**只有 `plan()`,没有 `execute()`**),并新增 `routing_logs` 表与 `POST/GET /api/agents/routing-logs`。**未落地**:`report.build_report()` 是唯一骨架(`raise NotImplementedError("复盘报告属 S8′")`);另两项契约里明确挂着 —— ⛔ `start_profile_analysis`(画像域无后台消费者)、⏳ `routing_logs` 真机联调(端点已落地,需 `mvn -B package` + 重启后端才能验通)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
 | `deploy/` | **现行**生产编排:`deploy/compose.yaml` 四容器(Nginx / Java / ai / MySQL) |
 | `backend/` | **归档**:FastAPI + SQLAlchemy 参考实现。**不要按它改功能**,但它的 `docker-compose.yml` 仍是**本机开发/测试**起 MySQL(3307)的现行方式;生产编排走 `deploy/compose.yaml`,两者别混用 |
 | `legacy/` | **归档**:Vue 改造前的旧版单文件前端 |
@@ -75,7 +75,7 @@ cd frontend
 npm install
 npm run dev        # 必须用 http://localhost:5173 访问
 npm run build
-npm run e2e:verify # 浏览器验收(8 例,走系统 Edge)
+npm run e2e:verify # 浏览器验收(frontend/e2e-verify/,19 个 spec / 37 例;走系统 Edge)
 npm run e2e:smoke  # 同配置,但 --grep 只跑 8 个命名场景(离线演示/AI 工作台/跨来源队列/…)
 ```
 
@@ -147,7 +147,7 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 **两代会议 Agent 并存(改会议相关代码前必读)**:`java-backend/.../agent/` 是**上一代**(模型自主工具循环;通用会议,不分类型);`ai-service/` 是**新一代**(LangGraph 固定工作流,五类会议各一张同构 `StateGraph`)。**两者不是包含关系** —— 新家有老家没有的(`snapshot_mismatch`),老家有新家没有的(开放类产出、编造负责人拦截、片段全覆盖、运行状态机)。`docs/会议Agent_外部功能基线与新架构落点.md` 逐条固定了老家的外部契约与新家落点,是这层迁移的依据。
 
-**平台工具层(S3)**:编排层与 Java 之间**唯一**的调用面 —— `GET /api/agents/catalog`(能力清单,只含元数据)与 `POST /api/agents/tools/{name}`(14 个只读工具)。工具清单**运行时从 `/catalog` 拉取、不硬编码**,新增工具只改 Java、Python 零改动。契约由 `PlatformAgentContractTest`(PLAT-01…17)钉住。注意:那 5 个会议只读工具是**平台资产**而非老会议 Agent 的一部分,已从 `agent/AgentTools` 拆到 `com.aicap.platform.MeetingTools`(与 `PlatformToolCatalog` 对外发布的 `agent="meeting"` 契约同名),`PlatformToolCatalog` / `PlatformToolService` 直接依赖它 —— 退役 `agent/` 时它**不跟着删**。另:PLAT-17 钉的是 `aicap.llm.agent-worker-enabled` 真的绑到 `LlmProperties`(本仓曾因少写 `llm.` 前缀而静默失效,见 `qa/测试用例设计_当前基线_v3.md:680`)。
+**平台工具层(S3)**:编排层与 Java 之间**唯一**的调用面 —— `GET /api/agents/catalog`(能力清单,只含元数据)与 `POST /api/agents/tools/{name}`。当前 **16 枚工具 = 14 只读**(5 会议 + 8 画像 + 1 `semantic_search`)**+ 2 触发型**(`start_meeting_analysis` / `start_plan_draft`,`read_only=false`;**只创建 run 落审批队列,不写业务表** —— 第三枚 `start_profile_analysis` 因画像域无后台消费者而暂缓,缺口见契约 §2.4)。工具清单**运行时从 `/catalog` 拉取、不硬编码**,主管的路由集合由 catalog 里 `read_only=false` 的那些派生,新增工具只改 Java、Python 零改动。契约由 `PlatformAgentContractTest`(PLAT-01…20)钉住。注意:那 5 个会议只读工具是**平台资产**而非老会议 Agent 的一部分,已从 `agent/AgentTools` 拆到 `com.aicap.platform.MeetingTools`(与 `PlatformToolCatalog` 对外发布的 `agent="meeting"` 契约同名),`PlatformToolCatalog` / `PlatformToolService` 直接依赖它 —— 退役 `agent/` 时它**不跟着删**。另:PLAT-17 钉的是 `aicap.llm.agent-worker-enabled` 真的绑到 `LlmProperties`(本仓曾因少写 `llm.` 前缀而静默失效,见 `qa/测试用例设计_当前基线_v3.md:680`)。
 
 **RAG 检索层**(`rag/`):`Chunker`(6 类数据源,结构化行拼「增强前缀」)→ `EmbeddingModel` → `VectorStore`(双实现:`MysqlVectorStore` 应用层暴力余弦 / `QdrantVectorStore` REST 调 ANN,由 `AICAP_VECTOR_STORE` 切换)→ `RetrievalService`(三路召回 + RRF 融合 + 精排 + ACL)。每次检索落一行 `retrieval_logs`,存三路/融合/最终三阶段的明细。
 
@@ -181,7 +181,7 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 - **数据库连不上会伪装成"Bean 装配失败"**:Docker Desktop 没在跑时(容器 `aiguanli-mysql` / `aicap-qdrant` 随之消失),`mvn -B test` 的报错是 `UnsatisfiedDependencyException: Error creating bean ... meetingMapper ... dataSourceScriptDatabaseInitializer: Failed to execute database script`,真正的根因 `java.net.ConnectException: Connection refused` 埋在十几层 `Caused by` 之后。整套契约测试会**逐个类**这样失败,看起来像大面积回归,其实是环境。先 `docker ps` 确认两个容器在跑,再怀疑代码。
 - **MyBatis-Plus 注解 SQL**:含 `<script>` 的语句会被当 XML 解析,裸 `<` / `<=` 直接抛 `SAXParseException`(表现为 `Failed to load ApplicationContext`),必须写成 `&lt;=` 或改用 `FIND_IN_SET` 之类回避。不含 `<script>` 的语句不解析,`<=` 正常。
-- **README 的测试数字是分层口径**（v3 用例设计文档记 180 条设计，其中后端 128；正文注释记实际 148 项），已被 RAG 层 S1/S2 与随后的 ACL 加固、主管三件套（会话/事件/检查点）等超过，**实际 368**（契约目录 `@Test` 计数）+ 目录外的纯单测 = `mvn -B test` 全量 **481**（均为 2026-10-11 实测）。README 里已加注说明，但被问到时一律以 `mvn -B test` 的实际输出为准。
+- **README 的测试数字是分层口径**（v3 用例设计文档记 180 条设计，其中后端 128；正文注释记实际 148 项），已被 RAG 层 S1/S2 与随后的 ACL 加固、主管三件套（会话/事件/检查点）、S5′ 路由与触发型工具等超过，**实际 387**（契约目录 50 个类的 `@Test` 计数;抽象基类里的 `@Test` 会被子类各跑一遍,故注解数会**低于**实际执行数）+ 目录外的纯单测 = `mvn -B test` 全量 **501**（均为 2026-10-11 22:10 实测,全绿）。README 里已加注说明，但被问到时一律以 `mvn -B test` 的实际输出为准。
 - **开发库 `AIcap` 里的向量来自本地 fixture 桩**(64 维,非真实模型),配好真实密钥后跑一次 `reindex` 会自动全部重算(模型名不一致即判过期)。
 - **ACL 默认全开**:`aicap.rag.acl` 在 `application.yml` 里是 `{}`,所有源都是 `member` 级,任何登录用户可见。机制存在但开关是关的 —— 配了什么源、什么级别是产品决定。
 - **`aicap.rag.acl` 的取值必须在 ladder 里**:启动时校验(`RagProperties.validateAcl`,挂在记录生效配置的那个 `@PostConstruct` 上),配 `reviewer`(系统里真实存在却不在梯子上)、`viewer`、或大小写写错的 `MEMBER` 都**直接启动失败并打印键值**。校验之前它们会静默按「最高要求」处理(只有 admin 可见)—— `viewer` 尤其反直觉,读起来是"viewer 及以上",实际正好相反。校验**只覆盖值**:源类型名(键)拼错不拦,它落到 `aclRoleFor` 的默认 `member`,方向是放行。另外 `acl_role` 是 `varchar(16)`、梯子角色最长 6 字符,所以这条校验顺带堵死了"超长值启动不报错、要到重建索引才以 `DataIntegrityViolationException`(500)炸出来"那条路;将来往 ladder 加更长的角色名,要在这儿补一次长度校验。
@@ -190,8 +190,8 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 ## 设计文档的定位
 
-`docs/AIcap-Agent能力扩展_实施计划.md` 是**活文档**:每完成一项就地回填勾选状态,是进度的唯一口径。`docs/AIcap-智能体能力扩展设计_v1.0.md` 是设计依据,其 `§4 模块 C`(编排层)、`§5 模块 D`(多智能体 + MCP)、`§6 模块 E`(评测)尚未落地。改动这两份文档前先与作者确认。
+`docs/AIcap-Agent能力扩展_实施计划.md` 是**活文档**:每完成一项就地回填勾选状态。**但它不是主管智能体那条线的进度口径** —— 该文档自己在 `S4` 行与 `:44` 的引用块里写明:原 `AgentGraph`/`Checkpointer` 方案已废弃,`S4′` 起进度看《落地方案》。实况也印证了这点(2026-10-11 22:00 实测:实施计划止于 10:36,落地方案更新到 22:07)。`docs/AIcap-智能体能力扩展设计_v1.0.md` 是设计依据,其 `§4 模块 C`(编排层)、`§5 模块 D`(多智能体 + MCP)、`§6 模块 E`(评测)尚未落地。改动这两份文档前先与作者确认。
 
-**主管智能体两份**:`docs/主管智能体_落地方案_v1.0.md` 是编排层与平台之间的**跨进程实现契约** —— 其 §9 明写「实现中若发现契约有误,**先改本文再改代码**」;`docs/主管智能体_需求与规划_v1.1.md` 管需求与权限口径。
+**主管智能体两份**:`docs/主管智能体_落地方案_v1.0.md` 是编排层与平台之间的**跨进程实现契约**,**也是这条线进度的现行口径**(其 §8 的 S2.5→S8′ 表逐行记 ✅/🔶/⛔ 与实测数字) —— 其 §9 明写「实现中若发现契约有误,**先改本文再改代码**」;`docs/主管智能体_需求与规划_v1.1.md` 管需求与权限口径。
 
 **会议 Agent 的现状面**:`docs/会议Agent_外部功能基线与新架构落点.md`(外部功能契约,含逐类核对的取证声明)、`docs/会议Agent_方案落地与首轮契约.md`(路线与历史进度)、`docs/会议Agent_五类会议试用指南.md`(首次试用)。`ai-service/README.md` 很长且逐轮追加,「当前仅 Daily」「下一轮」等是当轮历史范围 —— **最新状态以它末尾与各质量报告为准**。

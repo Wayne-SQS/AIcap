@@ -476,6 +476,8 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .task-week-grid div.active{background:var(--green);border-color:var(--ink);color:var(--ink);font-weight:700}
 .loadflag{display:inline-block;font-size:11px;font-family:var(--mono);font-weight:700;border:1.5px solid var(--ink);padding:1px 8px;box-shadow:2px 2px 0 var(--ink)}
 .loadflag.low{background:#e7efdf}.loadflag.normal{background:var(--green)}.loadflag.busy{background:var(--orange)}.loadflag.over{background:var(--red);color:#fff}
+/* 未配置:不是负载档位,用中性灰 + 斜纹(与「低负载」的实心绿明确区分) */
+.loadflag.unset{background:repeating-linear-gradient(45deg,#e8e8e8 0 4px,#d2d2d2 4px 8px);color:var(--muted)}
 .load-note{margin:0 0 8px;color:var(--muted);font-size:12px}
 .member-section-header .load-note{margin:4px 0 0}
 .load-legend{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 8px;font:11px var(--mono);color:var(--muted)}
@@ -492,6 +494,8 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .heat-cell{border-right:1px solid var(--line);padding:8px;text-align:center;font-family:var(--mono);font-size:12px;cursor:help}
 .heat-cell .hrs{display:inline-block;min-width:40px;padding:3px 6px;border:1.5px solid var(--ink);font-weight:700;box-shadow:1.5px 1.5px 0 var(--ink)}
 .hl0{background:#e7efdf}.hl1{background:var(--green)}.hl2{background:var(--orange)}.hl3{background:#efb0a4}
+/* -1 = 容量未配置:斜纹中性格,不冒充「低负载」的实心色 */
+.hl-1{background:repeating-linear-gradient(45deg,#e8e8e8 0 4px,#d2d2d2 4px 8px)}
 .heat-head{display:grid;grid-template-columns:150px repeat(6,1fr);border-bottom:2px solid var(--ink);background:var(--paper-2);font-family:var(--mono);font-weight:700;font-size:12px}
 .heat-head div{padding:9px;border-right:1px solid var(--line);text-align:center}
 
@@ -586,6 +590,7 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .bw-track .used.normal{background:repeating-linear-gradient(45deg,var(--green) 0 7px,var(--green-2) 7px 14px)}
 .bw-track .used.busy{background:repeating-linear-gradient(45deg,var(--orange) 0 7px,var(--orange-2) 7px 14px)}
 .bw-track .used.over{background:repeating-linear-gradient(45deg,#d96d5d 0 7px,#b84638 7px 14px)}
+.bw-track .used.unset{background:repeating-linear-gradient(45deg,#e8e8e8 0 7px,#d2d2d2 7px 14px)}
 .bw-track .cap{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
 /* 成员开发活动图:6 周(W1–W6)× 7 天,带星期/周标签(真实数据,口径在图上写明) */
 .contrib-wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:10px}

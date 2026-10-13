@@ -45,7 +45,9 @@ public class SchemaUpgrader implements ApplicationRunner {
     };
 
     private static final String[][] USER_COLUMNS = {
-            {"capacity_hours", "`capacity_hours` int NOT NULL DEFAULT '60'"},
+            /* 可空:US27 要求区分「容量未配置」与「容量为零」,而未配置只能是 NULL。
+               列若为 NOT NULL DEFAULT 60,"未配置"在存储层就不存在 —— 前端再怎么写都拿不到这个状态。 */
+            {"capacity_hours", "`capacity_hours` int DEFAULT NULL"},
     };
 
     private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
@@ -73,14 +75,18 @@ public class SchemaUpgrader implements ApplicationRunner {
             Set<String> added = new HashSet<>();
             if (tableExists(conn, "tasks")) {
                 added.addAll(addMissing(conn, "tasks", TASK_COLUMNS));
-                if (added.contains("tasks.estimated_hours")) {
-                    // 老库补列后 estimated_hours 全为 0,按 hours 回填(对齐 FastAPI 迁移脚本)
-                    execute(conn, "UPDATE `tasks` SET `estimated_hours` = `hours` WHERE `estimated_hours` = 0");
-                    log.info("tasks.estimated_hours 已按 hours 回填");
+                /* 回填判定必须按**数据**,不能按"本次是否刚补列" —— 与 hasNullAclRank 同因:
+                   MySQL 的 DDL 自动提交,若 ALTER 成功而随后的 UPDATE 没提交(进程被杀 / 连接断 /
+                   超时),下次启动时列已存在,按"刚补列"判定就永远不会再回填,estimated_hours 会永久停在 0。
+                   下面的 UPDATE 自带 WHERE,幂等自愈。 */
+                if (hasUnfilledEstimatedHours(conn)) {
+                    execute(conn, "UPDATE `tasks` SET `estimated_hours` = `hours` WHERE `estimated_hours` = 0 AND `hours` > 0");
+                    log.info("tasks.estimated_hours 存在未回填行,已按 hours 回填");
                 }
             }
             if (tableExists(conn, "users")) {
                 added.addAll(addMissing(conn, "users", USER_COLUMNS));
+                added.addAll(ensureCapacityNullable(conn));
             }
             // knowledge_chunks 建表时可不存在;补列后老向量因 embedding_model 为空会被判为过期,
             // 下次重建自动重算 —— 这正是引入该列的目的,无需额外回填。
@@ -195,6 +201,40 @@ public class SchemaUpgrader implements ApplicationRunner {
                      "SELECT 1 FROM `knowledge_chunks` WHERE `acl_rank` IS NULL LIMIT 1")) {
             return rs.next();
         }
+    }
+
+    /** 是否还有 estimated_hours=0 但 hours&gt;0 的任务 —— 判定回填的唯一依据(见 run)。 */
+    private boolean hasUnfilledEstimatedHours(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT 1 FROM `tasks` WHERE `estimated_hours` = 0 AND `hours` > 0 LIMIT 1")) {
+            return rs.next();
+        }
+    }
+
+    /**
+     * 保证 {@code users.capacity_hours} 可空(US27)。
+     *
+     * <p>「容量未配置」与「容量为零」是两种状态,而未配置只能存在为 NULL ——
+     * 列一旦是 {@code NOT NULL DEFAULT 60},"未配置"在存储层就不可表达,
+     * 前端/接口无论怎么写都拿不到它,这正是 US11 零容量场景不可达的第一层。
+     *
+     * <p>只放宽约束,**不动存量数据**(现网 60/48/60/54/60 一个数不改)。
+     * 幂等:已经是可空就直接返回。
+     */
+    private Set<String> ensureCapacityNullable(Connection conn) throws SQLException {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, "users", null)) {
+            while (rs.next()) {
+                if (!"capacity_hours".equalsIgnoreCase(rs.getString("COLUMN_NAME"))) continue;
+                if (!"NO".equalsIgnoreCase(rs.getString("IS_NULLABLE"))) return Set.of();
+                execute(conn, "ALTER TABLE `users` MODIFY COLUMN `capacity_hours` int DEFAULT NULL "
+                        + "COMMENT '六周可用容量(小时),成员负载视图分母;NULL=未配置,0=确认无可用'");
+                log.info("users.capacity_hours 由 NOT NULL 放宽为可空(US27:未配置与零必须可区分)");
+                return Set.of("users.capacity_hours(nullable)");
+            }
+        }
+        return Set.of();
     }
 
     private boolean indexExists(Connection conn, String table, String indexName) throws SQLException {

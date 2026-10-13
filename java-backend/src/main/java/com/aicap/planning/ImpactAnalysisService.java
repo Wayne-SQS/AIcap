@@ -71,12 +71,19 @@ public class ImpactAnalysisService {
                 if (owner != null) {
                     int[] before = beforeLoads.getOrDefault(newOwner, new int[6]);
                     int[] after = afterLoads.getOrDefault(newOwner, new int[6]);
-                    int weeklyCapacity = Math.max(1, owner.getCapacityHours() / 6);
-                    for (int week = 0; week < 6; week++) {
-                        if (after[week] > weeklyCapacity) {
-                            addRisk(load, "high", taskId, owner.getDisplayName() + " W" + (week + 1)
-                                    + "：修改前 " + before[week] + "h，修改后 " + after[week]
-                                    + "h，周容量 " + weeklyCapacity + "h");
+                    /* 容量三态:未配置 → 不判超载(信息不足,但要说明);确认为 0 → 周容量为 0,任何 >0 工时都超限。
+                       旧写法 Math.max(1, cap / 6) 把「未配置」和「零容量」一起变成 1h/周 —— 又一个凭空捏造的分母。 */
+                    Integer capacity = owner.getCapacityHours();
+                    if (capacity == null || capacity < 0) {
+                        addRisk(load, "info", taskId, "成员 " + owner.getDisplayName() + " 容量未配置，无法判断是否超限");
+                    } else {
+                        int weeklyCapacity = capacity / 6;
+                        for (int week = 0; week < 6; week++) {
+                            if (after[week] > weeklyCapacity) {
+                                addRisk(load, "high", taskId, owner.getDisplayName() + " W" + (week + 1)
+                                        + "：修改前 " + before[week] + "h，修改后 " + after[week]
+                                        + "h，周容量 " + weeklyCapacity + "h");
+                            }
                         }
                     }
                     if (sum(before) != sum(after)) {

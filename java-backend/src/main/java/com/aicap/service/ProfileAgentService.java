@@ -825,7 +825,7 @@ public class ProfileAgentService {
         if (acts.isEmpty() && doneCount == 0) {
             inference.add("该时间范围内暂无足够数据,无法确认实际完成内容,需要成员补充说明");
         }
-        int loadPct = loadPercent(u, myTasks);
+        Integer loadPct = loadPercent(u, myTasks);
         m.put("current_load_percent", loadPct);
 
         // ---- 规则引擎完整画像(9 字段):既是 LLM 不可用时的降级结果,也是 LLM 路径的字段兜底 ----
@@ -849,7 +849,8 @@ public class ProfileAgentService {
         portrait.put("review_participation", reviewCount >= 3 ? "较高(参与 " + reviewCount + " 次 Review)" :
                 reviewCount >= 1 ? "一般(参与 " + reviewCount + " 次 Review)" : "暂无 Review 记录");
         portrait.put("current_load_percent", loadPct);
-        portrait.put("risk_flags", loadPct >= 90 ? "负载过高,可能影响 Sprint 里程碑" :
+        portrait.put("risk_flags", loadPct == null ? "容量未配置,无法判断负载" :
+                loadPct >= 90 ? "负载过高,可能影响 Sprint 里程碑" :
                 loadPct >= 70 ? "负载偏高,建议关注" : "正常");
         portrait.put("recommended_task_types", buildRecommendations(mp, mainModule));
 
@@ -897,15 +898,40 @@ public class ProfileAgentService {
         return m;
     }
 
-    private int loadPercent(User u, List<Task> myTasks) {
-        int capacity = u.getCapacityHours() == null || u.getCapacityHours() <= 0 ? 60 : u.getCapacityHours();
+    /** 零容量 + 有未完成工时:负载率数学上为 ∞,用远超任何阈值的哨兵表达"满溢"(见 loadPercent) */
+    private static final int LOAD_SATURATED = 999;
+
+    /**
+     * 负载率读数(单位 %):**容量三态必须分开**,口径见 US27「区分容量未配置与容量为零」。
+     *
+     * <ul>
+     *   <li>容量未配置(null / 负数)→ 返回 {@code null}「未知」,**不再猜成 60**:
+     *       旧实现 {@code == null || <= 0 ? 60} 把"没填"和"填 0"一起当成 60,等于凭空捏造容量,
+     *       也正是"零容量不可达"在服务端的一层。</li>
+     *   <li>容量确认为 0 → 有未完成工时即满溢(返回 {@link #LOAD_SATURATED});旧实现同样按 60 算,
+     *       把"零容量满溢"稀释成 20% 这类假数字。</li>
+     *   <li>容量 &gt; 0 → 真实百分比,**不封顶**:旧实现 {@code Math.min(100, ...)} 让 200% 与 100%
+     *       无法区分,超载幅度被抹平(登记于 qa/assistant-work/H02-planning-inventory/api-map.md:16)。</li>
+     * </ul>
+     */
+    private Integer loadPercent(User u, List<Task> myTasks) {
+        Integer capacity = u.getCapacityHours();
+        if (capacity != null && capacity < 0) capacity = null;
         int openHours = 0;
         for (Task t : myTasks) {
             if (t.getStatus() != null && (t.getStatus() == 0 || t.getStatus() == 1) && t.getHours() != null) {
                 openHours += t.getHours();
             }
         }
-        return Math.min(100, Math.round(openHours * 100.0f / capacity));
+        if (capacity == null) return null;
+        if (capacity == 0) return openHours > 0 ? LOAD_SATURATED : 0;
+        return Math.round(openHours * 100.0f / capacity);
+    }
+
+    /** 容量展示:未配置单独成词,不与 0 混写(US27) */
+    private String capacityText(User u) {
+        Integer cap = u.getCapacityHours();
+        return cap == null ? "容量未配置" : "容量 " + cap + "h";
     }
 
     private List<String> buildRecommendations(MemberProfile mp, String mainModule) {
@@ -956,14 +982,13 @@ public class ProfileAgentService {
         for (Map.Entry<Integer, Integer> e : openLoad.entrySet()) {
             User u = users.stream().filter(x -> x.getId().equals(e.getKey())).findFirst().orElse(null);
             if (u == null) continue;
-            int pct = loadPercent(u, tasks.stream().filter(t -> e.getKey().equals(t.getOwnerId())).toList());
-            if (pct >= 90) {
+            Integer pct = loadPercent(u, tasks.stream().filter(t -> e.getKey().equals(t.getOwnerId())).toList());
+            if (pct != null && pct >= 90) {
                 risks.add(Map.of(
                         "kind", "overload",
                         "user_id", e.getKey(),
                         "member", nameOf.get(e.getKey()),
-                        "evidence", "未完成任务工时 " + e.getValue() + "h / 容量 " +
-                                (u.getCapacityHours() == null ? 60 : u.getCapacityHours()) + "h",
+                        "evidence", "未完成任务工时 " + e.getValue() + "h / " + capacityText(u),
                         "inference", "负载约 " + pct + "%,长期过载风险,建议重新分配部分任务",
                         "suggested_action", "将低优先级任务拆分给负载较低的成员,或安排他人参与 Review"));
             }
@@ -1244,7 +1269,9 @@ public class ProfileAgentService {
             row.put("range_end", s.getRangeEnd().toString());
             row.put("good_at", payload.getOrDefault("good_at", "暂无足够数据"));
             row.put("risk_flags", payload.getOrDefault("risk_flags", "正常"));
-            row.put("load_percent", payload.getOrDefault("current_load_percent", 0));
+            // 容量未配置时 current_load_percent 为 null(见 loadPercent):原样透传,不回落 0 ——
+            // 回落 0 会把「未知」显示成「没有负载」,与 US27 区分三态的口径正好相反。
+            row.put("load_percent", payload.get("current_load_percent"));
             // 与上一张快照对比变化原因
             List<String> changes = new ArrayList<>();
             if (i > 0) {

@@ -28,7 +28,9 @@ public final class AuthDtos {
     }
 
     public static UserOut toUserOut(com.aicap.entity.User u) {
+        /* 容量三态原样透传:null = 未配置(前端显示「未配置」),0 = 确认为零(任何工时即超载)。
+           旧实现 `== null ? 60` 把「没填」改写成 60 —— 这是"未配置与零不可达"在出参层的一层。 */
         return new UserOut(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole(), u.getColor(),
-                u.getCapacityHours() == null ? 60 : u.getCapacityHours());
+                u.getCapacityHours());
     }
 }

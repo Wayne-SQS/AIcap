@@ -175,10 +175,17 @@ function scheduleWarnings(task, start, end) {
   if (project.storiesForTask(task).some(story => !sprints.has(story.sprint))) warnings.push('新排期与关联 Story Sprint 不完全一致')
   const other = project.tasks.filter(t => t.owner === task.owner && t.id !== task.id)
   const proposed = hoursByWeek(task, start, end)
-  const weeklyCapacity = project.capacityHours(task.owner) / 6
-  for (let week = 1; week <= 6; week++) {
-    const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
-    if (weeklyCapacity && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
+  /* 容量三态:未配置 → 不判超载(信息不足),但要说明;确认为 0 → 任何 >0 工时都是超限。
+     旧写法 `if (weeklyCapacity && ...)` 在零容量时直接静默跳过,正是 US11 漏判的一半。 */
+  const cap = project.capacityOf(task.owner)
+  if (!cap.known) {
+    warnings.push(`成员 ${project.memberName(task.owner)} 容量未配置，无法预警周负载超限`)
+  } else {
+    const weeklyCapacity = cap.hours / 6
+    for (let week = 1; week <= 6; week++) {
+      const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
+      if (load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
+    }
   }
   return [...new Set(warnings)]
 }

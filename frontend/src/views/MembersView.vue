@@ -111,14 +111,22 @@ function weeklyHours(task) {
 }
 function ownerRisks(task, ownerId) {
   const member = project.memberById(ownerId)
-  const capacity = member ? project.capacityHours(ownerId) / 6 : 0
-  if (!capacity) return []
+  if (!member) return []
   const current = project.memberWeeklyLoad(ownerId)
   const after = Array(6).fill(0)
   project.tasks.filter(item => item.owner === ownerId && item.id !== task.id).forEach(item => {
     weeklyHours(item).forEach((hours, index) => { after[index] += hours })
   })
   weeklyHours(task).forEach((hours, index) => { after[index] += hours })
+  const cap = project.capacityOf(ownerId)
+  /* 未配置:信息不足,不判超载,但明确说出来(旧写法 `if (!capacity) return []` 是静默跳过) */
+  if (!cap.known) {
+    return after.some(hours => hours > 0)
+      ? [{ type: 'load', text: `成员 ${member.name} 容量未配置，无法判断是否超载，请人工核对` }]
+      : []
+  }
+  /* 确认为 0:周容量就是 0,任何 >0 工时都超限(旧写法在此之前就 return [] 了) */
+  const capacity = cap.hours / 6
   return after.flatMap((hours, index) => hours > capacity ? [{ type: 'load', text: `W${index + 1}：当前 ${current[index] || 0}h，调整后 ${hours}h，周容量 ${capacity.toFixed(1)}h` }] : [])
 }
 function startTaskDrag(task, event) {
@@ -156,23 +164,39 @@ function cancelOwnerChange() { pendingOwner.value = null }
 /* ==================== 周负载热力图 ==================== */
 const load = computed(() => project.loadByOwner)
 const LOAD_LABEL = ['低负载', '正常', '偏忙', '超载']
+/** 热力格等级:0/1/2/3 = 四档;未配置用 -1(中性色),不冒充「低负载」 */
+function heatLevel(m, hours) {
+  const cap = project.capacityOf(m.id)
+  if (!cap.known) return -1
+  const weekly = cap.hours / 6
+  const ratio = cap.hours === 0 ? (hours > 0 ? Infinity : 0) : hours / weekly
+  return ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
+}
 function heatCell(m, w) {
   const hours = load.value[m.id] ? load.value[m.id][w] : 0
-  const weeklyCapacity = project.capacityHours(m.id) / 6
-  const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
-  const lv = ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
+  const lv = heatLevel(m, hours)
+  const cap = project.capacityOf(m.id)
+  const capText = cap.known ? `周容量：${(cap.hours / 6).toFixed(1)}h` : '周容量：未配置'
+  const levelText = lv < 0 ? '未配置' : LOAD_LABEL[lv]
   const related = project.tasks.filter(t => t.owner === m.id && t.w[0] <= w + 1 && t.w[1] >= w + 1).map(t => t.id).join('、') || '无'
   return {
     hours, lv,
-    title: `${m.name} · W${w + 1}\n计划工时：${hours}h\n周容量：${weeklyCapacity.toFixed(1)}h\n负载等级：${LOAD_LABEL[lv]}\n关联任务：${related}`
+    title: `${m.name} · W${w + 1}\n计划工时：${hours}h\n${capText}\n负载等级：${levelText}\n关联任务：${related}`
   }
 }
 
 /* ==================== 容量与分配 ==================== */
 const bandwidthCards = computed(() => project.members.map(m => {
   const alloc = project.allocatedHours(m.id)
-  const cap = project.capacityHours(m.id)
-  return { m, alloc, cap, pct: cap ? Math.round(alloc / cap * 100) : 0, state: project.capacityStatus(cap ? alloc / cap : 0) }
+  const cap = project.capacityOf(m.id)
+  const util = project.utilization(m.id)
+  return {
+    m, alloc, known: cap.known, cap: cap.hours,
+    remaining: cap.known ? cap.hours - alloc : null,
+    rateText: project.loadRateText(util),
+    rateWidth: project.loadRateWidth(util),
+    state: project.capacityStatus(util)
+  }
 }))
 
 /* ==================== 成员开发活动图(真实数据:activity_records,含 GitHub 同步) ==================== */
@@ -385,10 +409,10 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
       <div v-for="b in bandwidthCards" :key="b.m.id" class="mcard">
         <div class="head">
           <span class="avatar" :class="'a' + b.m.id">{{ memberLabel(b.m.id) }}</span>
-          <div><h3>{{ b.m.name }}</h3><div class="role">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
+          <div><h3>{{ b.m.name }}</h3><div class="role">容量 {{ b.known ? b.cap + 'h' : '未配置' }} · 已分配 {{ b.alloc }}h · 剩余 {{ b.known ? (b.cap - b.alloc) + 'h' : '—' }}</div></div>
           <span class="loadflag" :class="b.state.key" style="margin-left:auto">{{ b.state.label }}</span>
         </div>
-        <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: Math.min(b.pct, 100) + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.pct }}%</span></div>
+        <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: b.rateWidth + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.rateText }}</span></div>
       </div>
     </div>
         </div>

@@ -7,7 +7,9 @@ import com.aicap.entity.User;
 import com.aicap.mapper.MemberProfileMapper;
 import com.aicap.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -88,6 +90,48 @@ public class MemberProfileService {
         return toOut(target, profile);
     }
 
+    /**
+     * 设置成员容量(US27「成员每周可用容量的设置、保存和读取」)。**三态必须能表达**:
+     * <ul>
+     *   <li>缺字段 → 422(这个端点的唯一职责就是设容量,漏传视为调用错误)</li>
+     *   <li>显式 {@code null} → 清为「未配置」(容量未知,不参与超载判定)</li>
+     *   <li>0 及以上 → 确认为该值(0 = 该周期无可用工时,任何负载即超载)</li>
+     * </ul>
+     *
+     * <p>刻意走 {@link UpdateWrapper} 显式 {@code .set("capacity_hours", null)}:MyBatis-Plus 默认的
+     * {@code updateStrategy=NOT_NULL} 会**跳过** null 字段,用 {@code updateById} 永远清不掉容量
+     * ——那样"未配置"依旧不可达。
+     */
+    @Transactional
+    public MemberProfileDtos.ProfileOut saveCapacity(Integer userId, MemberProfileDtos.CapacityIn in, User actor) {
+        if (userId == null) throw ApiException.notFound("成员不存在");
+        boolean privileged = PROFILE_ADMIN_ROLES.contains(actor.getRole());
+        boolean selfWriter = actor.getId().equals(userId) && "member".equals(actor.getRole());
+        if (!privileged && !selfWriter) {
+            if ("viewer".equals(actor.getRole())) {
+                throw ApiException.forbidden("只读角色不能修改容量");
+            }
+            throw ApiException.forbidden("只能修改本人容量，或由管理员/负责人代改");
+        }
+        MemberProfileDtos.CapacityIn body = in == null ? new MemberProfileDtos.CapacityIn(null) : in;
+        JsonNode node = body.capacityHours();
+        if (node == null) throw ApiException.unprocessable("必须提供 capacity_hours 字段（null 表示未配置）");
+        Integer value;
+        if (node.isNull()) {
+            value = null;
+        } else if (node.isIntegralNumber() && node.asInt() >= 0) {
+            value = node.asInt();
+        } else {
+            throw ApiException.unprocessable("capacity_hours 必须是不小于 0 的整数，或用 null 表示未配置");
+        }
+        User target = userMapper.selectById(userId);
+        if (target == null) throw ApiException.notFound("成员不存在");
+        userMapper.update(null, new UpdateWrapper<User>().eq("id", userId).set("capacity_hours", value));
+        target.setCapacityHours(value);
+        MemberProfile profile = profileMapper.selectOne(new QueryWrapper<MemberProfile>().eq("user_id", userId));
+        return toOut(target, profile);
+    }
+
     /** 供会话 Agent 的 list_members 等场景复用的画像摘要 */
     public MemberProfileDtos.ProfileOut ofUser(User user) {
         MemberProfile p = profileMapper.selectOne(new QueryWrapper<MemberProfile>().eq("user_id", user.getId()));
@@ -114,7 +158,7 @@ public class MemberProfileService {
     private MemberProfileDtos.ProfileOut toOut(User user, MemberProfile p) {
         return new MemberProfileDtos.ProfileOut(
                 user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.getColor(),
-                user.getCapacityHours() == null ? 60 : user.getCapacityHours(),
+                user.getCapacityHours(),
                 p == null ? "" : p.getTitle(),
                 p == null ? List.of() : read(p.getTechStack()),
                 p == null ? List.of() : read(p.getCapabilities()),

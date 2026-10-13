@@ -95,10 +95,17 @@ export function useProjectActions() {
     const other = project.tasks.filter(item => item.owner === task.owner && item.id !== task.id)
     const proposed = weeklyHours({ ...task, w: [start, end] })
     const beforeLoad = project.memberWeeklyLoad(task.owner)
-    const capacity = project.capacityHours(task.owner) / 6
-    for (let week = 1; week <= 6; week++) {
-      const load = other.reduce((sum, item) => sum + weeklyHours(item)[week - 1], 0) + proposed[week - 1]
-      if (capacity && load > capacity) addImpact(report, 'loadRisk', `W${week}：修改前 ${beforeLoad[week - 1] || 0}h，修改后 ${load}h，超过周容量 ${capacity.toFixed(1)}h`, task.id)
+    /* 容量三态:未配置 → 不判超载但明确说明;确认为 0 → 任何 >0 工时都超限。
+       旧写法 `if (capacity && load > capacity)` 把零容量当成"没有上限"静默跳过。 */
+    const cap = project.capacityOf(task.owner)
+    if (!cap.known) {
+      addImpact(report, 'loadRisk', `成员 ${project.memberName(task.owner)} 容量未配置，无法判断周负载是否超限`, task.id)
+    } else {
+      const capacity = cap.hours / 6
+      for (let week = 1; week <= 6; week++) {
+        const load = other.reduce((sum, item) => sum + weeklyHours(item)[week - 1], 0) + proposed[week - 1]
+        if (load > capacity) addImpact(report, 'loadRisk', `W${week}：修改前 ${beforeLoad[week - 1] || 0}h，修改后 ${load}h，超过周容量 ${capacity.toFixed(1)}h`, task.id)
+      }
     }
     const before = weeklyHours(task)
     const changedWeeks = before.map((hours, index) => hours !== proposed[index] ? `W${index + 1}` : null).filter(Boolean)
@@ -117,11 +124,16 @@ export function useProjectActions() {
     const before = project.memberWeeklyLoad(target.id)
     const after = before.slice()
     weeklyHours(task).forEach((hours, index) => { after[index] += hours })
-    const capacity = project.capacityHours(target.id) / 6
     const report = emptyImpactReport()
-    after.forEach((hours, index) => {
-      if (hours > capacity) addImpact(report, 'loadRisk', `成员 ${target.name} W${index + 1}：修改前 ${before[index] || 0}h，修改后 ${hours}h，周容量 ${capacity.toFixed(1)}h`, task.id)
-    })
+    const cap = project.capacityOf(target.id)
+    if (!cap.known) {
+      addImpact(report, 'loadRisk', `成员 ${target.name} 容量未配置，无法判断调整后是否超载`, task.id)
+    } else {
+      const capacity = cap.hours / 6
+      after.forEach((hours, index) => {
+        if (hours > capacity) addImpact(report, 'loadRisk', `成员 ${target.name} W${index + 1}：修改前 ${before[index] || 0}h，修改后 ${hours}h，周容量 ${capacity.toFixed(1)}h`, task.id)
+      })
+    }
     const impacts = [{ entity: task.id, kind: 'task_owner', before: beforeOwner?.name || '未分配', after: target.name, detail: `目标成员 ${target.name} 的六周负载将重新计算` }]
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
