@@ -143,9 +143,20 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 改表结构的两种落点:新表 → 追加进 `db/schema.sql`;给已有表加列 → 追加进 `SchemaUpgrader.java`(不要改 schema.sql 里的既有定义,老库不会重跑)。
 
-**智能体层**:LLM 驱动的分析任务,分布在 `agent/`(会议 Agent)和 `profile/`(画像 Agent,8 个工具)。会议 Agent 的形态是 `AgentJobs`(原子认领 + 租约 + 幂等队列)→ `MeetingWorkerTask` → `AgentRunner`(有界工具循环,`MAX_STEPS` + 工具去重 + 超时检查)。**后台调度器与具体域无关**:`worker/AgentWorker` 只认 `WorkerTask` 接口(`name()` + `runNext()`),各域在自己的包里注册一个薄壳(`agent/MeetingWorkerTask`、`planning/PlanningWorkerTask`、`generation/GenerationWorkerTask`)—— 所以 `meeting-agent` 这个任务能随 `agent/` 一起退役,而 planning / project-generation 的后台消费与 `/api/health` 里的可观测性不受影响。共享的 LLM 配置与传输在 `llm/`(`LlmProperties` 绑 `aicap.llm.*`、`ModelClient`),域错误在 `common/AgentError`;`agent/` 已不外泄给任何其他包(`AgentPackageIsSelfContainedTest` 钉住)。画像 Agent 有双模式:`GET /analysis` 零 LLM 只读预览,`POST /analysis/run` 正式分析且失败逐项降级留痕。两者都是**建议生产者**,不直接写业务表。
+**智能体层**:LLM 驱动的分析任务,分布在 `ai-service/`(会议 Agent,五类会议)和 `profile/`(画像 Agent,8 个工具)。**后台调度器与具体域无关**:`worker/AgentWorker` 只认 `WorkerTask` 接口(`name()` + `runNext()`),各域在自己的包里注册一个薄壳(`planning/PlanningWorkerTask`、`generation/GenerationWorkerTask`)。共享的 LLM 配置与传输在 `llm/`(`LlmProperties` 绑 `aicap.llm.*`、`ModelClient`),域错误在 `common/AgentError`。画像 Agent 有双模式:`GET /analysis` 零 LLM 只读预览,`POST /analysis/run` 正式分析且失败逐项降级留痕。两者都是**建议生产者**,不直接写业务表。
 
-**两代会议 Agent 并存(改会议相关代码前必读)**:`java-backend/.../agent/` 是**上一代**(模型自主工具循环;通用会议,不分类型);`ai-service/` 是**新一代**(LangGraph 固定工作流,五类会议各一张同构 `StateGraph`)。**两者不是包含关系** —— 新家有老家没有的(`snapshot_mismatch`),老家有新家没有的(开放类产出、编造负责人拦截、片段全覆盖、运行状态机)。`docs/会议Agent_外部功能基线与新架构落点.md` 逐条固定了老家的外部契约与新家落点,是这层迁移的依据。
+> **2026-10-13 变更：上一代会议 Agent（`java-backend/.../agent/`）已整包删除。**
+> 前置剥离此前已完成，故删除无副作用：`rag/TranscriptSegmenter`（切分器已从 `AnalysisValidator` 拆出共用）、
+> `llm/LlmProperties`、`common/AgentError`、`platform/MeetingTools`（5 个会议只读工具已拆到平台包，
+> **不随 `agent/` 退役**）。平台层经 `platform/MeetingAnalysisTrigger` 接口 + `ObjectProvider`
+> 可选注入调用，删除后该工具如实报 `agent_tool_unavailable` 而非 500。
+>
+> **随本次删除一并退役的能力（缺口，待补）**：老家 `AnalysisValidator` 是**运行时阻断式**
+> 证据校验（`invented_assignment` 拦截编造负责人 / `invalid_evidence` 逐字核对 / `incomplete_analysis`
+> 片段全覆盖），新链路 `ai-service/evaluation.py` 仅为**离线评测脚本、不阻断**。
+> 即：迁移后模型伪造 quote 可能查无此句而系统不报错，属「测试不会变红」的静默降级。
+> 另外老家的**开放类八项产出**（decisions / coordination_items / status_constraints / source_notes /
+> risks / unresolved_questions / limitations 等）在新家无对应，前端「通用会议 Agent」面板已一并移除。
 
 **平台工具层(S3)**:编排层与 Java 之间**唯一**的调用面 —— `GET /api/agents/catalog`(能力清单,只含元数据)与 `POST /api/agents/tools/{name}`。当前 **16 枚工具 = 14 只读**(5 会议 + 8 画像 + 1 `semantic_search`)**+ 2 触发型**(`start_meeting_analysis` / `start_plan_draft`,`read_only=false`;**只创建 run 落审批队列,不写业务表** —— 第三枚 `start_profile_analysis` 因画像域无后台消费者而暂缓,缺口见契约 §2.4)。工具清单**运行时从 `/catalog` 拉取、不硬编码**,主管的路由集合由 catalog 里 `read_only=false` 的那些派生,新增工具只改 Java、Python 零改动。契约由 `PlatformAgentContractTest`(PLAT-01…20)钉住。注意:那 5 个会议只读工具是**平台资产**而非老会议 Agent 的一部分,已从 `agent/AgentTools` 拆到 `com.aicap.platform.MeetingTools`(与 `PlatformToolCatalog` 对外发布的 `agent="meeting"` 契约同名),`PlatformToolCatalog` / `PlatformToolService` 直接依赖它 —— 退役 `agent/` 时它**不跟着删**。另:PLAT-17 钉的是 `aicap.llm.agent-worker-enabled` 真的绑到 `LlmProperties`(本仓曾因少写 `llm.` 前缀而静默失效,见 `qa/测试用例设计_当前基线_v3.md:680`)。
 
@@ -174,8 +185,18 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 - **本仓没有 linter**:`frontend/package.json` 无 eslint 脚本,`java-backend/pom.xml` 无 checkstyle/spotbugs/pmd。质量闸门是**契约测试**与 `agent-orchestrator/tests/test_no_db.py`、`arch/AgentPackageIsSelfContainedTest` 这类结构性测试,不是静态检查 —— 别去找或新引一个 lint 工具。
 - **不引第三方 SDK**:HTTP 一律 JDK `HttpClient`,JSON 一律 Jackson(`ObjectMapper`)。已刻意排除 OkHttp/Retrofit/Feign 与 Qdrant Java SDK。
 - 配置走 `@ConfigurationProperties` + `application.yml` 的 `${ENV_VAR:默认值}`;密钥默认留空,由环境变量注入。
-- **不改动 `agent/`、`profile/` 现有类的公开签名** —— 新能力加在旁路,不改老接口。
+- **不改动 `profile/`、`planning/`、`generation/`、`rag/`、`platform/` 现有类的公开签名** —— 新能力加在旁路,不改老接口。
 - 建表/补列方式见上文「数据库自举」。
+
+### 文档纪律(2026-10-13 立)
+
+本仓文档一度膨胀到 **75 份 / 85.5 万字符**,且与代码严重漂移。以下为强制约定:
+
+1. **分三层,不新增第四层**:`01-产品`(做什么,冻结带版本)/ `02-契约`(接口与进度,活文档)/ `03-能力`(功能细节)。过程记录一律进 `_process/`。
+2. **智能体名单只在一处定义**:`docs/01-产品/智能体产品契约.md`。任何文档、UI、接口出现第二份名单视为分叉,须先回来改契约文件。
+3. **进度口径唯一**:`docs/02-契约/主管智能体_落地方案_v1.0.md §7`。`AIcap-Agent能力扩展_实施计划.md` 的 Sprint 编号属**另一条线**,引用时必须写明是哪条线,或直接改用 §7 的编号。
+4. **禁止为"记录过程"新增文档**:开发日志写在 `_process/` 下按日期追加,不新建"第 N 轮"文档。
+5. **改代码必须改文档**:结构性删除/重命名后,同 PR 内必须同步所有提及该结构的文档,否则视为未完成。
 
 ## 已知坑
 
