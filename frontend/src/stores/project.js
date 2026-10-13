@@ -10,6 +10,7 @@ import { milestonesApi } from '@/api/milestones'
 import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
 import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
+import { capacityBreakdown, projectWeeks as resolveProjectWeeks } from '@/utils/projectCapacity'
 
 /* 项目数据基座:stories/tasks/pool/log 四份数据 + members(真实成员)
 
@@ -154,11 +155,22 @@ export const useProjectStore = defineStore('project', {
       return tail && tail !== m.role ? `${ROLE_TXT[m.roleKey] || m.roleKey} · ${tail}` : m.role
     },
     memberTasks: s => id => s.tasks.filter(t => t.owner === id),
-    capacityHours: s => id => Math.max(0, Number((s.members.find(x => x.id === id) || {}).capacity) || 0),
+    /** 当前项目总容量 = 个人周容量 × 当前项目周期；旧 capacity 是六周历史总量。 */
+    projectWeeks: s => resolveProjectWeeks(useProjectsStore().currentProject, s.tasks, s.stories),
+    capacityBreakdown: s => id => capacityBreakdown(
+      s.members.find(x => x.id === id) || {}, useProjectsStore().currentProject, s.tasks, s.stories),
+    weeklyCapacityHours() {
+      return id => this.capacityBreakdown(id).weekly
+    },
+    capacityHours() {
+      return id => this.capacityBreakdown(id).total
+    },
     allocatedHours: s => id => s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0),
-    utilization: s => id => {
-      const cap = Number((s.members.find(x => x.id === id) || {}).capacity) || 0
-      return cap ? s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+    utilization() {
+      return id => {
+      const cap = this.capacityHours(id)
+      return cap ? this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      }
     },
     /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
     capacityStatus: () => utilization => {
@@ -268,24 +280,28 @@ export const useProjectStore = defineStore('project', {
         sprints: (Array.isArray(t.sprints) && t.sprints.length) ? t.sprints : derivedTaskSprints(t.week_start, t.week_end)
       }
     },
-    /** 用后端真实用户覆盖成员姓名/角色/容量(容量口径统一到 users.capacity_hours) */
+    /** 用后端真实用户覆盖成员姓名/角色/容量；capacity_hours 保持六周历史总量。 */
     mergeMembers(users) {
       if (!Array.isArray(users) || !users.length) return
       const byId = new Map(users.map(u => [u.id, u]))
+      const scopedMemberIds = new Set(users.map(u => memberIndex(u.id)))
       /* 位置对齐的前提是 users.id 恰为 1..N 连续;不连续时 `id-1` 会出现空洞,
          空洞处的成员会保留种子姓名(表现为「负责人姓名对不上」),这里明确告警而不是静默错配。 */
       if (!isContiguousUserIds(users.map(u => u.id))) {
         console.warn('[AICAP member-identity] users.id 非 1..N 连续,前端成员下标(= id-1)存在空洞,可能出现负责人姓名错配:',
           users.map(u => u.id).sort((a, b) => a - b))
       }
-      this.members = this.members.map(m => {
+      // 成员关系以当前 project_id 的链接为准，避免切换项目后沿用上一个项目成员的容量。
+      this.members = this.members.filter(m => scopedMemberIds.has(m.id)).map(m => {
         const u = byId.get(memberUserId(m.id))
         if (!u) return m
         return {
           ...m,
           name: u.display_name || u.username,
           roleKey: u.role || m.roleKey,
-          capacity: u.capacity_hours || m.capacity
+          capacity: u.capacity_hours ?? m.capacity,
+          // 项目成员容量不可从上一个项目继承；旧接口未给字段时交给历史六周容量兼容层推导。
+          weeklyCapacity: u.weekly_capacity_hours ?? null
         }
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
@@ -294,7 +310,8 @@ export const useProjectStore = defineStore('project', {
         if (!this.members.some(m => m.id === idx)) {
           this.members.push({
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
-            roleKey: u.role, tag: '', capacity: u.capacity_hours || 60,
+            roleKey: u.role, tag: '', capacity: u.capacity_hours ?? 60,
+            weeklyCapacity: u.weekly_capacity_hours ?? null,
             accent: MEMBER_COLORS[idx] || 'gray'
           })
         }
@@ -329,7 +346,12 @@ export const useProjectStore = defineStore('project', {
       const scopedUsers = Array.isArray(users) ? users.filter(user => memberIds.has(Number(user.id))) : []
       this.mergeMembers(scopedUsers.map(user => {
         const link = memberLinks.find(member => Number(member.user_id) === Number(user.id))
-        return link ? { ...user, capacity_hours: link.capacity_hours ?? user.capacity_hours, role: link.project_role || user.role } : user
+        return link ? {
+          ...user,
+          capacity_hours: link.capacity_hours ?? user.capacity_hours,
+          weekly_capacity_hours: link.weekly_capacity_hours ?? null,
+          role: link.project_role || user.role
+        } : user
       }))
       this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
@@ -460,7 +482,7 @@ export const useProjectStore = defineStore('project', {
       if (memberIds.some((id, i) => id !== i)) {
         errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
       }
-      this.members.forEach(m => { if ((Number(m.capacity) || 0) <= 0) errors.push(`成员 ${m.name} 容量无效`) })
+      this.members.forEach(m => { if (this.weeklyCapacityHours(m.id) <= 0) errors.push(`成员 ${m.name} 周容量无效`) })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)
       const result = { warnings, errors }

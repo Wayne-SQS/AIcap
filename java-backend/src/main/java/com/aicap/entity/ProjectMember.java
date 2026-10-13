@@ -15,6 +15,8 @@ public class ProjectMember {
     private String projectId;
     private Integer userId;
     private String projectRole;
+    /** Explicit per-week capacity. Null means derive from legacy six-week capacity_hours. */
+    private Integer weeklyCapacityHours;
     private Integer capacityHours;
     private LocalDateTime joinedAt;
 }

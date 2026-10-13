@@ -87,7 +87,7 @@ function weeklyHours(task) {
 }
 function ownerRisks(task, ownerId) {
   const member = project.memberById(ownerId)
-  const capacity = member ? project.capacityHours(ownerId) / 6 : 0
+  const capacity = member ? project.weeklyCapacityHours(ownerId) : 0
   if (!capacity) return []
   const current = project.memberWeeklyLoad(ownerId)
   const after = Array(6).fill(0)
@@ -134,7 +134,7 @@ const load = computed(() => project.loadByOwner)
 const LOAD_LABEL = ['低负载', '正常', '偏忙', '超载']
 function heatCell(m, w) {
   const hours = load.value[m.id] ? load.value[m.id][w] : 0
-  const weeklyCapacity = project.capacityHours(m.id) / 6
+  const weeklyCapacity = project.weeklyCapacityHours(m.id)
   const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
   const lv = ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
   const related = project.tasks.filter(t => t.owner === m.id && t.w[0] <= w + 1 && t.w[1] >= w + 1).map(t => t.id).join('、') || '无'
@@ -202,7 +202,7 @@ function plannedWeeklyData(memberId) {
       taskIds[week - 1].push(task.code || task.id)
     }
   })
-  const weeklyCapacity = project.capacityHours(memberId) / 6
+  const weeklyCapacity = project.weeklyCapacityHours(memberId)
   const weeks = weekly.map((hours, index) => {
     const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
     const level = hours <= 0 ? 0 : (ratio > 1 ? 4 : (ratio >= .8 ? 3 : (ratio >= .6 ? 2 : 1)))
@@ -437,7 +437,7 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
       <div v-for="b in bandwidthCards" :key="b.m.id" class="mcard">
         <div class="head">
           <span class="avatar" :class="'a' + b.m.id">{{ memberLabel(b.m.id) }}</span>
-          <div><h3>{{ b.m.name }}</h3><div class="role">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
+          <div><h3>{{ b.m.name }}</h3><div class="role" :title="`每周 ${project.weeklyCapacityHours(b.m.id)}h × ${project.projectWeeks} 周 = 总容量 ${b.cap}h`">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
           <span class="loadflag" :class="b.state.key" style="margin-left:auto">{{ b.state.label }}</span>
         </div>
         <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: Math.min(b.pct, 100) + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.pct }}%</span></div>

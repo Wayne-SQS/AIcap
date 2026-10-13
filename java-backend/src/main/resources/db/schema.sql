@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `project_members` (
   `project_id` varchar(20) NOT NULL,
   `user_id` int NOT NULL,
   `project_role` varchar(20) NOT NULL,
+  `weekly_capacity_hours` int DEFAULT NULL COMMENT '每周可投入工时;为空时兼容 capacity_hours/6',
   `capacity_hours` int NOT NULL DEFAULT 60,
   `joined_at` datetime NOT NULL,
   PRIMARY KEY (`id`), UNIQUE KEY `uq_project_members_project_user` (`project_id`,`user_id`), KEY `ix_project_members_user` (`user_id`)

@@ -10,6 +10,7 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.ProjectMapper;
 import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.service.ProjectCapacityPolicy;
 import com.aicap.entity.Project;
 import com.aicap.entity.ProjectMember;
 import com.aicap.security.PasswordUtil;
@@ -262,7 +263,7 @@ public class DataSeeder implements ApplicationRunner {
             for (String projectId : List.of("P002")) {
                 if (!List.of("admin", "owner").contains(user.getRole())) continue;
                 if (projectMemberMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ProjectMember>().eq("project_id", projectId).eq("user_id", user.getId())) > 0) continue;
-                ProjectMember member = new ProjectMember(); member.setProjectId(projectId); member.setUserId(user.getId()); member.setProjectRole("viewer".equals(user.getRole()) ? "viewer" : user.getRole()); member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours()); member.setJoinedAt(LocalDateTime.now()); projectMemberMapper.insert(member);
+                ProjectMember member = new ProjectMember(); member.setProjectId(projectId); member.setUserId(user.getId()); member.setProjectRole("viewer".equals(user.getRole()) ? "viewer" : user.getRole()); member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours()); member.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(user.getId())); member.setJoinedAt(LocalDateTime.now()); projectMemberMapper.insert(member);
             }
         }
     }

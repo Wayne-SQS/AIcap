@@ -86,11 +86,16 @@ public class ProjectAccessService {
 
     public List<Map<String, Object>> projectMembers(String projectId) {
         requireMember(projectId);
+        Project project = projects.selectById(normalize(projectId));
+        int projectWeeks = ProjectCapacityPolicy.projectWeeks(project);
         return members.selectList(new QueryWrapper<ProjectMember>().eq("project_id", normalize(projectId)).orderByAsc("user_id"))
                 .stream().map(m -> {
                     Map<String,Object> row = new LinkedHashMap<>();
                     row.put("id", m.getId()); row.put("project_id", m.getProjectId()); row.put("user_id", m.getUserId());
-                    row.put("project_role", m.getProjectRole()); row.put("capacity_hours", m.getCapacityHours()); row.put("joined_at", m.getJoinedAt());
+                    double weekly = ProjectCapacityPolicy.weeklyCapacity(m.getWeeklyCapacityHours(), m.getCapacityHours(), m.getUserId());
+                    row.put("project_role", m.getProjectRole()); row.put("capacity_hours", m.getCapacityHours());
+                    row.put("weekly_capacity_hours", weekly); row.put("project_weeks", projectWeeks);
+                    row.put("total_capacity_hours", weekly * projectWeeks); row.put("joined_at", m.getJoinedAt());
                     return row;
                 }).toList();
     }
@@ -110,7 +115,7 @@ public class ProjectAccessService {
         project.setCreatedAt(now); project.setUpdatedAt(now); projects.insert(project);
         ProjectMember member = new ProjectMember();
         member.setProjectId(id); member.setUserId(user.getId()); member.setProjectRole("owner");
-        member.setCapacityHours(60); member.setJoinedAt(now); members.insert(member);
+        member.setCapacityHours(60); member.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(user.getId())); member.setJoinedAt(now); members.insert(member);
         return summary(project, member);
     }
 
@@ -135,7 +140,8 @@ public class ProjectAccessService {
             User linkedUser = users.selectById(userId);
             if (linkedUser == null) continue;
             ProjectMember link = new ProjectMember(); link.setProjectId(id); link.setUserId(userId);
-            link.setProjectRole(userId.equals(user.getId()) ? "owner" : "member"); link.setCapacityHours(linkedUser.getCapacityHours()); link.setJoinedAt(now); members.insert(link);
+            link.setProjectRole(userId.equals(user.getId()) ? "owner" : "member");
+            link.setCapacityHours(linkedUser.getCapacityHours()); link.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(userId)); link.setJoinedAt(now); members.insert(link);
         }
         return id;
     }
@@ -146,6 +152,7 @@ public class ProjectAccessService {
         out.put("id", p.getId()); out.put("name", p.getName()); out.put("description", visibleDescription(p.getDescription())); out.put("status", p.getStatus());
         out.put("activities", activityNames(p.getDescription()));
         out.put("start_date", p.getStartDate()); out.put("end_date", p.getEndDate()); out.put("total_sprints", p.getTotalSprints());
+        out.put("project_weeks", ProjectCapacityPolicy.projectWeeks(p));
         out.put("created_by", p.getCreatedBy()); out.put("created_at", p.getCreatedAt()); out.put("updated_at", p.getUpdatedAt());
         out.put("project_role", member.getProjectRole()); out.put("story_count", stories.selectCount(new QueryWrapper<com.aicap.entity.Story>().eq("project_id", p.getId())));
         out.put("task_count", tasks.selectCount(new QueryWrapper<com.aicap.entity.Task>().eq("project_id", p.getId())));

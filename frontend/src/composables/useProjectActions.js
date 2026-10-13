@@ -98,7 +98,7 @@ export function useProjectActions() {
     const other = project.tasks.filter(item => item.owner === task.owner && item.id !== task.id)
     const proposed = weeklyHours({ ...task, w: [start, end] })
     const beforeLoad = project.memberWeeklyLoad(task.owner)
-    const capacity = project.capacityHours(task.owner) / 6
+    const capacity = project.weeklyCapacityHours(task.owner)
     for (let week = 1; week <= 6; week++) {
       const load = other.reduce((sum, item) => sum + weeklyHours(item)[week - 1], 0) + proposed[week - 1]
       if (capacity && load > capacity) addImpact(report, 'loadRisk', `W${week}：修改前 ${beforeLoad[week - 1] || 0}h，修改后 ${load}h，超过周容量 ${capacity.toFixed(1)}h`, task.id)
@@ -120,7 +120,7 @@ export function useProjectActions() {
     const before = project.memberWeeklyLoad(target.id)
     const after = before.slice()
     weeklyHours(task).forEach((hours, index) => { after[index] += hours })
-    const capacity = project.capacityHours(target.id) / 6
+    const capacity = project.weeklyCapacityHours(target.id)
     const report = emptyImpactReport()
     after.forEach((hours, index) => {
       if (hours > capacity) addImpact(report, 'loadRisk', `成员 ${target.name} W${index + 1}：修改前 ${before[index] || 0}h，修改后 ${hours}h，周容量 ${capacity.toFixed(1)}h`, task.id)

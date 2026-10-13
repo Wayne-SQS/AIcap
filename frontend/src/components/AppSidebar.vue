@@ -33,8 +33,7 @@ const navGroups = [
       { view: 'meetings', icon: '◉', label: '会议工作区' },
       { view: 'submit-agent', icon: '↗', label: '任务提交分析' },
       { view: 'profile-agent', icon: '◌', label: '成员画像分析' },
-      { view: 'drawing-agent', icon: '✎', label: 'Planning Agent · 项目规划' },
-      { view: 'project-generator', icon: '✚', label: '智能生成项目图' },
+      { view: 'drawing-agent', icon: '✎', label: '画图智能体' },
       { view: 'review', icon: '✓', label: '提案审核中心' }
     ]
   }

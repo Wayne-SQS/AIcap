@@ -51,6 +51,10 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"capacity_hours", "`capacity_hours` int NOT NULL DEFAULT '60'"},
     };
 
+    private static final String[][] PROJECT_MEMBER_COLUMNS = {
+            {"weekly_capacity_hours", "`weekly_capacity_hours` int DEFAULT NULL"},
+    };
+
     private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
             {"embedding_model", "`embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
             {"acl_rank", "`acl_rank` int DEFAULT NULL"},
@@ -61,6 +65,9 @@ public class SchemaUpgrader implements ApplicationRunner {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
             migrateProjects(conn);
+            if (tableExists(conn, "project_members")) {
+                added.addAll(addMissing(conn, "project_members", PROJECT_MEMBER_COLUMNS));
+            }
             ensureTaskStoryRelations(conn);
             if (tableExists(conn, "tasks")) {
                 added.addAll(addMissing(conn, "tasks", TASK_COLUMNS));
@@ -127,7 +134,7 @@ public class SchemaUpgrader implements ApplicationRunner {
 
     private void ensureProjectTables(Connection conn) throws SQLException {
         execute(conn, "CREATE TABLE IF NOT EXISTS projects (id varchar(20) NOT NULL, name varchar(200) NOT NULL, description text NOT NULL, status varchar(20) NOT NULL DEFAULT 'ACTIVE', start_date date DEFAULT NULL, end_date date DEFAULT NULL, total_sprints int NOT NULL DEFAULT 0, created_by int DEFAULT NULL, created_at datetime NOT NULL, updated_at datetime NOT NULL, PRIMARY KEY (id), KEY ix_projects_status (status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-        execute(conn, "CREATE TABLE IF NOT EXISTS project_members (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, user_id int NOT NULL, project_role varchar(20) NOT NULL, capacity_hours int NOT NULL DEFAULT 60, joined_at datetime NOT NULL, PRIMARY KEY (id), UNIQUE KEY uq_project_members_project_user (project_id,user_id), KEY ix_project_members_user (user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        execute(conn, "CREATE TABLE IF NOT EXISTS project_members (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, user_id int NOT NULL, project_role varchar(20) NOT NULL, weekly_capacity_hours int DEFAULT NULL, capacity_hours int NOT NULL DEFAULT 60, joined_at datetime NOT NULL, PRIMARY KEY (id), UNIQUE KEY uq_project_members_project_user (project_id,user_id), KEY ix_project_members_user (user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         execute(conn, "CREATE TABLE IF NOT EXISTS app_migrations (name varchar(100) NOT NULL, applied_at datetime NOT NULL, PRIMARY KEY(name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     }
 

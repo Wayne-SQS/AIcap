@@ -174,7 +174,7 @@ function scheduleWarnings(task, start, end) {
   if (project.storiesForTask(task).some(story => !sprints.has(story.sprint))) warnings.push('新排期与关联 Story Sprint 不完全一致')
   const other = project.tasks.filter(t => t.owner === task.owner && t.id !== task.id)
   const proposed = hoursByWeek(task, start, end)
-  const weeklyCapacity = project.capacityHours(task.owner) / 6
+  const weeklyCapacity = project.weeklyCapacityHours(task.owner)
   for (let week = 1; week <= 6; week++) {
     const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
     if (weeklyCapacity && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
