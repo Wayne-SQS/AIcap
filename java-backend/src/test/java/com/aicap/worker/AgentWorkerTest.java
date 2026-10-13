@@ -18,8 +18,9 @@ class AgentWorkerTest {
      * 一个卡住的 worker 不能拖住别的 worker。
      *
      * <p>这条是调度器与具体域解耦的**理由所在**:会议任务卡住时,
-     * planning 与 project-generation 必须照常轮询。改名前它靠 {@code AgentJobs}
-     * 的 mock 表达,现在按 {@link WorkerTask} 表达 —— 断言的是同一条性质。
+     * planning 与 project-generation 必须照常轮询。断言的是
+     * 「一个 WorkerTask 卡住不影响其它 WorkerTask」这条性质,与具体域无关 ——
+     * 老会议任务(原 {@code com.aicap.agent})已于 2026-10-13 删除,此测试仍成立。
      */
     @Test
     void blockedWorkerDoesNotStopTheOthers() throws Exception {

@@ -6,9 +6,5 @@ export const meetingsApi = {
   create: (payload, projectId) => api('/api/meetings', { method: 'POST', body: JSON.stringify({ ...payload, project_id: projectId }) }),
   get: (id, projectId) => api(`/api/meetings/${id}?projectId=${encodeURIComponent(projectId || '')}`),
   /* 删除会议(admin/owner):后端级联删除录音与历史建议记录,已批准产生的需求池条目不回滚 */
-  remove: (id, projectId) => api(`/api/meetings/${id}?projectId=${encodeURIComponent(projectId || '')}`, { method: 'DELETE' }),
-  runs: (id, projectId) => api(`/api/meetings/${id}/runs?projectId=${encodeURIComponent(projectId || '')}`),
-  startRun: (id, projectId) => api(`/api/meetings/${id}/runs?projectId=${encodeURIComponent(projectId || '')}`, { method: 'POST' }),
-  getRun: (runId, projectId) => api(`/api/agent-runs/${runId}?projectId=${encodeURIComponent(projectId || '')}`),
-  retryRun: (runId, projectId) => api(`/api/agent-runs/${runId}/retry?projectId=${encodeURIComponent(projectId || '')}`, { method: 'POST' })
+  remove: (id, projectId) => api(`/api/meetings/${id}?projectId=${encodeURIComponent(projectId || '')}`, { method: 'DELETE' })
 }

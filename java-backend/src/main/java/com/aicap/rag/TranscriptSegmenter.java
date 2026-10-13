@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
  * <p><b>编号方案是一个跨域契约,不是实现细节</b>:知识库切块
  * ({@link Chunker#chunkMeeting}) 用它把 {@code seg-N} 对齐成 {@code chunk_index N-1},
  * 会议 Agent 用它做证据逐字核对。两边必须切得一模一样,否则"检索命中的块"与
- * "模型引用的证据"会对不上。故从 {@code com.aicap.agent.AnalysisValidator} 拆出来共用。
+ * "模型引用的证据"会对不上。故它早已从原 {@code com.aicap.agent.AnalysisValidator}
+ * 拆出来归入本包共用 —— 该老包已于 2026-10-13 删除,本类不受影响。
  *
  * <p>切分逻辑与 Python 侧 {@code runner.segments_for} 逐行一致,改动需同步。
  */

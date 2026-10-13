@@ -3,7 +3,6 @@ import { useSessionStore } from '@/stores/session'
 import { useProjectsStore } from '@/stores/projects'
 import { meetingsApi } from '@/api/meetings'
 import { suggestionsApi } from '@/api/suggestions'
-import { agentApi } from '@/api/agent'
 
 /* 会议域 store:对齐 meeting-review.js meetingReviewState + meeting-agent.js agentUI
    在线:会议/建议/Agent 配置与运行;离线由 AiView 走演示分支,不进本 store */
@@ -13,11 +12,7 @@ export const useMeetingStore = defineStore('meeting', {
     suggestions: [],
     selected: '',
     busy: [],           // 审核中的建议 id(旧版 Set,数组便于响应式)
-    submission: null,   // { fingerprint, key } 提交幂等键(网络失败后复用)
-    agentConfig: null,
-    agentRun: null,     // 当前选中会议的最新运行
-    agentError: '',
-    agentLoading: false
+    submission: null   // { fingerprint, key } 提交幂等键(网络失败后复用)
   }),
   getters: {
     online: () => {
@@ -32,28 +27,24 @@ export const useMeetingStore = defineStore('meeting', {
       const s = useSessionStore()
       return !!s.currentUser && ['admin', 'owner'].includes(s.currentUser.role)
     },
-    selectedMeeting: s => s.meetings.find(m => m.id === s.selected) || null,
-    runActive: s => !!s.agentRun && ['queued', 'running'].includes(s.agentRun.status)
+    selectedMeeting: s => s.meetings.find(m => m.id === s.selected) || null
   },
   actions: {
     async loadAll() {
       if (!this.online) return
       const projectId = useProjectsStore().currentProjectId
-      if (!projectId) { this.meetings = []; this.suggestions = []; this.selected = ''; this.agentRun = null; return }
-      const [meetings, suggestions, config] = await Promise.all([
-        meetingsApi.list(projectId), suggestionsApi.list(projectId), agentApi.config().catch(() => null)
+      if (!projectId) { this.meetings = []; this.suggestions = []; this.selected = ''; return }
+      const [meetings, suggestions] = await Promise.all([
+        meetingsApi.list(projectId), suggestionsApi.list(projectId)
       ])
       this.meetings = meetings
       this.suggestions = suggestions
-      if (config) this.agentConfig = config
       if (!meetings.some(m => m.id === this.selected)) {
         this.selected = meetings[0]?.id || ''
       }
     },
     select(id) {
       this.selected = id
-      this.agentRun = null
-      this.agentError = ''
     },
     async saveMeeting(values) {
       const meeting = await meetingsApi.create(values, useProjectsStore().currentProjectId)
@@ -67,8 +58,6 @@ export const useMeetingStore = defineStore('meeting', {
     async removeMeeting(id) {
       const result = await meetingsApi.remove(id, useProjectsStore().currentProjectId)
       this.selected = ''
-      this.agentRun = null
-      this.agentError = ''
       await this.loadAll()
       this.select('')   // loadAll 会自动补选第一条,这里显式复位保持空态
       return result
@@ -96,44 +85,6 @@ export const useMeetingStore = defineStore('meeting', {
       const result = await suggestionsApi.review(id, payload, useProjectsStore().currentProjectId)
       this.suggestions = this.suggestions.map(s => s.id === id ? result : s)
       return result
-    },
-    /* Agent 运行:refreshRun 由组件轮询驱动(generation 竞态防护在组件内) */
-    async refreshRun() {
-      const id = this.selected
-      if (!this.online || !id) return
-      const rows = await meetingsApi.runs(id, useProjectsStore().currentProjectId)
-      const run = rows[0] ? await meetingsApi.getRun(rows[0].id, useProjectsStore().currentProjectId) : null
-      if (this.selected !== id) return  // 已切换会议,丢弃过期结果
-      this.agentRun = run
-      if (run && ['awaiting_review', 'completed'].includes(run.status)) {
-        this.suggestions = await suggestionsApi.list(useProjectsStore().currentProjectId)
-      }
-      return run
-    },
-    async startRun(retryId = null) {
-      const id = this.selected
-      this.agentError = ''
-      this.agentLoading = true
-      try {
-        const run = retryId
-          ? await meetingsApi.retryRun(retryId, useProjectsStore().currentProjectId)
-          : await meetingsApi.startRun(id, useProjectsStore().currentProjectId)
-        if (this.selected === id) this.agentRun = run
-        return run
-      } finally {
-        this.agentLoading = false
-      }
-    },
-    /* 复制会议并重新分析 */
-    async reanalyze() {
-      const original = this.selectedMeeting
-      const meeting = await meetingsApi.create({
-        title: original.title.slice(0, 190) + ' · 重新分析',
-        transcript: original.transcript
-      }, useProjectsStore().currentProjectId)
-      this.meetings.unshift(meeting)
-      this.selected = meeting.id
-      return meeting
     }
   }
 })

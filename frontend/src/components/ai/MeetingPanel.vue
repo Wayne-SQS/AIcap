@@ -6,7 +6,6 @@ import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useReviewStore } from '@/stores/review'
 import { SUG_KEY } from '@/constants'
-import AgentRunPanel from './AgentRunPanel.vue'
 import RecorderPanel from './RecorderPanel.vue'
 import StatusAnalysisPanel from './StatusAnalysisPanel.vue'
 import PlanningAnalysisPanel from './PlanningAnalysisPanel.vue'
@@ -198,7 +197,6 @@ function genDemoSuggestion() {
         <ReviewAnalysisPanel v-else-if="analysisType === 'review'" :key="'review:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <RetroAnalysisPanel v-else-if="analysisType === 'retro'" :key="'retro:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <RefinementAnalysisPanel v-else-if="analysisType === 'refinement'" :key="'refinement:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
-        <details><summary>通用会议 Agent（分析摘要与行动项）</summary><AgentRunPanel /></details>
         <details :open="analysisType === 'assignment'"><summary>Assignment 分配建议 · 只读查询后可另行保存建议</summary><AssignmentPanel :key="'assignment:' + meeting.selected" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" /></details>
       </template>
       <p v-else class="empty">先创建或选择会议，再开始分析。</p>

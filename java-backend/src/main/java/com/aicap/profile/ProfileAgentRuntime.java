@@ -16,7 +16,8 @@ import java.util.List;
  *   → final: 结构化 JSON 结论(必须带 evidence_refs,锚定工具调用)
  *   步数/预算控制:超过 maxSteps 强制收敛,防止失控;每步留痕(可观测)。
  *
- * 与会议智能体的 AgentRunner 完全独立:自己的循环、自己的步进协议、自己的留痕结构。
+ * 与会议智能体的循环完全独立:自己的循环、自己的步进协议、自己的留痕结构。
+ * （原会议 AgentRunner 随 `com.aicap.agent` 于 2026-10-13 一并删除，本类不依赖它。）
  */
 @Component
 public class ProfileAgentRuntime {

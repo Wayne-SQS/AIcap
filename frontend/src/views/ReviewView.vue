@@ -84,7 +84,6 @@ watch(() => projects.currentProjectId, (next, previous) => {
   meeting.meetings = []
   meeting.suggestions = []
   meeting.selected = ''
-  meeting.agentRun = null
   meeting.loadAll().catch(() => { /* 可手动刷新 */ })
 })
 

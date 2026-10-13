@@ -607,16 +607,9 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             String audioId = up.json().path("id").asText();
             assertNotNull(findStoredAudio(audioId), "上传后音频文件应已落盘: " + audioId);
 
-            // 造数据 3:发起一次分析 → run + queued 事件(worker 关闭,不会真的调用模型)
-            ApiResponse run = post("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
-            assertEquals(200, run.status(), run.body());
-            String runId = run.json().path("id").asText();
-            assertEquals("queued", run.json().path("status").asText(), run.body());
-
-            // 删除前确认三类从属数据都真实存在(否则"删除后为空"没有意义)
+            // 删除前确认两类从属数据都真实存在(否则"删除后为空"没有意义)
             assertEquals(1, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size());
             assertEquals(1, get("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).json().size());
-            assertEquals(1, get("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).json().size());
             assertTrue(meetingListed(mid), "删除前会议应在列表中");
 
             // 删除
@@ -631,10 +624,6 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             // 会议本体消失
             assertEquals(404, get("/api/meetings/" + mid, token(USER_ADMIN)).status(), "会议应已删除");
             assertFalse(meetingListed(mid), "GET /api/meetings 中不应再有该会议");
-            // 分析任务消失(事件外键先删才可能删得掉 run)→ GET /api/agent-runs 404
-            assertEquals(404, get("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).status());
-            assertEquals(404, get("/api/agent-runs/" + runId, token(USER_ADMIN)).status(),
-                    "分析任务行应已随会议删除");
             // 建议与审核载荷消失
             assertEquals(0, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size(),
                     "该会议的建议应清空");

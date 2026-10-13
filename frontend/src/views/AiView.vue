@@ -41,8 +41,6 @@ watch(() => projects.currentProjectId, (next, previous) => {
   meeting.meetings = []
   meeting.suggestions = []
   meeting.selected = ''
-  meeting.agentRun = null
-  meeting.agentError = ''
   queueEntries.value = []
   recentMeeting.value = null
   summaryCounts.value = { pendingCount: 0, executionCount: 0 }
