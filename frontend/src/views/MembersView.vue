@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useProjectsStore } from '@/stores/projects'
+import { projectsApi } from '@/api/projects'
 import { membersApi } from '@/api/members'
 import { profileAgentApi } from '@/api/profileAgent'
 import { useProjectActions } from '@/composables/useProjectActions'
@@ -12,6 +13,7 @@ import OwnerRiskDialog from '@/components/members/OwnerRiskDialog.vue'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 import { memberLabel, memberUserId } from '@/data/memberIdentity'
+import { useToast } from '@/composables/useToast'
 
 /* 成员任务图同时保留真实画像/GitHub 活动，以及任务负责人调整、影响确认和四个独立缩放画布。 */
 const project = useProjectStore()
@@ -26,6 +28,39 @@ const draggingTask = ref('')
 const profiles = ref([])
 const drawerMember = ref(null)
 const online = computed(() => session.apiMode && !!session.currentUser)
+const canEditCapacity = computed(() => online.value && ['owner', 'admin'].includes(projects.currentProject?.project_role) && !session.isViewer)
+const editingCapacity = ref(null)
+const capacityProjectId = ref(null)
+const capacityInput = ref('')
+const capacityBusy = ref(false)
+const { notify } = useToast()
+
+function editCapacity(member) {
+  editingCapacity.value = member.id
+  capacityProjectId.value = projects.currentProjectId
+  capacityInput.value = member.configuredWeeklyCapacity == null ? '' : String(member.configuredWeeklyCapacity)
+}
+
+async function saveCapacity() {
+  if (!canEditCapacity.value || editingCapacity.value == null || capacityBusy.value) return
+  if (capacityProjectId.value !== projects.currentProjectId) { editingCapacity.value = null; return }
+  const value = capacityInput.value.trim()
+  if (value && (!/^\d+$/.test(value) || Number(value) > 10000)) {
+    notify('周容量请输入 0 到 10000 的整数，留空使用默认值')
+    return
+  }
+  capacityBusy.value = true
+  try {
+    await projectsApi.updateMemberCapacity(projects.currentProjectId, memberUserId(editingCapacity.value), {
+      weekly_capacity_hours: value === '' ? null : Number(value)
+    })
+    await project.loadAll(projects.currentProjectId)
+    editingCapacity.value = null
+    notify('成员周容量已保存')
+  } catch (error) { notify(error.message) }
+  finally { capacityBusy.value = false }
+}
+watch(() => projects.currentProjectId, () => { editingCapacity.value = null })
 
 const overviewViewport = ref(null)
 const overviewShell = ref(null)
@@ -88,7 +123,7 @@ function weeklyHours(task) {
 function ownerRisks(task, ownerId) {
   const member = project.memberById(ownerId)
   const capacity = member ? project.weeklyCapacityHours(ownerId) : 0
-  if (!capacity) return []
+  if (!Number.isFinite(capacity) || capacity < 0) return []
   const current = project.memberWeeklyLoad(ownerId)
   const after = Array(6).fill(0)
   project.tasks.filter(item => item.owner === ownerId && item.id !== task.id).forEach(item => {
@@ -135,7 +170,7 @@ const LOAD_LABEL = ['低负载', '正常', '偏忙', '超载']
 function heatCell(m, w) {
   const hours = load.value[m.id] ? load.value[m.id][w] : 0
   const weeklyCapacity = project.weeklyCapacityHours(m.id)
-  const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
+  const ratio = weeklyCapacity ? hours / weeklyCapacity : (hours > 0 ? Infinity : 0)
   const lv = ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
   const related = project.tasks.filter(t => t.owner === m.id && t.w[0] <= w + 1 && t.w[1] >= w + 1).map(t => t.id).join('、') || '无'
   return {
@@ -148,7 +183,8 @@ function heatCell(m, w) {
 const bandwidthCards = computed(() => project.members.map(m => {
   const alloc = project.allocatedHours(m.id)
   const cap = project.capacityHours(m.id)
-  return { m, alloc, cap, pct: cap ? Math.round(alloc / cap * 100) : 0, state: project.capacityStatus(cap ? alloc / cap : 0) }
+  const utilization = cap ? alloc / cap : (alloc > 0 ? Infinity : 0)
+  return { m, alloc, cap, pct: cap ? Math.round(utilization * 100) : (alloc > 0 ? 100 : 0), state: project.capacityStatus(utilization) }
 }))
 
 /* ==================== 成员开发活动图(真实 activity_records + 任务规划预计强度) ==================== */
@@ -440,6 +476,12 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
           <div><h3>{{ b.m.name }}</h3><div class="role" :title="`每周 ${project.weeklyCapacityHours(b.m.id)}h × ${project.projectWeeks} 周 = 总容量 ${b.cap}h`">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
           <span class="loadflag" :class="b.state.key" style="margin-left:auto">{{ b.state.label }}</span>
         </div>
+        <button v-if="canEditCapacity" type="button" @click="editCapacity(b.m)">设置周容量</button>
+        <form v-if="editingCapacity === b.m.id" class="capacity-form" @submit.prevent="saveCapacity">
+          <label>人时/周 <input v-model="capacityInput" type="text" inputmode="numeric" placeholder="留空使用默认值"></label>
+          <button :disabled="capacityBusy" type="submit">保存</button>
+          <button type="button" :disabled="capacityBusy" @click="editingCapacity = null">取消</button>
+        </form>
         <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: Math.min(b.pct, 100) + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.pct }}%</span></div>
       </div>
     </div>
@@ -622,6 +664,9 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
 .bandwidth-section .mcard {
   box-shadow: none;
 }
+.capacity-form{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin-top:8px}
+.capacity-form label{display:grid;gap:4px;font-size:12px}
+.capacity-form input{width:150px;padding:6px;border:2px solid var(--ink)}
 
 .activity-heatmap-section .contrib-wrap {
   gap: 12px;

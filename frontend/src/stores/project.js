@@ -169,7 +169,8 @@ export const useProjectStore = defineStore('project', {
     utilization() {
       return id => {
       const cap = this.capacityHours(id)
-      return cap ? this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      const allocated = this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0)
+      return cap ? allocated / cap : (allocated > 0 ? Infinity : 0)
       }
     },
     /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
@@ -301,7 +302,8 @@ export const useProjectStore = defineStore('project', {
           roleKey: u.role || m.roleKey,
           capacity: u.capacity_hours ?? m.capacity,
           // 项目成员容量不可从上一个项目继承；旧接口未给字段时交给历史六周容量兼容层推导。
-          weeklyCapacity: u.weekly_capacity_hours ?? null
+          weeklyCapacity: u.weekly_capacity_hours ?? null,
+          configuredWeeklyCapacity: u.configured_weekly_capacity_hours ?? null
         }
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
@@ -312,6 +314,7 @@ export const useProjectStore = defineStore('project', {
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
             roleKey: u.role, tag: '', capacity: u.capacity_hours ?? 60,
             weeklyCapacity: u.weekly_capacity_hours ?? null,
+            configuredWeeklyCapacity: u.configured_weekly_capacity_hours ?? null,
             accent: MEMBER_COLORS[idx] || 'gray'
           })
         }
@@ -350,6 +353,7 @@ export const useProjectStore = defineStore('project', {
           ...user,
           capacity_hours: link.capacity_hours ?? user.capacity_hours,
           weekly_capacity_hours: link.weekly_capacity_hours ?? null,
+          configured_weekly_capacity_hours: link.configured_weekly_capacity_hours ?? null,
           role: link.project_role || user.role
         } : user
       }))

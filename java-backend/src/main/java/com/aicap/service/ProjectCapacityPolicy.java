@@ -30,7 +30,8 @@ public final class ProjectCapacityPolicy {
     }
 
     public static double weeklyCapacity(Integer explicitWeeklyCapacity, Integer legacySixWeekCapacity, Integer userId) {
-        if (explicitWeeklyCapacity != null && explicitWeeklyCapacity > 0) return explicitWeeklyCapacity;
+        // Zero is an intentional unavailable week, not a missing value.
+        if (explicitWeeklyCapacity != null && explicitWeeklyCapacity >= 0) return explicitWeeklyCapacity;
         int fallback = defaultWeeklyCapacity(userId);
         if (fallback > 0) return fallback;
         if (legacySixWeekCapacity != null && legacySixWeekCapacity > 0) return legacySixWeekCapacity / (double) LEGACY_WEEKS;

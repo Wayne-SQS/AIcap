@@ -39,8 +39,11 @@ export function defaultWeeklyCapacity(member) {
 
 /** Explicit weekly capacity wins; legacy capacity_hours is only a no-identity compatibility fallback. */
 export function weeklyCapacity(member) {
-  const explicit = positiveNumber(member?.weeklyCapacity ?? member?.weekly_capacity_hours)
-  if (explicit) return explicit
+  const configured = member?.weeklyCapacity ?? member?.weekly_capacity_hours
+  if (configured !== null && configured !== undefined) {
+    const explicit = Number(configured)
+    if (Number.isFinite(explicit) && explicit >= 0) return explicit
+  }
   const fallback = defaultWeeklyCapacity(member)
   if (fallback) return fallback
   const legacy = positiveNumber(member?.legacyCapacity ?? member?.capacity_hours ?? member?.capacity)

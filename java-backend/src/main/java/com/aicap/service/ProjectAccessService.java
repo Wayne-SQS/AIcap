@@ -94,10 +94,28 @@ public class ProjectAccessService {
                     row.put("id", m.getId()); row.put("project_id", m.getProjectId()); row.put("user_id", m.getUserId());
                     double weekly = ProjectCapacityPolicy.weeklyCapacity(m.getWeeklyCapacityHours(), m.getCapacityHours(), m.getUserId());
                     row.put("project_role", m.getProjectRole()); row.put("capacity_hours", m.getCapacityHours());
-                    row.put("weekly_capacity_hours", weekly); row.put("project_weeks", projectWeeks);
+                    row.put("weekly_capacity_hours", weekly);
+                    row.put("configured_weekly_capacity_hours", m.getWeeklyCapacityHours());
+                    row.put("project_weeks", projectWeeks);
                     row.put("total_capacity_hours", weekly * projectWeeks); row.put("joined_at", m.getJoinedAt());
                     return row;
                 }).toList();
+    }
+
+    @Transactional
+    public Map<String, Object> updateMemberCapacity(String projectId, Integer userId, Integer weeklyCapacity) {
+        requireOwner(projectId);
+        if (weeklyCapacity != null && (weeklyCapacity < 0 || weeklyCapacity > 10000)) {
+            throw ApiException.badRequest("周容量须为 0 到 10000 人时，或留空使用默认值");
+        }
+        ProjectMember member = members.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", normalize(projectId)).eq("user_id", userId).last("LIMIT 1"));
+        if (member == null) throw ApiException.notFound("项目成员不存在");
+        members.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ProjectMember>()
+                .eq("id", member.getId()).set("weekly_capacity_hours", weeklyCapacity));
+        return projectMembers(projectId).stream()
+                .filter(row -> userId.equals(row.get("user_id"))).findFirst()
+                .orElseThrow(() -> ApiException.notFound("项目成员不存在"));
     }
 
 
