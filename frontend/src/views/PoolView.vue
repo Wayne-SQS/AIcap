@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -12,6 +13,7 @@ import { memberUserId, memberIndex } from '@/data/memberIdentity'
 /* 需求池:结构对齐旧版 L634-654,逻辑对齐 pool 保存(L1441-1455)/dropPool(L1456-1460)/
    promotePool 工作流弹窗(meeting-improvements.js L43-67):在线走 API、离线改本地 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -43,9 +45,9 @@ async function save() {
   if (!title) { notify('请填写需求标题'); return }
   if (session.apiMode) {
     try {
-      await poolApi.create({ title, description: desc || '（待补充描述）', source: '手动新增', priority: form.pri })
+      await poolApi.create({ title, description: desc || '（待补充描述）', source: '手动新增', priority: form.pri }, projects.currentProjectId)
       cancelForm()
-      await project.loadAll()
+      await project.loadAll(projects.currentProjectId)
       notify('已保存到需求池（服务器）')
     } catch (err) { notify(err.message) }
   } else {
@@ -65,7 +67,7 @@ async function save() {
 async function dropPool(id) {
   if (guard('移除需求')) return
   if (session.apiMode) {
-    try { await poolApi.remove(id); await project.loadAll(); notify(id + ' 已从需求池移除') }
+    try { await poolApi.remove(id, projects.currentProjectId); await project.loadAll(projects.currentProjectId); notify(id + ' 已从需求池移除') }
     catch (err) { notify(err.message) }
     return
   }
@@ -108,8 +110,8 @@ async function submitPromote() {
   promoting.value = true
   try {
     if (session.apiMode) {
-      await poolApi.promote(promoteForm.id, body)
-      try { await project.loadAll() } catch (err) { notify('已移入看板，刷新失败：' + err.message) }
+      await poolApi.promote(promoteForm.id, body, projects.currentProjectId)
+      try { await project.loadAll(projects.currentProjectId) } catch (err) { notify('已移入看板，刷新失败：' + err.message) }
     } else {
       /* 编号由 store 统一分配:与后端 StoryController.nextStoryId 同为 US%02d 口径。
          修复:此处原为 'M' + (基于 slice(1) 取数) —— 故事基线从 M01 迁到 US01 后,

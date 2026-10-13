@@ -2,7 +2,6 @@ package com.aicap.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -44,20 +43,6 @@ public final class MemberProfileDtos {
             if (yearsExperience == null) yearsExperience = 0;
             // 三个维度不做缺省兜底:缺字段必须 422,避免"漏传即清空画像"
         }
-    }
-
-    /**
-     * PATCH /api/members/{userId}/capacity 请求体(US27「成员每周可用容量的设置、保存和读取」)。
-     *
-     * <p>刻意用 {@link JsonNode} 而不是 {@code Integer}:必须区分**「字段缺失」与「显式 null」**——
-     * 用 {@code Integer} 时两者在 Jackson 里都是 null,没法表达"只读不写"和"清空为未配置"的区别。
-     * <ul>
-     *   <li>字段缺失 → 422(这个端点的唯一职责就是设置容量,漏传视为调用错误)</li>
-     *   <li>{@code "capacity_hours": null} → 清为「未配置」(与 0 是两种状态)</li>
-     *   <li>{@code "capacity_hours": 0} 及以上 → 确认为该值</li>
-     * </ul>
-     */
-    public record CapacityIn(@JsonProperty("capacity_hours") @JsonAlias("capacityHours") JsonNode capacityHours) {
     }
 
     /** GET /api/members/profiles 单项输出(含 users 的基础字段) */

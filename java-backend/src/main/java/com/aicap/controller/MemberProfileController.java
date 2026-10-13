@@ -38,12 +38,4 @@ public class MemberProfileController {
         User actor = Roles.any();
         return profileService.save(userId, in, actor);
     }
-
-    /** 设置成员容量(US27)。体:{"capacity_hours": N | 0 | null};null = 清为「未配置」,与 0 是两种状态。 */
-    @PatchMapping("/{userId}/capacity")
-    public MemberProfileDtos.ProfileOut updateCapacity(@PathVariable Integer userId,
-                                                       @RequestBody MemberProfileDtos.CapacityIn in) {
-        User actor = Roles.any();
-        return profileService.saveCapacity(userId, in, actor);
-    }
 }

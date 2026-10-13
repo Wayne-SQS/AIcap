@@ -17,6 +17,7 @@ import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
 import com.aicap.service.IdAllocator;
 import com.aicap.service.ProjectPlanningActionService;
+import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -60,12 +62,15 @@ public class TaskPoolController {
     /** 编号分配:本类原有的 nextStoryId()/nextPoolId() 与 StoryController 逐字重复,已集中 */
     private final IdAllocator idAllocator;
     private final ProjectPlanningActionService planningActions;
+    private final ProjectAccessService projectAccess;
+    private final com.aicap.service.TaskStoryRelationService taskStoryRelations;
 
     // ---------- 工具 ----------
 
     @Transactional
-    void addLog(String storyId, String logType, String detail, Integer userId) {
+    void addLog(String projectId, String storyId, String logType, String detail, Integer userId) {
         StoryLog log = new StoryLog();
+        log.setProjectId(projectId);
         log.setStoryId(storyId);
         log.setLogType(logType);
         log.setDetail(detail);
@@ -102,9 +107,9 @@ public class TaskPoolController {
     }
 
     /** 依赖环检测(对齐 FastAPI tasks.py `_has_dependency_cycle`):以 taskId 为终点做可达性 DFS */
-    private boolean hasDependencyCycle(String taskId, List<String> dependencies) {
+    private boolean hasDependencyCycle(String projectId, String taskId, List<String> dependencies) {
         Map<String, List<String>> dependencyMap = new HashMap<>();
-        for (Task t : taskMapper.selectList(null)) {
+        for (Task t : taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", projectId))) {
             dependencyMap.put(t.getId(), parseRefs(t.getDependsOn(), "T"));
         }
         dependencyMap.put(taskId, dependencies);
@@ -192,9 +197,13 @@ public class TaskPoolController {
     // ---------- tasks ----------
 
     @GetMapping("/tasks")
-    public List<TaskDtos.TaskOut> listTasks() {
-        Roles.any();
-        return TaskDtos.toOutList(taskMapper.selectList(new QueryWrapper<Task>().orderByAsc("id")));
+    public List<TaskDtos.TaskOut> listTasks(@RequestParam String projectId) {
+        projectAccess.requireMember(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        return taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId).orderByAsc("code"))
+                .stream()
+                .map(task -> TaskDtos.toOut(task, taskStoryRelations.storyCodes(scopedProjectId, task)))
+                .toList();
     }
 
     /**
@@ -208,9 +217,12 @@ public class TaskPoolController {
     @PatchMapping("/tasks/{taskId}")
     @Transactional
     public TaskDtos.TaskOut patchTask(@PathVariable String taskId,
-                                      @RequestBody JsonNode body) {
+                                      @RequestBody JsonNode body,
+                                      @RequestParam String projectId) {
         User actor = Roles.writer();
-        Task task = taskMapper.selectById(taskId);
+        projectAccess.requireWriter(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        Task task = taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scopedProjectId).eq("code", taskId));
         if (task == null) {
             throw ApiException.notFound("任务不存在");
         }
@@ -245,7 +257,7 @@ public class TaskPoolController {
         String kanban = null;
         if (hasKanban && !body.get("kanban_card_id").isNull()) {
             kanban = body.get("kanban_card_id").asText();
-            if (storyMapper.selectById(kanban) == null) {
+            if (storyMapper.selectOne(new QueryWrapper<Story>().eq("project_id", scopedProjectId).eq("code", kanban)) == null) {
                 throw ApiException.badRequest("所属看板卡不存在");
             }
         }
@@ -259,7 +271,7 @@ public class TaskPoolController {
         String normalizedStoryRef = null;
         if (body.has("story_ref")) {
             List<String> refs = parseRefs(storyRef.value(), "US");
-            Set<String> storyIds = storyMapper.selectList(null).stream()
+            Set<String> storyIds = storyMapper.selectList(new QueryWrapper<Story>().eq("project_id", scopedProjectId)).stream()
                     .map(Story::getId).collect(Collectors.toSet());
             List<String> missing = refs.stream().filter(r -> !storyIds.contains(r)).toList();
             if (!missing.isEmpty()) {
@@ -274,13 +286,13 @@ public class TaskPoolController {
             if (deps.contains(taskId)) {
                 throw ApiException.badRequest("任务不能依赖自身");
             }
-            Set<String> taskIds = taskMapper.selectList(null).stream()
+            Set<String> taskIds = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId)).stream()
                     .map(Task::getId).collect(Collectors.toSet());
             List<String> missing = deps.stream().filter(r -> !taskIds.contains(r)).toList();
             if (!missing.isEmpty()) {
                 throw ApiException.badRequest("前置任务不存在：" + String.join(", ", missing));
             }
-            if (hasDependencyCycle(taskId, deps)) {
+            if (hasDependencyCycle(scopedProjectId, taskId, deps)) {
                 throw ApiException.badRequest("任务依赖不能形成循环");
             }
             normalizedDependsOn = String.join(",", deps);
@@ -308,8 +320,8 @@ public class TaskPoolController {
         }
         if (ownerId.present()) {
             if (!changed) {
-                planningActions.updateTaskOwner(taskId, ownerId.value(), actor);
-                task = taskMapper.selectById(taskId);
+                planningActions.updateTaskOwner(scopedProjectId, taskId, ownerId.value(), actor);
+                task = taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scopedProjectId).eq("code", taskId));
             } else {
                 task.setOwnerId(ownerId.value());
             }
@@ -359,25 +371,29 @@ public class TaskPoolController {
         }
 
         if (!changed) {
-            return TaskDtos.toOut(task);
+            return TaskDtos.toOut(task, taskStoryRelations.storyCodes(scopedProjectId, task));
         }
         taskMapper.updateById(task);
-        return TaskDtos.toOut(task);
+        if (body.has("story_ref")) {
+            taskStoryRelations.replaceRelations(scopedProjectId, task, normalizedStoryRef);
+        }
+        return TaskDtos.toOut(task, taskStoryRelations.storyCodes(scopedProjectId, task));
     }
 
     // ---------- pool ----------
 
     @GetMapping("/pool")
-    public List<PoolDtos.PoolOut> listPool() {
-        Roles.any();
-        return PoolDtos.toOutList(poolItemMapper.selectList(new QueryWrapper<PoolItem>().orderByAsc("id")));
+    public List<PoolDtos.PoolOut> listPool(@RequestParam String projectId) {
+        projectAccess.requireMember(projectId);
+        return PoolDtos.toOutList(poolItemMapper.selectList(new QueryWrapper<PoolItem>().eq("project_id", ProjectAccessService.normalize(projectId)).orderByAsc("id")));
     }
 
     @PostMapping("/pool")
     @Transactional
-    public PoolDtos.PoolOut createPool(@Valid @RequestBody PoolDtos.PoolIn body) {
-        Roles.writer();
+    public PoolDtos.PoolOut createPool(@Valid @RequestBody PoolDtos.PoolIn body, @RequestParam String projectId) {
+        projectAccess.requireWriter(projectId);
         PoolItem item = new PoolItem();
+        item.setProjectId(ProjectAccessService.normalize(projectId));
         item.setId(idAllocator.nextPoolId());
         item.setTitle(body.title() == null ? "" : body.title());
         item.setDescription(body.description());
@@ -389,13 +405,14 @@ public class TaskPoolController {
     }
 
     @DeleteMapping("/pool/{poolId}")
-    public PoolDtos.DeleteOut deletePool(@PathVariable String poolId) {
-        Roles.writer();
-        PoolItem item = poolItemMapper.selectById(poolId);
+    public PoolDtos.DeleteOut deletePool(@PathVariable String poolId, @RequestParam String projectId) {
+        projectAccess.requireWriter(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        PoolItem item = poolItemMapper.selectOne(new QueryWrapper<PoolItem>().eq("project_id", scopedProjectId).eq("id", poolId));
         if (item == null) {
             throw ApiException.notFound("需求池条目不存在");
         }
-        poolItemMapper.deleteById(poolId);
+        poolItemMapper.delete(new QueryWrapper<PoolItem>().eq("project_id", scopedProjectId).eq("id", poolId));
         return new PoolDtos.DeleteOut(true);
     }
 
@@ -403,17 +420,21 @@ public class TaskPoolController {
     @PostMapping("/pool/{poolId}/promote")
     @Transactional
     public StoryDtos.StoryOut promote(@PathVariable String poolId,
-                                      @Valid @RequestBody PoolDtos.PoolPromoteIn body) {
+                                      @Valid @RequestBody PoolDtos.PoolPromoteIn body,
+                                      @RequestParam String projectId) {
         User user = Roles.writer();
-        PoolItem item = poolItemMapper.selectById(poolId);
+        projectAccess.requireWriter(projectId);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        PoolItem item = poolItemMapper.selectOne(new QueryWrapper<PoolItem>().eq("project_id", scopedProjectId).eq("id", poolId));
         if (item == null) {
             throw ApiException.notFound("需求池条目不存在");
         }
         if (body.ownerId() != null && userMapper.selectById(body.ownerId()) == null) {
             throw ApiException.unprocessable("所选负责人不存在");
         }
-        String sid = idAllocator.nextStoryId();
+        String sid = idAllocator.nextStoryId(scopedProjectId);
         Story story = new Story();
+        story.setProjectId(scopedProjectId);
         story.setId(sid);
         story.setTitle(item.getTitle());
         story.setDescription(item.getDescription() == null || item.getDescription().isBlank()
@@ -427,10 +448,10 @@ public class TaskPoolController {
         story.setOwnerId(body.ownerId());
         story.setCreatedAt(LocalDateTime.now());
         storyMapper.insert(story);
-        poolItemMapper.deleteById(poolId);
+        poolItemMapper.delete(new QueryWrapper<PoolItem>().eq("project_id", scopedProjectId).eq("id", poolId));
         String detail = "由需求池 " + poolId + " 移入 Sprint " + body.sprint() + "，负责人 "
                 + (body.ownerId() == null ? "未分配" : body.ownerId());
-        addLog(sid, "create", detail, user.getId());
+        addLog(scopedProjectId, sid, "create", detail, user.getId());
         return StoryDtos.toOut(story);
     }
 }

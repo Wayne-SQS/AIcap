@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { authApi } from '@/api/auth'
 import { health, setAuthToken, getAuthToken } from '@/api/client'
 import { useToast } from '@/composables/useToast'
+import { useProjectsStore } from '@/stores/projects'
 
 /* 会话与在线/离线模式:对齐旧版 index.html L1262-1341 的
    apiMode/authToken/currentUser/bootstrap/doLogin/logout/updateChip/openLogin 全套语义 */
@@ -46,7 +47,7 @@ export const useSessionStore = defineStore('session', {
             try {
               this.currentUser = await authApi.me()
               const project = useProjectStoreSafe()
-              if (project) await project.loadAll()
+              if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
             } catch (e) {
               this.authToken = null
               setAuthToken(null)
@@ -76,7 +77,7 @@ export const useSessionStore = defineStore('session', {
       this.apiMode = true
       this.loginOpen = false
       const project = useProjectStoreSafe()
-      if (project) await project.loadAll()
+      if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
       const { notify } = useToast()
       notify('欢迎，' + this.currentUser.display_name)
     },

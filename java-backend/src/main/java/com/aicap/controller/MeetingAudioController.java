@@ -34,26 +34,27 @@ public class MeetingAudioController {
     private final MeetingAudioService audioService;
 
     @PostMapping("/meetings/{meetingId}/audio")
-    public MeetingAudioDtos.AudioOut upload(@PathVariable String meetingId,
+    public MeetingAudioDtos.AudioOut upload(@PathVariable String meetingId, @RequestParam String projectId,
                                             @RequestParam("file") MultipartFile file,
                                             @RequestParam(value = "source", required = false) String source,
                                             @RequestParam(value = "duration_ms", required = false) Integer durationMs) {
         User actor = Roles.writer();
-        return audioService.store(meetingId, file, source, durationMs, actor);
+        return audioService.store(projectId, meetingId, file, source, durationMs, actor);
     }
 
     @GetMapping("/meetings/{meetingId}/audio")
-    public List<MeetingAudioDtos.AudioOut> list(@PathVariable String meetingId) {
+    public List<MeetingAudioDtos.AudioOut> list(@PathVariable String meetingId, @RequestParam String projectId) {
         Roles.any();
-        return audioService.list(meetingId);
+        return audioService.list(projectId, meetingId);
     }
 
     /** 回放/下载:返回 mp3 字节流 */
     @GetMapping("/audio/{audioId}")
     public ResponseEntity<byte[]> play(@PathVariable String audioId,
+                                       @RequestParam String projectId,
                                        @RequestParam(value = "download", required = false) String download) {
         Roles.any();
-        MeetingAudioService.LoadedAudio loaded = audioService.load(audioId);
+        MeetingAudioService.LoadedAudio loaded = audioService.load(projectId, audioId);
         boolean asAttachment = "1".equals(download) || "true".equalsIgnoreCase(download);
         ContentDisposition disposition = (asAttachment ? ContentDisposition.attachment() : ContentDisposition.inline())
                 .filename(loaded.meta().getFilename(), StandardCharsets.UTF_8).build();
@@ -66,9 +67,9 @@ public class MeetingAudioController {
     }
 
     @DeleteMapping("/audio/{audioId}")
-    public Map<String, Object> delete(@PathVariable String audioId) {
+    public Map<String, Object> delete(@PathVariable String audioId, @RequestParam String projectId) {
         User actor = Roles.any();
-        audioService.delete(audioId, actor);
+        audioService.delete(projectId, audioId, actor);
         return Map.of("ok", true);
     }
 }

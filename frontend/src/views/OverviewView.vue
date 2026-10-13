@@ -4,13 +4,13 @@ import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
-import { MAP_SPRINTS, MILESTONES } from '@/data/seed'
+import { MAP_SPRINTS } from '@/data/seed'
 
 /* 对齐旧版 renderOverview(L893-907) + renderRealtime(L1181-1186) + 视图结构 L447-485 */
 const router = useRouter()
 const project = useProjectStore()
 const session = useSessionStore()
-const go = v => router.push({ name: v })
+const go = v => router.push({ name: project.currentProjectId ? `project-${v}` : v, params: project.currentProjectId ? { projectId: project.currentProjectId } : {} })
 
 const ovTotal = computed(() => String(project.stories.length).padStart(2, '0'))
 const ovTasks = computed(() => project.tasks.length)
@@ -40,8 +40,8 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     <div class="hero">
       <div>
         <div class="eyebrow">PROJECT OVERVIEW / 项目总览</div>
-        <h1>爱管理</h1>
-        <p>四人小队 · 六周迭代 · 从需求到交付的一体化协作平台。</p>
+        <h1>{{ project.currentProject?.name || '我的项目' }}</h1>
+        <p>{{ project.currentProject?.description || '当前项目的需求、排期与协作数据。' }}</p>
       </div>
       <button class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="go('board')">＋ 新建用户故事</button>
     </div>
@@ -75,7 +75,8 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
 
     <div class="h-sec">里程碑 · 关键交付节点</div>
     <div class="mile" id="mile-grid">
-      <div v-for="m in MILESTONES" :key="m.id" class="milecard" :class="{ done: m.week <= 2 }">
+      <div v-if="!project.milestones.length" class="empty-state">暂无项目里程碑</div>
+      <div v-for="m in project.milestones" :key="m.id" class="milecard" :class="{ done: m.week <= 2 }">
         <span class="wk">W{{ m.week }}</span><span class="mid">{{ m.id }}</span><h4>{{ m.name }}</h4><p>{{ m.desc }}</p>
       </div>
     </div>

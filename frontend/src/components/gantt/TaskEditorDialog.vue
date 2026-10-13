@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -13,6 +14,7 @@ import { memberUserId, memberIndex } from '@/data/memberIdentity'
    离线:直接改本地任务并重算 sprints
    校验前后端同口径:周序、US/T 编号合法性、关联故事与前置任务存在性、不能依赖自身 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -74,8 +76,8 @@ async function submit() {
       depends_on: dependsOn
     }
     if (session.apiMode) {
-      await tasksApi.patch(editingId.value, payload)
-      await project.loadAll()
+      await tasksApi.patch(editingId.value, payload, projects.currentProjectId)
+      await project.loadAll(projects.currentProjectId)
     } else {
       const t = project.tasks.find(x => x.id === editingId.value)
       const keepEh = t.eh == null || t.eh === t.h

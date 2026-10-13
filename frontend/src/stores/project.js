@@ -4,10 +4,13 @@ import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
+import { projectsApi } from '@/api/projects'
+import { useProjectsStore } from '@/stores/projects'
 import { milestonesApi } from '@/api/milestones'
 import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
 import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
+import { capacityBreakdown, projectWeeks as resolveProjectWeeks } from '@/utils/projectCapacity'
 
 /* 项目数据基座:stories/tasks/pool/log 四份数据 + members(真实成员)
 
@@ -16,8 +19,6 @@ import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/d
    - 离线:落回 seed.js 的 US01–US37 基线(与后端 DataSeeder 同源)。
    - 血缘口径保持:v2 的「看板↔甘特强制血缘」不变(subTasksOf/cardPct/groupPct),
      此处新增 mcc 新版引入的共享只读选择器(任务状态/负载/依赖/一致性自检),四视图共用一套算法。
-   - **容量三态**(US11/US27,口径见 capacityOf):未配置(null)≠ 确认为零(0)≠ 正常(>0)。
-     判定一律走 capacityOf / utilization,负载率显示走 loadRateText / loadRateWidth。
 */
 
 function validStory(x) {
@@ -27,11 +28,15 @@ function validStory(x) {
     [null, 0, 1, 2, 3, 4].includes(x.owner) && [1, 2, 3, 4, 5].includes(x.activity)
 }
 
-function loadStories() {
+function scopedKey(base, projectId) {
+  return `${base}-${projectId || 'none'}`
+}
+
+function loadStories(projectId) {
   let ok = true
   let stories = structuredClone(SEED)
   try {
-    const saved = JSON.parse(localStorage.getItem(STORIES_KEY))
+    const saved = JSON.parse(localStorage.getItem(scopedKey(STORIES_KEY, projectId)))
     if (Array.isArray(saved) && saved.length && saved.every(validStory)) {
       // 旧基线(M01–M23)存量缓存:与 US01–US37 新基线不同源,直接落回种子而不是混着用
       const legacy = saved.every(x => /^M\d+$/.test(x.id))
@@ -42,9 +47,9 @@ function loadStories() {
   return { stories, storageOK: ok }
 }
 
-function loadPool() {
+function loadPool(projectId) {
   try {
-    const sl = JSON.parse(localStorage.getItem(POOL_KEY))
+    const sl = JSON.parse(localStorage.getItem(scopedKey(POOL_KEY, projectId)))
     if (Array.isArray(sl) && sl.length) return sl
   } catch { /* ignore */ }
   return structuredClone(POOL_SEED)
@@ -56,17 +61,17 @@ function validTask(t) {
     t.w[0] >= 1 && t.w[1] <= 6 && t.w[0] <= t.w[1] && Number.isFinite(Number(t.h))
 }
 
-function loadTasks() {
+function loadTasks(projectId) {
   try {
-    const saved = JSON.parse(localStorage.getItem(TASKS_KEY))
+    const saved = JSON.parse(localStorage.getItem(scopedKey(TASKS_KEY, projectId)))
     if (Array.isArray(saved) && saved.length && saved.every(validTask)) return saved
   } catch { /* ignore */ }
   return structuredClone(TASKS)
 }
 
-function loadLog() {
+function loadLog(projectId) {
   try {
-    const sl = JSON.parse(localStorage.getItem(LOG_KEY))
+    const sl = JSON.parse(localStorage.getItem(scopedKey(LOG_KEY, projectId)))
     if (Array.isArray(sl)) return sl.slice(-50)
   } catch { /* ignore */ }
   return []
@@ -81,27 +86,6 @@ function weeklyHoursOf(task, out) {
   return out
 }
 
-/**
- * 容量读数 → { known, hours }。**判定容量必须走这里,不要只取数字。**
- *
- * 口径来自 `docs/项目侧交接_会议Agent接入_v0.1.md:56`:
- * 「无容量数据返回 unknown,**不当作零或无限容量**;容量为零时避免除零。」
- * 即三态必须分开:
- *   - `null` / `undefined` / 空串 / 非法值 → `{known:false}`「未配置」:信息不足,不判超载,负载率显示「—」
- *   - `0`                                → `{known:true, hours:0}`「确认为零」:任何 >0 工时都是超载
- *   - `>0`                               → `{known:true, hours:n}` 正常
- *
- * 旧实现把三者塌成一个数(`Math.max(0, Number(x) || 0)`),于是"零容量"被当成"没有上限",
- * 负载率显示 0%、「充足」—— 这正是 US11 评审未通过的根因。
- */
-export function capacityOf(member) {
-  const raw = member ? member.capacity : null
-  if (raw === null || raw === undefined || raw === '') return { known: false, hours: 0 }
-  const hours = Number(raw)
-  if (!Number.isFinite(hours) || hours < 0) return { known: false, hours: 0 }
-  return { known: true, hours }
-}
-
 /** 任务引用字段(T 编号 / US 编号)统一解析:逗号分隔 + 去空白 */
 export function taskRefs(value) {
   return String(value || '').split(',').map(x => x.trim()).filter(Boolean)
@@ -109,13 +93,14 @@ export function taskRefs(value) {
 
 export const useProjectStore = defineStore('project', {
   state: () => {
-    const init = loadStories()
+    const projectId = useProjectsStore().currentProjectId
+    const init = loadStories(projectId)
     return {
       stories: init.stories,
       storageOK: init.storageOK,
-      tasks: loadTasks(),
-      pool: loadPool(),
-      log: loadLog(),
+      tasks: loadTasks(projectId),
+      pool: loadPool(projectId),
+      log: loadLog(projectId),
       members: structuredClone(MEMBERS),
       milestones: structuredClone(MILESTONES),
       serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
@@ -170,39 +155,29 @@ export const useProjectStore = defineStore('project', {
       return tail && tail !== m.role ? `${ROLE_TXT[m.roleKey] || m.roleKey} · ${tail}` : m.role
     },
     memberTasks: s => id => s.tasks.filter(t => t.owner === id),
-    /** 容量读数 { known, hours } —— 判定容量的唯一入口(三态见模块头 capacityOf) */
-    capacityOf: s => id => capacityOf(s.members.find(x => x.id === id)),
-    /** 六周可用容量(小时);未配置时回落 0 —— 仅供展示,判定请用 capacityOf / utilization */
-    capacityHours: s => id => capacityOf(s.members.find(x => x.id === id)).hours,
-    allocatedHours: s => id => s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0),
-    /** 利用率:未配置 → NaN(未知);零容量且有工时 → Infinity;零容量且无工时 → 0;其余 = 已分配 / 容量 */
-    utilization: s => id => {
-      const cap = capacityOf(s.members.find(x => x.id === id))
-      const alloc = s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0)
-      if (!cap.known) return NaN
-      if (cap.hours === 0) return alloc > 0 ? Infinity : 0
-      return alloc / cap.hours
+    /** 当前项目总容量 = 个人周容量 × 当前项目周期；旧 capacity 是六周历史总量。 */
+    projectWeeks: s => resolveProjectWeeks(useProjectsStore().currentProject, s.tasks, s.stories),
+    capacityBreakdown: s => id => capacityBreakdown(
+      s.members.find(x => x.id === id) || {}, useProjectsStore().currentProject, s.tasks, s.stories),
+    weeklyCapacityHours() {
+      return id => this.capacityBreakdown(id).weekly
     },
-    /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用。
-        「未配置」单列一态(灰),但它不是负载档位,故不进 .load-legend 的 4 档图例。 */
+    capacityHours() {
+      return id => this.capacityBreakdown(id).total
+    },
+    allocatedHours: s => id => s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0),
+    utilization() {
+      return id => {
+      const cap = this.capacityHours(id)
+      return cap ? this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      }
+    },
+    /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
     capacityStatus: () => utilization => {
-      if (Number.isNaN(utilization)) return { key: 'unset', label: '未配置' }
       if (utilization > 1) return { key: 'over', label: '超载' }
       if (utilization >= .8) return { key: 'busy', label: '偏忙' }
       if (utilization >= .6) return { key: 'normal', label: '正常' }
       return { key: 'low', label: '充足' }
-    },
-    /** 负载率显示:未配置 →「—」;零容量且有工时 →「∞」;其余「N%」 */
-    loadRateText: () => utilization => {
-      if (Number.isNaN(utilization)) return '—'
-      if (!Number.isFinite(utilization)) return '∞'
-      return Math.round(utilization * 100) + '%'
-    },
-    /** 负载率进度条宽度(0..100):未配置 → 0;零容量满溢 → 100 */
-    loadRateWidth: () => utilization => {
-      if (Number.isNaN(utilization)) return 0
-      if (!Number.isFinite(utilization)) return 100
-      return Math.max(0, Math.min(100, Math.round(utilization * 100)))
     },
     memberWeeklyLoad: s => id => {
       const out = Array(6).fill(0)
@@ -230,7 +205,13 @@ export const useProjectStore = defineStore('project', {
       if (task.status === 1 || task.progress > 0) return '进行中'
       return '待办'
     },
-    taskById: s => id => s.tasks.find(t => t.id === id) || null,
+    /* 任务业务编号(code)与数据库内部主键(internal_id)是两套标识。
+       视图和接口仍以 Txx 业务编号互相引用，因此查找时兼容两种返回字段及字符串/数字类型。 */
+    taskById: s => id => {
+      const key = String(id ?? '')
+      return s.tasks.find(t => [t.id, t.code, t.internalId, t.internal_id]
+        .some(value => value != null && String(value) === key)) || null
+    },
     taskName: s => id => {
       const t = s.tasks.find(x => x.id === id)
       return t ? `${id} ${t.name}` : id
@@ -241,7 +222,7 @@ export const useProjectStore = defineStore('project', {
       ? task.sprints : derivedTaskSprints(task.w[0], task.w[1])).map(s => 'S' + s).join(' / '),
     predecessorsOf: s => id => taskRefs((s.tasks.find(t => t.id === id) || {}).dependsOn),
     dependentsOf: s => id => s.tasks.filter(t => taskRefs(t.dependsOn).includes(id)).map(t => t.id),
-    storiesForTask: s => task => taskRefs(task.story)
+    storiesForTask: s => task => (Array.isArray(task.storyRefs) && task.storyRefs.length ? task.storyRefs : taskRefs(task.story))
       .map(id => s.stories.find(x => x.id === id.toUpperCase())).filter(Boolean),
 
     /* ==================== Sprint 位移规则(唯一住处) ====================
@@ -282,10 +263,14 @@ export const useProjectStore = defineStore('project', {
       }
     },
     mapTask(t) {
+      const code = t.code || t.id || ''
       return {
-        id: t.id, name: t.name, owner: memberIndex(t.owner_id), h: t.hours,
+        id: code, code, internalId: t.internal_id ?? t.internalId ?? null,
+        name: t.name, description: t.description || t.task_description || t.details || t.content || '',
+        owner: memberIndex(t.owner_id), h: t.hours,
         eh: t.estimated_hours != null ? t.estimated_hours : t.hours,
         w: [t.week_start, t.week_end], story: t.story_ref || '',
+        storyRefs: Array.isArray(t.story_refs) && t.story_refs.length ? t.story_refs : (t.story_ref ? taskRefs(t.story_ref) : []),
         card: t.kanban_card_id || null, type: t.task_type || 'feature',
         dependsOn: t.depends_on || '',
         priority: t.priority || 'Should',
@@ -295,27 +280,28 @@ export const useProjectStore = defineStore('project', {
         sprints: (Array.isArray(t.sprints) && t.sprints.length) ? t.sprints : derivedTaskSprints(t.week_start, t.week_end)
       }
     },
-    /** 用后端真实用户覆盖成员姓名/角色/容量(容量口径统一到 users.capacity_hours) */
+    /** 用后端真实用户覆盖成员姓名/角色/容量；capacity_hours 保持六周历史总量。 */
     mergeMembers(users) {
       if (!Array.isArray(users) || !users.length) return
       const byId = new Map(users.map(u => [u.id, u]))
+      const scopedMemberIds = new Set(users.map(u => memberIndex(u.id)))
       /* 位置对齐的前提是 users.id 恰为 1..N 连续;不连续时 `id-1` 会出现空洞,
          空洞处的成员会保留种子姓名(表现为「负责人姓名对不上」),这里明确告警而不是静默错配。 */
       if (!isContiguousUserIds(users.map(u => u.id))) {
         console.warn('[AICAP member-identity] users.id 非 1..N 连续,前端成员下标(= id-1)存在空洞,可能出现负责人姓名错配:',
           users.map(u => u.id).sort((a, b) => a - b))
       }
-      this.members = this.members.map(m => {
+      // 成员关系以当前 project_id 的链接为准，避免切换项目后沿用上一个项目成员的容量。
+      this.members = this.members.filter(m => scopedMemberIds.has(m.id)).map(m => {
         const u = byId.get(memberUserId(m.id))
         if (!u) return m
         return {
           ...m,
           name: u.display_name || u.username,
           roleKey: u.role || m.roleKey,
-          /* 容量三态原样透传:后端给 null 表示「未配置」,不得回落成种子里的 60。
-             旧写法 `u.capacity_hours || m.capacity` 会把 0 和 null 一起吞掉 ——
-             这是"零容量不可达"的最后一道闸门(后端真发 0 也会在这里变回 60)。 */
-          capacity: u.capacity_hours === undefined ? m.capacity : u.capacity_hours
+          capacity: u.capacity_hours ?? m.capacity,
+          // 项目成员容量不可从上一个项目继承；旧接口未给字段时交给历史六周容量兼容层推导。
+          weeklyCapacity: u.weekly_capacity_hours ?? null
         }
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
@@ -324,31 +310,49 @@ export const useProjectStore = defineStore('project', {
         if (!this.members.some(m => m.id === idx)) {
           this.members.push({
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
-            roleKey: u.role, tag: '', capacity: u.capacity_hours === undefined ? null : u.capacity_hours,
+            roleKey: u.role, tag: '', capacity: u.capacity_hours ?? 60,
+            weeklyCapacity: u.weekly_capacity_hours ?? null,
             accent: MEMBER_COLORS[idx] || 'gray'
           })
         }
       })
       this.members.sort((a, b) => a.id - b.id)
     },
-    async refreshStoriesAndLogs() {
+    async refreshStoriesAndLogs(projectId = useProjectsStore().currentProjectId) {
       const session = useSessionStore()
       const token = session.authToken
-      const [stories, logs] = await Promise.all([storiesApi.list(), storiesApi.logs()])
+      if (!projectId) throw new Error('请先选择项目')
+      const [stories, logs] = await Promise.all([storiesApi.list(projectId), storiesApi.logs(projectId)])
       if (!session.online || session.authToken !== token) return
       this.stories = stories.map(this.mapStory)
       this.log = logs.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
       this.checkConsistency()
     },
-    async loadAll() {
-      const [st, tk, pl, lg, users] = await Promise.all([
-        storiesApi.list(), tasksApi.list(), poolApi.list(), storiesApi.logs(), authApi.users()
+    async loadAll(projectId = useProjectsStore().currentProjectId) {
+      const projects = useProjectsStore()
+      const activeProjectId = projectId || projects.currentProjectId
+      if (!activeProjectId) throw new Error('请先选择项目')
+      projects.currentProjectId = activeProjectId
+      projects.persistSelection()
+      const [st, tk, pl, lg, projectMembers, users] = await Promise.all([
+        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId), storiesApi.logs(activeProjectId), projectsApi.members(activeProjectId), authApi.users()
       ])
       let milestoneRows = []
-      try { milestoneRows = await milestonesApi.list() } catch { milestoneRows = [] }
+      try { milestoneRows = await milestonesApi.list(activeProjectId) } catch { milestoneRows = [] }
       this.stories = st.map(this.mapStory)
       this.tasks = tk.map(this.mapTask)
-      this.mergeMembers(users)
+      const memberLinks = Array.isArray(projectMembers) ? projectMembers : []
+      const memberIds = new Set(memberLinks.map(member => Number(member.user_id)).filter(Number.isInteger))
+      const scopedUsers = Array.isArray(users) ? users.filter(user => memberIds.has(Number(user.id))) : []
+      this.mergeMembers(scopedUsers.map(user => {
+        const link = memberLinks.find(member => Number(member.user_id) === Number(user.id))
+        return link ? {
+          ...user,
+          capacity_hours: link.capacity_hours ?? user.capacity_hours,
+          weekly_capacity_hours: link.weekly_capacity_hours ?? null,
+          role: link.project_role || user.role
+        } : user
+      }))
       this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
          与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
@@ -404,35 +408,36 @@ export const useProjectStore = defineStore('project', {
       this.savehint = '已连接后端 · 登录后加载正式项目数据'
     },
     restoreLocal() {
-      const init = loadStories()
+      const projectId = useProjectsStore().currentProjectId
+      const init = loadStories(projectId)
       this.stories = init.stories
-      this.pool = loadPool()
-      this.tasks = loadTasks()
+      this.pool = loadPool(projectId)
+      this.tasks = loadTasks(projectId)
       this.members = structuredClone(MEMBERS)
       this.milestones = structuredClone(MILESTONES)
-      this.log = loadLog()
+      this.log = loadLog(projectId)
       this.serverSync = false
       this.savehint = '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     },
     persist() {
       try {
-        localStorage.setItem(STORIES_KEY, JSON.stringify(this.stories))
+        localStorage.setItem(scopedKey(STORIES_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.stories))
         this.storageOK = true
       } catch { this.storageOK = false }
     },
     persistTasks() {
       try {
-        localStorage.setItem(TASKS_KEY, JSON.stringify(this.tasks))
+        localStorage.setItem(scopedKey(TASKS_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.tasks))
         this.storageOK = true
       } catch { this.storageOK = false }
     },
     persistPool() {
-      try { localStorage.setItem(POOL_KEY, JSON.stringify(this.pool)) } catch { /* ignore */ }
+      try { localStorage.setItem(scopedKey(POOL_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.pool)) } catch { /* ignore */ }
     },
     addlog(type, id, detail) {
       this.log.push({ t: new Date().toLocaleTimeString('zh-CN', { hour12: false }), type, id, detail: detail || '' })
       if (this.log.length > 50) this.log = this.log.slice(-50)
-      try { localStorage.setItem(LOG_KEY, JSON.stringify(this.log)) } catch { /* ignore */ }
+      try { localStorage.setItem(scopedKey(LOG_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.log)) } catch { /* ignore */ }
     },
     /** 一致性自检(只告警不改数):编号重复、负责人/工时/周次非法、关联 Story 缺失、挂载看板卡不存在、
      *  Sprint 口径不一致、子任务全完成但故事未标记完成、成员下标不连续、旧版 M 编号残留 */
@@ -477,19 +482,7 @@ export const useProjectStore = defineStore('project', {
       if (memberIds.some((id, i) => id !== i)) {
         errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
       }
-      /* 容量自检按三态分开:旧写法 `(Number(m.capacity) || 0) <= 0` 把「未配置」和
-         「确认为 0」都报成"容量无效"错误 —— 与负载视图把它们显示成两种状态自相矛盾。
-         现在:未配置 → 告警(信息缺口,可继续用);确认为 0 → 合法,不报;
-         只有负数/非数字才是真错误。 */
-      this.members.forEach(m => {
-        const raw = m.capacity
-        const blank = raw === null || raw === undefined || raw === ''
-        if (!blank && !(Number(raw) >= 0)) {
-          errors.push(`成员 ${m.name} 容量无效：${raw}`)
-        } else if (!capacityOf(m).known) {
-          warnings.push(`成员 ${m.name} 容量未配置`)
-        }
-      })
+      this.members.forEach(m => { if (this.weeklyCapacityHours(m.id) <= 0) errors.push(`成员 ${m.name} 周容量无效`) })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)
       const result = { warnings, errors }

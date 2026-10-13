@@ -14,6 +14,7 @@ public class PlanningAgentRun {
     @TableId(type = IdType.INPUT)
     private String id;
     private Integer requestedBy;
+    private String projectId;
     private String requestText;
     private String status;
     private Integer attempt;

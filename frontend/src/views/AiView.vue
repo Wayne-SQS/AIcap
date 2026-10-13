@@ -2,11 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 import { useReviewStore } from '@/stores/review'
 import { loadReviewQueue, loadReviewQueueSummary } from '@/api/reviewQueue'
 
 const router = useRouter()
 const meeting = useMeetingStore()
+const projects = useProjectsStore()
 const review = useReviewStore()
 const online = computed(() => meeting.online)
 const queueEntries = ref([])
@@ -34,6 +36,18 @@ const latestProposal = computed(() => {
   return [...queueEntries.value, ...generic].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || null
 })
 watch(() => meeting.online, value => { if (value) refreshQueueSummary() }, { immediate: true })
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous) return
+  meeting.meetings = []
+  meeting.suggestions = []
+  meeting.selected = ''
+  meeting.agentRun = null
+  meeting.agentError = ''
+  queueEntries.value = []
+  recentMeeting.value = null
+  summaryCounts.value = { pendingCount: 0, executionCount: 0 }
+  if (next && meeting.online) refreshQueueSummary()
+})
 
 async function refreshQueueSummary() {
   queueLoading.value = true
@@ -64,14 +78,14 @@ async function refreshQueueSummary() {
 }
 function continueProposal(row) {
   if (row.source === 'general' || row.source === 'offline') {
-    router.push({ name: 'review', query: { suggestionId: row.proposalId } })
+    open('review', { suggestionId: row.proposalId })
     return
   }
   const status = row.status === 'pending' ? 'pending' : row.status === 'approved' && row.executionStatus === 'not_started' ? 'execution' : 'reviewed'
-  router.push({ name: 'meetings', query: {
+  open('meetings', {
     meetingId: row.meetingId, type: row.source, analysisId: row.analysisId,
     fromReview: '1', status, source: row.source
-  } })
+  })
 }
 
 const agents = [
@@ -82,7 +96,10 @@ const agents = [
   { title: '智能生成项目图', name: '项目图生成器', desc: '生成项目图示；此入口与绘图工具分开呈现。', input: '项目上下文', result: '项目图', impact: '请在页面确认具体保存行为', route: 'project-generator', badge: '生成工具', kind: '独立工作区' },
   { title: '对话演示', name: 'AI 对话演示', desc: '体验固定示例问答，不连接真实模型。', input: '示例问题', result: '静态演示回复', impact: '不修改项目数据', route: 'ai-demo', badge: '静态演示', kind: '只读演示' }
 ]
-function open(name) { router.push({ name }) }
+function open(name, query = undefined) {
+  const scoped = projects.currentProjectId && router.hasRoute(`project-${name}`)
+  router.push({ name: scoped ? `project-${name}` : name, params: scoped ? { projectId: projects.currentProjectId } : undefined, query })
+}
 </script>
 
 <template>

@@ -61,7 +61,8 @@ export function skinOf(story, ctx) {
   }
 
   if (skin === 'sprint') {
-    const sp = MAP_SPRINTS.find(x => x.matches(story)) || MAP_SPRINTS[0]
+    const sprints = ctx.sprints || MAP_SPRINTS
+    const sp = sprints.find(x => x.matches(story)) || sprints[0] || MAP_SPRINTS[0]
     const end = sprintEndWeek(sp.number)
     return {
       tone: 'tone-' + sp.cls,
@@ -119,7 +120,7 @@ export function legendOf(skin, data, ctx) {
   }
 
   if (skin === 'sprint') {
-    return MAP_SPRINTS.map(sp => {
+    return (ctx.sprints || MAP_SPRINTS).map(sp => {
       const end = sprintEndWeek(sp.number)
       return {
         tone: 'tone-' + sp.cls,

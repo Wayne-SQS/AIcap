@@ -3,6 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { audioApi } from '@/api/audio'
 import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import AudioTranscription from './AudioTranscription.vue'
@@ -12,6 +13,7 @@ import AudioTranscription from './AudioTranscription.vue'
    因此录音结束后在浏览器内解码为 PCM 并用 lamejs 编码成 mp3(服务端不需要 ffmpeg)。 */
 const meeting = useMeetingStore()
 const session = useSessionStore()
+const projects = useProjectsStore()
 const { notify } = useToast()
 /* 只读账号(viewer):录音/提交入口已是 disabled(per maySubmit),补一句原因说明 */
 const readonlyTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
@@ -168,7 +170,7 @@ async function submitClip() {
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const file = new File([clip.value.blob], `录音-${stamp}.mp3`, { type: 'audio/mpeg' })
-    const row = await audioApi.upload(meetingId.value, file, { source: 'recorder', durationMs: clip.value.ms })
+    const row = await audioApi.upload(meetingId.value, file, { source: 'recorder', durationMs: clip.value.ms, projectId: projects.currentProjectId })
     notify(`录音已提交到会议（${fmtSize(row.byte_size)}）`)
     clearClip()
     await refresh()
@@ -188,7 +190,7 @@ async function submitFile(ev) {
   busy.value = true
   error.value = ''
   try {
-    const row = await audioApi.upload(meetingId.value, file, { source: 'upload' })
+    const row = await audioApi.upload(meetingId.value, file, { source: 'upload', projectId: projects.currentProjectId })
     notify(`已提交本地音频（${fmtSize(row.byte_size)}）`)
     await refresh()
   } catch (e) {
@@ -206,13 +208,13 @@ function clearClip() {
 
 async function refresh() {
   if (!meetingId.value) { audios.value = []; return }
-  try { audios.value = await audioApi.list(meetingId.value) } catch (e) { error.value = e.message }
+  try { audios.value = await audioApi.list(meetingId.value, projects.currentProjectId) } catch (e) { error.value = e.message }
 }
 
 async function play(row) {
   if (playUrls.value[row.id]) return playUrls.value[row.id]
   try {
-    const blob = await audioApi.fetchBlob(row.id)
+    const blob = await audioApi.fetchBlob(row.id, projects.currentProjectId)
     const url=URL.createObjectURL(blob)
     playUrls.value = { ...playUrls.value, [row.id]: url }
     return url
@@ -263,7 +265,7 @@ async function playRange(row,range) {
 async function remove(row) {
   if (!window.confirm('删除这段录音？该操作不可撤销。')) return
   try {
-    await audioApi.remove(row.id)
+    await audioApi.remove(row.id, projects.currentProjectId)
     if (playUrls.value[row.id]) URL.revokeObjectURL(playUrls.value[row.id])
     notify('录音已删除')
     await refresh()

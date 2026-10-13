@@ -1,6 +1,6 @@
 <script setup>
 import { useProjectStore } from '@/stores/project'
-import { SPRINTS } from '@/data/seed'
+import { MAP_SPRINTS } from '@/data/seed'
 import { SKINS, SORTS } from '@/data/boardSkins'
 
 /* 看板工具栏:tabs(#boardtab/#maptab) + 筛选(#search/#sprint/#owner) + 地图呈现层
@@ -11,10 +11,11 @@ import { SKINS, SORTS } from '@/data/boardSkins'
    #todayanchor 是「现在」锚点的展示口:紧急程度图层的所有档位都由它推出,必须可见,不能藏着 */
 defineProps({
   boardView: { type: String, required: true },
+  sprints: { type: Array, default: () => MAP_SPRINTS },
   search: { type: String, default: '' },
   sprint: { type: String, default: 'all' },
   owner: { type: String, default: 'all' },
-  density: { type: String, default: 'detail' },
+  density: { type: String, default: 'compact' },
   skin: { type: String, default: 'urgency' },
   sortBy: { type: String, default: 'origin' },
   today: { type: String, default: '' }
@@ -41,10 +42,7 @@ function setBoardView(v) {
     <div class="filters">
       <input id="search" type="search" aria-label="搜索故事" placeholder="搜索标题 / ID…" :value="search" @input="emit('update:search', $event.target.value)">
       <select id="sprint" aria-label="筛选迭代" :value="sprint" @change="emit('update:sprint', $event.target.value)">
-        <option value="1">Sprint 1 · {{ SPRINTS[0].tag }}</option>
-        <option value="2">Sprint 2 · {{ SPRINTS[1].tag }}</option>
-        <option value="3">Sprint 3 · {{ SPRINTS[2].tag }}</option>
-        <option value="4plus">Sprint 4+ · 后续路线</option>
+        <option v-for="sp in sprints" :key="sp.number" :value="sp.number === 4 ? '4plus' : String(sp.number)">{{ sp.name }} · {{ sp.tag }}</option>
         <option value="all">全部 Sprint</option>
       </select>
       <select id="owner" aria-label="筛选负责人" :value="owner" @change="emit('update:owner', $event.target.value)">

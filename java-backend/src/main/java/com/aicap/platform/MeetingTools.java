@@ -21,6 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import com.aicap.service.ProjectAccessService;
+import com.aicap.service.ProjectAccessService;
+
 /**
  * 会议 Agent 只读工具(对齐 FastAPI meeting_agent/tools.py)。
  * 本轮仅允许新增需求池建议;所有工具只读、不修改任务/故事。
@@ -63,19 +66,19 @@ public class MeetingTools {
         List<JsonNode> list = new ArrayList<>();
         list.add(function("search_stories",
                 "按关键词查询真实故事，检查新需求是否已有。最多20条，更多结果明确标记。",
-                searchSchema("按关键词搜索故事标题")));
+                projectSearchSchema("按关键词搜索故事标题")));
         list.add(function("search_pool",
                 "按关键词查询真实需求池，避免建议重复需求。最多20条。",
                 searchSchema("按关键词搜索需求池标题")));
         list.add(function("list_tasks",
                 "查询已有任务和工时，可按成员ID筛选。当前系统无任务状态或真实容量，不能推断是否过载。",
-                tasksSchema()));
+                projectTasksSchema()));
         list.add(function("list_members",
                 "查询真实成员ID及显示名，名称有歧义时不能猜测。",
                 emptySchema()));
         list.add(function("project_summary",
                 "查询真实故事统计及当前数据能力限制。",
-                emptySchema()));
+                projectOnlySchema()));
         return list;
     }
 
@@ -89,6 +92,36 @@ public class MeetingTools {
         props.set("keyword", kw);
         ArrayNode required = objectMapper.createArrayNode();
         required.add("keyword");
+        return objectSchema(props, required);
+    }
+
+    private ObjectNode projectSearchSchema(String title) {
+        ObjectNode schema = searchSchema(title);
+        ObjectNode props = (ObjectNode) schema.path("properties");
+        ObjectNode project = objectMapper.createObjectNode();
+        project.put("type", "string"); project.put("minLength", 1);
+        props.set("project_id", project);
+        ((ArrayNode) schema.path("required")).add("project_id");
+        return schema;
+    }
+
+    private ObjectNode projectTasksSchema() {
+        ObjectNode schema = tasksSchema();
+        ObjectNode props = (ObjectNode) schema.path("properties");
+        ObjectNode project = objectMapper.createObjectNode();
+        project.put("type", "string"); project.put("minLength", 1);
+        props.set("project_id", project);
+        ((ArrayNode) schema.path("required")).add("project_id");
+        return schema;
+    }
+
+    private ObjectNode projectOnlySchema() {
+        ObjectNode props = objectMapper.createObjectNode();
+        ObjectNode project = objectMapper.createObjectNode();
+        project.put("type", "string"); project.put("minLength", 1);
+        props.set("project_id", project);
+        ArrayNode required = objectMapper.createArrayNode();
+        required.add("project_id");
         return objectSchema(props, required);
     }
 
@@ -117,7 +150,7 @@ public class MeetingTools {
 
     private String keyword(String name, JsonNode arguments) throws AgentError {
         ObjectNode node = objectArgs(name, arguments);
-        if (node.size() != 1 || !"keyword".equals(node.fieldNames().next())) {
+        if (node.size() != 2 || !node.has("keyword") || !node.has("project_id")) {
             throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
         }
         JsonNode kw = node.path("keyword");
@@ -131,10 +164,28 @@ public class MeetingTools {
         return text;
     }
 
+    private String projectId(JsonNode arguments) throws AgentError {
+        String id = objectArgs("project", arguments).path("project_id").asText("").trim().toUpperCase();
+        if (id.isBlank()) throw new AgentError("invalid_tool_arguments", "project_id 必填");
+        return id;
+    }
+
+    private String requireProjectContext(JsonNode arguments, String runProjectId) throws AgentError {
+        if (runProjectId == null || runProjectId.isBlank()) {
+            throw new AgentError("project_context_missing", "Agent Run 缺少 projectId");
+        }
+        String requested = projectId(arguments);
+        String scoped = ProjectAccessService.normalize(runProjectId);
+        if (!scoped.equals(requested)) {
+            throw new AgentError("project_context_mismatch", "工具 projectId 与 Agent Run 项目不一致");
+        }
+        return scoped;
+    }
+
     private JsonNode maybeOwnerId(String name, JsonNode arguments) throws AgentError {
         ObjectNode node = objectArgs(name, arguments);
-        if (node.size() == 0) return null;
-        if (node.size() != 1 || !"owner_id".equals(node.fieldNames().next())) {
+        if (node.size() == 1 && node.has("project_id")) return null;
+        if (node.size() != 2 || !node.has("owner_id") || !node.has("project_id")) {
             throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
         }
         JsonNode owner = node.path("owner_id");
@@ -153,27 +204,28 @@ public class MeetingTools {
 
     // ---------- 执行 ----------
 
-    public JsonNode execute(String name, JsonNode arguments, Integer userId) throws AgentError {
+    public JsonNode execute(String name, JsonNode arguments, Integer userId, String projectId) throws AgentError {
         User user = userId == null ? null : userMapper.selectById(userId);
         if (user == null || !WRITER_ROLES.contains(user.getRole())) {
             throw new AgentError("permission_changed", "发起人的权限已变化，分析已停止");
         }
         switch (name) {
             case "project_summary" -> {
-                emptyArgs(name, arguments);
-                return projectSummary();
+                return projectSummary(requireProjectContext(arguments, projectId));
             }
             case "list_members" -> {
                 emptyArgs(name, arguments);
                 return listMembers();
             }
             case "list_tasks" -> {
+                String scopedProjectId = requireProjectContext(arguments, projectId);
                 JsonNode ownerId = maybeOwnerId(name, arguments);
-                return listTasks(ownerId);
+                return listTasks(scopedProjectId, ownerId);
             }
             case "search_stories" -> {
+                String scopedProjectId = requireProjectContext(arguments, projectId);
                 String keyword = keyword(name, arguments);
-                return searchStories(keyword);
+                return searchStories(scopedProjectId, keyword);
             }
             case "search_pool" -> {
                 String keyword = keyword(name, arguments);
@@ -183,8 +235,8 @@ public class MeetingTools {
         }
     }
 
-    private ObjectNode projectSummary() {
-        List<Story> stories = storyMapper.selectList(null);
+    private ObjectNode projectSummary(String projectId) {
+        List<Story> stories = storyMapper.selectList(new QueryWrapper<Story>().eq("project_id", projectId));
         long done = stories.stream().filter(s -> s.getStatus() != null && s.getStatus() == 2).count();
         ObjectNode node = objectMapper.createObjectNode();
         node.put("stories", stories.size());
@@ -215,10 +267,10 @@ public class MeetingTools {
         return node;
     }
 
-    private ObjectNode listTasks(JsonNode ownerId) {
-        QueryWrapper<Task> qw = new QueryWrapper<>();
+    private ObjectNode listTasks(String projectId, JsonNode ownerId) {
+        QueryWrapper<Task> qw = new QueryWrapper<Task>().eq("project_id", projectId);
         if (ownerId != null) qw.eq("owner_id", ownerId.asInt());
-        qw.orderByAsc("id").last("LIMIT 21");
+        qw.orderByAsc("code").last("LIMIT 21");
         List<Task> tasks = taskMapper.selectList(qw);
         ArrayNode items = objectMapper.createArrayNode();
         for (Task t : tasks.subList(0, Math.min(20, tasks.size()))) {
@@ -243,9 +295,9 @@ public class MeetingTools {
         return node;
     }
 
-    private ObjectNode searchStories(String keyword) {
-        QueryWrapper<Story> qw = new QueryWrapper<Story>().like("title", keyword)
-                .orderByAsc("id").last("LIMIT 21");
+    private ObjectNode searchStories(String projectId, String keyword) {
+        QueryWrapper<Story> qw = new QueryWrapper<Story>().eq("project_id", projectId).like("title", keyword)
+                .orderByAsc("code").last("LIMIT 21");
         List<Story> rows = storyMapper.selectList(qw);
         ArrayNode items = objectMapper.createArrayNode();
         for (Story r : rows.subList(0, Math.min(20, rows.size()))) {

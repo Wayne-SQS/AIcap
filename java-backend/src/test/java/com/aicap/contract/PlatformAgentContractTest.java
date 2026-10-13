@@ -285,7 +285,8 @@ class PlatformAgentContractTest extends ContractTestSupport {
     @Test
     void plat18_triggerTools_createRunThenDeduplicate() {
         // 请求文本带 uuid:测试库若在两次跑之间没被清空,也不会因为历史行而误判"已存在"
-        String body = json(map("request", "把 US01 挪到第 3 个 Sprint " + UUID.randomUUID()));
+        String body = json(map("request", "把 US01 挪到第 3 个 Sprint " + UUID.randomUUID(),
+                "project_id", firstProjectId()));
 
         ApiResponse first = post(TOOLS + "start_plan_draft", token(USER_ADMIN), body);
         assertEquals(200, first.status(), first.body());
@@ -313,6 +314,13 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertFalse(noRequest.json().path("ok").asBoolean(), noRequest.body());
         assertEquals("invalid_arguments", noRequest.json().path("error_code").asText(), noRequest.body());
 
+        // 多项目之后 project_id 也是必填:少了它 run 会落到默认项目,确认时写的是别人的项目
+        ApiResponse noProject = post(TOOLS + "start_plan_draft", token(USER_ADMIN),
+                json(map("request", "缺 project_id 的请求 " + UUID.randomUUID())));
+        assertEquals(200, noProject.status(), noProject.body());
+        assertFalse(noProject.json().path("ok").asBoolean(), noProject.body());
+        assertEquals("invalid_arguments", noProject.json().path("error_code").asText(), noProject.body());
+
         ApiResponse noMeeting = post(TOOLS + "start_meeting_analysis", token(USER_ADMIN), json(map()));
         assertEquals(200, noMeeting.status(), noMeeting.body());
         assertFalse(noMeeting.json().path("ok").asBoolean(), noMeeting.body());
@@ -325,5 +333,19 @@ class PlatformAgentContractTest extends ContractTestSupport {
         String body = json(map("request", "把 US02 挪到第 4 个 Sprint " + UUID.randomUUID()));
         assertStatus(post(TOOLS + "start_plan_draft", token(USER_VIEWER), body), 403);
         assertStatus(post(TOOLS + "start_plan_draft", null, body), 401);
+    }
+
+    /**
+     * 多项目之后 planning 触发必须带 project_id(契约 §2.4):取调用者可见的第一个项目,
+     * 而不是把"P001/P002"这类值写死在用例里 —— 种子项目的存在与否不该决定用例的成败。
+     */
+    private String firstProjectId() {
+        ApiResponse response = get("/api/projects", token(USER_ADMIN));
+        assertEquals(200, response.status(), response.body());
+        JsonNode projects = response.json();
+        assertTrue(projects.isArray() && !projects.isEmpty(), "测试库应至少有一个可见项目: " + response.body());
+        String projectId = projects.get(0).path("id").asText();
+        assertFalse(projectId.isEmpty(), response.body());
+        return projectId;
     }
 }

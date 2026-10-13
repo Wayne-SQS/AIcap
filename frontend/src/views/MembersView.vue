@@ -2,22 +2,20 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
 import { membersApi } from '@/api/members'
 import { profileAgentApi } from '@/api/profileAgent'
-import { useToast } from '@/composables/useToast'
-import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useProjectActions } from '@/composables/useProjectActions'
-import MemberProfileDialog from '@/components/members/MemberProfileDialog.vue'
 import MemberTaskDrawer from '@/components/members/MemberTaskDrawer.vue'
 import TaskDetailDrawer from '@/components/members/TaskDetailDrawer.vue'
 import OwnerRiskDialog from '@/components/members/OwnerRiskDialog.vue'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
-import { ROLE_TXT } from '@/data/seed'
-import { memberLabel } from '@/data/memberIdentity'
+import { memberLabel, memberUserId } from '@/data/memberIdentity'
 
 /* 成员任务图同时保留真实画像/GitHub 活动，以及任务负责人调整、影响确认和四个独立缩放画布。 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { updateTaskOwner, analyzeTaskOwner } = useProjectActions()
 const memberDrop = ref(null)
@@ -25,17 +23,9 @@ const drawerTask = ref(null)
 const riskDialog = ref(null)
 const pendingOwner = ref(null)
 const draggingTask = ref('')
-const { notify } = useToast()
 const profiles = ref([])
-const profileError = ref('')
-const editing = ref(null)
 const drawerMember = ref(null)
 const online = computed(() => session.apiMode && !!session.currentUser)
-const DIMS_OF_PROFILE = [
-  { k: 'tech_stack', t: '技术栈' },
-  { k: 'capabilities', t: '工作能力' },
-  { k: 'process_domains', t: '熟悉的开发流程领域' }
-]
 
 const overviewViewport = ref(null)
 const overviewShell = ref(null)
@@ -54,24 +44,10 @@ async function loadProfiles() {
   if (!online.value) return
   try {
     profiles.value = await membersApi.profiles()
-    profileError.value = ''
   } catch (e) {
-    profileError.value = e.message
+    profiles.value = []
   }
 }
-/* 权限:admin/owner 可改任何人;member 只能改本人;viewer 只读 */
-function canEdit(p) {
-  const u = session.currentUser
-  if (!u) return false
-  if (u.role === 'admin' || u.role === 'owner') return true
-  return u.role === 'member' && u.id === p.user_id
-}
-function onSaved(saved) {
-  profiles.value = profiles.value.map(p => (p.user_id === saved.user_id ? saved : p))
-  editing.value = null
-  notify('画像已更新')
-}
-
 const { zoom: overviewZoom, zoomMode: overviewZoomMode, minZoom: overviewMinZoom, maxZoom: overviewMaxZoom, canvasStyle: overviewCanvasStyle, shellStyle: overviewShellStyle, zoomIn: overviewZoomIn, zoomOut: overviewZoomOut, setZoomPercent: setOverviewZoomPercent, resetZoom: overviewResetZoom, fitToCanvas: overviewFitToCanvas } =
   useCanvasZoom({ viewport: overviewViewport, canvas: overviewCanvas, shell: overviewShell, fillViewportWidth: true, minContentWidth: 1040, initialMode: 'manual' })
 const { zoom: loadZoom, zoomMode: loadZoomMode, minZoom: loadMinZoom, maxZoom: loadMaxZoom, canvasStyle: loadCanvasStyle, shellStyle: loadShellStyle, zoomIn: loadZoomIn, zoomOut: loadZoomOut, setZoomPercent: setLoadZoomPercent, resetZoom: loadResetZoom, fitToCanvas: loadFitToCanvas } =
@@ -111,22 +87,14 @@ function weeklyHours(task) {
 }
 function ownerRisks(task, ownerId) {
   const member = project.memberById(ownerId)
-  if (!member) return []
+  const capacity = member ? project.weeklyCapacityHours(ownerId) : 0
+  if (!capacity) return []
   const current = project.memberWeeklyLoad(ownerId)
   const after = Array(6).fill(0)
   project.tasks.filter(item => item.owner === ownerId && item.id !== task.id).forEach(item => {
     weeklyHours(item).forEach((hours, index) => { after[index] += hours })
   })
   weeklyHours(task).forEach((hours, index) => { after[index] += hours })
-  const cap = project.capacityOf(ownerId)
-  /* 未配置:信息不足,不判超载,但明确说出来(旧写法 `if (!capacity) return []` 是静默跳过) */
-  if (!cap.known) {
-    return after.some(hours => hours > 0)
-      ? [{ type: 'load', text: `成员 ${member.name} 容量未配置，无法判断是否超载，请人工核对` }]
-      : []
-  }
-  /* 确认为 0:周容量就是 0,任何 >0 工时都超限(旧写法在此之前就 return [] 了) */
-  const capacity = cap.hours / 6
   return after.flatMap((hours, index) => hours > capacity ? [{ type: 'load', text: `W${index + 1}：当前 ${current[index] || 0}h，调整后 ${hours}h，周容量 ${capacity.toFixed(1)}h` }] : [])
 }
 function startTaskDrag(task, event) {
@@ -164,46 +132,31 @@ function cancelOwnerChange() { pendingOwner.value = null }
 /* ==================== 周负载热力图 ==================== */
 const load = computed(() => project.loadByOwner)
 const LOAD_LABEL = ['低负载', '正常', '偏忙', '超载']
-/** 热力格等级:0/1/2/3 = 四档;未配置用 -1(中性色),不冒充「低负载」 */
-function heatLevel(m, hours) {
-  const cap = project.capacityOf(m.id)
-  if (!cap.known) return -1
-  const weekly = cap.hours / 6
-  const ratio = cap.hours === 0 ? (hours > 0 ? Infinity : 0) : hours / weekly
-  return ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
-}
 function heatCell(m, w) {
   const hours = load.value[m.id] ? load.value[m.id][w] : 0
-  const lv = heatLevel(m, hours)
-  const cap = project.capacityOf(m.id)
-  const capText = cap.known ? `周容量：${(cap.hours / 6).toFixed(1)}h` : '周容量：未配置'
-  const levelText = lv < 0 ? '未配置' : LOAD_LABEL[lv]
+  const weeklyCapacity = project.weeklyCapacityHours(m.id)
+  const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
+  const lv = ratio > 1 ? 3 : (ratio >= .8 ? 2 : (ratio >= .6 ? 1 : 0))
   const related = project.tasks.filter(t => t.owner === m.id && t.w[0] <= w + 1 && t.w[1] >= w + 1).map(t => t.id).join('、') || '无'
   return {
     hours, lv,
-    title: `${m.name} · W${w + 1}\n计划工时：${hours}h\n${capText}\n负载等级：${levelText}\n关联任务：${related}`
+    title: `${m.name} · W${w + 1}\n计划工时：${hours}h\n周容量：${weeklyCapacity.toFixed(1)}h\n负载等级：${LOAD_LABEL[lv]}\n关联任务：${related}`
   }
 }
 
 /* ==================== 容量与分配 ==================== */
 const bandwidthCards = computed(() => project.members.map(m => {
   const alloc = project.allocatedHours(m.id)
-  const cap = project.capacityOf(m.id)
-  const util = project.utilization(m.id)
-  return {
-    m, alloc, known: cap.known, cap: cap.hours,
-    remaining: cap.known ? cap.hours - alloc : null,
-    rateText: project.loadRateText(util),
-    rateWidth: project.loadRateWidth(util),
-    state: project.capacityStatus(util)
-  }
+  const cap = project.capacityHours(m.id)
+  return { m, alloc, cap, pct: cap ? Math.round(alloc / cap * 100) : 0, state: project.capacityStatus(cap ? alloc / cap : 0) }
 }))
 
-/* ==================== 成员开发活动图(真实数据:activity_records,含 GitHub 同步) ==================== */
+/* ==================== 成员开发活动图(真实 activity_records + 任务规划预计强度) ==================== */
 const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 const contribLoading = ref(false)
 const contribError = ref('')
 const contribs = ref([])
+const contribLoadVersion = ref(0)
 
 function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -223,26 +176,107 @@ function lastSixFullWeeks() {
   return { start: fmtDate(start), end: fmtDate(end) }
 }
 function contribTip(c, d, w) {
+  if (c.mode === 'planned') {
+    const meta = c.meta?.[d]?.[w]
+    if (!meta || meta.hours <= 0) return `W${w + 1} 周${DAY_LABELS[d]} · 无预计工时`
+    const levels = ['无活动', '少', '一般', '较多', '活跃']
+    return `W${w + 1} 周${DAY_LABELS[d]} · 预计开发强度：${levels[meta.level]} · 预计工时约${meta.hours}h · 关联任务${meta.taskIds.join('、') || '无'}（预计值）`
+  }
   const meta = c.meta[d][w]
   if (!meta || meta.total === 0) return `${c.m.name} · ${meta ? meta.date : '?'}\n无活动`
   const parts = Object.entries(meta.counts || {}).filter(([, n]) => n > 0).map(([t, n]) => `${t}×${n}`).join(' ')
   return `${c.m.name} · ${meta.date}\n活动 ${meta.total} 次${parts ? '\n' + parts : ''}\n来源:活动记录(含 GitHub 同步)`
 }
+function plannedWeeklyData(memberId) {
+  const weekly = Array(6).fill(0)
+  const taskIds = Array.from({ length: 6 }, () => [])
+  project.tasks.filter(t => t.owner === memberId && Array.isArray(t.w)).forEach(task => {
+    const start = Math.max(1, Number(task.w[0]) || 1)
+    const end = Math.min(6, Number(task.w[1]) || start)
+    const span = Math.max(1, end - start + 1)
+    const hours = Math.max(0, Number(task.h) || 0)
+    const base = Math.floor(hours / span)
+    let remainder = hours - base * span
+    for (let week = start; week <= end; week++) {
+      weekly[week - 1] += base + (remainder-- > 0 ? 1 : 0)
+      taskIds[week - 1].push(task.code || task.id)
+    }
+  })
+  const weeklyCapacity = project.weeklyCapacityHours(memberId)
+  const weeks = weekly.map((hours, index) => {
+    const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
+    const level = hours <= 0 ? 0 : (ratio > 1 ? 4 : (ratio >= .8 ? 3 : (ratio >= .6 ? 2 : 1)))
+    return { week: index + 1, hours, level, taskIds: [...new Set(taskIds[index])] }
+  })
+  return { weekly, weeks }
+}
+function stableHash(value) {
+  let hash = 2166136261
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+function plannedGrid(memberId, plannedData, projectId) {
+  const grid = Array.from({ length: 7 }, () => Array(6).fill(0))
+  const meta = Array.from({ length: 7 }, () => Array(6).fill(null))
+  plannedData.weeks.forEach((week, index) => {
+    const hours = week.hours
+    if (hours <= 0) return
+    const seed = stableHash(`${projectId}:${memberId}:W${index + 1}:${week.taskIds.join(',')}`)
+    // 先按周工时决定活跃天数，避免低工时周被机械铺满 6～7 天。
+    // 有任务的周保持可读的活动痕迹：低/中/高工时分别覆盖约 2-3、3-4、4-5 个工作日。
+    const variation = seed % 2
+    const weekdayCount = hours <= 0 ? 0
+      : (hours <= 3 ? 2
+        : (hours <= 6 ? 2 + variation
+          : (hours <= 12 ? 3 + variation
+            : (hours <= 15 ? 4
+              : (hours <= 20 ? 4 + variation : 5)))))
+    const weekend = hours >= 29 && seed % 7 === 0
+    const dayCount = Math.min(hours, 6, weekdayCount + (weekend ? 1 : 0))
+    const candidates = weekend ? [0, 1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4]
+    const ordered = candidates.map((day, position) => ({ day, order: (seed + position * 13) % 101 })).sort((a, b) => a.order - b.order).slice(0, dayCount).map(item => item.day)
+    const dayHours = Array(7).fill(0)
+    // 每个活跃日先分配 1h，再按稳定顺序分配余量，形成有高有低的日强度。
+    ordered.forEach(day => { dayHours[day] = 1 })
+    const extraPattern = [0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0]
+    for (let unit = ordered.length; unit < hours; unit++) {
+      const offset = seed % extraPattern.length
+      const target = extraPattern[(unit - ordered.length + offset) % extraPattern.length] % ordered.length
+      dayHours[ordered[target]] += 1
+    }
+    ordered.forEach(day => {
+      const dayHoursValue = dayHours[day]
+      // 颜色按日工时区间映射，避免成员容量较小导致整周直接变成深绿色。
+      const level = dayHoursValue >= 8 ? 4 : (dayHoursValue >= 5 ? 3 : (dayHoursValue >= 3 ? 2 : 1))
+      grid[day][index] = Math.min(4, level)
+      meta[day][index] = { date: `W${index + 1}`, total: level, hours: dayHoursValue, level, taskIds: week.taskIds }
+    })
+    for (let day = 0; day < 7; day++) if (!meta[day][index]) meta[day][index] = { date: `W${index + 1}`, total: 0, hours: 0, level: 0, taskIds: [] }
+  })
+  return { grid, meta }
+}
 async function loadContribs() {
-  if (!online.value) { contribs.value = []; contribError.value = ''; return }
-  if (!profiles.value.length) { contribs.value = []; contribError.value = '成员画像未加载，无法获取真实活动数据'; return }
+  const loadVersion = ++contribLoadVersion.value
+  const projectId = projects.currentProjectId
+  if (!projectId) { contribs.value = []; contribError.value = ''; return }
   contribLoading.value = true
   contribError.value = ''
   const { start, end } = lastSixFullWeeks()
   try {
-    // 成员以后端真实画像为准(user_id 1..5),不再用前端 0-based seed id,避免查询错位
-    const members = profiles.value.map((p, i) => ({
-      id: p.user_id,
-      name: p.display_name,
-      frontId: project.members[i] ? project.members[i].id : p.user_id
-    }))
-    contribs.value = await Promise.all(members.map(async m => {
-      const rows = await profileAgentApi.heatmap(start, end, m.id)
+    // 成员范围以当前项目的 members 为准，避免活动或任务跨项目串入；画像仅用于补充真实姓名。
+    const members = project.members.map(member => {
+      const p = profiles.value.find(profile => Number(profile.user_id) === Number(memberUserId(member.id)))
+      return { id: p?.user_id || memberUserId(member.id), name: p?.display_name || member.name, frontId: member.id }
+    })
+    const planned = new Map(members.map(m => [m.frontId, plannedWeeklyData(m.frontId)]))
+    const nextContribs = await Promise.all(members.map(async m => {
+      let rows = []
+      if (online.value) {
+        try { rows = await profileAgentApi.heatmap(start, end, m.id, projectId) } catch { rows = [] }
+      }
       const dayMap = new Map(rows.map(r => [r.date, r]))
       const grid = Array.from({ length: 7 }, () => Array(6).fill(0))
       const meta = Array.from({ length: 7 }, () => Array(6).fill(null))
@@ -258,20 +292,45 @@ async function loadContribs() {
         grid[dd][w] = Math.min(total, 4)
         meta[dd][w] = row ? { date: key, total: row.total, counts: row.counts } : { date: key, total: 0, counts: null }
       }
-      const flat = grid.flat()
       // 数字口径:真实活动总数/活跃天数取 heatmap 原始值;grid 仅用于格子颜色分级(单日 >4 统一最深色)
       const realTotal = rows.reduce((a, r) => a + r.total, 0)
       const realActive = rows.filter(r => r.total > 0).length
-      return { m, rows: grid, meta, total: realTotal, activeDays: realActive }
+      if (realTotal > 0) return { m, rows: grid, meta, total: realTotal, activeDays: realActive, mode: 'real' }
+      const expected = planned.get(m.frontId) || { weekly: Array(6).fill(0), weeks: [] }
+      const plannedView = plannedGrid(m.frontId, expected, projectId)
+      return {
+        m,
+        rows: plannedView.grid,
+        meta: plannedView.meta,
+        plannedWeeks: expected.weeks,
+        total: expected.weekly.reduce((sum, hours) => sum + hours, 0),
+        activeDays: expected.weekly.filter(hours => hours > 0).length,
+        mode: expected.weekly.some(hours => hours > 0) ? 'planned' : 'empty'
+      }
     }))
+    if (loadVersion === contribLoadVersion.value && projectId === projects.currentProjectId) {
+      contribs.value = nextContribs
+    }
   } catch (e) {
-    contribError.value = e.message || '加载真实活动数据失败'
-    contribs.value = []
+    if (loadVersion === contribLoadVersion.value && projectId === projects.currentProjectId) {
+      contribError.value = e.message || '加载真实活动数据失败'
+      contribs.value = []
+    }
   } finally {
-    contribLoading.value = false
+    if (loadVersion === contribLoadVersion.value) contribLoading.value = false
   }
 }
 watch(online, async v => { if (v) { await loadProfiles(); await loadContribs() } }, { immediate: true })
+watch(() => projects.currentProjectId, async (id, previousId) => {
+  if (id === previousId) return
+  contribLoadVersion.value += 1
+  contribs.value = []
+  contribError.value = ''
+  if (online.value && id) await loadContribs()
+})
+// 新建项目或草案确认后任务列表可能在当前项目不变的情况下异步刷新，
+// 预计热力图也必须随负责人/工时/周次变化重新计算。
+watch(() => project.tasks, () => { if (projects.currentProjectId) loadContribs() }, { deep: true })
 onMounted(async () => { await loadProfiles(); await loadContribs() })
 </script>
 
@@ -284,37 +343,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         <p>{{ project.members.length }} 名成员（含只读查看者） · 6 周负载热力图 · 容量与分配 · 点击成员卡片查看任务明细。</p>
       </div>
     </div>
-
-
-    <div class="h-sec">成员画像</div>
-    <p v-if="!online" class="small">离线演示模式：画像需连接后端读取（在线登录后自动加载）。</p>
-    <p v-else-if="profileError" class="small" role="alert">画像加载失败：{{ profileError }}</p>
-    <div v-else class="profile-grid" id="member-profiles">
-      <div v-for="p in profiles" :key="p.user_id" class="pcard">
-        <div class="phead">
-          <b>{{ p.display_name }}</b>
-          <span class="badge">{{ ROLE_TXT[p.role] || p.role }}</span>
-          <span class="small" v-if="p.years_experience">{{ p.years_experience }} 年经验</span>
-          <button
-            v-if="canEdit(p) || session.isViewer" class="edit"
-            :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''"
-            @click="editing = p"
-          >编辑画像</button>
-        </div>
-        <div class="ptitle" v-if="p.title">{{ p.title }}</div>
-        <p class="small psum" v-if="p.summary">{{ p.summary }}</p>
-        <div v-for="dim in DIMS_OF_PROFILE" :key="dim.k" class="pdim">
-          <div class="pdim-t">{{ dim.t }}</div>
-          <div class="chips">
-            <span v-for="s in p[dim.k]" :key="s.name" class="chip" :title="`熟练度 ${s.level}/5`">
-              {{ s.name }}<i class="bar"><b :style="{ width: (s.level / 5 * 100) + '%' }"></b></i>
-            </span>
-            <span v-if="!p[dim.k] || !p[dim.k].length" class="small">—</span>
-          </div>
-        </div>
-      </div>
-    </div>
-    <MemberProfileDialog v-if="editing" :profile="editing" @close="editing = null" @saved="onSaved" />
 
     <div class="member-canvas-list" aria-label="成员任务图模块">
     <section class="member-canvas-section members-overview-section" data-member-canvas="overview" aria-labelledby="members-overview-title">
@@ -409,10 +437,10 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
       <div v-for="b in bandwidthCards" :key="b.m.id" class="mcard">
         <div class="head">
           <span class="avatar" :class="'a' + b.m.id">{{ memberLabel(b.m.id) }}</span>
-          <div><h3>{{ b.m.name }}</h3><div class="role">容量 {{ b.known ? b.cap + 'h' : '未配置' }} · 已分配 {{ b.alloc }}h · 剩余 {{ b.known ? (b.cap - b.alloc) + 'h' : '—' }}</div></div>
+          <div><h3>{{ b.m.name }}</h3><div class="role" :title="`每周 ${project.weeklyCapacityHours(b.m.id)}h × ${project.projectWeeks} 周 = 总容量 ${b.cap}h`">容量 {{ b.cap }}h · 已分配 {{ b.alloc }}h · 剩余 {{ b.cap - b.alloc }}h</div></div>
           <span class="loadflag" :class="b.state.key" style="margin-left:auto">{{ b.state.label }}</span>
         </div>
-        <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: b.rateWidth + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.rateText }}</span></div>
+        <div class="bw-row"><span class="small">已分配</span><div class="bw-track"><i class="used" :class="b.state.key" :style="{ width: Math.min(b.pct, 100) + '%' }"></i><i class="cap" style="left:100%"></i></div><span class="mono small">{{ b.pct }}%</span></div>
       </div>
     </div>
         </div>
@@ -423,7 +451,7 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section activity-heatmap-section" data-member-canvas="activity" aria-labelledby="activity-heatmap-title">
     <header class="member-section-header">
       <h2 id="activity-heatmap-title">成员开发活动图</h2>
-      <p>代码热力图 · 最近 6 个完整自然周 · 真实活动记录（含 GitHub 同步）。</p>
+      <p>真实活动按自然周日期展示；无真实活动时，根据任务负责人、工时和项目周次显示预计开发强度。</p>
     </header>
     <CanvasZoomControls :zoom="activityZoom" :min-zoom="activityMinZoom" :max-zoom="activityMaxZoom" :zoom-mode="activityZoomMode"
       :reset-zoom="activityResetZoom" :fit-to-canvas="activityFitToCanvas" :zoom-in="activityZoomIn" :zoom-out="activityZoomOut"
@@ -432,16 +460,18 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
       <div ref="activityShell" class="canvas-zoom-shell" :style="activityShellStyle">
         <div ref="activityCanvas" class="member-module-canvas activity-canvas" :style="activityCanvasStyle">
           <p v-if="!online" class="small">离线演示模式：活动图需连接后端读取真实活动记录（在线登录后自动加载）。</p>
-          <p v-else-if="contribLoading" class="small">正在加载真实活动数据…</p>
+          <p v-else-if="contribLoading" class="small">正在加载活动数据…</p>
           <p v-else-if="contribError" class="small" role="alert">活动数据加载失败：{{ contribError }}</p>
           <div v-else class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">
           <span class="avatar" :class="'a' + c.m.frontId">{{ memberLabel(c.m.frontId) }}</span>{{ c.m.name }}
-          <span class="small mono" style="margin-left:auto">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
+          <span class="small mono" style="margin-left:auto" v-if="c.mode === 'real'">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
+          <span class="small mono" style="margin-left:auto" v-else-if="c.mode === 'planned'">预计工时 {{ c.total }}h · 计划周数 {{ c.activeDays }}</span>
+          <span class="small mono" style="margin-left:auto" v-else>暂无真实活动或任务规划</span>
         </div>
         <div class="contrib-role small">{{ project.memberRoleText(c.m.frontId) }}</div>
-        <div class="contrib-grid">
+        <div v-if="c.mode === 'real' || c.mode === 'planned'" class="contrib-grid">
           <span class="grid-corner"></span>
           <span v-for="w in 6" :key="'h' + w" class="week-label" :style="{ gridColumn: w + 1, gridRow: 1 }">W{{ w }}</span>
           <template v-for="(row, d) in c.rows" :key="'d' + d">
@@ -456,13 +486,13 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         </div>
       </div>
       <div class="contrib-note">
-        <span>每格 = 该成员某一天的开发活动</span>
+        <span>真实模式：每格 = 某一天的活动；预计模式：每格 = 对应项目周的预计开发强度</span>
         <span>无活动</span><span class="sw c0"></span>
         <span>少</span><span class="sw c1"></span>
         <span>一般</span><span class="sw c2"></span>
         <span>较多</span><span class="sw c3"></span>
         <span>活跃</span><span class="sw c4"></span>
-        <span>真实数据 · 来自活动记录（含 GitHub 同步），悬停看日期与活动明细</span>
+        <span>预计数据来自 Task 的负责人、hours、week_start/week_end，不写入活动记录；真实数据来自活动记录（含 GitHub 同步）</span>
       </div>
     </div>
         </div>
@@ -630,5 +660,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
   .load-viewport {
     height: 360px;
   }
+
 }
 </style>

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
@@ -80,6 +81,7 @@ function brief(s, max = 70) {
 
 export function useAgentRefresh() {
   const project = useProjectStore()
+  const projects = useProjectsStore()
   const session = useSessionStore()
   const { notify } = useToast()
   const { guard } = usePermissionGuard()
@@ -134,7 +136,7 @@ export function useAgentRefresh() {
       synced = true
 
       // userId 只传一个人:后端只评估这名成员的提交物(1 次 LLM,不是全团队 6 次)
-      const run = await profileAgentApi.run(start, end, who)
+      const run = await profileAgentApi.run(start, end, who, projects.currentProjectId)
       const m = (run?.members || [])[0]
       const engine = run?.engine === 'llm' ? 'LLM' : '规则引擎'
       const name = m?.display_name || (who != null ? `成员#${who}` : '提交者')
@@ -164,8 +166,8 @@ export function useAgentRefresh() {
     completingTaskId.value = task.id
     try {
       if (session.online) {
-        await tasksApi.patch(task.id, { status: 2 })
-        await project.loadAll()
+        await tasksApi.patch(task.id, { status: 2 }, projects.currentProjectId)
+        await project.loadAll(projects.currentProjectId)
       } else {
         task.status = 2
         task.progress = 100

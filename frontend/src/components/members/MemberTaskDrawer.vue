@@ -30,9 +30,6 @@ const member = computed(() => project.memberById(props.memberId))
 const mine = computed(() => project.memberTasks(props.memberId))
 const filtered = computed(() => (filter.value === 'all' ? mine.value : mine.value.filter(t => project.taskStatusKey(t) === filter.value)))
 const unfinished = computed(() => mine.value.filter(t => project.taskStatusKey(t) !== 'done').length)
-/** 容量三态:未配置(null)≠ 确认为 0 —— 展示口径与成员页/容量卡一致 */
-const cap = computed(() => project.capacityOf(props.memberId))
-const capText = computed(() => (cap.value.known ? cap.value.hours + 'h' : '未配置'))
 
 function storyRefText(t) {
   return taskRefs(t.story).join('、') || '无'
@@ -101,11 +98,11 @@ onBeforeUnmount(() => {
         <div class="member-detail-head">
           <div>
             <b>{{ project.memberRoleText(memberId) }}</b>
-            <span class="small"> · 总任务 {{ mine.length }} · 未完成 {{ unfinished }} · 容量 {{ capText }}</span>
+            <span class="small" :title="`每周 ${project.weeklyCapacityHours(memberId)}h × ${project.projectWeeks} 周 = 总容量 ${project.capacityHours(memberId)}h`"> · 总任务 {{ mine.length }} · 未完成 {{ unfinished }} · 容量 {{ project.capacityHours(memberId) }}h</span>
           </div>
         </div>
         <div class="member-summary">
-          <div><b>可分配工时</b>{{ project.allocatedHours(memberId) }}h / {{ capText }}</div>
+          <div><b>可分配工时</b>{{ project.allocatedHours(memberId) }}h / {{ project.capacityHours(memberId) }}h</div>
           <div><b>负载档位</b>{{ project.capacityStatus(project.utilization(memberId)).label }}</div>
         </div>
         <div class="member-detail-head">

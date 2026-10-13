@@ -19,6 +19,7 @@ import com.aicap.mapper.MeetingMapper;
 import com.aicap.mapper.MeetingSuggestionRecordMapper;
 import com.aicap.mapper.PoolItemMapper;
 import com.aicap.mapper.SuggestionMapper;
+import com.aicap.service.ProjectAccessService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -61,6 +62,7 @@ public class MeetingService {
     private final ObjectMapper objectMapper;
     /** 显式事务模板:用于同类自调用场景(见 submitSuggestionIdempotent) */
     private final TransactionTemplate tx;
+    private final ProjectAccessService projectAccess;
     private final MeetingDeletionGuard deletionGuard;
     private final ReviewQueueShadowIndexService shadow;
 
@@ -70,6 +72,9 @@ public class MeetingService {
     public Meeting createMeeting(MeetingDtos.MeetingIn in, User user) {
         Meeting m = new Meeting();
         m.setId(UUID.randomUUID().toString());
+        String projectId = ProjectAccessService.normalize(in.projectId());
+        projectAccess.requireWriter(projectId);
+        m.setProjectId(projectId);
         m.setTitle(in.title().trim());
         m.setTranscript(in.transcript());
         m.setCreatedBy(user.getId());
@@ -78,8 +83,19 @@ public class MeetingService {
         return m;
     }
 
-    public List<Meeting> listMeetings() {
-        return meetingMapper.selectList(new QueryWrapper<Meeting>().orderByDesc("created_at").orderByDesc("id"));
+    public List<Meeting> listMeetings(String projectId) {
+        String scoped = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scoped);
+        return meetingMapper.selectList(new QueryWrapper<Meeting>().eq("project_id", scoped)
+                .orderByDesc("created_at").orderByDesc("id"));
+    }
+
+    public Meeting requireMeeting(String projectId, String meetingId) {
+        String scoped = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scoped);
+        Meeting m = meetingMapper.selectOne(new QueryWrapper<Meeting>().eq("id", meetingId).eq("project_id", scoped));
+        if (m == null) throw ApiException.notFound("会议不存在");
+        return m;
     }
 
     public Meeting getMeeting(String meetingId) {
@@ -107,10 +123,9 @@ public class MeetingService {
      * @return 音频落盘相对路径 + 本次删除的建议数/分析任务数(供响应体回报)
      */
     @Transactional
-    public MeetingDeletion deleteMeeting(String meetingId) {
+    public MeetingDeletion deleteMeeting(String projectId, String meetingId) {
+        Meeting meeting = requireMeeting(projectId, meetingId);
         deletionGuard.check(meetingId);
-        Meeting meeting = meetingMapper.selectById(meetingId);
-        if (meeting == null) throw ApiException.notFound("会议不存在");
 
         // 1) Agent 事件 → 分析任务(meeting_agent_events.run_id → meeting_agent_runs.id)
         List<MeetingAgentRun> runs = runMapper.selectList(
@@ -170,8 +185,8 @@ public class MeetingService {
 
     /** 生成建议(幂等):同 client_request_id 返回既有建议;不同 payload 409 */
     @Transactional
-    public SuggestionOutHolder stage(MeetingDtos.SuggestionIn in, User user) {
-        Meeting meeting = meetingMapper.selectById(in.meetingId());
+    public SuggestionOutHolder stage(String projectId, MeetingDtos.SuggestionIn in, User user) {
+        Meeting meeting = requireMeeting(projectId, in.meetingId());
         if (meeting == null) throw ApiException.notFound("会议不存在");
         if (meeting.getTranscript() == null || !meeting.getTranscript().contains(in.evidence())) {
             throw ApiException.unprocessable("证据必须是会议原文中的连续片段");
@@ -223,10 +238,10 @@ public class MeetingService {
      *  唯一键 {@code uq_meeting_suggestion_request} 冲突时会留下「suggestion 已落库、record 未写」
      *  的孤儿行:该行既不出现在 {@code GET /api/suggestions}(无 record 可关联),又会命中 Agent
      *  「已有同名待审建议」的判定而被长期抑制,无人可审。 */
-    public SuggestionOutHolder submitSuggestionIdempotent(MeetingDtos.SuggestionIn in, User user) {
+    public SuggestionOutHolder submitSuggestionIdempotent(String projectId, MeetingDtos.SuggestionIn in, User user) {
         for (int i = 0; i < 3; i++) {
             try {
-                return tx.execute(status -> stage(in, user));
+                return tx.execute(status -> stage(projectId, in, user));
             } catch (DuplicateKeyException e) {
                 // 唯一键冲突:本轮写入已整体回滚,重新走幂等查询路径
                 MeetingSuggestionRecord existing = recordMapper.selectOne(new QueryWrapper<MeetingSuggestionRecord>()
@@ -242,16 +257,22 @@ public class MeetingService {
         throw ApiException.conflict("建议编号或提交冲突，请重试");
     }
 
-    public List<MeetingSuggestionRecord> listRecords(String meetingId) {
+    public List<MeetingSuggestionRecord> listRecords(String projectId, String meetingId) {
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scopedProjectId);
+        if (meetingId != null) requireMeeting(projectId, meetingId);
         QueryWrapper<MeetingSuggestionRecord> qw = new QueryWrapper<>();
         if (meetingId != null) qw.eq("meeting_id", meetingId);
         return recordMapper.selectList(qw.orderByDesc("id"));
     }
 
-    public MeetingSuggestionRecord getRecordBySuggestionId(String suggestionId) {
+    public MeetingSuggestionRecord getRecordBySuggestionId(String projectId, String suggestionId) {
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scopedProjectId);
         MeetingSuggestionRecord r = recordMapper.selectOne(
                 new QueryWrapper<MeetingSuggestionRecord>().eq("suggestion_id", suggestionId));
         if (r == null) throw ApiException.notFound("会议建议不存在");
+        if (r.getMeetingId() != null) requireMeeting(projectId, r.getMeetingId());
         return r;
     }
 
@@ -259,14 +280,14 @@ public class MeetingService {
      *  READ_COMMITTED:认领失败后同事务内重读须见到并发胜者已提交的最新状态
      *  (对齐 FastAPI 版 rollback 后新事务重读的语义;RR 快照会把同结论并发误判为 409) */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public SuggestionOutHolder review(String suggestionId, MeetingDtos.ReviewIn in, User user) {
+    public SuggestionOutHolder review(String projectId, String suggestionId, MeetingDtos.ReviewIn in, User user) {
         // 决策⇔载荷一致性(对齐 FastAPI ReviewIn model_validator):modify_and_approve 必须带 changes,其余不得带
         boolean isModify = "modify_and_approve".equals(in.decision());
         if (isModify != (in.changes() != null)) {
             throw ApiException.unprocessable("仅修改后采纳必须提供 changes");
         }
         Suggestion suggestion = suggestionMapper.selectById(suggestionId);
-        MeetingSuggestionRecord record = getRecordBySuggestionId(suggestionId);
+        MeetingSuggestionRecord record = getRecordBySuggestionId(projectId, suggestionId);
         if (suggestion == null) throw ApiException.notFound("会议建议不存在");
 
         String targetStatus = "reject".equals(in.decision()) ? "rejected" : "approved";
@@ -284,7 +305,7 @@ public class MeetingService {
                 .eq("status", "pending"));
         if (claimed == 0) {
             suggestion = suggestionMapper.selectById(suggestionId);
-            record = getRecordBySuggestionId(suggestionId);
+            record = getRecordBySuggestionId(projectId, suggestionId);
             return reviewedOutcome(suggestion, record, targetStatus, in);
         }
         suggestion.setStatus(targetStatus);
@@ -312,6 +333,7 @@ public class MeetingService {
             item.setDescription((String) changes.getOrDefault("description", ""));
             item.setSource("会议 " + record.getMeetingId() + " / 建议 " + suggestionId);
             item.setPriority((String) changes.getOrDefault("priority", "Could"));
+            item.setProjectId(ProjectAccessService.normalize(projectId));
             item.setCreatedAt(LocalDateTime.now());
             try {
                 poolItemMapper.insert(item);

@@ -30,7 +30,10 @@ public final class TaskDtos {
                           Integer status,
                           Integer progress,
                           Boolean blocked,
-                          List<Integer> sprints) {
+                          List<Integer> sprints,
+                          @JsonProperty("primary_story_ref") String primaryStoryRef,
+                          @JsonProperty("additional_story_refs") List<String> additionalStoryRefs,
+                          @JsonProperty("story_refs") List<String> storyRefs) {
     }
 
     /** 任务删除/未用 */
@@ -60,7 +63,37 @@ public final class TaskDtos {
                 t.getStatus() == null ? 0 : t.getStatus(),
                 t.getProgress() == null ? 0 : t.getProgress(),
                 t.getBlocked() != null && t.getBlocked() != 0,
-                sprintsOf(t.getWeekStart(), t.getWeekEnd()));
+                sprintsOf(t.getWeekStart(), t.getWeekEnd()),
+                firstStoryRef(t.getStoryRef()),
+                additionalStoryRefs(t.getStoryRef()),
+                storyRefs(t.getStoryRef()));
+    }
+
+    public static TaskOut toOut(Task t, List<String> refs) {
+        List<String> safeRefs = refs == null ? List.of() : refs;
+        String primary = safeRefs.isEmpty() ? null : safeRefs.get(0);
+        List<String> additional = safeRefs.size() <= 1 ? List.of() : safeRefs.subList(1, safeRefs.size());
+        TaskOut base = toOut(t);
+        return new TaskOut(base.id(), base.name(), base.ownerId(), base.hours(), base.weekStart(), base.weekEnd(),
+                base.storyRef(), base.kanbanCardId(), base.estimatedHours(), base.taskType(), base.dependsOn(),
+                base.priority(), base.status(), base.progress(), base.blocked(), base.sprints(), primary,
+                additional, safeRefs);
+    }
+
+    private static List<String> storyRefs(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        return java.util.Arrays.stream(value.split(","))
+                .map(String::trim).filter(s -> !s.isBlank()).toList();
+    }
+
+    private static String firstStoryRef(String value) {
+        List<String> refs = storyRefs(value);
+        return refs.isEmpty() ? null : refs.get(0);
+    }
+
+    private static List<String> additionalStoryRefs(String value) {
+        List<String> refs = storyRefs(value);
+        return refs.size() <= 1 ? List.of() : refs.subList(1, refs.size());
     }
 
     public static List<TaskOut> toOutList(List<Task> list) {

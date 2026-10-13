@@ -4,6 +4,9 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * GitHub 同步配置(US34:GitHub 仓库与成员映射)。
  *
@@ -37,4 +40,6 @@ public class GitHubProperties {
     private int maxPages = 5;
     /** 单次同步拉取 PR 的 Reviews 上限(每个 PR 1 个请求,默认 30 个 PR;超出范围的 review 留待下轮) */
     private int reviewPrLimit = 30;
+    /** Explicit repository owner/name -> project id mapping; empty means unmatched. */
+    private Map<String, String> repositoryProjectMapping = new LinkedHashMap<>();
 }

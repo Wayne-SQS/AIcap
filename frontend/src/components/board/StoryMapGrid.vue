@@ -1,7 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import StoryCard from './StoryCard.vue'
-import { activities } from '@/constants'
+import { DEFAULT_ACTIVITIES } from '@/constants'
 import { MAP_SPRINTS } from '@/data/seed'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
@@ -11,6 +11,8 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
 const props = defineProps({
   data: { type: Array, required: true },
+  sprints: { type: Array, default: () => MAP_SPRINTS },
+  activities: { type: Array, default: () => DEFAULT_ACTIVITIES },
   sprint: { type: String, required: true },
   density: { type: String, default: 'detail' },
   skin: { type: String, default: 'none' },
@@ -27,12 +29,48 @@ const suppressClick = ref(false)
 const mapViewport = ref(null)
 const mapShell = ref(null)
 const mapCanvas = ref(null)
-const { zoom, zoomMode, minZoom, maxZoom, canvasStyle, shellStyle, zoomIn, zoomOut, setZoomPercent, resetZoom, fitToCanvas } =
-  useCanvasZoom({ viewport: mapViewport, canvas: mapCanvas, shell: mapShell, fillViewportWidth: true, minContentWidth: 968, fitMinZoom: 0.2, initialMode: 'manual' })
+const { zoom, zoomMode, minZoom, maxZoom, canvasStyle, shellStyle, zoomIn, zoomOut, setZoomPercent, resetZoom, applyZoom, measure } =
+  useCanvasZoom({ viewport: mapViewport, canvas: mapCanvas, shell: mapShell, fillViewportWidth: true, minZoom: 0.6, fitMinZoom: 0.6, initialMode: 'manual' })
+
+// 画布保持未缩放的布局宽高，transform 只负责显示缩放；shell 承担缩放后的滚动占位。
+const mapStyle = computed(() => ({
+  ...canvasStyle.value,
+  width: activeActivities.value.length > 6 ? `${115 + activeActivities.value.length * 150}px` : canvasStyle.value.width || '100%',
+  minWidth: activeActivities.value.length > 6 ? `${115 + activeActivities.value.length * 150}px` : '0',
+  maxWidth: activeActivities.value.length > 6 ? `${115 + activeActivities.value.length * 150}px` : undefined,
+  gridTemplateColumns: activeActivities.value.length
+    ? `115px repeat(${activeActivities.value.length}, minmax(0, 1fr))`
+    : '115px'
+}))
+
+// 每次点击都读取未受 transform 影响的布局尺寸，按宽高较小值适配并留出 3% 安全边距。
+function fitToCanvas() {
+  const view = mapViewport.value
+  const canvas = mapCanvas.value
+  if (!view || !canvas) return
+  measure()
+  const contentWidth = Math.max(canvas.offsetWidth, canvas.scrollWidth)
+  const contentHeight = Math.max(canvas.offsetHeight, canvas.scrollHeight)
+  if (!contentWidth || !contentHeight) return
+  const scaleX = view.clientWidth / contentWidth
+  const scaleY = view.clientHeight / contentHeight
+  const fitsAtFullSize = scaleX >= 1 && scaleY >= 1
+  const fitScale = fitsAtFullSize ? 1 : Math.max(0.6, Math.min(scaleX, scaleY) * 0.97)
+  applyZoom(fitScale, { clientX: view.getBoundingClientRect().left, clientY: view.getBoundingClientRect().top }, 'fit')
+  nextTick(() => {
+    view.scrollLeft = 0
+    view.scrollTop = 0
+  })
+}
 
 const compact = computed(() => props.density === 'compact')
+const activityNames = computed(() => props.activities?.length ? props.activities : DEFAULT_ACTIVITIES)
+const activeActivities = computed(() => activityNames.value
+  .map((name, index) => ({ name, number: index + 1 }))
+  .filter(activity => props.data.some(story => Number(story.activity) === activity.number)))
 const ctx = computed(() => ({
   skin: props.skin,
+  sprints: props.sprints,
   tasks: project.tasks,
   nowWeek: props.nowWeek,
   members: project.members,
@@ -43,8 +81,13 @@ const skinLabel = computed(() => (SKINS.find(s => s.key === props.skin) || {}).l
 const legend = computed(() => legendOf(props.skin, props.data, ctx.value))
 const legendSum = computed(() => legend.value.reduce((a, r) => a + r.count, 0))
 function cardSkin(story) { return skinOf(story, ctx.value) }
-const sprintList = computed(() => MAP_SPRINTS.filter(sp => props.sprint === 'all' || (props.sprint === '4plus' ? sp.number === 4 : sp.number === +props.sprint)))
-function cellStories(sp, i) { return sortStories(props.data.filter(s => sp.matches(s) && s.activity === i + 1), props.sortBy, ctx.value) }
+const sprintList = computed(() => props.sprints.filter(sp => props.sprint === 'all' || (props.sprint === '4plus' ? sp.number === 4 : sp.number === +props.sprint)))
+// 筛选和密度变化后重新测量，避免沿用上一张地图的滚动范围。
+watch([activeActivities, sprintList, compact], () => {
+  measure()
+  if (zoomMode.value === 'fit') fitToCanvas()
+}, { flush: 'post' })
+function cellStories(sp, activity) { return sortStories(props.data.filter(s => sp.matches(s) && Number(s.activity) === activity.number), props.sortBy, ctx.value) }
 function keyOf(sp, activity) { return `${sp.number}-${activity}` }
 function startDrag(id) { dragStoryId.value = id }
 function clearDrag() { dragStoryId.value = ''; dropKey.value = '' }
@@ -95,7 +138,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', movePointer))
 </script>
 
 <template>
-  <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；点击故事可查看验收条件。Sprint 4+ 为后续路线，不纳入本学期六周承诺。</p>
+  <p class="mapnote">横向按骨干活动展开，纵向按 Sprint 切片；Sprint 作为故事筛选和辅助信息。点击故事可查看验收条件。</p>
   <div v-if="legend.length" class="maplegend" id="maplegend" :data-skin="skin">
     <span class="legendtitle">马甲 · {{ skinLabel }}</span>
     <span v-for="r in legend" :key="r.glyph" class="legenditem" :class="r.tone" :data-key="r.glyph" :data-count="r.count">
@@ -108,20 +151,24 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', movePointer))
     :reset-zoom="resetZoom" :fit-to-canvas="fitToCanvas" :zoom-in="zoomIn" :zoom-out="zoomOut" :set-zoom-percent="setZoomPercent" />
   <div ref="mapViewport" class="mapwrap canvas-zoom-viewport" tabindex="0" aria-label="可横向滚动的故事地图" @click.capture="captureClick">
     <div ref="mapShell" class="canvas-zoom-shell" :style="shellStyle">
-      <div ref="mapCanvas" class="mapgrid" id="map" :class="{ compact, skinned: skin !== 'none' }" :style="canvasStyle" @pointerdown.capture="startPointerFromGrid">
-        <div class="maphead"><span class="map-code">ROADMAP</span><strong>发布切片</strong></div>
-        <div v-for="(a, i) in activities" :key="a" class="maphead"><span class="map-code">A{{ i + 1 }}</span><strong>{{ a }}</strong></div>
-        <template v-for="sp in sprintList" :key="sp.number">
-          <div class="sprinthead" :class="sp.cls">{{ sp.name }}<br><span class="small">{{ sp.tag }}</span></div>
-          <div v-for="(a, i) in activities" :key="sp.number + '-' + i"
+      <div ref="mapCanvas" class="mapgrid" id="map" :class="{ compact, skinned: skin !== 'none' }"
+        :style="mapStyle" @pointerdown.capture="startPointerFromGrid">
+        <div class="maphead" style="grid-column:1;grid-row:1"><span class="map-code">ROADMAP</span><strong>发布切片</strong></div>
+        <div v-for="(activity, i) in activeActivities" :key="activity.number" class="maphead"
+          :style="{ gridColumn: i + 2, gridRow: 1 }"><span class="map-code">A{{ activity.number }}</span><strong>{{ activity.name }}</strong></div>
+        <template v-for="(sp, rowIndex) in sprintList" :key="sp.number">
+          <div class="sprinthead" :class="sp.cls"
+            :style="{ gridColumn: 1, gridRow: rowIndex + 2 }">{{ sp.name }}<br><span class="small">{{ sp.tag }}</span></div>
+          <div v-for="(activity, i) in activeActivities" :key="sp.number + '-' + activity.number"
             class="mapcell" :class="[sp.cls, { compact, 'is-drop-target': dropKey === keyOf(sp, i + 1) }]"
-            :data-cell="sp.number + '-' + (i + 1)" :data-map-drop="`${sp.number}-${i + 1}`"
-            @dragenter.prevent="dropKey = keyOf(sp, i + 1)" @dragover.prevent="dropKey = keyOf(sp, i + 1)"
-            @dragleave.self="dropKey = ''" @drop.prevent="drop(sp, i + 1, $event)">
-            <StoryCard v-for="story in cellStories(sp, i)" :key="story.id" :story="story" :map="true"
+            :style="{ gridColumn: i + 2, gridRow: rowIndex + 2 }"
+            :data-cell="sp.number + '-' + activity.number" :data-map-drop="keyOf(sp, activity.number)"
+            @dragenter.prevent="dropKey = keyOf(sp, activity.number)" @dragover.prevent="dropKey = keyOf(sp, activity.number)"
+            @dragleave.self="dropKey = ''" @drop.prevent="drop(sp, activity.number, $event)">
+            <StoryCard v-for="story in cellStories(sp, activity)" :key="story.id" :story="story" :map="true"
               :compact="compact" :skin="cardSkin(story)" :class="{ 'is-dragging': dragStoryId === story.id }"
               @open="emit('open', $event)" @dragstart="startDrag(story.id)" @dragend="clearDrag" />
-            <span v-if="!cellStories(sp, i).length" class="small">暂无故事</span>
+            <span v-if="!cellStories(sp, activity).length" class="small">暂无故事</span>
           </div>
         </template>
         <div v-if="!data.length" class="empty" style="grid-column:1/-1">没有匹配的故事，试试调整筛选条件。</div>

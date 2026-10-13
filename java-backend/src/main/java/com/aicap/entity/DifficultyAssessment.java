@@ -13,6 +13,9 @@ import java.time.LocalDateTime;
 public class DifficultyAssessment {
     @TableId(type = IdType.AUTO)
     private Integer id;
+    private String projectId;
+    private Long taskInternalId;
+    private String taskCodeSnapshot;
     private String taskId;
     /** low/medium/high/extreme */
     private String level;

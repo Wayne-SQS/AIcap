@@ -10,6 +10,7 @@ import com.aicap.rag.Hit;
 import com.aicap.rag.RagProperties;
 import com.aicap.rag.RetrievalContext;
 import com.aicap.rag.RetrievalService;
+import com.aicap.service.ProjectAccessService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +72,7 @@ public class PlatformToolService {
     private final RetrievalService retrievalService;
     private final RagProperties props;
     private final ObjectMapper mapper;
+    private final ProjectAccessService projectAccess;
 
     /**
      * 会议分析的触发面(S5′ 触发型工具)。
@@ -99,12 +101,13 @@ public class PlatformToolService {
         long started = System.currentTimeMillis();
         JsonNode safeArgs = args == null || args.isNull() ? mapper.createObjectNode() : args;
         try {
+            String projectId = projectContext(safeArgs);
             return switch (spec.agent()) {
                 case PlatformToolCatalog.AGENT_MEETING ->
-                        success(toolName, meetingTools.execute(toolName, safeArgs, caller.getId()),
+                        success(toolName, meetingTools.execute(toolName, safeArgs, caller.getId(), requireProject(projectId)),
                                 null, started);
-                case PlatformToolCatalog.AGENT_PROFILE -> invokeProfile(toolName, safeArgs, started);
-                case PlatformToolCatalog.AGENT_PLATFORM -> invokePlatform(toolName, safeArgs, caller, started);
+                case PlatformToolCatalog.AGENT_PROFILE -> invokeProfile(toolName, safeArgs, requireProject(projectId), started);
+                case PlatformToolCatalog.AGENT_PLATFORM -> invokePlatform(toolName, safeArgs, caller, requireProject(projectId), started);
                 default -> throw ApiException.notFound("未知工具: " + toolName);
             };
         } catch (AgentError e) {
@@ -119,8 +122,8 @@ public class PlatformToolService {
         }
     }
 
-    private ToolOutcome invokeProfile(String toolName, JsonNode args, long started) {
-        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(args));
+    private ToolOutcome invokeProfile(String toolName, JsonNode args, String projectId, long started) {
+        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(args), projectId);
         if (!call.ok()) {
             return failure(toolName, call.error() == null ? "tool_failed" : call.error(),
                     readable(call.resultJson()), started);
@@ -128,7 +131,19 @@ public class PlatformToolService {
         return success(toolName, read(call.resultJson()), null, started);
     }
 
-    private ToolOutcome invokePlatform(String toolName, JsonNode args, User caller, long started) {
+    private String projectContext(JsonNode args) {
+        String projectId = args.path("project_id").asText("").trim();
+        return projectId.isEmpty() ? args.path("projectId").asText("").trim() : projectId;
+    }
+
+    private String requireProject(String projectId) {
+        if (projectId == null || projectId.isBlank()) return projectId;
+        String scoped = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scoped);
+        return scoped;
+    }
+
+    private ToolOutcome invokePlatform(String toolName, JsonNode args, User caller, String projectId, long started) {
         if (PlatformToolCatalog.SEMANTIC_SEARCH.equals(toolName)) {
             return semanticSearch(args, caller, started);
         }
@@ -136,7 +151,7 @@ public class PlatformToolService {
             return startMeetingAnalysis(args, caller, started);
         }
         if (PlatformToolCatalog.START_PLAN_DRAFT.equals(toolName)) {
-            return startPlanDraft(args, caller, started);
+            return startPlanDraft(args, caller, projectId, started);
         }
         throw ApiException.notFound("未知工具: " + toolName);
     }
@@ -171,7 +186,7 @@ public class PlatformToolService {
      * <p>幂等口径:{@code planning_agent_runs} 没有唯一键,故按"同一 {@code request_text}
      * 已有未完成 run"判定(含 {@code waiting_confirmation}:草案还在等人确认时再触发无意义)。
      */
-    private ToolOutcome startPlanDraft(JsonNode args, User caller, long started) {
+    private ToolOutcome startPlanDraft(JsonNode args, User caller, String projectId, long started) {
         String tool = PlatformToolCatalog.START_PLAN_DRAFT;
         String request = args.path("request").asText("").trim();
         if (request.isEmpty()) {
@@ -180,11 +195,16 @@ public class PlatformToolService {
         if (request.length() > 2000) {
             return failure(tool, "invalid_arguments", "request 过长(上限 2000 字符)", started);
         }
-        PlanningAgentRun existing = planningJobs.findUnfinishedByRequest(request);
+        /* 多项目之后 planning run 必须落在某个项目上(project_id 就是队列的作用域),
+           少了它 run 会挂到默认项目,确认时写的也是别人的项目。 */
+        if (projectId == null || projectId.isBlank()) {
+            return failure(tool, "invalid_arguments", "project_id 必填", started);
+        }
+        PlanningAgentRun existing = planningJobs.findUnfinishedByRequest(projectId, request);
         if (existing != null) {
             return success(tool, triggerJson(existing.getId(), existing.getStatus(), true), null, started);
         }
-        PlanningAgentRun run = planningJobs.queue(request, caller.getId());
+        PlanningAgentRun run = planningJobs.queue(projectId, request, caller.getId());
         return success(tool, triggerJson(run.getId(), run.getStatus(), false), null, started);
     }
 

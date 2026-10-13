@@ -1,7 +1,17 @@
 <script setup>
-import { useRouter } from 'vue-router'
-// 侧栏结构逐字对齐旧版 index.html L407-433(选择器保留:.navitem[data-view]/.navtitle/.teamdots)
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useProjectsStore } from '@/stores/projects'
+import { useProjectStore } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
+
+const route = useRoute()
 const router = useRouter()
+const projects = useProjectsStore()
+const project = useProjectStore()
+const session = useSessionStore()
+const projectPicker = ref(null)
+const projectMenuOpen = ref(false)
 const navGroups = [
   {
     title: '项目空间',
@@ -23,22 +33,72 @@ const navGroups = [
       { view: 'meetings', icon: '◉', label: '会议工作区' },
       { view: 'submit-agent', icon: '↗', label: '任务提交分析' },
       { view: 'profile-agent', icon: '◌', label: '成员画像分析' },
-      { view: 'drawing-agent', icon: '✎', label: 'Planning Agent · 项目规划' },
-      { view: 'project-generator', icon: '✚', label: '智能生成项目图' },
+      { view: 'drawing-agent', icon: '✎', label: '画图智能体' },
       { view: 'review', icon: '✓', label: '提案审核中心' }
     ]
   }
 ]
-function go(v) { router.push({ name: v }) }
+const scopedRoute = computed(() => Boolean(route.meta.projectScoped))
+const activeProject = computed(() => projects.currentProject)
+const selectedProjectName = computed(() => activeProject.value?.name || '选择项目')
+
+async function switchProject(id) {
+  if (!id) return
+  projectMenuOpen.value = false
+  await projects.selectProject(id)
+  await project.loadAll(id)
+  const view = route.meta.legacyName || 'overview'
+  router.push({ name: `project-${view}`, params: { projectId: id } })
+}
+function closeProjectMenu(event) {
+  if (!projectPicker.value?.contains(event.target)) projectMenuOpen.value = false
+}
+function onProjectPickerKeydown(event) {
+  if (event.key === 'Escape') projectMenuOpen.value = false
+}
+onMounted(() => document.addEventListener('pointerdown', closeProjectMenu))
+onBeforeUnmount(() => document.removeEventListener('pointerdown', closeProjectMenu))
+function go(name) {
+  if (!projects.currentProjectId) return router.push({ name: 'projects' })
+  router.push({ name: `project-${name}`, params: { projectId: projects.currentProjectId } })
+}
 </script>
 
 <template>
   <aside class="sidebar">
-    <div class="brand">
-      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-      <span>爱管理<small>TEAM WORKSPACE</small></span>
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>爱管理<small>TEAM WORKSPACE</small></span></div>
+    <div class="project-switcher">
+      <label id="project-switch-label">当前项目 / PROJECT</label>
+      <div ref="projectPicker" class="project-picker" @keydown="onProjectPickerKeydown">
+        <button
+          id="project-switch"
+          type="button"
+          class="project-picker-trigger"
+          aria-haspopup="listbox"
+          :aria-expanded="projectMenuOpen"
+          aria-labelledby="project-switch-label project-switch"
+          :title="activeProject?.name || '选择项目'"
+          @click="projectMenuOpen = !projectMenuOpen"
+        >
+          <span>{{ selectedProjectName }}</span><i aria-hidden="true"></i>
+        </button>
+        <div v-if="projectMenuOpen" class="project-picker-menu" role="listbox" aria-labelledby="project-switch-label">
+          <button type="button" class="project-picker-option is-placeholder" disabled>选择项目</button>
+          <button
+            v-for="item in projects.projects"
+            :key="item.id"
+            type="button"
+            class="project-picker-option"
+            :class="{ 'is-selected': item.id === projects.currentProjectId }"
+            role="option"
+            :aria-selected="item.id === projects.currentProjectId"
+            :title="item.name"
+            @click="switchProject(item.id)"
+          >{{ item.name }}</button>
+        </div>
+      </div>
+      <button class="project-list-link" @click="router.push({ name: 'projects' })">我的项目</button>
     </div>
-    <div class="project"><span class="small">当前项目 / PROJECT</span><br>爱管理 · 开发小队</div>
     <nav aria-label="功能导航">
       <template v-for="group in navGroups" :key="group.title">
         <div class="navtitle" :style="group.topGap ? 'margin-top:24px' : ''">{{ group.title }}</div>
@@ -46,24 +106,17 @@ function go(v) { router.push({ name: v }) }
           v-for="item in group.items"
           :key="item.view"
           class="navitem"
-          :class="{ active: $route.name === item.view }"
+          :class="{ active: route.meta.legacyName === item.view || route.name === item.view }"
           :data-view="item.view"
           @click="go(item.view)"
           @keydown.enter.prevent="go(item.view)"
           @keydown.space.prevent="go(item.view)"
           role="link"
           tabindex="0"
-          :aria-current="$route.name === item.view ? 'page' : undefined"
+          :aria-current="route.meta.legacyName === item.view || route.name === item.view ? 'page' : undefined"
         ><span class="navicon" aria-hidden="true">{{ item.icon }}</span>{{ item.label }}</div>
       </template>
     </nav>
-    <div class="sidebottom">
-      <span class="eyebrow">PARTY / 04</span>
-      <div class="teamdots">
-        <span class="avatar">P1</span><span class="avatar a1">P2</span><span class="avatar a2">P3</span><span class="avatar a3">P4</span>
-      </div>
-      <p class="small">四人小队，共同推进。</p>
-      <p class="small" style="margin-top:-6px">像素风可交互原型 · 本机自动保存</p>
-    </div>
+    <div class="sidebottom"><span class="eyebrow">{{ activeProject?.id || 'PROJECT' }}</span><p class="small">{{ activeProject?.name || (session.currentUser ? '请选择项目' : '工作区') }}</p></div>
   </aside>
 </template>

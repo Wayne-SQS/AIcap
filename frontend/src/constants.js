@@ -8,7 +8,8 @@ export const SUG_KEY = 'aiguanli-pixel-sug-v1'
 export const DEC_KEY = 'aiguanli-pixel-dec-v1'
 
 export const statuses = ['待办', '进行中', '已完成']
-export const activities = ['进入与组织项目', '梳理需求', '安排与执行', '观察与协同', '复盘改进']
+export const DEFAULT_ACTIVITIES = ['进入与组织项目', '梳理需求', '安排与执行', '观察与协同', '复盘改进']
+export const activities = DEFAULT_ACTIVITIES
 export const VIEW_NAMES = {
   overview: '项目总览',
   pool: '需求池',

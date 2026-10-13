@@ -40,16 +40,17 @@ public class PlanningAgentJobs {
 
     private static final String INTERRUPTED_MESSAGE = "分析进程中断或超时，可重试";
 
-    public PlanningAgentRun queue(String text, int user) {
+    public PlanningAgentRun queue(String projectId, String text, int user) {
         PlanningAgentRun run = new PlanningAgentRun();
         run.setId(UUID.randomUUID().toString());
         run.setRequestedBy(user);
+        run.setProjectId(projectId);
         run.setRequestText(text);
         run.setStatus("queued");
         run.setAttempt(1);
         run.setModel(props.getModel());
         run.setPromptVersion("planning-owner-v1");
-        run.setContextJson(tools.contextSnapshot().toString());
+        run.setContextJson(tools.contextSnapshot(projectId).toString());
         run.setCreatedAt(LocalDateTime.now());
         run.setUpdatedAt(LocalDateTime.now());
         tx.executeWithoutResult(status -> {
@@ -104,13 +105,24 @@ public class PlanningAgentJobs {
      * 未完成含 {@code waiting_confirmation} —— 草案还在等人确认时再触发一次没有意义。
      */
     public PlanningAgentRun findUnfinishedByRequest(String requestText) {
+        return findUnfinishedByRequest(null, requestText);
+    }
+
+    /**
+     * 同上,但限定在指定项目内。多项目下 {@code request_text} 相同不代表同一件事
+     * (两个项目可以提一模一样的规划请求),跨项目去重会把另一个项目的合法触发吞掉。
+     */
+    public PlanningAgentRun findUnfinishedByRequest(String projectId, String requestText) {
         if (requestText == null || requestText.isBlank()) {
             return null;
         }
-        return runs.selectOne(new QueryWrapper<PlanningAgentRun>()
+        QueryWrapper<PlanningAgentRun> query = new QueryWrapper<PlanningAgentRun>()
                 .eq("request_text", requestText)
-                .in("status", "queued", "running", "waiting_confirmation")
-                .orderByDesc("created_at").last("LIMIT 1"));
+                .in("status", "queued", "running", "waiting_confirmation");
+        if (projectId != null && !projectId.isBlank()) {
+            query.eq("project_id", projectId);
+        }
+        return runs.selectOne(query.orderByDesc("created_at").last("LIMIT 1"));
     }
 
     public boolean runNext() {
@@ -129,7 +141,7 @@ public class PlanningAgentJobs {
         event(run, "running", "画图智能体开始读取项目数据并分析");
         try {
             client.setModelOverride(run.getModel());
-            ObjectNode result = runner.analyze(run.getRequestText(), client,
+            ObjectNode result = runner.analyze(run.getProjectId(), run.getRequestText(), client,
                     (kind, detail) -> event(run, kind, detail));
             run.setResultJson(result.toString());
             event(run, "plan_generated", "已生成结构化修改方案");

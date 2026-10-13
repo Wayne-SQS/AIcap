@@ -35,17 +35,22 @@ public class PlanningAgentService {
     private final ObjectMapper mapper;
     private final PlatformTransactionManager transactionManager;
 
-    public Map<String, Object> create(String text, User user) {
+    public Map<String, Object> create(String projectId, String text, User user) {
         if (text == null || text.isBlank()) throw ApiException.badRequest("规划请求不能为空");
         if (!props.settingsReady()) throw ApiException.server("服务端尚未配置模型密钥");
-        return out(jobs.queue(text.trim(), user.getId()));
+        return out(jobs.queue(projectId, text.trim(), user.getId()));
     }
 
     public Map<String, Object> get(String id) {
         // 读路由也先回收过期 run:否则用户点开卡死的 run 只能看到永久的 running
         jobs.expireRuns();
+        return get(id, null);
+    }
+
+    public Map<String, Object> get(String id, String projectId) {
         PlanningAgentRun run = runs.selectById(id);
         if (run == null) throw ApiException.notFound("规划运行不存在");
+        requireProject(run, projectId);
         Map<String, Object> result = out(run);
         List<Map<String, Object>> eventList = new ArrayList<>();
         for (PlanningAgentEvent event : events.selectList(new QueryWrapper<PlanningAgentEvent>()
@@ -58,8 +63,13 @@ public class PlanningAgentService {
     }
 
     public Map<String, Object> confirm(String id, User user) {
+        return confirm(id, null, user);
+    }
+
+    public Map<String, Object> confirm(String id, String projectId, User user) {
         PlanningAgentRun run = runs.selectById(id);
         if (run == null) throw ApiException.notFound("规划运行不存在");
+        requireProject(run, projectId);
         if (!"waiting_confirmation".equals(run.getStatus())) {
             throw ApiException.conflict("该规划不在待确认状态");
         }
@@ -71,7 +81,7 @@ public class PlanningAgentService {
                 jobs.event(run, "action_started", "开始执行 " + action.path("type").asText()
                         + " " + actionTarget(action));
             }
-            execution.validateAndExecute(run.getResultJson(), user);
+            execution.validateAndExecute(run.getProjectId(), run.getResultJson(), user);
             for (JsonNode action : plan.path("actions")) {
                 jobs.event(run, "action_completed", "已完成 " + action.path("type").asText()
                         + " " + actionTarget(action));
@@ -98,8 +108,13 @@ public class PlanningAgentService {
     }
 
     public Map<String, Object> cancel(String id) {
+        return cancel(id, null);
+    }
+
+    public Map<String, Object> cancel(String id, String projectId) {
         PlanningAgentRun run = runs.selectById(id);
         if (run == null) throw ApiException.notFound("规划运行不存在");
+        requireProject(run, projectId);
         if (cancelWaiting(id) != 1) throw ApiException.conflict("该规划已被处理，请刷新结果");
         run.setStatus("cancelled");
         run.setUpdatedAt(LocalDateTime.now());
@@ -142,6 +157,12 @@ public class PlanningAgentService {
         if (action.hasNonNull("task_id")) return action.path("task_id").asText();
         if (action.hasNonNull("milestone_id")) return action.path("milestone_id").asText();
         return action.path("story_id").asText();
+    }
+
+    private void requireProject(PlanningAgentRun run, String projectId) {
+        if (projectId != null && !projectId.equalsIgnoreCase(run.getProjectId())) {
+            throw ApiException.notFound("规划运行不存在");
+        }
     }
 
     private Map<String, Object> out(PlanningAgentRun run) {

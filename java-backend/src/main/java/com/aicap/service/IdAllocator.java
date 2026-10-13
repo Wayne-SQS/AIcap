@@ -45,9 +45,9 @@ public class IdAllocator {
     private final PoolItemMapper poolItemMapper;
 
     /** 下一个可用的故事编号({@code US%02d});已被占用的号自动顺延 */
-    public String nextStoryId() {
+    public String nextStoryId(String projectId) {
         int max = 0;
-        for (Story s : storyMapper.selectList(null)) {
+        for (Story s : storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", projectId))) {
             Matcher m = US_ID.matcher(s.getId());
             if (m.matches()) {
                 max = Math.max(max, Integer.parseInt(m.group(1)));
@@ -55,12 +55,14 @@ public class IdAllocator {
         }
         for (int i = 0; i < MAX_PROBE; i++) {
             String candidate = String.format("US%02d", max + 1 + i);
-            if (storyMapper.selectById(candidate) == null) {
+            if (storyMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", projectId).eq("code", candidate)) == null) {
                 return candidate;
             }
         }
         throw ApiException.conflict("故事编号分配连续冲突，请稍后重试");
     }
+
+    public String nextStoryId() { throw ApiException.badRequest("projectId 必填"); }
 
     /** 下一个可用的需求池编号({@code R%02d});与故事的 US 命名空间相互独立 */
     public String nextPoolId() {

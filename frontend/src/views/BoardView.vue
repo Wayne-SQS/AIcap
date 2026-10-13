@@ -1,14 +1,16 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useProjectActions } from '@/composables/useProjectActions'
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
-import { statuses, activities, STORIES_KEY, LOG_KEY } from '@/constants'
+import { statuses, DEFAULT_ACTIVITIES, STORIES_KEY, LOG_KEY } from '@/constants'
 import { currentWeek, todayText } from '@/data/planCalendar'
+import { MAP_SPRINTS } from '@/data/seed'
 import BoardSummary from '@/components/board/BoardSummary.vue'
 import BoardToolbar from '@/components/board/BoardToolbar.vue'
 import StoryCard from '@/components/board/StoryCard.vue'
@@ -20,6 +22,7 @@ import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 /* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
    本次移植 legacy 新版:默认进入「故事地图」、Sprint 4+ 筛选、负责人显示真实姓名 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -37,13 +40,34 @@ const pendingStoryMove = ref(null)
    density 详细/总览 —— 总览把 37 张 148px 卡压成 22px 小矩形,四个切片一屏看全;
    skin    马甲图层 —— 默认「紧急程度」,地图最该先看到的就是风险分布;
    sortBy  格内排序 —— 默认保持原次序(基线即 US01→US37),不重新发明顺序 */
-const density = ref('detail')
+// 故事地图默认使用紧凑总览；完整字段仍可通过点击故事打开详情面板查看。
+const density = ref('compact')
 const skin = ref('urgency')
 const sortBy = ref('origin')
 
 /* 「现在」锚点:全应用唯一定义在 data/planCalendar.js,这里只负责注入与展示 */
 const nowWeek = computed(() => currentWeek())
 const today = computed(() => todayText(nowWeek.value))
+const mapActivities = computed(() => {
+  const names = projects.currentProject?.activities
+  return Array.isArray(names) && names.length ? names : DEFAULT_ACTIVITIES
+})
+const mapSprints = computed(() => {
+  const current = projects.currentProject
+  if (!current || current.id === 'P002') return MAP_SPRINTS
+  const names = new Map()
+  for (const match of (current.description || '').matchAll(/Sprint\s*(\d+)\s*(?:[：:、·-]\s*)?([^；;。\r\n]+)/gi)) {
+    const name = match[2].trim()
+    if (name) names.set(Number(match[1]), name)
+  }
+  const maxSprint = Math.max(Number(current.total_sprints) || 0, ...project.stories.map(s => Number(s.sprint) || 0))
+  return MAP_SPRINTS.filter(sp => sp.number <= maxSprint)
+    .map(sp => ({ ...sp, tag: names.get(sp.number) || (sp.number === 4 ? sp.tag : '迭代目标') }))
+})
+const storyRange = computed(() => {
+  const ids = project.stories.map(s => s.id).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  return ids.length ? `（${ids[0]}–${ids.at(-1)}）` : ''
+})
 
 /* 切换到总览时把地图滚进视野:总览的目的就是"一屏看全全局",
    若还要用户自己往下滚,这个功能等于没达成目的 */
@@ -59,7 +83,7 @@ const data = computed(() => {
   return project.stories.filter(s =>
     (sp === 'all' || (sp === '4plus' ? s.sprint >= 4 : s.sprint === +sp)) &&
     (owner.value === 'all' || s.owner === +owner.value) &&
-    (!q || [s.id, s.title, s.description, s.acceptance, project.memberName(s.owner), activities[s.activity - 1]].join(' ').toLowerCase().includes(q))
+    (!q || [s.id, s.title, s.description, s.acceptance, project.memberName(s.owner), mapActivities.value[s.activity - 1]].join(' ').toLowerCase().includes(q))
   )
 })
 const inScope = id => data.value.some(s => s.id === id)
@@ -79,8 +103,8 @@ function onDrop(i) {
   if (!s || s.status === i) return
   if (guard('拖拽修改状态')) return
   if (session.apiMode) {
-    storiesApi.patch(id, { status: i })
-      .then(async () => { await project.loadAll(); notify(id + ' → ' + statuses[i] + ' · 已同步到服务器') })
+    storiesApi.patch(id, { status: i }, projects.currentProjectId)
+      .then(async () => { await project.loadAll(projects.currentProjectId); notify(id + ' → ' + statuses[i] + ' · 已同步到服务器') })
       .catch(err => notify(err.message))
   } else {
     s.status = i
@@ -132,7 +156,7 @@ function exportJson() {
 function exportCsv() {
   const head = ['ID', '标题', '用户故事', 'MoSCoW', 'Sprint', '骨干活动', '负责人', '状态', '验收条件']
   const rows = project.stories.map(s =>
-    [s.id, s.title, s.description, s.priority, 'S' + s.sprint, 'A' + s.activity + ' ' + activities[s.activity - 1],
+    [s.id, s.title, s.description, s.priority, 'S' + s.sprint, 'A' + s.activity + ' ' + mapActivities.value[s.activity - 1],
      (s.owner == null ? '未分配' : project.memberName(s.owner)), statuses[s.status], s.acceptance]
       .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
   dl('爱管理-用户故事.csv', new Blob(['\ufeff' + head.join(',') + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }))
@@ -141,7 +165,7 @@ function exportCsv() {
 async function resetDemo() {
   if (session.apiMode) {
     if (!confirm('在线模式下将重新拉取服务器数据(不会重置服务器)。继续？')) return
-    try { await project.loadAll(); notify('已重新拉取服务器数据') } catch (e) { notify(e.message) }
+    try { await project.loadAll(projects.currentProjectId); notify('已重新拉取服务器数据') } catch (e) { notify(e.message) }
     return
   }
   if (!confirm('确定恢复为演示数据？当前所有修改将丢失。')) return
@@ -169,6 +193,7 @@ async function resetDemo() {
     <BoardSummary :data="data" :total-stories="project.stories.length" />
     <BoardToolbar
       v-model:board-view="boardView" v-model:search="search" v-model:sprint="sprint" v-model:owner="owner"
+      :sprints="mapSprints"
       :density="density" @update:density="onDensity"
       v-model:skin="skin" v-model:sort-by="sortBy" :today="today"
     />
@@ -201,7 +226,7 @@ async function resetDemo() {
     </div>
     <div id="mappanel" role="tabpanel" aria-labelledby="maptab" :hidden="boardView !== 'map'">
       <StoryMapGrid
-        :data="data" :sprint="sprint" :density="density" :skin="skin"
+        :data="data" :sprint="sprint" :sprints="mapSprints" :activities="mapActivities" :density="density" :skin="skin"
         :sort-by="sortBy" :now-week="nowWeek"
         @open="openEditor($event)" @move="onMapMove"
       />
@@ -210,7 +235,7 @@ async function resetDemo() {
     <div class="footer">
       <span>■ Must 必须做　■ Should 应该做　■ Could 可以做</span>
       <span id="savehint">{{ project.savehint }}</span>
-      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事（US01–US37 基线）</span>
+      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事{{ storyRange }}</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="expjson" @click="exportJson">导出 JSON</button>
         <button id="expcsv" @click="exportCsv">导出 CSV</button>
