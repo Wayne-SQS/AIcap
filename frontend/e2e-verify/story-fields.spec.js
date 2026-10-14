@@ -1,0 +1,35 @@
+import { test, expect } from '@playwright/test'
+
+test('离线故事字段和史诗归属保存后仍能回显', async ({ page }) => {
+  await page.route('**/api/health', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.goto('/#/board')
+
+  await page.locator('#manage-epics').click()
+  const manager = page.locator('#epic-manager')
+  await expect(manager).toBeVisible()
+  await manager.locator('input[name=epic_name]').fill('交付保障')
+  await manager.locator('button[type=submit]').click()
+  await expect(manager).toContainText('E5 · 交付保障')
+  await manager.getByRole('button', { name: '关闭' }).click()
+
+  await page.locator('#boardtab').click()
+  await page.locator('#board .card[data-id="US03"]').click()
+  const editor = page.locator('#editor')
+  await editor.locator('input[name=role]').fill('项目负责人')
+  await editor.locator('input[name=goal]').fill('细化故事')
+  await editor.locator('input[name=value]').fill('明确交付范围')
+  await editor.locator('select[name=epic_id]').selectOption('5')
+  await editor.locator('button[type=submit]').click()
+  await expect(editor).toBeHidden()
+
+  await page.reload()
+  await page.locator('#boardtab').click()
+  await page.locator('#board .card[data-id="US03"]').click()
+  await expect(editor.locator('input[name=role]')).toHaveValue('项目负责人')
+  await expect(editor.locator('input[name=goal]')).toHaveValue('细化故事')
+  await expect(editor.locator('input[name=value]')).toHaveValue('明确交付范围')
+  await expect(editor.locator('select[name=epic_id]')).toHaveValue('5')
+  await editor.getByRole('button', { name: '取消' }).click()
+  await page.locator('#manage-epics').click()
+  await expect(manager.locator('li').filter({ hasText: 'E5 · 交付保障' }).getByRole('button', { name: '删除' })).toBeDisabled()
+})

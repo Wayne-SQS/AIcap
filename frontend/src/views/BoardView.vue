@@ -17,6 +17,7 @@ import StoryCard from '@/components/board/StoryCard.vue'
 import StoryMapGrid from '@/components/board/StoryMapGrid.vue'
 import ChangeLogPanel from '@/components/board/ChangeLogPanel.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
+import EpicManagerDialog from '@/components/board/EpicManagerDialog.vue'
 import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 
 /* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
@@ -33,6 +34,8 @@ const search = ref('')
 const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
+const epicsRef = ref(null)
+const canManageEpics = computed(() => !session.apiMode || ['owner', 'admin'].includes(projects.currentProject?.project_role))
 const riskDialogRef = ref(null)
 const pendingStoryMove = ref(null)
 
@@ -83,7 +86,8 @@ const data = computed(() => {
   return project.stories.filter(s =>
     (sp === 'all' || (sp === '4plus' ? s.sprint >= 4 : s.sprint === +sp)) &&
     (owner.value === 'all' || s.owner === +owner.value) &&
-    (!q || [s.id, s.title, s.description, s.acceptance, project.memberName(s.owner), mapActivities.value[s.activity - 1]].join(' ').toLowerCase().includes(q))
+    (!q || [s.id, s.title, s.description, s.role, s.goal, s.value, s.acceptance,
+      project.epics.find(e => e.id === s.epicId)?.name, project.memberName(s.owner), mapActivities.value[s.activity - 1]].join(' ').toLowerCase().includes(q))
   )
 })
 const inScope = id => data.value.some(s => s.id === id)
@@ -154,9 +158,10 @@ function exportJson() {
   notify('已导出 JSON 备份')
 }
 function exportCsv() {
-  const head = ['ID', '标题', '用户故事', 'MoSCoW', 'Sprint', '骨干活动', '负责人', '状态', '验收条件']
+  const head = ['ID', '标题', '用户故事', '角色', '目标', '价值', '所属史诗', 'MoSCoW', 'Sprint', '骨干活动', '负责人', '状态', '验收条件']
   const rows = project.stories.map(s =>
-    [s.id, s.title, s.description, s.priority, 'S' + s.sprint, 'A' + s.activity + ' ' + mapActivities.value[s.activity - 1],
+    [s.id, s.title, s.description, s.role || '', s.goal || '', s.value || '', project.epics.find(e => e.id === s.epicId)?.name || '',
+     s.priority, 'S' + s.sprint, 'A' + s.activity + ' ' + mapActivities.value[s.activity - 1],
      (s.owner == null ? '未分配' : project.memberName(s.owner)), statuses[s.status], s.acceptance]
       .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
   dl('爱管理-用户故事.csv', new Blob(['\ufeff' + head.join(',') + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }))
@@ -187,7 +192,10 @@ async function resetDemo() {
         <h1>用户故事看板</h1>
         <p>把每一个想法，推进到完成。</p>
       </div>
-      <button class="primary" id="new" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor()">＋ 新建故事</button>
+      <div class="hero-actions">
+        <button id="manage-epics" :disabled="!canManageEpics" @click="epicsRef?.open()">管理史诗</button>
+        <button class="primary" id="new" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor()">＋ 新建故事</button>
+      </div>
     </div>
 
     <BoardSummary :data="data" :total-stories="project.stories.length" />
@@ -245,6 +253,7 @@ async function resetDemo() {
 
     <ChangeLogPanel />
     <StoryEditorDialog ref="editorRef" :in-scope="inScope" />
+    <EpicManagerDialog ref="epicsRef" />
     <RiskConfirmDialog ref="riskDialogRef" @cancel="cancelStoryMove" @confirm="confirmStoryMove" />
   </section>
 </template>

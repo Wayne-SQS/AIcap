@@ -48,12 +48,26 @@ CREATE TABLE IF NOT EXISTS `users` (
   UNIQUE KEY `ix_users_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `epics` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_epics_project_name` (`project_id`,`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `stories` (
   `internal_id` bigint NOT NULL AUTO_INCREMENT,
   `project_id` varchar(20) NOT NULL,
   `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `story_role` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `story_goal` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `story_value` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `epic_id` bigint DEFAULT NULL,
   `acceptance` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `priority` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `sprint` int NOT NULL,
@@ -63,6 +77,7 @@ CREATE TABLE IF NOT EXISTS `stories` (
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`internal_id`),
   UNIQUE KEY `uq_stories_project_code` (`project_id`,`code`),
+  KEY `ix_stories_project_epic` (`project_id`,`epic_id`),
   KEY `owner_id` (`owner_id`),
   CONSTRAINT `stories_ibfk_1` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

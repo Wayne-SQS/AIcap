@@ -2,6 +2,7 @@ package com.aicap.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.time.LocalDateTime;
@@ -13,6 +14,10 @@ public class Story {
     private String projectId;
     private String code;
     private String title; private String description; private String acceptance; private String priority;
+    @TableField("story_role") private String role;
+    @TableField("story_goal") private String goal;
+    @TableField("story_value") private String value;
+    private Long epicId;
     private Integer sprint; private Integer activity; private Integer status; private Integer ownerId; private LocalDateTime createdAt;
 
     /** External/API compatibility: callers continue to use the business code as id. */

@@ -51,6 +51,13 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"capacity_hours", "`capacity_hours` int NOT NULL DEFAULT '60'"},
     };
 
+    private static final String[][] STORY_COLUMNS = {
+            {"story_role", "`story_role` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT ''"},
+            {"story_goal", "`story_goal` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT ''"},
+            {"story_value", "`story_value` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT ''"},
+            {"epic_id", "`epic_id` bigint DEFAULT NULL"},
+    };
+
     private static final String[][] PROJECT_MEMBER_COLUMNS = {
             {"weekly_capacity_hours", "`weekly_capacity_hours` int DEFAULT NULL"},
     };
@@ -65,6 +72,13 @@ public class SchemaUpgrader implements ApplicationRunner {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
             migrateProjects(conn);
+            execute(conn, "CREATE TABLE IF NOT EXISTS epics (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, name varchar(100) NOT NULL, description varchar(500) NOT NULL DEFAULT '', created_at datetime NOT NULL, PRIMARY KEY (id), UNIQUE KEY uq_epics_project_name (project_id,name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            if (tableExists(conn, "stories")) {
+                added.addAll(addMissing(conn, "stories", STORY_COLUMNS));
+                if (!indexExists(conn, "stories", "ix_stories_project_epic")) {
+                    execute(conn, "ALTER TABLE stories ADD KEY ix_stories_project_epic (project_id,epic_id)");
+                }
+            }
             if (tableExists(conn, "project_members")) {
                 added.addAll(addMissing(conn, "project_members", PROJECT_MEMBER_COLUMNS));
             }

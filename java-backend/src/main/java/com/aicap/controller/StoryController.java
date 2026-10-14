@@ -3,11 +3,13 @@ package com.aicap.controller;
 import com.aicap.common.ApiException;
 import com.aicap.dto.StoryDtos;
 import com.aicap.entity.Story;
+import com.aicap.entity.Epic;
 import com.aicap.entity.StoryLog;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.mapper.StoryLogMapper;
 import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.EpicMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.Roles;
@@ -15,6 +17,8 @@ import com.aicap.service.IdAllocator;
 import com.aicap.service.ProjectAccessService;
 import com.aicap.service.TaskStoryRelationService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 用户故事/看板卡接口(对齐 FastAPI routers/stories.py)。
@@ -42,6 +47,7 @@ import java.util.List;
 public class StoryController {
 
     private final StoryMapper storyMapper;
+    private final EpicMapper epicMapper;
     private final StoryLogMapper storyLogMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
@@ -67,6 +73,14 @@ public class StoryController {
     private void checkOwner(String projectId, Integer ownerId) {
         if (ownerId != null && userMapper.selectById(ownerId) == null) {
             throw ApiException.badRequest("负责人不存在");
+        }
+        projectAccess.requireProjectMember(projectId, ownerId);
+    }
+
+    private void checkEpic(String projectId, Long epicId) {
+        if (epicId == null) return;
+        if (epicMapper.selectCount(new QueryWrapper<Epic>().eq("project_id", projectId).eq("id", epicId)) == 0) {
+            throw ApiException.badRequest("史诗不是当前项目的史诗");
         }
     }
 
@@ -115,12 +129,17 @@ public class StoryController {
         projectAccess.requireWriter(projectId);
         String scopedProjectId = ProjectAccessService.normalize(projectId);
         checkOwner(scopedProjectId, body.ownerId());
+        checkEpic(scopedProjectId, body.epicId());
         String sid = idAllocator.nextStoryId(scopedProjectId);
         Story story = new Story();
         story.setProjectId(scopedProjectId);
         story.setId(sid);
         story.setTitle(body.title().trim());
         story.setDescription(body.description() == null ? "" : body.description());
+        story.setRole(body.role() == null ? "" : body.role());
+        story.setGoal(body.goal() == null ? "" : body.goal());
+        story.setValue(body.value() == null ? "" : body.value());
+        story.setEpicId(body.epicId());
         story.setAcceptance(body.acceptance() == null ? "" : body.acceptance());
         story.setPriority(body.priority());
         story.setSprint(body.sprint());
@@ -155,6 +174,20 @@ public class StoryController {
         }
         if (body.title() != null) { story.setTitle(body.title().trim()); changed = true; }
         if (body.description() != null) { story.setDescription(body.description()); changed = true; }
+        if (body.role() != null) { story.setRole(body.role()); changed = true; }
+        if (body.goal() != null) { story.setGoal(body.goal()); changed = true; }
+        if (body.value() != null) { story.setValue(body.value()); changed = true; }
+        if (body.epicId() != null) {
+            JsonNode requested = body.epicId();
+            if (!requested.isNull() && (!requested.isIntegralNumber() || requested.asLong() <= 0))
+                throw ApiException.badRequest("epic_id 必须为正整数或 null");
+            Long epicId = requested.isNull() ? null : requested.asLong();
+            checkEpic(scopedProjectId, epicId);
+            if (!Objects.equals(epicId, story.getEpicId())) {
+                story.setEpicId(epicId);
+                changed = true;
+            }
+        }
         if (body.acceptance() != null) { story.setAcceptance(body.acceptance()); changed = true; }
         if (body.priority() != null) { story.setPriority(body.priority()); changed = true; }
         if (body.sprint() != null) { story.setSprint(body.sprint()); changed = true; }
@@ -167,6 +200,11 @@ public class StoryController {
             return StoryDtos.toOut(story);
         }
         storyMapper.updateById(story);
+        if (body.epicId() != null && body.epicId().isNull()) {
+            // MyBatis-Plus skips null entity fields by default; clearing needs explicit SQL NULL.
+            storyMapper.update(null, new UpdateWrapper<Story>().eq("project_id", scopedProjectId)
+                    .eq("internal_id", story.getInternalId()).set("epic_id", null));
+        }
         if (body.status() != null && oldStatus != body.status()) {
             addLog(scopedProjectId, storyId, "move", story.getTitle() + " → 状态 " + story.getStatus(), user.getId());
         } else {

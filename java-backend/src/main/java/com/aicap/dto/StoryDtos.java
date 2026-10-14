@@ -3,6 +3,7 @@ package com.aicap.dto;
 import com.aicap.entity.Story;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +22,10 @@ public final class StoryDtos {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record StoryIn(@NotNull @Size(max = 200) String title,
                           String description,
+                          @Size(max = 200) String role,
+                          @Size(max = 500) String goal,
+                          @Size(max = 500) String value,
+                          @JsonProperty("epic_id") Long epicId,
                           String acceptance,
                           @Pattern(regexp = "^(Must|Should|Could)$", message = "priority 必须是 Must/Should/Could")
                           String priority,
@@ -42,6 +47,10 @@ public final class StoryDtos {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record StoryPatch(@Size(max = 200) String title,
                              String description,
+                             @Size(max = 200) String role,
+                             @Size(max = 500) String goal,
+                             @Size(max = 500) String value,
+                             @JsonProperty("epic_id") JsonNode epicId,
                              String acceptance,
                              @Pattern(regexp = "^(Must|Should|Could)$", message = "priority 必须是 Must/Should/Could")
                              String priority,
@@ -52,7 +61,8 @@ public final class StoryDtos {
     }
 
     /** 故事输出(StoryOut) */
-    public record StoryOut(String id, String title, String description, String acceptance,
+    public record StoryOut(String id, String title, String description, String role, String goal, String value,
+                           @JsonProperty("epic_id") Long epicId, String acceptance,
                            String priority, Integer sprint, Integer activity, Integer status,
                            @JsonProperty("owner_id") Integer ownerId) {
     }
@@ -78,7 +88,7 @@ public final class StoryDtos {
     }
 
     public static StoryOut toOut(Story s) {
-        return new StoryOut(s.getId(), s.getTitle(), s.getDescription(), s.getAcceptance(),
+        return new StoryOut(s.getId(), s.getTitle(), s.getDescription(), s.getRole(), s.getGoal(), s.getValue(), s.getEpicId(), s.getAcceptance(),
                 s.getPriority(), s.getSprint(), s.getActivity(), s.getStatus(), s.getOwnerId());
     }
 

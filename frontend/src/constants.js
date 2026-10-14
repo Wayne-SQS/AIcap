@@ -1,6 +1,7 @@
 /* localStorage key 与全局常量(与旧版 index.html 逐字一致,勿改) */
 export const TOKEN_KEY = 'aiguanli_token'
 export const STORIES_KEY = 'aiguanli-pixel-stories-v1'
+export const EPICS_KEY = 'aiguanli-pixel-epics-v1'
 export const TASKS_KEY = 'aiguanli-pixel-tasks-v1'
 export const LOG_KEY = 'aiguanli-pixel-log-v1'
 export const POOL_KEY = 'aiguanli-pixel-pool-v1'

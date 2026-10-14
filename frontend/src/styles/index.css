@@ -425,6 +425,8 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .legend .sw{width:14px;height:14px;border:2px solid var(--ink);flex:0 0 auto}
 .legend .diamond-key{width:11px;height:11px;transform:rotate(45deg);background:var(--yellow);border:2px solid var(--ink);display:inline-block}
 .legend .note{color:var(--muted);font-family:var(--mono)}
+.hero-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.epic-tag{font:700 10px var(--mono);padding:1px 5px;border:1px solid var(--ink);background:var(--paper-2)}
 .legend .critical-path-key{width:14px;height:14px;border:2px solid #ba3a36;display:inline-block;box-sizing:border-box}
 .gantt-path{margin-top:10px;padding:9px 12px;border:1px solid var(--line);background:var(--paper);font-family:var(--mono);font-size:12px}
 
