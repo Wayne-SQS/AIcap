@@ -55,19 +55,28 @@ public class RefinementProposalExecutionService {
         if(!approved.path("action").asText().equals("create_story")) throw ApiException.conflict("批准动作无效");
         var changes=approved.path("changes");
         RefinementProposalReviewService.requireComplete(changes);
-        for (var story : jdbc.queryForList("SELECT id,title FROM stories ORDER BY id FOR UPDATE")) {
+        String projectId=jdbc.queryForObject("SELECT project_id FROM meetings WHERE id=?",String.class,meetingId);
+        for (var story : jdbc.queryForList("SELECT code AS id,title FROM stories WHERE project_id=? ORDER BY code FOR UPDATE", projectId)) {
             if (RefinementProposalReviewService.titleKey(story.get("title").toString()).equals(
                     RefinementProposalReviewService.titleKey(changes.path("title").asText())))
                 throw ApiException.conflict("已有同名故事，请重新分析审核");
         }
-        String storyId=idAllocator.nextStoryId();
-        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status,owner_id,created_at) VALUES (?,?,?,?,?,?,?,0,NULL,CURRENT_TIMESTAMP)",
-            storyId,changes.path("title").asText().strip(),changes.path("description").asText(),changes.path("acceptance").asText(),
-            changes.path("priority").asText(),changes.path("sprint").intValue(),changes.path("activity").intValue());
+        String storyId=idAllocator.nextStoryId(projectId);
+        var storyKey=new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            var statement=connection.prepareStatement("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status,owner_id,created_at) VALUES (?,?,?,?,?,?,?,?,0,NULL,CURRENT_TIMESTAMP)",new String[]{"internal_id"});
+            statement.setString(1,projectId);statement.setString(2,storyId);
+            statement.setString(3,changes.path("title").asText().strip());statement.setString(4,changes.path("description").asText());
+            statement.setString(5,changes.path("acceptance").asText());statement.setString(6,changes.path("priority").asText());
+            statement.setInt(7,changes.path("sprint").intValue());statement.setInt(8,changes.path("activity").intValue());
+            return statement;
+        },storyKey);
+        long internalId=Objects.requireNonNull(storyKey.getKey()).longValue();
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs(story_id,log_type,detail,user_id,created_at) VALUES (?,'create',?,?,CURRENT_TIMESTAMP)",new String[]{"id"});
-            statement.setString(1,storyId);statement.setString(2,approved.toString());statement.setInt(3,executorId);return statement;
+            var statement=connection.prepareStatement("INSERT INTO story_logs(project_id,story_internal_id,story_code_snapshot,story_id,log_type,detail,user_id,created_at) VALUES (?,?,?,?,'create',?,?,CURRENT_TIMESTAMP)",new String[]{"id"});
+            statement.setString(1,projectId);statement.setLong(2,internalId);statement.setString(3,storyId);statement.setString(4,storyId);
+            statement.setString(5,approved.toString());statement.setInt(6,executorId);return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();
         jdbc.update("INSERT INTO meeting_refinement_proposal_executions(analysis_id,proposal_index,proposal_id,story_id,story_log_id,executed_by) VALUES (?,?,?,?,?,?)",

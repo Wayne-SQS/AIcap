@@ -18,7 +18,7 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         return mvc.perform(post(path+"/"+id+"/proposal-executions").contentType("application/json")
             .content("{\"proposal_id\":\"p1\"}")).andReturn().getResponse();
     }
-    int sprint() { return jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US13'",Integer.class); }
+    int sprint() { return jdbc.queryForObject("SELECT sprint FROM stories WHERE project_id='P001' AND code='US13'",Integer.class); }
     int logs() { return jdbc.queryForObject("SELECT COUNT(*) FROM story_logs",Integer.class); }
 
     @Test void modifiedApprovalExecutionAndRetryPreserveOriginal() throws Exception {
@@ -27,11 +27,11 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         assertEquals(1,sprint());
         var first=execute(id); assertEquals(200,first.getStatus(),first.getContentAsString());
         assertEquals(4,sprint()); assertEquals(1,logs());
-        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
         var result=mapper.readTree(first.getContentAsByteArray());
         assertEquals(1,result.path("previous_sprint").asInt()); assertEquals(4,result.path("new_sprint").asInt());
         assertTrue(result.path("story_log_id").asInt()>0);
-        jdbc.update("UPDATE stories SET sprint=3 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=3 WHERE project_id='P001' AND code='US13'");
         assertEquals(first.getContentAsString(),execute(id).getContentAsString());
         assertEquals(3,sprint()); assertEquals(1,logs()); assertEquals(original,service.get("m1",id));
         assertEquals(409,review(id,"reject",null).getStatus());
@@ -47,7 +47,7 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         assertEquals(200,response.getStatus(),response.getContentAsString());
         assertEquals(2,mapper.readTree(response.getContentAsByteArray()).at("/approved_proposal/expected/sprint").asInt());
         assertEquals(200,execute(id).getStatus());
-        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US14'",Integer.class));
+        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE project_id='P001' AND code='US14'",Integer.class));
         assertEquals(1,sprint());
     }
 
@@ -58,9 +58,9 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         }
         role("admin"); assertEquals(409,execute(id).getStatus());
         assertEquals(200,review(id,"approve",null).getStatus());
-        jdbc.update("UPDATE stories SET sprint=3 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=3 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,execute(id).getStatus()); assertEquals(0,logs());
-        jdbc.update("UPDATE stories SET sprint=1 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=1 WHERE project_id='P001' AND code='US13'");
         var input=body();input.put("client_request_id","other");
         String other=mapper.readTree(submit(input).getContentAsByteArray()).path("id").asText();
         assertEquals(200,review(other,"reject",null).getStatus());
@@ -71,7 +71,7 @@ class PlanningProposalFlowTest extends PlanningAnalysisStorageTest {
         String id=saved(); role("admin");
         for(int target:new int[]{0,1,2,5}) assertEquals(422,review(id,"modify_and_approve",target).getStatus());
         assertEquals(422,review(id,"approve",3).getStatus());
-        jdbc.update("UPDATE stories SET sprint=3 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=3 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,review(id,"approve",null).getStatus());
         assertEquals(200,review(id,"reject",null).getStatus());
     }

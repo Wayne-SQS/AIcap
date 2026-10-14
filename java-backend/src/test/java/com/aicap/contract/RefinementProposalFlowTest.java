@@ -36,14 +36,14 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         var response=execute(id); assertEquals(200,response.getStatus(),response.getContentAsString());
         var execution=mapper.readTree(response.getContentAsByteArray());
         assertEquals("US15",execution.path("story_id").asText());
-        var story=jdbc.queryForMap("SELECT * FROM stories WHERE id='US15'");
+        var story=jdbc.queryForMap("SELECT * FROM stories WHERE project_id='P001' AND code='US15'");
         assertEquals("导出周报CSV",story.get("title")); assertEquals("Should",story.get("priority"));
         assertEquals(3,story.get("sprint")); assertEquals(4,story.get("activity")); assertEquals(0,story.get("status")); assertNull(story.get("owner_id"));
         var log=jdbc.queryForMap("SELECT * FROM story_logs WHERE story_id='US15'");
         assertEquals(execution.path("story_log_id").intValue(),((Number)log.get("id")).intValue());
         assertEquals(amended().get("changes"),mapper.readTree(log.get("detail").toString()).get("changes"));
         assertEquals(original,service.get("m1",id));
-        jdbc.update("UPDATE stories SET title='后续人工修改' WHERE id='US15'");
+        jdbc.update("UPDATE stories SET title='后续人工修改' WHERE project_id='P001' AND code='US15'");
         assertEquals(execution,mapper.readTree(execute(id).getContentAsByteArray()));
         assertEquals(3,rows("stories")); assertEquals(1,rows("story_logs"));
         assertEquals(409,review(id,decision("reject")).getStatus());
@@ -85,7 +85,7 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         String id=saved(); role("admin"); var input=amended(); ((ObjectNode)input.get("changes")).put("title"," 登录 ");
         assertEquals(409,review(id,input).getStatus());
         assertEquals(200,review(id,amended()).getStatus());
-        jdbc.update("UPDATE stories SET title='导出周报CSV' WHERE id='US13'");
+        jdbc.update("UPDATE stories SET title='导出周报CSV' WHERE project_id='P001' AND code='US13'");
         assertEquals(409,execute(id).getStatus()); assertEquals(0,rows("story_logs")); assertEquals(2,rows("stories"));
     }
 

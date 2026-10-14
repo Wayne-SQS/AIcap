@@ -32,7 +32,7 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
         assertEquals(1,result.path("reviewed_by").asInt());
         assertEquals("not_started",result.path("execution_status").asText());
         assertEquals(result.get("original_proposal"),result.get("approved_proposal"));
-        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
         assertEquals(original,service.get("m1",id));
         var listing=mapper.readTree(mvc.perform(get(reviewPath(id))).andReturn().getResponse().getContentAsByteArray());
         assertEquals("reviewed",listing.path("review_status").asText());
@@ -47,7 +47,7 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
         assertEquals(0,result.at("/approved_proposal/changes/status").asInt());
         assertEquals("人工确认",result.path("reason").asText());
         assertEquals(result.at("/original_proposal/evidence"),result.at("/approved_proposal/evidence"));
-        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
     }
 
     @Test void correctedStoryReviewIsIdempotentAndRejectsInvalidFields() throws Exception {
@@ -55,7 +55,7 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
         input.put("story_id","US14"); input.putObject("changes").put("status",1);
         input.putObject("story_patch").put("owner_id",2);
         var first=review(id,input); assertEquals(200,first.getStatus(),first.getContentAsString());
-        jdbc.update("UPDATE stories SET sprint=4 WHERE id='US14'");
+        jdbc.update("UPDATE stories SET sprint=4 WHERE project_id='P001' AND code='US14'");
         assertEquals(first.getContentAsString(),review(id,input).getContentAsString());
         input.put("story_id","US13"); assertEquals(409,review(id,input).getStatus());
         var second=body(); second.put("client_request_id","second-review");
@@ -71,9 +71,9 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
 
     @Test void staleOrDeletedStoryCannotBeApprovedButCanBeRejected() throws Exception {
         String id=savedAnalysis(); role("admin");
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,review(id,reviewBody("approve")).getStatus()); assertEquals(0,reviewCount());
-        jdbc.update("DELETE FROM stories WHERE id='US13'");
+        jdbc.update("DELETE FROM stories WHERE project_id='P001' AND code='US13'");
         assertEquals(409,review(id,reviewBody("approve")).getStatus());
         var rejected=review(id,reviewBody("reject")); assertEquals(200,rejected.getStatus());
         var result=mapper.readTree(rejected.getContentAsByteArray());
@@ -84,7 +84,7 @@ class StatusProposalReviewTest extends StatusAnalysisStorageTest {
     @Test void reviewRetryIsImmutableAndPreservesFirstReviewer() throws Exception {
         String id=savedAnalysis(); role("admin"); var input=reviewBody("approve");
         var first=review(id,input);
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         assertEquals(first.getContentAsString(),review(id,input).getContentAsString());
         assertEquals(409,review(id,reviewBody("reject")).getStatus());
         input.put("reason","changed"); assertEquals(409,review(id,input).getStatus());

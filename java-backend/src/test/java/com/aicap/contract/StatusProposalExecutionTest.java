@@ -22,7 +22,7 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
     }
     int executions() { return jdbc.queryForObject("SELECT COUNT(*) FROM meeting_status_proposal_executions",Integer.class); }
     int logs() { return jdbc.queryForObject("SELECT COUNT(*) FROM story_logs",Integer.class); }
-    int storyStatus() { return jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class); }
+    int storyStatus() { return jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class); }
 
     @Test void executionUpdatesStoryAndAuditWithoutChangingOriginalAnalysis() throws Exception {
         String id=approved(); var original=service.get("m1",id);
@@ -56,7 +56,7 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
         assertEquals("US14",saved.at("/approved_proposal/story_id").asText());
         assertEquals(0,saved.at("/approved_proposal/expected/status").asInt());
         assertEquals(200,execute(id,executionBody()).getStatus());
-        var story=jdbc.queryForMap("SELECT title,status,sprint,owner_id FROM stories WHERE id='US14'");
+        var story=jdbc.queryForMap("SELECT title,status,sprint,owner_id FROM stories WHERE project_id='P001' AND code='US14'");
         assertEquals("权限审核",story.get("title")); assertEquals(1,story.get("status"));
         assertEquals(3,story.get("sprint")); assertEquals(2,story.get("owner_id"));
         assertEquals(1,storyStatus()); assertEquals(1,logs());
@@ -68,7 +68,7 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
         input.putObject("changes").put("status",2);
         input.putObject("story_patch").put("sprint",3);
         assertEquals(200,review(id,input).getStatus());
-        jdbc.update("UPDATE stories SET sprint=4 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=4 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,execute(id,executionBody()).getStatus());
         assertEquals(1,storyStatus()); assertEquals(0,logs()); assertEquals(0,executions());
     }
@@ -82,7 +82,7 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
         var result=mapper.readTree(response.getContentAsByteArray());
         assertEquals(1,result.path("previous_status").asInt());
         assertEquals(1,result.path("new_status").asInt());
-        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(3,jdbc.queryForObject("SELECT sprint FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
         assertEquals("edit",jdbc.queryForObject("SELECT log_type FROM story_logs",String.class));
     }
 
@@ -94,16 +94,16 @@ class StatusProposalExecutionTest extends StatusProposalReviewTest {
         var input=body(); input.put("client_request_id","second");
         String second=mapper.readTree(submit(input).getContentAsByteArray()).path("id").asText();
         assertEquals(200,review(second,reviewBody("approve")).getStatus());
-        jdbc.update("UPDATE stories SET status=2 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=2 WHERE project_id='P001' AND code='US13'");
         // Already at desired status without an execution record is a conflict, not a successful retry.
         assertEquals(409,execute(second,executionBody()).getStatus());
-        jdbc.update("DELETE FROM stories WHERE id='US13'");
+        jdbc.update("DELETE FROM stories WHERE project_id='P001' AND code='US13'");
         assertEquals(409,execute(second,executionBody()).getStatus()); assertEquals(0,logs()); assertEquals(0,executions());
     }
 
     @Test void retryReturnsDurableFirstResultDespiteLaterChanges() throws Exception {
         String id=approved(); var first=execute(id,executionBody()); assertEquals(200,first.getStatus());
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         role("owner"); AuthContext.currentUser().setId(2);
         assertEquals(first.getContentAsString(),execute(id,executionBody()).getContentAsString());
         assertEquals(0,storyStatus()); assertEquals(1,logs()); assertEquals(1,executions());

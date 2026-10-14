@@ -98,11 +98,12 @@ public class ReviewProposalReviewService {
             return out(previous);
         }
         if (approved != null) {
+            String projectId=jdbc.queryForObject("SELECT project_id FROM meetings WHERE id=?",String.class,meetingId);
             int expected=original.path("expected").path("status").asInt();
             int desired=approved.path("changes").path("status").asInt();
             if ((!retargeted && (expected < 0 || expected > 1)) || desired != 2)
                 throw ApiException.unprocessable("Review仅支持待办或进行中故事的完成提案");
-            var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",targetId);
+            var stories=jdbc.queryForList("SELECT status FROM stories WHERE project_id=? AND code=? FOR UPDATE",projectId,targetId);
             if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
             int current=((Number)stories.getFirst().get("status")).intValue();
             if (!retargeted && current!=expected) throw ApiException.conflict("故事状态已变化，请重新分析");

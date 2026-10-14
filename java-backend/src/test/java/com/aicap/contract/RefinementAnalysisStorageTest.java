@@ -41,20 +41,34 @@ class RefinementAnalysisStorageTest {
         }
         @Bean Validator validator() { return Validation.buildDefaultValidatorFactory().getValidator(); }
         @Bean com.aicap.service.IdAllocator allocator(JdbcTemplate jdbc) {
-            // Real allocator; its two mapper reads use this same isolated JDBC datasource.
+            // Real allocator; its mapper reads use this same isolated JDBC datasource, scoped by project_id.
             var stories=(com.aicap.mapper.StoryMapper)java.lang.reflect.Proxy.newProxyInstance(
                 getClass().getClassLoader(),new Class[]{com.aicap.mapper.StoryMapper.class},(proxy,method,args)->{
-                    if(method.getName().equals("selectList")) return jdbc.queryForList("SELECT id FROM stories").stream().map(row->{
-                        var story=new com.aicap.entity.Story(); story.setId(row.get("id").toString()); return story;
+                    if(method.getName().equals("selectList")) return jdbc.queryForList(
+                        "SELECT code FROM stories WHERE project_id=?",cond(args[0],"project_id")).stream().map(row->{
+                        var story=new com.aicap.entity.Story(); story.setId(row.get("code").toString()); return story;
                     }).toList();
-                    if(method.getName().equals("selectById")) {
-                        var rows=jdbc.queryForList("SELECT id FROM stories WHERE id=?",args[0]);
+                    if(method.getName().equals("selectOne")) {
+                        var rows=jdbc.queryForList("SELECT code FROM stories WHERE project_id=? AND code=?",
+                            cond(args[0],"project_id"),cond(args[0],"code"));
                         if(rows.isEmpty()) return null;
-                        var story=new com.aicap.entity.Story(); story.setId(rows.getFirst().get("id").toString()); return story;
+                        var story=new com.aicap.entity.Story(); story.setId(rows.getFirst().get("code").toString()); return story;
+                    }
+                    if(method.getName().equals("selectById")) {
+                        var rows=jdbc.queryForList("SELECT code FROM stories WHERE code=?",args[0]);
+                        if(rows.isEmpty()) return null;
+                        var story=new com.aicap.entity.Story(); story.setId(rows.getFirst().get("code").toString()); return story;
                     }
                     throw new UnsupportedOperationException(method.getName());
                 });
             return new com.aicap.service.IdAllocator(stories,null);
+        }
+        static Object cond(Object wrapper,String column) {
+            var w=(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<?>)wrapper;
+            var pairs=w.getParamNameValuePairs();
+            var matcher=java.util.regex.Pattern.compile("(\\w+)\\s*=\\s*#\\{ew\\.paramNameValuePairs\\.(\\w+)\\}").matcher(w.getSqlSegment());
+            while(matcher.find()) if(matcher.group(1).equals(column)) return pairs.get(matcher.group(2));
+            throw new IllegalStateException("missing condition "+column+" in "+w.getSqlSegment());
         }
     }
     AnnotationConfigApplicationContext context;
@@ -70,8 +84,8 @@ class RefinementAnalysisStorageTest {
         service = context.getBean(RefinementAnalysisService.class);
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,project_id varchar(20),transcript longtext)");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20) not null,code varchar(10) not null,title varchar(200) not null,status int not null,sprint int not null,owner_id int,constraint uq_stories_project_code unique(project_id,code))");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/refinement-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -80,12 +94,12 @@ class RefinementAnalysisStorageTest {
         ddl = ddl.replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", "");
         jdbc.execute(ddl);
         jdbc.execute(ddl);
-        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10) not null,log_type varchar(20) not null,detail varchar(500) not null,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
-        jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "决定新增周报导出。\n\nUS14 开始开发。");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',1,1,NULL)");
-        jdbc.update("INSERT INTO stories VALUES ('US14','权限',0,2,NULL)");
+        jdbc.update("INSERT INTO meetings(id,project_id,transcript) VALUES ('m1','P001',?)", "决定新增周报导出。\n\nUS14 开始开发。");
+        jdbc.update("INSERT INTO stories(project_id,code,title,status,sprint,owner_id) VALUES ('P001','US13','登录',1,1,NULL)");
+        jdbc.update("INSERT INTO stories(project_id,code,title,status,sprint,owner_id) VALUES ('P001','US14','权限',0,2,NULL)");
         for (String column : java.util.List.of("description text", "acceptance text", "priority varchar(10)", "activity int", "created_at timestamp"))
             jdbc.execute("ALTER TABLE stories ADD " + column);
         for(String resource:java.util.List.of("refinement-proposal-reviews","refinement-proposal-executions")) {
@@ -137,7 +151,7 @@ class RefinementAnalysisStorageTest {
 
     @Test void exactRetryPreservesSnapshotAndChangedPayloadConflicts() throws Exception {
         var input=body(); var first=mapper.readTree(submit(input).getContentAsByteArray());
-        jdbc.update("UPDATE stories SET title='周报导出' WHERE id='US13'");
+        jdbc.update("UPDATE stories SET title='周报导出' WHERE project_id='P001' AND code='US13'");
         assertEquals(first,mapper.readTree(submit(input).getContentAsByteArray()));
         ((ObjectNode)input.get("result")).put("summary","不同结果");
         assertEquals(409,submit(input).getStatus()); assertEquals(1,count());

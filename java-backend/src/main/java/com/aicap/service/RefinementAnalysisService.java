@@ -56,7 +56,7 @@ public class RefinementAnalysisService {
         var input = parse(body);
         if (!meetingId.equals(input.result().meetingId())) throw ApiException.unprocessable("会议 ID 不一致");
         // A meeting row lock serializes same-meeting submissions, including concurrent retries.
-        var meetings = jdbc.queryForList("SELECT transcript FROM meetings WHERE id=? FOR UPDATE", meetingId);
+        var meetings = jdbc.queryForList("SELECT project_id,transcript FROM meetings WHERE id=? FOR UPDATE", meetingId);
         if (meetings.isEmpty()) throw ApiException.notFound("会议不存在");
         JsonNode result = mapper.valueToTree(input.result());
         var existing = jdbc.queryForList("SELECT * FROM meeting_refinement_analyses WHERE meeting_id=? AND submitted_by=? AND client_request_id=?",
@@ -67,12 +67,13 @@ public class RefinementAnalysisService {
             return out(existing.getFirst()); // Preserve original snapshots even if live stories changed.
         }
         String transcript = meetings.getFirst().get("transcript").toString();
+        String projectId = meetings.getFirst().get("project_id").toString();
         // Same splitlines boundaries as Python; blank lines retain their ordinal.
         String[] lines = transcript.split("\\r\\n|[\\n\\r\\u000B\\u000C\\u001C-\\u001E\\u0085\\u2028\\u2029]", -1);
         Set<String> ids = new HashSet<>(), titles = new HashSet<>();
         var snapshots = mapper.createArrayNode();
         // New stories have no target ID. Preserve the basic catalog used for duplicate checking.
-        var catalog = jdbc.queryForList("SELECT id,title,status,sprint,owner_id FROM stories ORDER BY id FOR UPDATE");
+        var catalog = jdbc.queryForList("SELECT code AS id,title,status,sprint,owner_id FROM stories WHERE project_id=? ORDER BY code FOR UPDATE", projectId);
         if (catalog.size()>1000) throw ApiException.conflict("故事目录过大，无法保存分析快照");
         for (var story : catalog) {
             titles.add(story.get("title").toString().strip().toLowerCase(Locale.ROOT));

@@ -57,8 +57,8 @@ class PlanningAnalysisStorageTest {
         service = context.getBean(PlanningAnalysisService.class);
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,project_id varchar(20),transcript longtext)");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20) not null,code varchar(10) not null,title varchar(200) not null,status int not null,sprint int not null,owner_id int,constraint uq_stories_project_code unique(project_id,code))");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/planning-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -73,12 +73,12 @@ class PlanningAnalysisStorageTest {
                     .replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", ""));
             }
         }
-        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10) not null,log_type varchar(20) not null,detail varchar(500) not null,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
-        jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "决定US13移至Sprint 2。\n\nUS14 开始开发。");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',1,1,NULL)");
-        jdbc.update("INSERT INTO stories VALUES ('US14','权限',0,2,NULL)");
+        jdbc.update("INSERT INTO meetings(id,project_id,transcript) VALUES ('m1','P001',?)", "决定US13移至Sprint 2。\n\nUS14 开始开发。");
+        jdbc.update("INSERT INTO stories(project_id,code,title,status,sprint,owner_id) VALUES ('P001','US13','登录',1,1,NULL)");
+        jdbc.update("INSERT INTO stories(project_id,code,title,status,sprint,owner_id) VALUES ('P001','US14','权限',0,2,NULL)");
         mvc = MockMvcBuilders.standaloneSetup(new PlanningAnalysisController(service),
                 new PlanningProposalReviewController(context.getBean(PlanningProposalReviewService.class)),
                 new PlanningProposalExecutionController(context.getBean(PlanningProposalExecutionService.class)))
@@ -114,7 +114,7 @@ class PlanningAnalysisStorageTest {
         assertEquals(1,saved.path("submitted_by").asInt());
         assertEquals(input.get("result"),saved.get("result"));
         assertTrue(saved.get("story_snapshots").get(0).get("owner_id").isNull());
-        jdbc.update("UPDATE stories SET title='changed',sprint=2 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET title='changed',sprint=2 WHERE project_id='P001' AND code='US13'");
         // Fresh JDBC-backed service read retains the original submission, not current project state.
         var fresh = new PlanningAnalysisService(jdbc, context.getBean(com.aicap.service.ReviewQueueShadowIndexService.class),
                 mapper, context.getBean(Validator.class));
@@ -125,7 +125,7 @@ class PlanningAnalysisStorageTest {
 
     @Test void retryIsIdempotentEvenAfterLiveStateChangesButChangedPayloadConflicts() throws Exception {
         var input=body(); var first=submit(input);
-        jdbc.update("UPDATE stories SET sprint=2 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET sprint=2 WHERE project_id='P001' AND code='US13'");
         assertEquals(first.getContentAsString(),submit(input).getContentAsString());
         ((ObjectNode)input.get("result")).put("summary","changed");
         assertEquals(409,submit(input).getStatus()); assertEquals(1,count());
@@ -156,7 +156,7 @@ class PlanningAnalysisStorageTest {
         var input=body(); var proposals=(com.fasterxml.jackson.databind.node.ArrayNode)input.at("/result/proposed_actions");
         var second=proposals.get(0).deepCopy(); ((ObjectNode)second).put("proposal_id","p2").put("story_id","US14");
         proposals.add(second); assertEquals(409,submit(input).getStatus()); assertEquals(0,count());
-        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
     }
 
     @Test void permissionsAndMeetingScopedQueries() throws Exception {

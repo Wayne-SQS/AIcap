@@ -62,21 +62,27 @@ public class ReviewProposalExecutionService {
             throw ApiException.conflict("提案执行状态不允许执行");
         var approved=json(reviews.getFirst().get("approved_json"));
         String storyId=approved.path("story_id").asText();
+        String projectId=jdbc.queryForObject("SELECT project_id FROM meetings WHERE id=?",String.class,meetingId);
         int before=approved.path("expected").path("status").asInt();
         int after=approved.path("changes").path("status").asInt();
         if (before < 0 || before > 1 || after != 2
                 || !approved.path("action").asText().equals("update_story_status"))
             throw ApiException.conflict("已批准的Review提案不是有效完成变更");
-        var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",storyId);
+        var stories=jdbc.queryForList("SELECT internal_id,status FROM stories WHERE project_id=? AND code=? FOR UPDATE",projectId,storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=before)
             throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
-        if(jdbc.update("UPDATE stories SET status=? WHERE id=? AND status=?",after,storyId,before)!=1)
+        var story=stories.getFirst();
+        if(jdbc.update("UPDATE stories SET status=? WHERE internal_id=? AND status=?",after,story.get("internal_id"),before)!=1)
             throw ApiException.conflict("故事状态已变化，请重新分析");
         String detail="会议Review提案执行："+before+" → "+after+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs (story_id,log_type,detail,user_id,created_at) VALUES (?,'move',?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1,storyId); statement.setString(2,detail); statement.setInt(3,executorId);
+            var statement=connection.prepareStatement("INSERT INTO story_logs " +
+                    "(project_id,story_internal_id,story_code_snapshot,story_id,log_type,detail,user_id,created_at) " +
+                    "VALUES (?,?,?,?,'move',?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1,projectId); statement.setLong(2,((Number)story.get("internal_id")).longValue());
+            statement.setString(3,storyId); statement.setString(4,storyId);
+            statement.setString(5,detail); statement.setInt(6,executorId);
             return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();

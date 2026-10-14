@@ -23,7 +23,7 @@ class ReviewProposalFlowTest extends ReviewAnalysisStorageTest {
         return mvc.perform(post(path+"/"+id+"/proposal-executions").contentType("application/json")
             .content("{\"proposal_id\":\"p1\"}")).andReturn().getResponse();
     }
-    int status() { return jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class); }
+    int status() { return jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class); }
     int logs() { return jdbc.queryForObject("SELECT COUNT(*) FROM story_logs",Integer.class); }
     int executions() { return jdbc.queryForObject("SELECT COUNT(*) FROM meeting_review_proposal_executions",Integer.class); }
 
@@ -39,13 +39,13 @@ class ReviewProposalFlowTest extends ReviewAnalysisStorageTest {
         assertEquals(response.getContentAsString(),review(id,input).getContentAsString());
         var first=execute(id); assertEquals(200,first.getStatus(),first.getContentAsString());
         assertEquals(2,status()); assertEquals(1,logs()); assertEquals(1,executions());
-        assertEquals(1,jdbc.queryForObject("SELECT sprint FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("SELECT sprint FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
         var result=mapper.readTree(first.getContentAsByteArray());
         assertEquals(1,result.path("previous_status").asInt()); assertEquals(2,result.path("new_status").asInt());
         assertEquals(jdbc.queryForObject("SELECT id FROM story_logs",Integer.class),result.path("story_log_id").asInt());
         assertEquals("move",jdbc.queryForObject("SELECT log_type FROM story_logs",String.class));
         assertTrue(jdbc.queryForObject("SELECT detail FROM story_logs",String.class).contains("analysis="+id));
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         assertEquals(first.getContentAsString(),execute(id).getContentAsString());
         assertEquals(0,status()); assertEquals(1,logs()); assertEquals(original,service.get("m1",id));
         assertEquals(409,review(id,decision("reject",null)).getStatus());
@@ -60,7 +60,7 @@ class ReviewProposalFlowTest extends ReviewAnalysisStorageTest {
         assertEquals("US14",reviewed.at("/approved_proposal/story_id").asText());
         assertEquals(0,reviewed.at("/approved_proposal/expected/status").asInt());
         assertEquals(200,execute(id).getStatus());
-        assertEquals(2,jdbc.queryForObject("SELECT status FROM stories WHERE id='US14'",Integer.class));
+        assertEquals(2,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US14'",Integer.class));
         assertEquals(1,status());
     }
 
@@ -77,11 +77,11 @@ class ReviewProposalFlowTest extends ReviewAnalysisStorageTest {
 
     @Test void staleApprovalAndStaleExecutionAreConflicts() throws Exception {
         String id=saved(); role("admin");
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,review(id,decision("approve",null)).getStatus());
-        jdbc.update("UPDATE stories SET status=1 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=1 WHERE project_id='P001' AND code='US13'");
         assertEquals(200,review(id,decision("approve",null)).getStatus());
-        jdbc.update("UPDATE stories SET status=0 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET status=0 WHERE project_id='P001' AND code='US13'");
         assertEquals(409,execute(id).getStatus()); assertEquals(0,logs()); assertEquals(0,executions());
     }
 

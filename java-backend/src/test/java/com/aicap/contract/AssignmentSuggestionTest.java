@@ -40,16 +40,16 @@ class AssignmentSuggestionTest {
         context=new AnnotationConfigApplicationContext(Config.class);
         jdbc=context.getBean(JdbcTemplate.class); mapper=context.getBean(ObjectMapper.class); service=context.getBean(AssignmentSuggestionService.class);
         jdbc.execute("CREATE TABLE users(id int primary key,role varchar(20))");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
-        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,project_id varchar(20))");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20) not null,code varchar(10) not null,title varchar(200) not null,status int not null,sprint int not null,owner_id int,constraint uq_stories_project_code unique(project_id,code))");
+        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10) not null,log_type varchar(20) not null,detail varchar(500) not null,user_id int,created_at timestamp)");
         try(var in=getClass().getResourceAsStream("/db/assignment-analyses.sql")) {
             var sql=new String(in.readAllBytes(),StandardCharsets.UTF_8).replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci","");
             jdbc.execute(sql); jdbc.execute(sql);
         }
         jdbc.update("INSERT INTO users VALUES (1,'admin'),(7,'member'),(8,'viewer')");
-        jdbc.update("INSERT INTO meetings VALUES ('m1'),('m2')");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',0,2,NULL)");
+        jdbc.update("INSERT INTO meetings(id,project_id) VALUES ('m1','P001'),('m2','P001')");
+        jdbc.update("INSERT INTO stories(project_id,code,title,status,sprint,owner_id) VALUES ('P001','US13','登录',0,2,NULL)");
         mvc=MockMvcBuilders.standaloneSetup(new AssignmentSuggestionController(service)).setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }
@@ -79,7 +79,7 @@ class AssignmentSuggestionTest {
     int postStatus(String url,JsonNode data) throws Exception { return mvc.perform(post(url).contentType("application/json").content(data.toString())).andReturn().getResponse().getStatus(); }
     @Test void savesListsAndRetriesOriginalSnapshotAfterBusinessChanges() throws Exception {
         var input=body(); var saved=service.save("m1",input,1);
-        jdbc.update("UPDATE stories SET owner_id=8 WHERE id='US13'");
+        jdbc.update("UPDATE stories SET owner_id=8 WHERE project_id='P001' AND code='US13'");
         assertEquals(saved,service.save("m1",input,1));
         assertEquals(saved,service.find("m1","r1",1));
         assertEquals(1,service.list("m1").size());
@@ -112,7 +112,7 @@ class AssignmentSuggestionTest {
         assertEquals("not_started",approved.path("execution_status").asText());
         assertEquals(approved,service.review("m1",id,input,1));
         assertEquals(approved,service.get("m1",id).path("review"));
-        assertNull(jdbc.queryForMap("SELECT owner_id FROM stories WHERE id='US13'").get("owner_id"));
+        assertNull(jdbc.queryForMap("SELECT owner_id FROM stories WHERE project_id='P001' AND code='US13'").get("owner_id"));
         assertEquals(409,assertThrows(ApiException.class,()->service.review("m1",id,decision(false),1)).getStatus());
         assertEquals(409,assertThrows(ApiException.class,()->service.review("m1",id,input,7)).getStatus());
     }
@@ -162,8 +162,8 @@ class AssignmentSuggestionTest {
         String id=service.save("m1",body(),1).path("id").asText();
         service.review("m1",id,decision(true),1);
         var executed=service.execute("m1",id,mapper.createObjectNode(),1);
-        assertEquals(7,jdbc.queryForObject("SELECT owner_id FROM stories WHERE id='US13'",Integer.class));
-        assertEquals(0,jdbc.queryForObject("SELECT status FROM stories WHERE id='US13'",Integer.class));
+        assertEquals(7,jdbc.queryForObject("SELECT owner_id FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
+        assertEquals(0,jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code='US13'",Integer.class));
         assertEquals(executed,service.execute("m1",id,mapper.createObjectNode(),1));
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM story_logs",Integer.class));
         assertEquals(executed,service.get("m1",id).path("review").path("execution"));
