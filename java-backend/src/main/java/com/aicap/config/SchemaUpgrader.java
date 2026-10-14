@@ -151,6 +151,18 @@ public class SchemaUpgrader implements ApplicationRunner {
         addProjectColumn(conn, "profile_agent_runs");
         addProjectColumn(conn, "suggestions");
         addProjectColumn(conn, "meeting_agent_runs");
+        if (tableExists(conn, "meeting_suggestion_records")) {
+            if (!columns(conn, "meeting_suggestion_records").contains("project_id")) {
+                execute(conn, "ALTER TABLE meeting_suggestion_records ADD COLUMN project_id varchar(20) NULL");
+            }
+            // Meeting ownership is authoritative. Old meetingless profile records cannot be
+            // attributed reliably; leave them unscoped until they are reconciled manually.
+            execute(conn, "UPDATE meeting_suggestion_records r JOIN meetings m ON m.id=r.meeting_id "
+                    + "SET r.project_id=m.project_id WHERE r.project_id IS NULL OR r.project_id<>m.project_id");
+            if (!indexExists(conn, "meeting_suggestion_records", "ix_meeting_suggestion_records_project")) {
+                execute(conn, "ALTER TABLE meeting_suggestion_records ADD KEY ix_meeting_suggestion_records_project (project_id)");
+            }
+        }
     }
 
     private void ensureProjectTables(Connection conn) throws SQLException {

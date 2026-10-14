@@ -14,6 +14,7 @@ public class MeetingSuggestionRecord {
     @TableId(type = IdType.AUTO)
     private Integer id;
     private String suggestionId;      // unique, FK->suggestions.id
+    private String projectId;
     private String meetingId;
     private String clientRequestId;
     private String requestHash;

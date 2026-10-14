@@ -57,6 +57,21 @@ public class ProjectAccessService {
         return member;
     }
 
+    /** Background workers have no request AuthContext; authorize their recorded initiator explicitly. */
+    public ProjectMember requireWriterForUser(String projectId, Integer userId) {
+        if (userId == null) throw ApiException.unauthorized("未登录或登录已过期");
+        Project project = projects.selectById(normalize(projectId));
+        if (project == null || "ARCHIVED".equalsIgnoreCase(project.getStatus())) {
+            throw ApiException.notFound("项目不存在或已归档");
+        }
+        ProjectMember member = members.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", project.getId()).eq("user_id", userId).last("LIMIT 1"));
+        if (member == null || "viewer".equalsIgnoreCase(member.getProjectRole())) {
+            throw ApiException.forbidden("无权提交该项目建议");
+        }
+        return member;
+    }
+
     public ProjectMember requireOwner(String projectId) {
         ProjectMember member = requireMember(projectId);
         if (!List.of("owner", "admin").contains(member.getProjectRole().toLowerCase())) {

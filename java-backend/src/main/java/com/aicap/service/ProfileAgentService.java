@@ -1424,6 +1424,7 @@ public class ProfileAgentService {
             // 同步建审核记录(meeting_id 为空=非会议来源),使建议进入统一审核中心列表并可走 /review 流程
             MeetingSuggestionRecord record = new MeetingSuggestionRecord();
             record.setSuggestionId(s.getId());
+            record.setProjectId(ProjectAccessService.normalize(projectId));
             record.setMeetingId(null);
             record.setSubmittedBy(user.getId());
             record.setClientRequestId("profile:" + s.getId() + ":manual");

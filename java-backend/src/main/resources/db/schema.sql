@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS `meetings` (
 CREATE TABLE IF NOT EXISTS `meeting_suggestion_records` (
   `id` int NOT NULL AUTO_INCREMENT,
   `suggestion_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` varchar(20) DEFAULT NULL,
   `meeting_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '可空:画像智能体等非会议来源的建议没有所属会议',
   `client_request_id` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
   `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -161,6 +162,7 @@ CREATE TABLE IF NOT EXISTS `meeting_suggestion_records` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_meeting_suggestion_request` (`meeting_id`,`submitted_by`,`client_request_id`),
   UNIQUE KEY `suggestion_id` (`suggestion_id`),
+  KEY `ix_meeting_suggestion_records_project` (`project_id`),
   KEY `submitted_by` (`submitted_by`),
   KEY `reviewed_by` (`reviewed_by`),
   CONSTRAINT `meeting_suggestion_records_ibfk_1` FOREIGN KEY (`suggestion_id`) REFERENCES `suggestions` (`id`),

@@ -187,8 +187,10 @@ public class MeetingService {
     /** 生成建议(幂等):同 client_request_id 返回既有建议;不同 payload 409 */
     @Transactional
     public SuggestionOutHolder stage(String projectId, MeetingDtos.SuggestionIn in, User user) {
-        projectAccess.requireWriter(projectId);
-        Meeting meeting = requireMeeting(projectId, in.meetingId());
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        projectAccess.requireWriterForUser(scopedProjectId, user == null ? null : user.getId());
+        Meeting meeting = meetingMapper.selectOne(new QueryWrapper<Meeting>()
+                .eq("id", in.meetingId()).eq("project_id", scopedProjectId));
         if (meeting == null) throw ApiException.notFound("会议不存在");
         if (meeting.getTranscript() == null || !meeting.getTranscript().contains(in.evidence())) {
             throw ApiException.unprocessable("证据必须是会议原文中的连续片段");
@@ -221,6 +223,7 @@ public class MeetingService {
 
         MeetingSuggestionRecord record = new MeetingSuggestionRecord();
         record.setSuggestionId(suggestion.getId());
+        record.setProjectId(scopedProjectId);
         record.setMeetingId(in.meetingId());
         record.setSubmittedBy(user.getId());
         record.setClientRequestId(in.clientRequestId());
@@ -241,6 +244,7 @@ public class MeetingService {
      *  的孤儿行:该行既不出现在 {@code GET /api/suggestions}(无 record 可关联),又会命中 Agent
      *  「已有同名待审建议」的判定而被长期抑制,无人可审。 */
     public SuggestionOutHolder submitSuggestionIdempotent(String projectId, MeetingDtos.SuggestionIn in, User user) {
+        projectAccess.requireWriter(projectId);
         for (int i = 0; i < 3; i++) {
             try {
                 return tx.execute(status -> stage(projectId, in, user));
@@ -263,7 +267,8 @@ public class MeetingService {
         String scopedProjectId = ProjectAccessService.normalize(projectId);
         projectAccess.requireMember(scopedProjectId);
         if (meetingId != null) requireMeeting(projectId, meetingId);
-        QueryWrapper<MeetingSuggestionRecord> qw = new QueryWrapper<>();
+        QueryWrapper<MeetingSuggestionRecord> qw = new QueryWrapper<MeetingSuggestionRecord>()
+                .eq("project_id", scopedProjectId);
         if (meetingId != null) qw.eq("meeting_id", meetingId);
         return recordMapper.selectList(qw.orderByDesc("id"));
     }
@@ -272,7 +277,8 @@ public class MeetingService {
         String scopedProjectId = ProjectAccessService.normalize(projectId);
         projectAccess.requireMember(scopedProjectId);
         MeetingSuggestionRecord r = recordMapper.selectOne(
-                new QueryWrapper<MeetingSuggestionRecord>().eq("suggestion_id", suggestionId));
+                new QueryWrapper<MeetingSuggestionRecord>().eq("suggestion_id", suggestionId)
+                        .eq("project_id", scopedProjectId));
         if (r == null) throw ApiException.notFound("会议建议不存在");
         if (r.getMeetingId() != null) requireMeeting(projectId, r.getMeetingId());
         return r;
