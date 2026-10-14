@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
@@ -21,8 +22,9 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
    这里保持同一口径,只是数据源换成了响应式 store。 */
 
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
-const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${project.currentProjectId || 'none'}`)
+const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${projects.currentProjectId || 'none'}`)
 
 /* ==================== 用例图 ==================== */
 const MIN_USECASE_WIDTH = 140
@@ -67,7 +69,8 @@ const FUNCTION_GROUPS = [
 ]
 
 function storySearchText(story) {
-  return [story.title, story.activity, story.description, story.acceptance].filter(Boolean).join(' ')
+  return [story.title, story.activity, story.description, story.role, story.goal, story.value, story.acceptance]
+    .filter(Boolean).join(' ')
 }
 
 function aggregateStories(stories) {
@@ -150,7 +153,9 @@ function syncUsecaseLayout(stories) {
         name: group.name,
         actorIds: group.actors,
         type: 'core',
-        ...position
+        ...position,
+        x: saved?.x ?? position.x,
+        y: saved?.y ?? position.y
       })
       : {
         id: group.id,
@@ -413,10 +418,11 @@ function saveUmlLayout() {
     participants: participants.map(({ id, x }) => ({ id, x }))
   }))
 }
-watch(() => project.stories.map(story => story.id), ids => {
-  syncUsecaseLayout(ids.map(id => project.stories.find(story => story.id === id)).filter(Boolean))
+watch(() => project.stories.map(story => [story.id, story.title, story.activity, story.description,
+  story.role, story.goal, story.value, story.acceptance].join('\u0000')).join('\u0001'), () => {
+  syncUsecaseLayout(project.stories)
 }, { immediate: true })
-watch(() => project.currentProjectId, async () => {
+watch(() => projects.currentProjectId, async () => {
   resetUmlLayout()
   syncUsecaseLayout(project.stories)
   await nextTick()
@@ -487,13 +493,13 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       <div>
         <div class="eyebrow">UML DIAGRAMS / 设计视图</div>
         <h1>UML 图</h1>
-        <p>用例图（用例名跟随故事标题）· 时序图（按后端真实路由绘制）。</p>
+        <p>用例图（按当前项目故事聚合）· 时序图（按后端真实路由绘制）。</p>
       </div>
     </div>
 
     <p class="uml-note">
       用例图按当前正式需求聚合为 {{ usecases.length }} 个系统功能；点击功能用例可查看其关联的原始 Story。
-      Story 新增、删除或重命名后，功能用例明细同步更新；节点可拖动并保存布局。
+      Story 新增、删除或修改叙述字段后，功能用例关联同步更新；节点可拖动并按项目保存布局。
       {{ session.isViewer ? '当前项目为只读权限，布局不可调整。' : '' }}
       时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
     </p>
@@ -563,7 +569,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       <div class="uc-detail-head">
         <b>{{ selectedUc.name }}</b>
         <span class="mono">{{ selectedUc.ref }}</span>
-        <span class="small">关联 {{ selectedStories.length }} 条故事（数据来自故事看板）</span>
+        <span class="small">关联 {{ selectedStories.length }} 条故事 · 来源：当前项目 {{ projects.currentProjectId || '离线演示' }} 的正式故事</span>
         <button class="uc-detail-close" type="button" @click="clearSelection">关闭 ✕</button>
       </div>
       <div class="uc-detail-row">
