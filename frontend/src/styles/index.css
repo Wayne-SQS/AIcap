@@ -376,6 +376,7 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .gbar.selected{outline:3px solid var(--ink);outline-offset:2px;z-index:3}
 .gbar.predecessor{box-shadow:0 0 0 3px rgba(54,112,74,.42)}
 .gbar.dependent{box-shadow:0 0 0 3px rgba(184,115,31,.42)}
+.gbar.critical-path{border-color:#ba3a36;box-shadow:0 0 0 2px rgba(186,58,54,.35)}
 .gbar.o0{background:var(--green)}.gbar.o1{background:var(--orange)}.gbar.o2{background:var(--blue)}.gbar.o3{background:var(--pink)}.gbar.o4{background:var(--gray)}
 /* 甘特图父子血缘层级(看板与甘特强制对应,保留 v2 口径) */
 .grow.parent{background:var(--paper-2);min-height:46px;margin-top:4px}
@@ -424,6 +425,8 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .legend .sw{width:14px;height:14px;border:2px solid var(--ink);flex:0 0 auto}
 .legend .diamond-key{width:11px;height:11px;transform:rotate(45deg);background:var(--yellow);border:2px solid var(--ink);display:inline-block}
 .legend .note{color:var(--muted);font-family:var(--mono)}
+.legend .critical-path-key{width:14px;height:14px;border:2px solid #ba3a36;display:inline-block;box-sizing:border-box}
+.gantt-path{margin-top:10px;padding:9px 12px;border:1px solid var(--line);background:var(--paper);font-family:var(--mono);font-size:12px}
 
 /* ============ 成员任务 ============ */
 .member-view-section{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:14px 16px;box-sizing:border-box}

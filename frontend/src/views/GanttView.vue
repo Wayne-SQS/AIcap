@@ -13,6 +13,7 @@ import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
+import { criticalPath } from '@/utils/criticalPath'
 
 /* 甘特图任务视图:
    - 每个任务占一行，Story 血缘保留在任务元数据与详情面板中
@@ -67,6 +68,8 @@ const relationOf = id => {
   if (dependents.value.includes(id)) return 'dependent'
   return ''
 }
+const deliveryPath = computed(() => criticalPath(project.tasks))
+const pathIds = computed(() => new Set(deliveryPath.value.ids))
 function select(key) {
   if (!key) return
   const [type, id] = key.split(':')
@@ -89,6 +92,7 @@ function barOf(t, key) {
   if (t.type === 'management') cls.push('mgmt')
   else if (t.status === 2 || t.progress >= 100) cls.push('task-done')
   if (relation) cls.push(relation)
+  if (pathIds.value.has(t.id)) cls.push('critical-path')
   return {
     left: ((start - 1) / 6 * 100).toFixed(2),
     width: (span / 6 * 100).toFixed(2),
@@ -305,6 +309,16 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
       <span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span>
       <span class="chip note">任务条 = 计划起止范围（不按工时比例）</span>
       <span class="chip note">点击任务条查看前置 / 后续任务</span>
+      <span class="chip note"><span class="critical-path-key"></span>红色描边 = 最长依赖链</span>
+    </div>
+
+    <div class="gantt-path" id="gantt-critical-path" aria-live="polite">
+      <template v-if="deliveryPath.cycle">任务依赖存在循环，无法计算最长依赖链；请先修正前置任务。</template>
+      <template v-else-if="deliveryPath.ids.length">
+        最长依赖链：{{ deliveryPath.ids.join(' → ') }} · 累计计划工期 {{ deliveryPath.weeks }} 周
+        <span class="small">（各任务计划周数相加，非日历跨度或交付日期）</span>
+      </template>
+      <template v-else>暂无可计算的任务依赖链。</template>
     </div>
 
     <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;从任务详情可继续查看 Story -->
