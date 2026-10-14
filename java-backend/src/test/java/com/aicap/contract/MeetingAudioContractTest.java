@@ -85,14 +85,19 @@ class MeetingAudioContractTest extends ContractTestSupport {
         }
         if (source != null) body.add("source", source);
         if (durationMs != null) body.add("duration_ms", String.valueOf(durationMs));
+        // 多项目改造后 projectId 是必填;multipart 请求由这里自己发,URL 注入管不到。
+        // 只放 URL 一处:query 与表单各放一份时 Spring 会把两个值拼成 "P001,P001",
+        // 查项目自然查不到,表现为 404「项目不存在或已归档」—— 比缺参数还难认。
         HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
-        return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio", HttpMethod.POST, entity, byte[].class));
+        return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio?projectId=" + PROJECT_ID,
+                HttpMethod.POST, entity, byte[].class));
     }
 
     private ResponseEntity<byte[]> fetchBytes(String audioId, String token) {
         HttpHeaders headers = new HttpHeaders();
         if (token != null) headers.setBearerAuth(token);
-        return rest.exchange("/api/audio/" + audioId, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        return rest.exchange("/api/audio/" + audioId + "?projectId=" + PROJECT_ID,
+                HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
     }
 
     private String createMeeting(String title) {

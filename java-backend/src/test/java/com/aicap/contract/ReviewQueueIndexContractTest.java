@@ -54,7 +54,7 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
             jdbc.update("DELETE FROM " + table + " WHERE meeting_id=?", meetingId);
         }
         jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
-        jdbc.update("DELETE FROM stories WHERE id=?", storyId);
+        jdbc.update("DELETE FROM stories WHERE code=?", storyId);
         jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
         for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
@@ -65,8 +65,11 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
     void dailyServiceWritesShadowThroughSaveReviewAndExecution() throws Exception {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
                 meetingId, "索引写入测试", "测试提案已确认。", 1);
-        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status) VALUES(?,?,?,?,?,?,?,?)",
-                storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        // 主键换成了 internal_id,业务编号落在 code;旧 id 列仍保留(迁移时降级为普通可空列),
+        // 这里两列都填,免得桩/老查询路径按 id 找不到
+        jdbc.update("INSERT INTO stories(project_id,code,id,title,description,acceptance,priority,sprint,activity,status) "
+                + "VALUES('P001',?,?,?,?,?,?,?,?,?)",
+                storyId, storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
         String body = """
                 {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
                 "meeting_type":"daily_scrum","summary":"已确认","open_questions":[],"proposed_actions":[

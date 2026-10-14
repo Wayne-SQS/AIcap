@@ -26,9 +26,16 @@ public interface RetrievalGraphMapper {
     record TaskEdges(String storyRef, String kanbanCardId) {
     }
 
-    /** 故事 → 挂载它的任务。返回任务 id(用于再取 task 类 chunk) */
+    /**
+     * 故事 → 挂载它的任务。返回任务<b>业务编号</b>(用于再取 task 类 chunk)。
+     *
+     * <p>取 {@code code} 而不是 {@code id}:多项目改造后 {@code tasks} 的主键是
+     * {@code internal_id},业务编号挪到了 {@code code},旧 {@code id} 列被降级成可空普通列 ——
+     * 之后新写的数据那一列是 NULL,按它查会**一行都查不到**,而图路会静默返回空
+     * (不报错,只是"检索结果里少了图路那一跳")。这类失效只能靠契约测试发现。
+     */
     @Select("""
-            SELECT DISTINCT t.`id`
+            SELECT DISTINCT t.`code`
             FROM `tasks` t
             WHERE t.`kanban_card_id` = #{storyId}
                OR FIND_IN_SET(#{storyId}, t.`story_ref`) > 0
@@ -39,7 +46,7 @@ public interface RetrievalGraphMapper {
     @Select("""
             SELECT t.`story_ref` AS storyRef, t.`kanban_card_id` AS kanbanCardId
             FROM `tasks` t
-            WHERE t.`id` = #{taskId}
+            WHERE t.`code` = #{taskId}
             """)
     TaskEdges findStoryRefsOfTask(@Param("taskId") String taskId);
 }

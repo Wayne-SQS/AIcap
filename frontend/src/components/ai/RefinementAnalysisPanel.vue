@@ -4,6 +4,7 @@ import { refinementAnalysesApi } from '@/api/refinementAnalyses'
 import { executionStatusName } from '@/api/workflowLabels'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import WorkflowPermissionNote from './WorkflowPermissionNote.vue'
 import RefinementProposalReviewForm from './RefinementProposalReviewForm.vue'
 import RefinementProposalExecute from './RefinementProposalExecute.vue'
@@ -13,6 +14,7 @@ import RefinementStoryFields from './RefinementStoryFields.vue'
 const props = defineProps({ meetingId: { type: String, required: true }, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
 const project = useProjectStore()
+const projects = useProjectsStore()
 const projectError = ref('')
 const projectLoading = ref(false)
 let mounted = true
@@ -44,8 +46,8 @@ async function loadDetails() {
   if (!selected.value) return
   try {
     const [reviewRows, executionRows] = await Promise.all([
-      refinementAnalysesApi.reviews(props.meetingId, selected.value),
-      refinementAnalysesApi.executions(props.meetingId, selected.value)
+      refinementAnalysesApi.reviews(props.meetingId, selected.value, projects.currentProjectId),
+      refinementAnalysesApi.executions(props.meetingId, selected.value, projects.currentProjectId)
     ])
     if (version !== detailVersion) return
     reviews.value = reviewRows

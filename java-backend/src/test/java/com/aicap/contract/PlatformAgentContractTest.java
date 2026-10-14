@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
 
 import com.aicap.platform.PlatformToolCatalog;
 import java.util.LinkedHashSet;
@@ -315,7 +316,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertEquals("invalid_arguments", noRequest.json().path("error_code").asText(), noRequest.body());
 
         // 多项目之后 project_id 也是必填:少了它 run 会落到默认项目,确认时写的是别人的项目
-        ApiResponse noProject = post(TOOLS + "start_plan_draft", token(USER_ADMIN),
+        ApiResponse noProject = requestWithoutProject(HttpMethod.POST, TOOLS + "start_plan_draft", token(USER_ADMIN),
                 json(map("request", "缺 project_id 的请求 " + UUID.randomUUID())));
         assertEquals(200, noProject.status(), noProject.body());
         assertFalse(noProject.json().path("ok").asBoolean(), noProject.body());

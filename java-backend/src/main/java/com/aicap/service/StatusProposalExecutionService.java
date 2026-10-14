@@ -78,7 +78,7 @@ public class StatusProposalExecutionService {
             if (value!=null && jdbc.queryForList("SELECT id FROM users WHERE id=?",value).isEmpty())
                 throw ApiException.conflict("批准的负责人已不存在");
         }
-        if(jdbc.update("UPDATE stories SET status=?,title=?,description=?,acceptance=?,priority=?,sprint=?,activity=?,owner_id=? WHERE id=? AND status=?",
+        if(jdbc.update("UPDATE stories SET status=?,title=?,description=?,acceptance=?,priority=?,sprint=?,activity=?,owner_id=? WHERE code=? AND status=?",
                 after,fieldValue(patch,"title",story.get("title")),fieldValue(patch,"description",story.get("description")),
                 fieldValue(patch,"acceptance",story.get("acceptance")),fieldValue(patch,"priority",story.get("priority")),
                 fieldValue(patch,"sprint",story.get("sprint")),fieldValue(patch,"activity",story.get("activity")),

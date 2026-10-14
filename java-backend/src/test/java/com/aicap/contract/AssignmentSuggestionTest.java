@@ -41,7 +41,7 @@ class AssignmentSuggestionTest {
         jdbc=context.getBean(JdbcTemplate.class); mapper=context.getBean(ObjectMapper.class); service=context.getBean(AssignmentSuggestionService.class);
         jdbc.execute("CREATE TABLE users(id int primary key,role varchar(20))");
         jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(10),title varchar(200),status int,sprint int,owner_id int)");
         jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         try(var in=getClass().getResourceAsStream("/db/assignment-analyses.sql")) {
             var sql=new String(in.readAllBytes(),StandardCharsets.UTF_8).replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci","");
@@ -49,7 +49,7 @@ class AssignmentSuggestionTest {
         }
         jdbc.update("INSERT INTO users VALUES (1,'admin'),(7,'member'),(8,'viewer')");
         jdbc.update("INSERT INTO meetings VALUES ('m1'),('m2')");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',0,2,NULL)");
+        jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',0,2,NULL)");
         mvc=MockMvcBuilders.standaloneSetup(new AssignmentSuggestionController(service)).setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }

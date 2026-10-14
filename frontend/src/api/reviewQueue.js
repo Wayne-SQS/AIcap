@@ -5,6 +5,10 @@ import { retroAnalysesApi } from './retroAnalyses'
 import { refinementAnalysesApi } from './refinementAnalyses'
 import { assignmentSuggestionsApi } from './assignment'
 import { api } from './client'
+import { useProjectsStore } from '@/stores/projects'
+
+// 细化(refinement)的审核/执行接口要求项目上下文;其余来源的 api 多传一个参数会被忽略。
+const currentProjectId = () => useProjectsStore().currentProjectId
 
 const sources = [
   { key: 'daily', label: 'Daily', api: statusAnalysesApi },
@@ -123,11 +127,11 @@ export async function loadReviewQueue(meetings) {
         const analyses = arr(await read(() => source.api.list(meeting.id)))
         await mapLimit(analyses, 3, async analysis => {
           try {
-            const reviewState = await read(() => source.api.reviews(meeting.id, analysis.id))
+            const reviewState = await read(() => source.api.reviews(meeting.id, analysis.id, currentProjectId()))
             const proposals = arr(reviewState?.proposals)
             let executions = []
             if (proposals.some(proposal => proposal.status === 'approved')) {
-              try { executions = arr(await read(() => source.api.executions(meeting.id, analysis.id))) }
+              try { executions = arr(await read(() => source.api.executions(meeting.id, analysis.id, currentProjectId()))) }
               catch (error) {
                 errors.push({ meetingId: meeting.id, meetingTitle: meeting.title,
                   source: `${source.label} · ${analysis.id} · 执行记录`, message: error.message })
@@ -266,10 +270,10 @@ async function hydrateReviewQueuePage(page) {
       } else {
         const base = `/api/meetings/${encodeURIComponent(ref.meetingId)}/${path}/${encodeURIComponent(ref.analysisId)}`
         ;[analysis, reviewState] = await Promise.all([
-          read(() => api(base)), read(() => source.api.reviews(ref.meetingId, ref.analysisId))
+          read(() => api(base)), read(() => source.api.reviews(ref.meetingId, ref.analysisId, currentProjectId()))
         ])
         if (arr(reviewState?.proposals).some(item => item.status === 'approved')) {
-          try { executions = arr(await read(() => source.api.executions(ref.meetingId, ref.analysisId))) }
+          try { executions = arr(await read(() => source.api.executions(ref.meetingId, ref.analysisId, currentProjectId()))) }
           catch (error) { errors.push({ meetingId: ref.meetingId, meetingTitle: ref.meetingTitle,
             source: `${source.label} · ${ref.analysisId} · 执行记录`, message: error.message }) }
         }

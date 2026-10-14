@@ -88,7 +88,7 @@ public class ReviewAnalysisService extends AbstractMeetingAnalysisService {
                 if (index >= lines.length || !lines[index].contains(evidence.quote()))
                     throw ApiException.unprocessable("证据必须来自对应会议原文片段");
             }
-            var stories = jdbc.queryForList("SELECT id,title,status,sprint,owner_id FROM stories WHERE id=? FOR UPDATE", proposal.storyId());
+            var stories = jdbc.queryForList("SELECT code AS id,title,status,sprint,owner_id FROM stories WHERE code=? FOR UPDATE", proposal.storyId());
             if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在");
             var story = stories.getFirst();
             if (((Number)story.get("status")).intValue() != proposal.expected().status())

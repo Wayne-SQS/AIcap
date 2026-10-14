@@ -70,7 +70,7 @@ public class ReviewProposalExecutionService {
         var stories=jdbc.queryForList("SELECT status FROM stories WHERE id=? FOR UPDATE",storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=before)
             throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
-        if(jdbc.update("UPDATE stories SET status=? WHERE id=? AND status=?",after,storyId,before)!=1)
+        if(jdbc.update("UPDATE stories SET status=? WHERE code=? AND status=?",after,storyId,before)!=1)
             throw ApiException.conflict("故事状态已变化，请重新分析");
         String detail="会议Review提案执行："+before+" → "+after+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();

@@ -9,10 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `frontend/` | **现行**前端:Vue3 + Vite + Pinia(像素风,15 视图) |
 | `java-backend/` | **现行**平台后端:Java 23 + Spring Boot 3.5 + MyBatis-Plus(8080) |
 | `ai-service/` | **现行**会议 Agent:Python + FastAPI + **LangGraph**(8090)。五类会议的类型化分析 + 音频转写/说话人分离;写库一律回 Java 业务接口 |
-| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100)。进度看契约 §8(见文末「设计文档的定位」),本层 `README.md` 的状态表是它的镜像——当前 **S5′**:S4′.2 的有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 侧会话/事件/检查点端点之上,又在循环前接上了规划相 `orchestrator.plan()`(真实实现:路由 + 反问阈值 + 触发型工具,**只有 `plan()`,没有 `execute()`**),并新增 `routing_logs` 表与 `POST/GET /api/agents/routing-logs`。**未落地**:`report.build_report()` 是唯一骨架(`raise NotImplementedError("复盘报告属 S8′")`);另两项契约里明确挂着 —— ⛔ `start_profile_analysis`(画像域无后台消费者)、⏳ `routing_logs` 真机联调(端点已落地,需 `mvn -B package` + 重启后端才能验通)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
+| `agent-orchestrator/` | **现行**「主管智能体」编排层(Python,8100)。**前端已接线**(2026-10-14:`SupervisorAvatar.vue` + `SupervisorChat.vue` 消费 SSE)。进度看契约 §8(见文末「设计文档的定位」),本层 `README.md` 的状态表是它的镜像——当前 **S5′**:S4′.2 的有界循环四道闸 + 检查点续跑 + SSE 事件流 + Java 侧会话/事件/检查点端点之上,又在循环前接上了规划相 `orchestrator.plan()`(真实实现:路由 + 反问阈值 + 触发型工具,**只有 `plan()`,没有 `execute()`**),并新增 `routing_logs` 表与 `POST/GET /api/agents/routing-logs`。**未落地**:`report.build_report()` 是唯一骨架(`raise NotImplementedError("复盘报告属 S8′")`);另两项契约里明确挂着 —— ⛔ `start_profile_analysis`(画像域无后台消费者)、⏳ `routing_logs` 真机联调(端点已落地,需 `mvn -B package` + 重启后端才能验通)。**不得持有数据库连接**——`tests/test_no_db.py` 结构性钉住 |
 | `deploy/` | **现行**生产编排:`deploy/compose.yaml` 四容器(Nginx / Java / ai / MySQL) |
-| `backend/` | **归档**:FastAPI + SQLAlchemy 参考实现。**不要按它改功能**,但它的 `docker-compose.yml` 仍是**本机开发/测试**起 MySQL(3307)的现行方式;生产编排走 `deploy/compose.yaml`,两者别混用 |
-| `legacy/` | **归档**:Vue 改造前的旧版单文件前端 |
+| `backend/` | **归档**:FastAPI + SQLAlchemy 参考实现。**不要按它改功能**,但它的 `docker-compose.yml` 仍是**本机开发/测试**起 MySQL(3307) + Qdrant(6333) 的现行方式;生产编排走 `deploy/compose.yaml`,两者别混用。已放 `DEPRECATED.md`(含删除前置条件) |
+| `legacy/` | **归档**:Vue 改造前的旧版单文件前端。全仓零引用,可整体删。已放 `DEPRECATED.md` |
 | `归档_其他材料/` | **归档**:实验指导书、交付物模板、早期规划稿(`.docx` / `.md`)。只读 |
 | `docs/` | 设计规格与实施计划,见文末「设计文档的定位」 |
 | `qa/` | 测试用例、执行记录、报告,以及前后端之外的第三套 Playwright 用例 |
@@ -171,6 +171,10 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 **参数化跑两套向量库实现**:`KnowledgeIndexContractTest` 与 `RetrievalContractTest` 是**抽象基类**(逻辑全在里面),各有两个子类 `*MySqlContractTest` / `*QdrantContractTest` 只差三行注解。为什么不用 `@ParameterizedTest`:实现是 `@ConditionalOnProperty` 在**启动时**选定的 Bean,运行期换不了,而 `@SpringBootTest` 的 properties 必须是编译期常量;`@Nested` 也不行,Spring 不为嵌套类单建上下文。隔离靠 `RagProperties.vectorStore` 钩子 `resetVectorStoreBeforeIndex()`:MySQL 侧由 `reset_test_data.sql` 完成,Qdrant 侧由 `QdrantTestSupport.resetCollection()` 删掉 `aicap_chunks_test` 集合 —— **那个集合名必须以 `_test` 结尾**,工具里有一道闸门拦着,配错就是删开发数据。
 
 新增同类测试时,若某个失效模式只在一条实现上存在(典型:ACL 在 SQL 里 vs 在 payload 里),**务必两遍都跑** —— 只测一条等于只验了一半,而漏的那一半正好是"语义检索绕过可见性"的后门。
+
+**`projectId` 由基类统一注入(2026-10-14)**:多项目改造后所有业务接口的 `projectId` 是**必填** `@RequestParam`,但几百个历史调用点都没带 —— 于是每个用例卡在同一个 422 上,真正的断言根本跑不到(135 个红的真因就是这个,不是缺列)。`ContractTestSupport` 现在自动补:URL 上一律补 `?projectId=P001`(`PROJECT_ID`,登录与项目列表除外);请求体只在白名单路径补(`/api/meetings` → `project_id`,`/api/agents/tools/` → `project_id`)—— DTO 是 strict(未知字段拒绝),**不能对所有 body 无脑注入**。multipart 请求不经过基类(自己 `rest.exchange`),要自己把 `projectId` 拼进 URL,**只拼一处**:query 与表单各放一份时 Spring 会把两个值拼成 `P001,P001`,症状是 404「项目不存在或已归档」,比缺参数还难认。要专门验证"缺 project_id 会被拒"的用例走 `requestWithoutProject(...)`,别硬碰注入。
+
+**老库升级别只改 `schema.sql`(2026-10-14 的教训)**:多项目改造把 stories/tasks/milestones 主键从业务编号换成 `internal_id` 自增 + `code` 编号,只改了建表语句 —— 新库是对的,**老库永远停在旧主键**,一读故事/任务就 `Unknown column 'internal_id'`。补列与数据回填现在都在 `SchemaUpgrader`(`migrateInternalKeys` / `backfillReferenceSnapshots` / `ensureReferencedProjectsExist`),改完务必跑一次"实体字段 vs 数据库列"核对(`java-backend/data/check_entity_columns.py`,它列出"实体有、表里没有"的列,这类缺失编译不报错、只在运行时 500)。另外 `story_logs`/`activity_records`/`difficulty_assessments` 还要补 `*_internal_id` + `*_code_snapshot`:编号可在项目内复用,没有快照就无法回答"这条日志当时指的是哪个故事";缺了它**删故事会 500**。
 
 ## 红线(任何改动不得违反)
 

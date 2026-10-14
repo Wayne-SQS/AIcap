@@ -529,7 +529,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         body.add("source", "recorder");
         body.add("duration_ms", "2000");
         HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
-        return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio",
+        return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio?projectId=" + PROJECT_ID,
                 HttpMethod.POST, entity, byte[].class));
     }
 
@@ -607,7 +607,15 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             String audioId = up.json().path("id").asText();
             assertNotNull(findStoredAudio(audioId), "上传后音频文件应已落盘: " + audioId);
 
-            // 删除前确认两类从属数据都真实存在(否则"删除后为空"没有意义)
+            // 造数据 3:一条 agent run —— 删除要级联清掉它(runs_deleted=1 才有意义)。
+            // 走库而不走 POST /runs:worker 关着,run 只会停在 queued,建出来就是等被删的从属数据。
+            String runId = java.util.UUID.randomUUID().toString();
+            jdbc.update("INSERT INTO meeting_agent_runs(id,meeting_id,requested_by,project_id,status,attempt,"
+                    + "model,prompt_version,created_at,updated_at) "
+                    + "VALUES (?,?,(SELECT id FROM users WHERE role='admin' LIMIT 1),'P001','queued',0,"
+                    + "'contract-test-model','v1',NOW(),NOW())", runId, mid);
+
+            // 删除前确认三类从属数据都真实存在(否则"删除后为空"没有意义)
             assertEquals(1, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size());
             assertEquals(1, get("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).json().size());
             assertTrue(meetingListed(mid), "删除前会议应在列表中");

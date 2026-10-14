@@ -58,7 +58,7 @@ class StatusAnalysisStorageTest {
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
         jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),description longtext,acceptance longtext,priority varchar(20),status int,sprint int,activity int,owner_id int)");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(20),title varchar(200),description longtext,acceptance longtext,priority varchar(20),status int,sprint int,activity int,owner_id int)");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/status-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -81,8 +81,8 @@ class StatusAnalysisStorageTest {
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
         jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "US13 已验收完成。\n\nUS14 开始开发。");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录','登录故事','通过验收','Must',1,2,2,NULL)");
-        jdbc.update("INSERT INTO stories VALUES ('US14','权限','权限故事','通过验收','Should',0,2,2,NULL)");
+        jdbc.update("INSERT INTO stories(code,id,title,description,acceptance,priority,status,sprint,activity,owner_id) VALUES ('US13','US13','登录','登录故事','通过验收','Must',1,2,2,NULL)");
+        jdbc.update("INSERT INTO stories(code,id,title,description,acceptance,priority,status,sprint,activity,owner_id) VALUES ('US14','US14','权限','权限故事','通过验收','Should',0,2,2,NULL)");
         mvc = MockMvcBuilders.standaloneSetup(new StatusAnalysisController(service), new StatusProposalReviewController(context.getBean(StatusProposalReviewService.class)), new StatusProposalExecutionController(context.getBean(StatusProposalExecutionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");

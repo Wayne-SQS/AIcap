@@ -15,7 +15,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.PreparedStatement;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -45,6 +48,47 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"status", "`status` int NOT NULL DEFAULT '0'"},
             {"progress", "`progress` int NOT NULL DEFAULT '0'"},
             {"blocked", "`blocked` int NOT NULL DEFAULT '0'"},
+            // 多项目改造新增:任务与故事的关联改为 internal_id(见 migrateInternalKeys)
+            {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
+            {"story_ref_legacy", "`story_ref_legacy` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"depends_on_legacy", "`depends_on_legacy` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"kanban_card_id_legacy", "`kanban_card_id_legacy` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
+    /**
+     * 快照列 + internal_id 外键列:与 stories/tasks 换主键同一批改造。
+     * 为什么必须补:业务编号可以在项目内被复用(删了 US01 再建 US01),
+     * 于是"某条日志当时指的是哪个故事"只能靠 internal_id 回答;而故事本身被删之后
+     * 连 internal_id 都查不到东西,所以还要留一份编号快照。缺了这两列,
+     * 删故事(以及写日志)会直接 500 —— 删除失败又会让契约测试的清理留下残留。
+     */
+    private static final String[][] STORY_LOG_COLUMNS = {
+            {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
+            {"story_code_snapshot", "`story_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
+    private static final String[][] ACTIVITY_RECORD_COLUMNS = {
+            {"task_internal_id", "`task_internal_id` bigint DEFAULT NULL"},
+            {"task_code_snapshot", "`task_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
+    private static final String[][] DIFFICULTY_ASSESSMENT_COLUMNS = {
+            {"task_internal_id", "`task_internal_id` bigint DEFAULT NULL"},
+            {"task_code_snapshot", "`task_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
+    private static final String[][] MILESTONE_COLUMNS = {
+            {"related_task_ids_legacy", "`related_task_ids_legacy` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
+    /**
+     * 需要切到「internal_id 自增主键 + code 业务编号」的业务表。
+     * 顺序 = 依赖顺序:stories 必须先于 tasks(tasks.story_internal_id 回填依赖 stories.internal_id)。
+     */
+    private static final String[][] INTERNAL_KEY_TABLES = {
+            {"stories", "uq_stories_project_code"},
+            {"tasks", "uq_tasks_project_code"},
+            {"milestones", "uq_milestones_project_code"},
     };
 
     private static final String[][] USER_COLUMNS = {
@@ -79,6 +123,9 @@ public class SchemaUpgrader implements ApplicationRunner {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
             migrateProjects(conn);
+            added.addAll(migrateInternalKeys(conn));
+            // 数据引用的项目必须在 projects 表里存在,否则接口一律 404「项目不存在或已归档」
+            added.addAll(ensureReferencedProjectsExist(conn));
             if (tableExists(conn, "project_members")) {
                 added.addAll(addMissing(conn, "project_members", PROJECT_MEMBER_COLUMNS));
             }
@@ -90,6 +137,13 @@ public class SchemaUpgrader implements ApplicationRunner {
                     execute(conn, "UPDATE `tasks` SET `estimated_hours` = `hours` WHERE `estimated_hours` = 0");
                     log.info("tasks.estimated_hours 已按 hours 回填");
                 }
+            }
+            // 结构补列完成后才回填:story_internal_id 依赖 stories.internal_id 已存在
+            added.addAll(backfillInternalRefs(conn));
+            added.addAll(backfillReferenceSnapshots(conn));
+            if (tableExists(conn, "milestones")) {
+                added.addAll(addMissing(conn, "milestones", MILESTONE_COLUMNS));
+                added.addAll(backfillMilestoneLegacy(conn));
             }
             if (tableExists(conn, "users")) {
                 added.addAll(addMissing(conn, "users", USER_COLUMNS));
@@ -205,6 +259,402 @@ public class SchemaUpgrader implements ApplicationRunner {
         execute(conn, "UPDATE `"+table+"` SET project_id='P001' WHERE project_id IS NULL OR project_id=''");
         if (!indexExists(conn, table, uniqueName)) execute(conn, "ALTER TABLE `"+table+"` ADD UNIQUE KEY `"+uniqueName+"` (project_id,id)");
         execute(conn, "ALTER TABLE `"+table+"` MODIFY COLUMN project_id varchar(20) NOT NULL");
+    }
+
+    /**
+     * 补建"业务数据引用了、但 {@code projects} 表里没有"的项目。
+     *
+     * <p>为什么必须补:多项目改造给项目加了存在性校验
+     * ({@code ProjectAccessService#requireMember} 查不到项目就 404「项目不存在或已归档」)。
+     * 而老库里的业务数据 {@code project_id} 全是被迁移代码填进去的 {@code P001},
+     * 项目表却只新建了 {@code P002} —— 于是<b>数据全部挂在不存在的项目下</b>:
+     * 表结构修好之后接口不再 500,改成 404,看板/故事/任务依旧一片空白。
+     * 这类"结构对了、数据还是看不见"的断层比缺列更难查,所以判定必须按<b>数据实际引用了什么</b>,
+     * 而不是靠硬编码某个项目号。
+     *
+     * <p>补的是项目行 + 全员成员关系(角色沿用 users.role):少了成员关系,
+     * 下一步 {@code requireMember} 会 403「无权访问该项目」。
+     */
+    private Set<String> ensureReferencedProjectsExist(Connection conn) throws SQLException {
+        if (!tableExists(conn, "projects") || !tableExists(conn, "users")) {
+            return Set.of();
+        }
+        Set<String> existing = new HashSet<>();
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT `id` FROM `projects`")) {
+            while (rs.next()) {
+                existing.add(rs.getString(1));
+            }
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        for (String table : tablesWithColumn(conn, "project_id")) {
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT DISTINCT `project_id` FROM `" + table + "` "
+                         + "WHERE `project_id` IS NOT NULL AND `project_id` <> ''")) {
+                while (rs.next()) {
+                    referenced.add(rs.getString(1));
+                }
+            }
+        }
+        Set<String> added = new HashSet<>();
+        for (String projectId : referenced) {
+            if (existing.contains(projectId)) {
+                continue;
+            }
+            try (PreparedStatement ps = conn.prepareStatement("INSERT IGNORE INTO `projects` "
+                    + "(`id`,`name`,`description`,`status`,`total_sprints`,`created_by`,`created_at`,`updated_at`) "
+                    + "SELECT ?,?,?,'ACTIVE',0,MIN(`id`),NOW(),NOW() FROM `users`")) {
+                ps.setString(1, projectId);
+                ps.setString(2, "爱管理·" + projectId);
+                ps.setString(3, "存量数据所在项目(迁移自动补建)");
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement("INSERT IGNORE INTO `project_members` "
+                    + "(`project_id`,`user_id`,`project_role`,`capacity_hours`,`joined_at`) "
+                    + "SELECT ?,`id`,CASE WHEN `role` IN ('admin','owner') THEN `role` WHEN `role`='viewer' THEN 'viewer' "
+                    + "ELSE 'member' END,`capacity_hours`,NOW() FROM `users`")) {
+                ps.setString(1, projectId);
+                ps.executeUpdate();
+            }
+            added.add("projects." + projectId);
+            log.info("业务数据引用的项目 {} 在 projects 表中缺失,已补建项目与全员成员", projectId);
+        }
+        return added;
+    }
+
+    /** 当前库里所有含指定列的表名(用于按数据判定,不硬编码表清单) */
+    private List<String> tablesWithColumn(Connection conn, String column) throws SQLException {
+        List<String> tables = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT `TABLE_NAME` FROM `information_schema`.`COLUMNS` "
+                + "WHERE `TABLE_SCHEMA` = ? AND `COLUMN_NAME` = ?")) {
+            ps.setString(1, conn.getCatalog());
+            ps.setString(2, column);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    tables.add(rs.getString(1));
+                }
+            }
+        }
+        return tables;
+    }
+
+    /**
+     * 多项目改造的<b>主体</b>:把存量业务表从「业务编号 varchar 主键」切到
+     * 「{@code internal_id} 自增主键 + {@code code} 业务编号」。
+     *
+     * <p>为什么必须有这段代码:schema.sql 只管"表不存在时建表",
+     * 于是<b>新库是对的、老库永远停在旧主键</b> —— 实体({@code Story}/{@code Task}/{@code Milestone})
+     * 的 {@code @TableId} 已经改成 {@code internal_id},老库上任何一次
+     * {@code SELECT internal_id ...} 都会抛
+     * {@code Unknown column 'internal_id' in 'field list'},表现为看板/故事/任务全 500。
+     * 而 {@link #migrateScopedBusinessTable} 只补 {@code project_id},看到缺 internal_id 时
+     * 按旧结构处理就返回了 —— 启动日志因此打印"列集合已是最新",实际什么都没做。
+     *
+     * <p>三步的顺序不能换:
+     * <ol>
+     *   <li>先解绑外键 —— 只要还有 {@code tasks.kanban_card_id → stories.id} 这类约束,
+     *       {@code DROP PRIMARY KEY} 直接 errno 150 失败;</li>
+     *   <li>再换主键 —— {@code internal_id} 必须带 AUTO_INCREMENT 且是键;</li>
+     *   <li>最后 {@code code} —— 值从老主键 {@code id} 复制,保持 US01/T01 这类业务编号不变。</li>
+     * </ol>
+     *
+     * <p>可重复执行:每步都按"列/索引当前是否存在"判定,已切过的表第一次判定即返回。
+     */
+    private Set<String> migrateInternalKeys(Connection conn) throws SQLException {
+        Set<String> added = new HashSet<>();
+        for (String[] spec : INTERNAL_KEY_TABLES) {
+            added.addAll(toInternalKey(conn, spec[0], spec[1]));
+        }
+        return added;
+    }
+
+    /** 单表切换(见 {@link #migrateInternalKeys});返回本次实际变更项 */
+    private Set<String> toInternalKey(Connection conn, String table, String uniqueName) throws SQLException {
+        if (!tableExists(conn, table)) {
+            return Set.of();
+        }
+        Set<String> added = new HashSet<>();
+        Set<String> cols = columns(conn, table);
+        if (cols.contains("internal_id") && cols.contains("code")) {
+            if (!indexColumns(conn, table, uniqueName).equals(Set.of("project_id", "code"))) {
+                if (indexExists(conn, table, uniqueName)) {
+                    execute(conn, "ALTER TABLE `" + table + "` DROP INDEX `" + uniqueName + "`");
+                }
+                execute(conn, "ALTER TABLE `" + table + "` ADD UNIQUE KEY `" + uniqueName + "` (`project_id`,`code`)");
+                added.add(table + "." + uniqueName);
+            }
+            return added;
+        }
+        boolean hasLegacyId = cols.contains("id");
+        if (!cols.contains("project_id")) {
+            execute(conn, "ALTER TABLE `" + table + "` ADD COLUMN `project_id` varchar(20) COLLATE utf8mb4_unicode_ci NULL");
+            added.add(table + ".project_id");
+        }
+        execute(conn, "UPDATE `" + table + "` SET `project_id`='P001' WHERE `project_id` IS NULL OR `project_id`=''");
+
+        // 1) 解绑:任何指向旧主键的外键都会让下一步失败
+        dropForeignKeysReferencing(conn, table);
+        // 2) 换主键
+        if (hasLegacyId && hasPrimaryKeyOn(conn, table, "id")) {
+            execute(conn, "ALTER TABLE `" + table + "` DROP PRIMARY KEY");
+        }
+        if (!cols.contains("internal_id")) {
+            execute(conn, "ALTER TABLE `" + table + "` ADD COLUMN `internal_id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST");
+            added.add(table + ".internal_id");
+            log.info("{}.internal_id 缺失,已切换为自增主键", table);
+        }
+        // 3) 业务编号:值取老主键,保证对外编号(US01/T01/MS01)一个不变
+        if (!cols.contains("code")) {
+            execute(conn, "ALTER TABLE `" + table + "` ADD COLUMN `code` varchar(20) COLLATE utf8mb4_unicode_ci NULL");
+            if (hasLegacyId) {
+                execute(conn, "UPDATE `" + table + "` SET `code`=`id` WHERE `code` IS NULL OR `code`=''");
+            } else {
+                execute(conn, "UPDATE `" + table + "` SET `code`=CONCAT('L',`internal_id`) WHERE `code` IS NULL OR `code`=''");
+            }
+            execute(conn, "ALTER TABLE `" + table + "` MODIFY COLUMN `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL");
+            added.add(table + ".code");
+            log.info("{}.code 缺失,已按老主键回填业务编号", table);
+        }
+        // 老主键列降级为普通可空列:实体已无 id 字段,留 NOT NULL 会让后续插入报
+        // "Field 'id' doesn't have a default value" —— 那比缺列更难查
+        if (hasLegacyId) {
+            execute(conn, "ALTER TABLE `" + table + "` MODIFY COLUMN `id` varchar(20) COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL");
+        }
+        // 唯一键从 (project_id,id) 改成 (project_id,code):编号唯一性从此按项目内 code 判定
+        if (!indexColumns(conn, table, uniqueName).equals(Set.of("project_id", "code"))) {
+            if (indexExists(conn, table, uniqueName)) {
+                execute(conn, "ALTER TABLE `" + table + "` DROP INDEX `" + uniqueName + "`");
+            }
+            execute(conn, "ALTER TABLE `" + table + "` ADD UNIQUE KEY `" + uniqueName + "` (`project_id`,`code`)");
+            added.add(table + "." + uniqueName);
+        }
+        return added;
+    }
+
+    /**
+     * 回填 tasks 侧对故事的引用,以及三个 {@code *_legacy} 列(保留切换前的旧值)。
+     *
+     * <p>{@code story_ref} 是<b>逗号分隔的多值</b>(如 {@code US01,US03,US04}),新结构把它拆成两处:
+     * 第一个编号 → {@code tasks.story_internal_id}(主故事),其余 → {@code task_story_relations}
+     * (附加关系,见 {@code TaskStoryRelationService})。只按整个字符串去 JOIN stories 是<b>匹配不上</b>的,
+     * 多值任务会静默丢掉全部故事关联 —— 这是"看起来迁移完了、关联全没了"那类缺陷。
+     *
+     * <p>判定走"数据当前缺什么",不是"本次是否刚补上列"(DDL 自动提交,补列与回填之间被打断时
+     * 下次仍能接着填,理由同 {@link #backfillAclRank})。
+     */
+    private Set<String> backfillInternalRefs(Connection conn) throws SQLException {
+        if (!tableExists(conn, "tasks") || !tableExists(conn, "stories")) {
+            return Set.of();
+        }
+        Set<String> cols = columns(conn, "tasks");
+        Set<String> added = new HashSet<>();
+        if (!cols.contains("story_internal_id") || !cols.contains("story_ref")) {
+            return Set.of();
+        }
+        if (!columns(conn, "stories").contains("internal_id")) {
+            return Set.of();
+        }
+        if (tableExists(conn, "task_story_relations") && needsTaskStoryBackfill(conn)) {
+            int[] counts = backfillTaskStoryLinks(conn);
+            if (counts[0] > 0) {
+                added.add("tasks.story_internal_id(回填 " + counts[0] + " 行)");
+                log.info("tasks.story_internal_id 已按 story_ref 首编号回填 {} 行", counts[0]);
+            }
+            if (counts[1] > 0) {
+                added.add("task_story_relations(回填 " + counts[1] + " 条附加关联)");
+                log.info("task_story_relations 已按 story_ref 余下编号回填 {} 条", counts[1]);
+            }
+        }
+        // 未匹配上的引用留 NULL 不报错:它只影响"任务→故事"的新关联查询,不影响编号读写
+        if (cols.contains("story_ref_legacy")) {
+            execute(conn, "UPDATE `tasks` SET `story_ref_legacy`=`story_ref` WHERE `story_ref_legacy` IS NULL AND `story_ref` IS NOT NULL");
+        }
+        if (cols.contains("kanban_card_id_legacy")) {
+            execute(conn, "UPDATE `tasks` SET `kanban_card_id_legacy`=`kanban_card_id` WHERE `kanban_card_id_legacy` IS NULL AND `kanban_card_id` IS NOT NULL");
+        }
+        if (cols.contains("depends_on_legacy")) {
+            execute(conn, "UPDATE `tasks` SET `depends_on_legacy`=`depends_on` WHERE `depends_on_legacy` IS NULL AND `depends_on` IS NOT NULL");
+        }
+        return added;
+    }
+
+    /** 补列 + 回填"引用快照":story_logs / activity_records / difficulty_assessments */
+    private Set<String> backfillReferenceSnapshots(Connection conn) throws SQLException {
+        Set<String> added = new HashSet<>();
+        if (tableExists(conn, "story_logs")) {
+            added.addAll(addMissing(conn, "story_logs", STORY_LOG_COLUMNS));
+            added.addAll(snapshotBackfill(conn, "story_logs", "stories", "story_id",
+                    "story_internal_id", "story_code_snapshot"));
+        }
+        if (tableExists(conn, "activity_records")) {
+            added.addAll(addMissing(conn, "activity_records", ACTIVITY_RECORD_COLUMNS));
+            added.addAll(snapshotBackfill(conn, "activity_records", "tasks", "task_id",
+                    "task_internal_id", "task_code_snapshot"));
+        }
+        if (tableExists(conn, "difficulty_assessments")) {
+            added.addAll(addMissing(conn, "difficulty_assessments", DIFFICULTY_ASSESSMENT_COLUMNS));
+            added.addAll(snapshotBackfill(conn, "difficulty_assessments", "tasks", "task_id",
+                    "task_internal_id", "task_code_snapshot"));
+        }
+        return added;
+    }
+
+    /**
+     * 按业务编号回填 internal_id,并把编号原样写进快照列。
+     *
+     * <p>快照<b>先落、且无条件</b>:编号快照的意义就是"目标被删了也认得出来",
+     * 所以哪怕 JOIN 不到 internal_id(故事/任务已删),编号也要先留下来。
+     */
+    private Set<String> snapshotBackfill(Connection conn, String table, String refTable, String codeColumn,
+                                         String internalColumn, String snapshotColumn) throws SQLException {
+        if (!tableExists(conn, refTable)) {
+            return Set.of();
+        }
+        Set<String> cols = columns(conn, table);
+        if (!cols.contains("project_id") || !cols.contains(codeColumn)
+                || !cols.contains(internalColumn) || !cols.contains(snapshotColumn)) {
+            return Set.of();
+        }
+        Set<String> refCols = columns(conn, refTable);
+        if (!refCols.contains("internal_id") || !refCols.contains("code")) {
+            return Set.of();
+        }
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT 1 FROM `" + table + "` WHERE `" + internalColumn + "` IS NULL "
+                     + "AND `" + codeColumn + "` IS NOT NULL AND `" + codeColumn + "` <> '' LIMIT 1")) {
+            if (!rs.next()) {
+                return Set.of();
+            }
+        }
+        execute(conn, "UPDATE `" + table + "` SET `" + snapshotColumn + "` = `" + codeColumn + "` "
+                + "WHERE `" + snapshotColumn + "` IS NULL AND `" + codeColumn + "` IS NOT NULL AND `" + codeColumn + "` <> ''");
+        int rows;
+        try (Statement st = conn.createStatement()) {
+            rows = st.executeUpdate("UPDATE `" + table + "` t JOIN `" + refTable + "` r "
+                    + "ON r.`project_id` = t.`project_id` AND r.`code` = t.`" + codeColumn + "` "
+                    + "SET t.`" + internalColumn + "` = r.`internal_id` "
+                    + "WHERE t.`" + internalColumn + "` IS NULL");
+        }
+        return rows > 0 ? Set.of(table + "." + internalColumn) : Set.of();
+    }
+
+    /** 是否还有"story_ref 有值但主故事/附加关系没落库"的任务 —— 回填的唯一依据 */
+    private boolean needsTaskStoryBackfill(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT 1 FROM `tasks` t WHERE t.`story_ref` IS NOT NULL "
+                     + "AND t.`story_ref` <> '' AND (t.`story_internal_id` IS NULL "
+                     + "OR (t.`story_ref` LIKE '%,%' AND NOT EXISTS (SELECT 1 FROM `task_story_relations` r "
+                     + "WHERE r.`task_internal_id` = t.`internal_id`))) LIMIT 1")) {
+            return rs.next();
+        }
+    }
+
+    /** 拆 story_ref 回填主故事与附加关系;返回 {主故事行数, 附加关系条数} */
+    private int[] backfillTaskStoryLinks(Connection conn) throws SQLException {
+        int primary = 0;
+        int extra = 0;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT `internal_id`,`project_id`,`story_ref` FROM `tasks` "
+                        + "WHERE `story_ref` IS NOT NULL AND `story_ref` <> ''")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long taskInternalId = rs.getLong(1);
+                    String projectId = rs.getString(2);
+                    List<String> codes = parseRefs(rs.getString(3));
+                    if (codes.isEmpty()) {
+                        continue;
+                    }
+                    Long primaryId = storyInternalId(conn, projectId, codes.get(0));
+                    if (primaryId != null && setStoryInternalId(conn, taskInternalId, primaryId)) {
+                        primary++;
+                    }
+                    for (String code : codes.subList(1, codes.size())) {
+                        Long storyId = storyInternalId(conn, projectId, code);
+                        if (storyId != null && insertRelation(conn, projectId, taskInternalId, storyId)) {
+                            extra++;
+                        }
+                    }
+                }
+            }
+        }
+        return new int[]{primary, extra};
+    }
+
+    /** 逗号分隔的业务编号 → 去空白后的编号列表 */
+    private List<String> parseRefs(String value) {
+        List<String> codes = new ArrayList<>();
+        if (value == null) {
+            return codes;
+        }
+        for (String part : value.split(",")) {
+            String code = part.trim();
+            if (!code.isEmpty()) {
+                codes.add(code);
+            }
+        }
+        return codes;
+    }
+
+    private Long storyInternalId(Connection conn, String projectId, String code) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT `internal_id` FROM `stories` WHERE `project_id` = ? AND `code` = ? LIMIT 1")) {
+            ps.setString(1, projectId);
+            ps.setString(2, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : null;
+            }
+        }
+    }
+
+    private boolean setStoryInternalId(Connection conn, long taskInternalId, long storyId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "UPDATE `tasks` SET `story_internal_id` = ? WHERE `internal_id` = ? AND `story_internal_id` IS NULL")) {
+            ps.setLong(1, storyId);
+            ps.setLong(2, taskInternalId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    /** 附加关系;UNIQUE(project_id,task,story) 已存在时 INSERT IGNORE 直接跳过(幂等) */
+    private boolean insertRelation(Connection conn, String projectId, long taskInternalId, long storyId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT IGNORE INTO `task_story_relations` (`project_id`,`task_internal_id`,`story_internal_id`,`created_at`,`updated_at`) "
+                        + "VALUES (?,?,?,NOW(),NOW())")) {
+            ps.setString(1, projectId);
+            ps.setLong(2, taskInternalId);
+            ps.setLong(3, storyId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    private Set<String> backfillMilestoneLegacy(Connection conn) throws SQLException {
+        Set<String> cols = columns(conn, "milestones");
+        if (!cols.contains("related_task_ids_legacy") || !cols.contains("related_task_ids")) {
+            return Set.of();
+        }
+        int n;
+        try (Statement st = conn.createStatement()) {
+            n = st.executeUpdate("UPDATE `milestones` SET `related_task_ids_legacy`=`related_task_ids` "
+                    + "WHERE `related_task_ids_legacy` IS NULL AND `related_task_ids` IS NOT NULL");
+        }
+        return n > 0 ? Set.of("milestones.related_task_ids_legacy") : Set.of();
+    }
+
+    /** 索引当前包含的列名(小写);索引不存在返回空集 —— 用于判定"名字在但列变了" */
+    private Set<String> indexColumns(Connection conn, String table, String indexName) throws SQLException {
+        Set<String> cols = new HashSet<>();
+        try (PreparedStatement ps = conn.prepareStatement("SHOW INDEX FROM `" + table + "` WHERE `Key_name` = ?")) {
+            ps.setString(1, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String column = rs.getString("Column_name");
+                    if (column != null) {
+                        cols.add(column.toLowerCase());
+                    }
+                }
+            }
+        }
+        return cols;
     }
 
     private void addProjectColumn(Connection conn, String table) throws SQLException {

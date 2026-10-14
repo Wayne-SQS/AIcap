@@ -118,7 +118,7 @@ public class AssignmentSuggestionService {
             return old;
         }
         var snapshot=body.path("result").path("context").path("selected_stories").get(0);
-        var stories=jdbc.queryForList("SELECT id,title,status,sprint,owner_id FROM stories WHERE id=? FOR UPDATE",snapshot.path("id").asText());
+        var stories=jdbc.queryForList("SELECT code AS id,title,status,sprint,owner_id FROM stories WHERE code=? FOR UPDATE",snapshot.path("id").asText());
         if(stories.isEmpty()) throw ApiException.conflict("目标故事不存在");
         var current=mapper.valueToTree(stories.getFirst());
         for(var field:List.of("id","title","status","sprint","owner_id"))
@@ -159,7 +159,7 @@ public class AssignmentSuggestionService {
             var users=jdbc.queryForList("SELECT role FROM users WHERE id=? FOR UPDATE",body.path("member_id").asInt());
             if(users.isEmpty() || !Set.of("admin","owner","member").contains(users.getFirst().get("role").toString())) throw ApiException.conflict("所选成员已不可分配，请重新查询");
             var snapshot=saved.path("context").path("selected_stories").get(0);
-            var stories=jdbc.queryForList("SELECT title,status,sprint,owner_id FROM stories WHERE id=? FOR UPDATE",snapshot.path("id").asText());
+            var stories=jdbc.queryForList("SELECT title,status,sprint,owner_id FROM stories WHERE code=? FOR UPDATE",snapshot.path("id").asText());
             if(stories.isEmpty()) throw ApiException.conflict("目标故事不存在");
             var current=mapper.valueToTree(stories.getFirst());
             for(var field:List.of("title","status","sprint","owner_id")) if(!current.path(field).equals(snapshot.path(field))) throw ApiException.conflict("故事已变化，请重新查询候选");
@@ -187,13 +187,13 @@ public class AssignmentSuggestionService {
         if(users.isEmpty() || !Set.of("admin","owner","member").contains(users.getFirst().get("role").toString())) throw ApiException.conflict("所选成员已不可分配，请重新查询并审核");
         var snapshot=json(record.get("result_json")).path("context").path("selected_stories").get(0);
         String storyId=snapshot.path("id").asText();
-        var stories=jdbc.queryForList("SELECT title,status,sprint,owner_id FROM stories WHERE id=? FOR UPDATE",storyId);
+        var stories=jdbc.queryForList("SELECT title,status,sprint,owner_id FROM stories WHERE code=? FOR UPDATE",storyId);
         if(stories.isEmpty()) throw ApiException.conflict("目标故事不存在");
         var current=mapper.valueToTree(stories.getFirst());
         for(var field:List.of("title","status","sprint","owner_id"))
             if(!current.path(field).equals(snapshot.path(field))) throw ApiException.conflict("故事已变化，请重新查询并审核");
         if(current.path("owner_id").isInt() && current.path("owner_id").asInt()==owner) throw ApiException.conflict("负责人未变化，无需执行");
-        if(jdbc.update("UPDATE stories SET owner_id=? WHERE id=?",owner,storyId)!=1) throw ApiException.conflict("故事已变化");
+        if(jdbc.update("UPDATE stories SET owner_id=? WHERE code=?",owner,storyId)!=1) throw ApiException.conflict("故事已变化");
         var keys=new org.springframework.jdbc.support.GeneratedKeyHolder();
         String detail="会议分配建议执行："+current.path("owner_id")+" → "+owner+"；meeting="+meetingId+"；suggestion="+id;
         jdbc.update(connection -> {

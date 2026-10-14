@@ -67,7 +67,7 @@ public class PlanningProposalExecutionService {
         var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE id=? FOR UPDATE",storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("sprint")).intValue()!=before)
             throw ApiException.conflict("故事不存在或Sprint已变化，请重新分析");
-        if(jdbc.update("UPDATE stories SET sprint=? WHERE id=? AND sprint=?",after,storyId,before)!=1)
+        if(jdbc.update("UPDATE stories SET sprint=? WHERE code=? AND sprint=?",after,storyId,before)!=1)
             throw ApiException.conflict("故事Sprint已变化，请重新分析");
         String detail="会议Sprint提案执行："+before+" → "+after+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();

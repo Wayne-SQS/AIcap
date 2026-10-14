@@ -2,9 +2,12 @@ import { api } from './client'
 
 const base = meetingId => `/api/meetings/${encodeURIComponent(meetingId)}/refinement-analyses`
 const record = (meetingId, analysisId) => `${base(meetingId)}/${encodeURIComponent(analysisId)}`
+// 审核与执行都是写操作，服务端要项目上下文（projectId 必填）：故事编号是"项目内唯一"，
+// 没有它就会 422。其余分析类的列表接口不受影响。
+const scoped = (path, projectId) => `${path}?projectId=${encodeURIComponent(projectId || '')}`
 
-async function execute(meetingId, analysisId, proposalId) {
-  const result = await api(`${record(meetingId, analysisId)}/proposal-executions`, {
+async function execute(meetingId, analysisId, proposalId, projectId) {
+  const result = await api(scoped(`${record(meetingId, analysisId)}/proposal-executions`, projectId), {
     method: 'POST', body: JSON.stringify({ proposal_id: proposalId })
   })
   const positiveId = value => Number.isSafeInteger(value) && value > 0
@@ -23,8 +26,9 @@ async function execute(meetingId, analysisId, proposalId) {
 
 export const refinementAnalysesApi = {
   execute,
-  review: (meetingId, analysisId, payload) => api(`${record(meetingId, analysisId)}/proposal-reviews`, { method: 'POST', body: JSON.stringify(payload) }),
+  review: (meetingId, analysisId, payload, projectId) =>
+    api(scoped(`${record(meetingId, analysisId)}/proposal-reviews`, projectId), { method: 'POST', body: JSON.stringify(payload) }),
   list: meetingId => api(base(meetingId)),
-  reviews: (meetingId, analysisId) => api(`${record(meetingId, analysisId)}/proposal-reviews`),
-  executions: (meetingId, analysisId) => api(`${record(meetingId, analysisId)}/proposal-executions`)
+  reviews: (meetingId, analysisId, projectId) => api(scoped(`${record(meetingId, analysisId)}/proposal-reviews`, projectId)),
+  executions: (meetingId, analysisId, projectId) => api(scoped(`${record(meetingId, analysisId)}/proposal-executions`, projectId))
 }

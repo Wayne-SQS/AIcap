@@ -2,11 +2,13 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { refinementAnalysesApi } from '@/api/refinementAnalyses'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 import { activities } from '@/constants'
 
 const props = defineProps({ meetingId: String, analysisId: String, proposal: Object })
 const emit = defineEmits(['saved', 'refresh'])
 const meeting = useMeetingStore()
+const projects = useProjectsStore()
 const changes = ref({ ...props.proposal.changes })
 const labels = { title: '标题', description: '描述', acceptance: '验收标准', priority: '优先级', sprint: 'Sprint', activity: '活动' }
 const missing = value => Object.keys(labels).filter(key => value[key] == null || (typeof value[key] === 'string' && !value[key].trim()))
@@ -36,7 +38,7 @@ async function submit() {
     }
   }
   busy.value = true
-  try { await refinementAnalysesApi.review(props.meetingId, props.analysisId, payload); if (mounted) emit('saved') }
+  try { await refinementAnalysesApi.review(props.meetingId, props.analysisId, payload, projects.currentProjectId); if (mounted) emit('saved') }
   catch (err) { if (mounted) error.value = `未能确认审核结果：${err.message}。请刷新处理状态核对，或重试同一决定。` }
   finally { if (mounted) busy.value = false }
 }

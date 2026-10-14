@@ -33,8 +33,14 @@ public class RefinementProposalExecutionService {
         for(String key:List.of("story_log_id","executed_by")) result.put(key,((Number)row.get(key)).intValue());
         return result;
     }
+    /**
+     * @param projectId 项目上下文。多项目改造后故事编号是"项目内唯一",分配编号与落库都必须带它;
+     *                  这里曾经调无参的 {@code nextStoryId()},那个重载只剩一句
+     *                  {@code throw badRequest("projectId 必填")} —— 于是「采纳建议 → 建故事」
+     *                  这条链路<b>恒 400</b>,而且是真机也坏、不只是测试红。
+     */
     @Transactional
-    public ObjectNode execute(String meetingId,String analysisId,JsonNode body,int executorId) {
+    public ObjectNode execute(String projectId,String meetingId,String analysisId,JsonNode body,int executorId) {
         if(body==null || !body.isObject() || body.size()!=1 || !body.path("proposal_id").isTextual()
                 || body.path("proposal_id").asText().isBlank() || body.path("proposal_id").asText().length()>80)
             throw ApiException.unprocessable("执行请求只能包含proposal_id");
@@ -55,19 +61,34 @@ public class RefinementProposalExecutionService {
         if(!approved.path("action").asText().equals("create_story")) throw ApiException.conflict("批准动作无效");
         var changes=approved.path("changes");
         RefinementProposalReviewService.requireComplete(changes);
-        for (var story : jdbc.queryForList("SELECT id,title FROM stories ORDER BY id FOR UPDATE")) {
+        // 同名检查与编号分配都必须限定在项目内:编号在不同项目里可以重复(US01 各项目都有)
+        for (var story : jdbc.queryForList("SELECT code,title FROM stories WHERE project_id=? ORDER BY code FOR UPDATE",projectId)) {
             if (RefinementProposalReviewService.titleKey(story.get("title").toString()).equals(
                     RefinementProposalReviewService.titleKey(changes.path("title").asText())))
                 throw ApiException.conflict("已有同名故事，请重新分析审核");
         }
-        String storyId=idAllocator.nextStoryId();
-        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status,owner_id,created_at) VALUES (?,?,?,?,?,?,?,0,NULL,CURRENT_TIMESTAMP)",
-            storyId,changes.path("title").asText().strip(),changes.path("description").asText(),changes.path("acceptance").asText(),
-            changes.path("priority").asText(),changes.path("sprint").intValue(),changes.path("activity").intValue());
+        String storyId=idAllocator.nextStoryId(projectId);
+        var storyKey=new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            var statement=connection.prepareStatement(
+                "INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status,owner_id,created_at) "
+                + "VALUES (?,?,?,?,?,?,?,?,0,NULL,CURRENT_TIMESTAMP)",new String[]{"internal_id"});
+            statement.setString(1,projectId);statement.setString(2,storyId);
+            statement.setString(3,changes.path("title").asText().strip());statement.setString(4,changes.path("description").asText());
+            statement.setString(5,changes.path("acceptance").asText());statement.setString(6,changes.path("priority").asText());
+            statement.setInt(7,changes.path("sprint").intValue());statement.setInt(8,changes.path("activity").intValue());
+            return statement;
+        },storyKey);
+        Long storyInternalId = storyKey.getKey()==null ? null : storyKey.getKey().longValue();
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs(story_id,log_type,detail,user_id,created_at) VALUES (?,'create',?,?,CURRENT_TIMESTAMP)",new String[]{"id"});
-            statement.setString(1,storyId);statement.setString(2,approved.toString());statement.setInt(3,executorId);return statement;
+            var statement=connection.prepareStatement(
+                "INSERT INTO story_logs(project_id,story_internal_id,story_code_snapshot,story_id,log_type,detail,user_id,created_at) "
+                + "VALUES (?,?,?,?,'create',?,?,CURRENT_TIMESTAMP)",new String[]{"id"});
+            statement.setString(1,projectId);
+            if (storyInternalId==null) statement.setNull(2,java.sql.Types.BIGINT); else statement.setLong(2,storyInternalId);
+            statement.setString(3,storyId);
+            statement.setString(4,storyId);statement.setString(5,approved.toString());statement.setInt(6,executorId);return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();
         jdbc.update("INSERT INTO meeting_refinement_proposal_executions(analysis_id,proposal_index,proposal_id,story_id,story_log_id,executed_by) VALUES (?,?,?,?,?,?)",

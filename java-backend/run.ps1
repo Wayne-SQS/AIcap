@@ -38,6 +38,14 @@ if ($pathJava) { $javaCandidates += $pathJava.Source }
 $java = $javaCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $java) { Write-Host '[错误] 未找到 java.exe，请设置 JAVA_HOME 或安装 JDK 23'; exit 1 }
 
+# Profile agent reads its own PROFILE_LLM_* prefix; without it the agent silently
+# degrades to the rule engine. Mirror AICAP_LLM_* when PROFILE_LLM_* is unset.
+if ($env:AICAP_LLM_API_KEY) {
+  if (-not $env:PROFILE_LLM_API_KEY)  { $env:PROFILE_LLM_API_KEY  = $env:AICAP_LLM_API_KEY }
+  if (-not $env:PROFILE_LLM_BASE_URL) { $env:PROFILE_LLM_BASE_URL = $env:AICAP_LLM_BASE_URL }
+  if (-not $env:PROFILE_LLM_MODEL)    { $env:PROFILE_LLM_MODEL    = $env:AICAP_LLM_MODEL }
+}
+
 # 4. 启动；控制台输出持续写入文件，避免无人消费的 stdout/stderr 管道阻塞 Worker。
 $jar = Join-Path $here 'target\aicap-java-backend.jar'
 if (-not (Test-Path $jar)) { Write-Host "[错误] 找不到 $jar,请先执行 run-build.bat"; exit 1 }

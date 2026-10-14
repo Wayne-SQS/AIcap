@@ -113,7 +113,7 @@ public class RefinementProposalReviewService {
         if (input.changes()!=null && approved.get("changes").equals(original.get("changes")))
             throw ApiException.unprocessable("修改后接受必须改变故事内容");
         requireComplete(approved.path("changes"));
-        for (var story : jdbc.queryForList("SELECT id,title FROM stories ORDER BY id FOR UPDATE"))
+        for (var story : jdbc.queryForList("SELECT code AS id,title FROM stories ORDER BY code FOR UPDATE"))
             if (titleKey(story.get("title").toString()).equals(titleKey(approved.at("/changes/title").asText())))
                 throw ApiException.conflict("已有同名故事，请修改或拒绝提案");
     }

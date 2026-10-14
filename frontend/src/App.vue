@@ -5,6 +5,8 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ToastBox from '@/components/ToastBox.vue'
 import LoginDialog from '@/components/LoginDialog.vue'
+import SupervisorAvatar from '@/components/SupervisorAvatar.vue'
+import SupervisorChat from '@/components/SupervisorChat.vue'
 
 const project = useProjectStore()
 
@@ -30,4 +32,7 @@ watch(dataSignature, () => project.checkConsistency())
   </div>
   <ToastBox />
   <LoginDialog />
+  <!-- 「本」是全站唯一 AI 入口:其它入口都保留着,但这里是"进办公室"的那扇门 -->
+  <SupervisorAvatar />
+  <SupervisorChat />
 </template>

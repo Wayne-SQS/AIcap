@@ -20,10 +20,10 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
           """)); return value;
     }
     org.springframework.mock.web.MockHttpServletResponse review(String id,JsonNode input) throws Exception {
-        return mvc.perform(post(path+"/"+id+"/proposal-reviews").contentType("application/json").content(input.toString())).andReturn().getResponse();
+        return mvc.perform(post(path+"/"+id+"/proposal-reviews").param("projectId","P001").contentType("application/json").content(input.toString())).andReturn().getResponse();
     }
     org.springframework.mock.web.MockHttpServletResponse execute(String id) throws Exception {
-        return mvc.perform(post(path+"/"+id+"/proposal-executions").contentType("application/json").content("{\"proposal_id\":\"p1\"}")).andReturn().getResponse();
+        return mvc.perform(post(path+"/"+id+"/proposal-executions").param("projectId","P001").contentType("application/json").content("{\"proposal_id\":\"p1\"}")).andReturn().getResponse();
     }
     int rows(String table) { return jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Integer.class); }
 
@@ -36,14 +36,14 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         var response=execute(id); assertEquals(200,response.getStatus(),response.getContentAsString());
         var execution=mapper.readTree(response.getContentAsByteArray());
         assertEquals("US15",execution.path("story_id").asText());
-        var story=jdbc.queryForMap("SELECT * FROM stories WHERE id='US15'");
+        var story=jdbc.queryForMap("SELECT * FROM stories WHERE code='US15'");
         assertEquals("导出周报CSV",story.get("title")); assertEquals("Should",story.get("priority"));
         assertEquals(3,story.get("sprint")); assertEquals(4,story.get("activity")); assertEquals(0,story.get("status")); assertNull(story.get("owner_id"));
         var log=jdbc.queryForMap("SELECT * FROM story_logs WHERE story_id='US15'");
         assertEquals(execution.path("story_log_id").intValue(),((Number)log.get("id")).intValue());
         assertEquals(amended().get("changes"),mapper.readTree(log.get("detail").toString()).get("changes"));
         assertEquals(original,service.get("m1",id));
-        jdbc.update("UPDATE stories SET title='后续人工修改' WHERE id='US15'");
+        jdbc.update("UPDATE stories SET title='后续人工修改' WHERE code='US15'");
         assertEquals(execution,mapper.readTree(execute(id).getContentAsByteArray()));
         assertEquals(3,rows("stories")); assertEquals(1,rows("story_logs"));
         assertEquals(409,review(id,decision("reject")).getStatus());
@@ -85,7 +85,7 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         String id=saved(); role("admin"); var input=amended(); ((ObjectNode)input.get("changes")).put("title"," 登录 ");
         assertEquals(409,review(id,input).getStatus());
         assertEquals(200,review(id,amended()).getStatus());
-        jdbc.update("UPDATE stories SET title='导出周报CSV' WHERE id='US13'");
+        jdbc.update("UPDATE stories SET title='导出周报CSV' WHERE code='US13'");
         assertEquals(409,execute(id).getStatus()); assertEquals(0,rows("story_logs")); assertEquals(2,rows("stories"));
     }
 
@@ -103,7 +103,7 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         var executor=context.getBean(RefinementProposalExecutionService.class);
         var pool=Executors.newFixedThreadPool(2); var barrier=new CyclicBarrier(2);
         try {
-            Callable<ObjectNode> job=()->{barrier.await(5,TimeUnit.SECONDS);return executor.execute("m1",id,mapper.readTree("{\"proposal_id\":\"p1\"}"),1);};
+            Callable<ObjectNode> job=()->{barrier.await(5,TimeUnit.SECONDS);return executor.execute("P001","m1",id,mapper.readTree("{\"proposal_id\":\"p1\"}"),1);};
             var a=pool.submit(job); var b=pool.submit(job);
             assertEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
             assertEquals(3,rows("stories")); assertEquals(1,rows("story_logs")); assertEquals(1,rows("meeting_refinement_proposal_executions"));
@@ -114,8 +114,8 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         String id=saved(); role("admin"); assertEquals(200,review(id,amended()).getStatus()); assertEquals(200,execute(id).getStatus());
         role("viewer");
         for(String resource:java.util.List.of("proposal-reviews","proposal-executions")) {
-            assertEquals(200,mvc.perform(get(path+"/"+id+"/"+resource)).andReturn().getResponse().getStatus());
-            assertEquals(404,mvc.perform(get("/api/meetings/other/refinement-analyses/"+id+"/"+resource)).andReturn().getResponse().getStatus());
+            assertEquals(200,mvc.perform(get(path+"/"+id+"/"+resource).param("projectId","P001")).andReturn().getResponse().getStatus());
+            assertEquals(404,mvc.perform(get("/api/meetings/other/refinement-analyses/"+id+"/"+resource).param("projectId","P001")).andReturn().getResponse().getStatus());
         }
     }
 }

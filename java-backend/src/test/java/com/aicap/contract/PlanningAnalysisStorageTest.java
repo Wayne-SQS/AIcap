@@ -58,7 +58,7 @@ class PlanningAnalysisStorageTest {
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
         jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/planning-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -77,8 +77,8 @@ class PlanningAnalysisStorageTest {
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
         jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "决定US13移至Sprint 2。\n\nUS14 开始开发。");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',1,1,NULL)");
-        jdbc.update("INSERT INTO stories VALUES ('US14','权限',0,2,NULL)");
+        jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',1,1,NULL)");
+        jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US14','US14','权限',0,2,NULL)");
         mvc = MockMvcBuilders.standaloneSetup(new PlanningAnalysisController(service),
                 new PlanningProposalReviewController(context.getBean(PlanningProposalReviewService.class)),
                 new PlanningProposalExecutionController(context.getBean(PlanningProposalExecutionService.class)))

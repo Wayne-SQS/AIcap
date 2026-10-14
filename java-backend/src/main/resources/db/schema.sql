@@ -260,6 +260,8 @@ CREATE TABLE IF NOT EXISTS `activity_records` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
   `task_id` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务(Txx),可空=未关联',
+  `task_internal_id` bigint DEFAULT NULL COMMENT '关联任务的 internal_id(多项目改造后任务主键不再是编号)',
+  `task_code_snapshot` varchar(20) DEFAULT NULL COMMENT '任务编号快照:任务删除后仍能显示当时的 Txx',
   `activity_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'commit/pr/review/bugfix/task_done/note/test',
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '活动标题,如「修复登录接口 401」',
   `detail` varchar(1000) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT '证据细节',

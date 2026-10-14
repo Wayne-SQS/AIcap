@@ -2,6 +2,7 @@ package com.aicap.contract;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,6 +65,14 @@ public abstract class ContractTestSupport {
     /** 每个会议 transcript 都包含的片段(证据引用它,满足"证据必须是会议原文连续片段") */
     protected static final String EVIDENCE_FRAGMENT = "增加成员批量导入功能以降低管理员操作成本";
 
+    /**
+     * 多项目改造后 {@code projectId} 是所有业务接口的<b>必填</b>参数(见
+     * {@code ProjectAccessService#requireMember}),契约测试的调用点一律不带它 ——
+     * 于是每个用例都卡在同一个 422 上,真正的断言根本跑不到。
+     * 这里统一注入,让测试重新测到业务行为;值取存量数据与播种所在的项目。
+     */
+    protected static final String PROJECT_ID = "P001";
+
     /** 种子故事 ID 集合 US01..US37;之外的任何故事编号(含旧 Mxx、测试自造的 US38+)一律视为测试残留 */
     private static final Pattern SEEDED_STORY = Pattern.compile("^US(0[1-9]|[12][0-9]|3[0-7])$");
 
@@ -107,23 +117,44 @@ public abstract class ContractTestSupport {
     // ------------------------------------------------------------------
 
     protected ApiResponse request(HttpMethod method, String path, String token, String jsonBody) {
+        return request(method, path, token, jsonBody, true);
+    }
+
+    /**
+     * 少数用例专门验证"缺 project_id 会被拒"({@code plat19}),这时注入反而会让它通过 ——
+     * 走这个方法显式关掉注入。
+     */
+    protected ApiResponse requestWithoutProject(HttpMethod method, String path, String token, String jsonBody) {
+        return request(method, path, token, jsonBody, false);
+    }
+
+    protected ApiResponse request(HttpMethod method, String path, String token, String jsonBody, boolean injectProject) {
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE);
         if (token != null) {
             headers.setBearerAuth(token);
         }
+        String scopedBody = jsonBody;
+        if (injectProject && bodyProjectKey(path) != null) {
+            try {
+                scopedBody = withProjectBody(path, jsonBody);
+            } catch (IOException e) {
+                throw new AssertionError("无法为 " + path + " 的请求体补项目字段: " + e);
+            }
+        }
         HttpEntity<byte[]> entity;
-        if (jsonBody != null) {
+        if (scopedBody != null) {
             headers.setContentType(MediaType.APPLICATION_JSON);
-            entity = new HttpEntity<>(jsonBody.getBytes(StandardCharsets.UTF_8), headers);
+            entity = new HttpEntity<>(scopedBody.getBytes(StandardCharsets.UTF_8), headers);
         } else {
             entity = new HttpEntity<>(headers);
         }
         ResponseEntity<byte[]> resp;
+        String scopedPath = withProject(path);
         try {
-            resp = rest.exchange(path, method, entity, byte[].class);
+            resp = rest.exchange(scopedPath, method, entity, byte[].class);
         } catch (Exception e) {
-            throw new AssertionError("HTTP 调用异常 " + method + " " + path + ": " + e);
+            throw new AssertionError("HTTP 调用异常 " + method + " " + scopedPath + ": " + e);
         }
         byte[] raw = resp.getBody();
         String body = raw == null ? "" : new String(raw, StandardCharsets.UTF_8);
@@ -136,6 +167,59 @@ public abstract class ContractTestSupport {
             }
         }
         return new ApiResponse(resp.getStatusCode().value(), json, body);
+    }
+
+    /**
+     * 少数接口把项目放在<b>请求体</b>里而不是 query 上,且 DTO 是 strict(未知字段拒绝),
+     * 所以不能对所有 body 无脑注入 —— 这里只列确实需要它的路径。
+     */
+    private static final Map<String, String> BODY_PROJECT_PATHS = Map.of(
+            "/api/meetings", "project_id",      // MeetingDtos.MeetingIn
+            "/api/agents/tools/", "project_id"  // 工具层用 JsonNode 接收,服务层读 project_id
+    );
+
+    private String bodyProjectKey(String path) {
+        if (path == null) {
+            return null;
+        }
+        for (Map.Entry<String, String> entry : BODY_PROJECT_PATHS.entrySet()) {
+            if (entry.getKey().endsWith("/") ? path.startsWith(entry.getKey()) : path.equals(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    /** 给需要项目上下文的 JSON body 补上项目字段;body 为空时只在该接口确实需要时才造一个 */
+    private String withProjectBody(String path, String jsonBody) throws IOException {
+        String key = bodyProjectKey(path);
+        if (key == null) {
+            return jsonBody;
+        }
+        ObjectNode node = jsonBody == null || jsonBody.isBlank()
+                ? om.createObjectNode()
+                : (ObjectNode) om.readTree(jsonBody);
+        if (node.path(key).isMissingNode() || node.path(key).isNull()) {
+            node.put(key, PROJECT_ID);
+        }
+        return om.writeValueAsString(node);
+    }
+
+    /**
+     * 给业务接口补 {@code projectId}(见 {@link #PROJECT_ID})。
+     * 登录、项目列表这类与项目无关的接口不加 —— 它们没有该参数,加了也无意义。
+     */
+    private String withProject(String path) {
+        if (path == null || !path.startsWith("/api/")) {
+            return path;
+        }
+        if (path.contains("projectId") || path.contains("project_id")) {
+            return path;
+        }
+        if (path.startsWith("/api/auth") || path.startsWith("/api/projects")) {
+            return path;
+        }
+        return path + (path.contains("?") ? "&" : "?") + "projectId=" + PROJECT_ID;
     }
 
     protected ApiResponse get(String path, String token) {

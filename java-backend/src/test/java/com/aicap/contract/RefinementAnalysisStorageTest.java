@@ -39,14 +39,19 @@ class RefinementAnalysisStorageTest {
         @Bean com.aicap.service.ReviewQueueShadowIndexService shadow() {
             return org.mockito.Mockito.mock(com.aicap.service.ReviewQueueShadowIndexService.class);
         }
+        // 控制器在改造成"必带 projectId"后依赖它做权限校验;本类测的是提案流转,不是权限,桩掉即可
+        @Bean com.aicap.service.ProjectAccessService projectAccess() {
+            return org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class);
+        }
         @Bean Validator validator() { return Validation.buildDefaultValidatorFactory().getValidator(); }
         @Bean com.aicap.service.IdAllocator allocator(JdbcTemplate jdbc) {
             // Real allocator; its two mapper reads use this same isolated JDBC datasource.
             var stories=(com.aicap.mapper.StoryMapper)java.lang.reflect.Proxy.newProxyInstance(
                 getClass().getClassLoader(),new Class[]{com.aicap.mapper.StoryMapper.class},(proxy,method,args)->{
-                    if(method.getName().equals("selectList")) return jdbc.queryForList("SELECT id FROM stories").stream().map(row->{
-                        var story=new com.aicap.entity.Story(); story.setId(row.get("id").toString()); return story;
+                    if(method.getName().equals("selectList")) return jdbc.queryForList("SELECT code FROM stories").stream().map(row->{
+                        var story=new com.aicap.entity.Story(); story.setId(row.get("code").toString()); return story;
                     }).toList();
+                    if(method.getName().equals("selectOne")) return null;
                     if(method.getName().equals("selectById")) {
                         var rows=jdbc.queryForList("SELECT id FROM stories WHERE id=?",args[0]);
                         if(rows.isEmpty()) return null;
@@ -71,7 +76,9 @@ class RefinementAnalysisStorageTest {
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
         jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(id varchar(10) primary key,title varchar(200),status int,sprint int,owner_id int)");
+        // 新主键结构(internal_id + code)；旧 id 列按迁移后的样子保留为普通可空列并填同值，
+        // 用例里若干断言仍按业务编号定位，两列都存在才不会互相打架
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20),code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/refinement-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -80,12 +87,12 @@ class RefinementAnalysisStorageTest {
         ddl = ddl.replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", "");
         jdbc.execute(ddl);
         jdbc.execute(ddl);
-        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
         jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "决定新增周报导出。\n\nUS14 开始开发。");
-        jdbc.update("INSERT INTO stories VALUES ('US13','登录',1,1,NULL)");
-        jdbc.update("INSERT INTO stories VALUES ('US14','权限',0,2,NULL)");
+        jdbc.update("INSERT INTO stories(project_id,code,id,title,status,sprint,owner_id) VALUES ('P001','US13','US13','登录',1,1,NULL)");
+        jdbc.update("INSERT INTO stories(project_id,code,id,title,status,sprint,owner_id) VALUES ('P001','US14','US14','权限',0,2,NULL)");
         for (String column : java.util.List.of("description text", "acceptance text", "priority varchar(10)", "activity int", "created_at timestamp"))
             jdbc.execute("ALTER TABLE stories ADD " + column);
         for(String resource:java.util.List.of("refinement-proposal-reviews","refinement-proposal-executions")) {
@@ -95,8 +102,10 @@ class RefinementAnalysisStorageTest {
             }
         }
         mvc = MockMvcBuilders.standaloneSetup(new RefinementAnalysisController(service),
-                new com.aicap.controller.RefinementProposalReviewController(context.getBean(com.aicap.service.RefinementProposalReviewService.class)),
-                new com.aicap.controller.RefinementProposalExecutionController(context.getBean(com.aicap.service.RefinementProposalExecutionService.class)))
+                new com.aicap.controller.RefinementProposalReviewController(context.getBean(com.aicap.service.RefinementProposalReviewService.class),
+                        context.getBean(com.aicap.service.ProjectAccessService.class)),
+                new com.aicap.controller.RefinementProposalExecutionController(context.getBean(com.aicap.service.RefinementProposalExecutionService.class),
+                        context.getBean(com.aicap.service.ProjectAccessService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }
@@ -117,7 +126,7 @@ class RefinementAnalysisStorageTest {
             """);
     }
     org.springframework.mock.web.MockHttpServletResponse submit(JsonNode body) throws Exception {
-        return mvc.perform(post(path).contentType("application/json").content(body.toString())).andReturn().getResponse();
+        return mvc.perform(post(path).param("projectId","P001").contentType("application/json").content(body.toString())).andReturn().getResponse();
     }
     int count() { return jdbc.queryForObject("SELECT COUNT(*) FROM meeting_refinement_analyses", Integer.class); }
 

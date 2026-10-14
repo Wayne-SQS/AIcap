@@ -2,10 +2,12 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { refinementAnalysesApi } from '@/api/refinementAnalyses'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 
 const props = defineProps({ meetingId: String, analysisId: String, proposalId: String })
 const emit = defineEmits(['executed', 'refresh'])
 const meeting = useMeetingStore()
+const projects = useProjectsStore()
 const busy = ref(false)
 const error = ref('')
 let mounted = true
@@ -16,7 +18,7 @@ async function execute() {
   busy.value = true
   error.value = ''
   try {
-    const result = await refinementAnalysesApi.execute(props.meetingId, props.analysisId, props.proposalId)
+    const result = await refinementAnalysesApi.execute(props.meetingId, props.analysisId, props.proposalId, projects.currentProjectId)
     if (mounted) emit('executed', result)
   } catch (err) {
     if (mounted) error.value = `未能确认执行结果：${err.message}。请刷新处理状态核对；重试同一提案不会重复创建故事。`

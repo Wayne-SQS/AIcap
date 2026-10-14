@@ -189,6 +189,13 @@ public class DataSeeder implements ApplicationRunner {
         }
         seedUsers();
         seedProjects();
+        // 故事/任务基线必须先于画像:migrateLegacyStorySeed 会在旧 M01–M23 基线上删旧插新,
+        // 之后 seedStories/seedTasks 按"有行即跳过"把 US01–US37 / T01–T16 补齐。
+        // 这两步曾一度没有任何调用者(多项目改造合并时丢失),表现为:库建好了、用户也有了,
+        // 但故事和任务永远是 0 行 —— 界面空白、契约测试基线断言全红。
+        boolean migrated = migrateLegacyStorySeed();
+        seedStories();
+        seedTasks(migrated);
         seedProfiles();
     }
 
@@ -256,6 +263,10 @@ public class DataSeeder implements ApplicationRunner {
     }
 
     private void seedProjects() {
+        // 播种目标项目必须先存在:故事/任务都写在 P001,而项目表里的正式项目是 P002 ——
+        // 少了这一步,播种出来的基线数据会挂在"不存在的项目"上,接口一律 404,
+        // 界面空白且看不出原因(契约测试则表现为大面积 404 而不是更有提示性的缺列 500)。
+        ensureProjectWithAllMembers("P001", "爱管理", "存量数据与演示基线所在项目");
         if (projectMapper.selectById("P002") == null) {
             Project p = new Project(); p.setId("P002"); p.setName("爱管理"); p.setDescription("正式规划数据待导入"); p.setStatus("ACTIVE"); p.setTotalSprints(0); p.setCreatedAt(LocalDateTime.now()); p.setUpdatedAt(LocalDateTime.now()); projectMapper.insert(p);
         }
@@ -265,6 +276,37 @@ public class DataSeeder implements ApplicationRunner {
                 if (projectMemberMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ProjectMember>().eq("project_id", projectId).eq("user_id", user.getId())) > 0) continue;
                 ProjectMember member = new ProjectMember(); member.setProjectId(projectId); member.setUserId(user.getId()); member.setProjectRole("viewer".equals(user.getRole()) ? "viewer" : user.getRole()); member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours()); member.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(user.getId())); member.setJoinedAt(LocalDateTime.now()); projectMemberMapper.insert(member);
             }
+        }
+    }
+
+    /** 确保项目存在,并把全员按角色加为成员(只补缺失的,不覆盖已有角色) */
+    private void ensureProjectWithAllMembers(String projectId, String name, String description) {
+        if (projectMapper.selectById(projectId) == null) {
+            Project p = new Project();
+            p.setId(projectId);
+            p.setName(name);
+            p.setDescription(description);
+            p.setStatus("ACTIVE");
+            p.setTotalSprints(0);
+            p.setCreatedAt(LocalDateTime.now());
+            p.setUpdatedAt(LocalDateTime.now());
+            projectMapper.insert(p);
+            log.info("项目 {} 缺失,已补建(播种目标项目必须存在)", projectId);
+        }
+        for (User user : userMapper.selectList(null)) {
+            if (projectMemberMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ProjectMember>()
+                    .eq("project_id", projectId).eq("user_id", user.getId())) > 0) {
+                continue;
+            }
+            ProjectMember member = new ProjectMember();
+            member.setProjectId(projectId);
+            member.setUserId(user.getId());
+            member.setProjectRole("viewer".equals(user.getRole()) ? "viewer"
+                    : List.of("admin", "owner").contains(user.getRole()) ? user.getRole() : "member");
+            member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours());
+            member.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(user.getId()));
+            member.setJoinedAt(LocalDateTime.now());
+            projectMemberMapper.insert(member);
         }
     }
 

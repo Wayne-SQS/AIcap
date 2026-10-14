@@ -101,9 +101,16 @@ public class TaskStoryRelationService {
                 .filter(relation -> storyInternalId.equals(relation.getStoryInternalId()))
                 .map(TaskStoryRelation::getTaskInternalId)
                 .toList();
-        List<Task> affected = tasks.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId)
-                .and(w -> w.eq("story_internal_id", storyInternalId)
-                        .or(x -> x.in("internal_id", relatedTaskIds))));
+        // 空集合不能进 in():MyBatis-Plus 会原样拼出 "IN ()",MySQL 直接语法错误
+        // —— 表现是删故事 500,而日志里只有一句 near '))))',查起来很费劲
+        QueryWrapper<Task> affectedQuery = new QueryWrapper<Task>().eq("project_id", scopedProjectId);
+        if (relatedTaskIds.isEmpty()) {
+            affectedQuery.eq("story_internal_id", storyInternalId);
+        } else {
+            affectedQuery.and(w -> w.eq("story_internal_id", storyInternalId)
+                    .or(x -> x.in("internal_id", relatedTaskIds)));
+        }
+        List<Task> affected = tasks.selectList(affectedQuery);
         for (Task task : affected) {
             List<String> codes = storyCodes(scopedProjectId, task).stream()
                     .filter(code -> {
