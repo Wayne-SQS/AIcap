@@ -62,9 +62,11 @@ public class StatusProposalExecutionService {
             throw ApiException.conflict("提案执行状态不允许执行");
         var approved=json(reviews.getFirst().get("approved_json"));
         String storyId=approved.path("story_id").asText();
+        String projectId=jdbc.queryForObject("SELECT project_id FROM meetings WHERE id=?",String.class,meetingId);
         int before=approved.path("expected").path("status").asInt();
         int after=approved.path("changes").path("status").asInt();
-        var stories=jdbc.queryForList("SELECT title,description,acceptance,priority,sprint,activity,status,owner_id FROM stories WHERE id=? FOR UPDATE",storyId);
+        var stories=jdbc.queryForList("SELECT internal_id,title,description,acceptance,priority,sprint,activity,status,owner_id " +
+                "FROM stories WHERE project_id=? AND code=? FOR UPDATE",projectId,storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("status")).intValue()!=before)
             throw ApiException.conflict("故事不存在或状态已变化，请重新分析");
         var story=stories.getFirst();
@@ -78,17 +80,21 @@ public class StatusProposalExecutionService {
             if (value!=null && jdbc.queryForList("SELECT id FROM users WHERE id=?",value).isEmpty())
                 throw ApiException.conflict("批准的负责人已不存在");
         }
-        if(jdbc.update("UPDATE stories SET status=?,title=?,description=?,acceptance=?,priority=?,sprint=?,activity=?,owner_id=? WHERE id=? AND status=?",
+        if(jdbc.update("UPDATE stories SET status=?,title=?,description=?,acceptance=?,priority=?,sprint=?,activity=?,owner_id=? WHERE internal_id=? AND status=?",
                 after,fieldValue(patch,"title",story.get("title")),fieldValue(patch,"description",story.get("description")),
                 fieldValue(patch,"acceptance",story.get("acceptance")),fieldValue(patch,"priority",story.get("priority")),
                 fieldValue(patch,"sprint",story.get("sprint")),fieldValue(patch,"activity",story.get("activity")),
-                fieldValue(patch,"owner_id",story.get("owner_id")),storyId,before)!=1)
+                fieldValue(patch,"owner_id",story.get("owner_id")),story.get("internal_id"),before)!=1)
             throw ApiException.conflict("故事状态已变化，请重新分析");
         String detail="会议提案执行："+before+" → "+after+"；故事字段="+(patch.isObject() ? patch.properties().stream().map(Map.Entry::getKey).toList() : "无")+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs (story_id,log_type,detail,user_id,created_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1,storyId); statement.setString(2,before==after ? "edit" : "move"); statement.setString(3,detail); statement.setInt(4,executorId);
+            var statement=connection.prepareStatement("INSERT INTO story_logs " +
+                    "(project_id,story_internal_id,story_code_snapshot,story_id,log_type,detail,user_id,created_at) " +
+                    "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1,projectId); statement.setLong(2,((Number)story.get("internal_id")).longValue());
+            statement.setString(3,storyId); statement.setString(4,storyId);
+            statement.setString(5,before==after ? "edit" : "move"); statement.setString(6,detail); statement.setInt(7,executorId);
             return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();

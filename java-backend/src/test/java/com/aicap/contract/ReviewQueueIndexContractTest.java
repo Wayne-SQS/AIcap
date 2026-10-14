@@ -53,8 +53,9 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
             jdbc.update("DELETE r FROM " + reviewTable + " r JOIN " + table + " a ON a.id=r.analysis_id WHERE a.meeting_id=?", meetingId);
             jdbc.update("DELETE FROM " + table + " WHERE meeting_id=?", meetingId);
         }
-        jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
+        jdbc.update("DELETE FROM story_logs WHERE project_id='P002' AND story_id=?", storyId);
         jdbc.update("DELETE FROM stories WHERE project_id='P002' AND code=?", storyId);
+        jdbc.update("DELETE FROM stories WHERE project_id='P099' AND code=?", storyId);
         jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
         for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
@@ -101,6 +102,10 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
                 meetingId, "索引写入测试", "测试提案已确认。", 1);
         jdbc.update("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status) VALUES('P002',?,?,?,?,?,?,?,?)",
                 storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        jdbc.update("INSERT IGNORE INTO projects(id,name,description,status,total_sprints,created_at,updated_at) " +
+                "VALUES ('P099','同编号故事隔离测试','','ACTIVE',1,NOW(),NOW())");
+        jdbc.update("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status) " +
+                        "VALUES('P099',?,'其他项目同编号故事','','','Must',1,1,0)", storyId);
         String body = """
                 {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
                 "meeting_type":"daily_scrum","summary":"已确认","open_questions":[],"proposed_actions":[
@@ -118,6 +123,12 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         statusExecutions.execute(meetingId, id, mapper.readTree("{\"proposal_id\":\"p1\"}"), 1);
         assertEquals("succeeded", jdbc.queryForObject(
                 "SELECT execution_status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P002' AND code=?",
+                Integer.class, storyId));
+        assertEquals(0, jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P099' AND code=?",
+                Integer.class, storyId));
+        assertEquals("P002", jdbc.queryForObject("SELECT project_id FROM story_logs WHERE story_id=?",
+                String.class, storyId));
     }
 
     @Test
