@@ -54,18 +54,52 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
             jdbc.update("DELETE FROM " + table + " WHERE meeting_id=?", meetingId);
         }
         jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
-        jdbc.update("DELETE FROM stories WHERE id=?", storyId);
+        jdbc.update("DELETE FROM stories WHERE project_id='P002' AND code=?", storyId);
         jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
         for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
         jdbc.update("DELETE FROM meetings WHERE id=?", meetingId);
+        jdbc.update("DELETE FROM project_members WHERE project_id='P099'");
+        jdbc.update("DELETE FROM projects WHERE id='P099'");
+    }
+
+    @Test
+    void pageAndSummaryExcludeOtherProjects() {
+        ReviewQueueIndexService.Summary baseline = index.summary("P002");
+        jdbc.update("INSERT IGNORE INTO projects(id,name,description,status,total_sprints,created_at,updated_at) " +
+                "VALUES ('P099','审核队列隔离测试','','ACTIVE',1,NOW(),NOW())");
+        jdbc.update("INSERT IGNORE INTO project_members(project_id,user_id,project_role,capacity_hours,joined_at) " +
+                "VALUES ('P099',1,'owner',60,NOW())");
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) " +
+                "VALUES(?,'P099','其他项目会议','测试原文',1,NOW())", meetingId);
+        String analysisId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) " +
+                        "VALUES(?,?,1,'queue-scope','completed','测试原文',?,'[]',NOW())",
+                analysisId, meetingId, "{\"proposed_actions\":[{\"proposal_id\":\"other-project\"}]}");
+        jdbc.update("INSERT INTO suggestions(id,agent,kind,evidence,affected,note,change_json,status,created_at) " +
+                "VALUES(?,'meeting','meeting','证据','项目','待审','{}','pending',NOW())", suggestionId);
+        suggestionIds.add(suggestionId);
+        jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,project_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) " +
+                "VALUES(?,'P099',?,'queue-scope','hash',1,'manual','','not_started')", suggestionId, meetingId);
+
+        assertEquals(2, index.page("P099", "pending", "all", null, null, null, null, 10).items().size());
+        assertEquals(2, index.summary("P099").pendingCount());
+        assertEquals(meetingId, index.summary("P099").recentMeeting().id());
+        assertEquals(meetingId, index.summary("P099").latest().meetingId());
+        assertEquals(baseline.pendingCount(), index.summary("P002").pendingCount());
+        assertTrue(index.page("P002", "all", "all", null, null, null, null, 10).items().stream()
+                .noneMatch(item -> meetingId.equals(item.meetingId())));
+        assertStatus(get("/api/review-queue?projectId=P099", token(USER_ADMIN)), 200);
+        assertStatus(get("/api/review-queue?projectId=P099", token(USER_VIEWER)), 403);
+        assertStatus(get("/api/review-queue/summary?projectId=P099", token(USER_VIEWER)), 403);
+        assertStatus(get("/api/review-queue", token(USER_ADMIN)), 422);
     }
 
     @Test
     void dailyServiceWritesShadowThroughSaveReviewAndExecution() throws Exception {
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,?,CURRENT_TIMESTAMP)",
                 meetingId, "索引写入测试", "测试提案已确认。", 1);
-        jdbc.update("INSERT INTO stories(id,title,description,acceptance,priority,sprint,activity,status) VALUES(?,?,?,?,?,?,?,?)",
+        jdbc.update("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status) VALUES('P002',?,?,?,?,?,?,?,?)",
                 storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
         String body = """
                 {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
@@ -88,8 +122,8 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
 
     @Test
     void pagesAllSourcesAndKeepsOldPendingProposals() {
-        ReviewQueueIndexService.Summary before = index.summary();
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+        ReviewQueueIndexService.Summary before = index.summary("P002");
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,?,?)",
                 meetingId, "分页队列测试会议", "测试原文", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,0)));
         int minute = 1;
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
@@ -115,13 +149,13 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
                 suggestionId, "meeting", "meeting", "测试", "US01", "测试", "{}", "pending",
                 Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,7)));
         suggestionIds.add(suggestionId);
-        jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,?,?,?,?,?,?,?)",
+        jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,project_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,'P002',?,?,?,?,?,?,?)",
                 suggestionId, meetingId, "queue-general", "test-hash", 1, "manual", "", "not_started");
 
         List<ReviewQueueIndexService.Item> all = new ArrayList<>();
         String cursor = null;
         for (int pageNumber = 0; pageNumber < 12; pageNumber++) {
-            ReviewQueueIndexService.Page page = index.page("all", "all", null, null, null, cursor, 2);
+            ReviewQueueIndexService.Page page = index.page("P002", "all", "all", null, null, null, cursor, 2);
             assertTrue(page.items().size() <= 2);
             all.addAll(page.items());
             cursor = page.nextCursor();
@@ -132,17 +166,17 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         assertEquals(7, new HashSet<>(all.stream().map(i -> i.source() + ":" + i.proposalId()).toList()).size());
         assertEquals(5, all.stream().filter(i -> i.status().equals("pending")).count());
         assertEquals("pending", all.getLast().status(), "较早的待审提案必须能翻页找到");
-        assertEquals(1, index.page("reviewed", "planning", null, null, null, null, 20).items().size());
-        assertEquals(0, index.page("pending", "planning", null, null, null, null, 20).items().size());
-        assertEquals(1, index.page("pending", "daily", "分页队列", null, null, null, 20).items().size());
-        ReviewQueueIndexService.Summary summary = index.summary();
+        assertEquals(1, index.page("P002", "reviewed", "planning", null, null, null, null, 20).items().size());
+        assertEquals(0, index.page("P002", "pending", "planning", null, null, null, null, 20).items().size());
+        assertEquals(1, index.page("P002", "pending", "daily", "分页队列", null, null, null, 20).items().size());
+        ReviewQueueIndexService.Summary summary = index.summary("P002");
         assertEquals(before.pendingCount() + 5, summary.pendingCount());
         assertEquals(before.executionCount() + 1, summary.executionCount());
         assertEquals(7, shadow.backfillMissing());
         assertEquals(summary.pendingCount(), shadow.counts().pending());
         assertEquals(summary.executionCount(), shadow.counts().execution());
         assertEquals(0, shadow.backfillMissing(), "重复回填不得覆盖已有索引行");
-        var pending = index.page("pending", "all", null, null, null, null, 50).items();
+        var pending = index.page("P002", "pending", "all", null, null, null, null, 50).items();
         var indexedPending = shadow.pendingFirst(50);
         assertEquals(pending.size(), indexedPending.size());
         for (int i = 0; i < pending.size(); i++) {
@@ -152,25 +186,25 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         }
         assertNotNull(summary.latest());
         assertNotNull(summary.recentMeeting());
-        assertThrows(RuntimeException.class, () -> index.page("all", "all", null, null, null, "invalid", 20));
+        assertThrows(RuntimeException.class, () -> index.page("P002", "all", "all", null, null, null, "invalid", 20));
 
-        ApiResponse viewer = get("/api/review-queue?status=pending&limit=2", token(USER_VIEWER));
-        assertStatus(viewer, 200);
-        assertEquals(2, viewer.json().path("items").size());
-        assertTrue(viewer.json().path("nextCursor").isTextual());
-        assertStatus(get("/api/review-queue?limit=101", token(USER_VIEWER)), 422);
-        assertStatus(get("/api/review-queue?limit=2", null), 401);
-        ApiResponse viewerSummary = get("/api/review-queue/summary", token(USER_VIEWER));
-        assertStatus(viewerSummary, 200);
-        assertEquals(summary.pendingCount(), viewerSummary.json().path("pendingCount").asLong());
-        assertTrue(viewerSummary.json().path("recentMeeting").path("title").isTextual());
-        assertStatus(get("/api/review-queue/summary", null), 401);
+        ApiResponse visible = get("/api/review-queue?projectId=P002&status=pending&limit=2", token(USER_ADMIN));
+        assertStatus(visible, 200);
+        assertEquals(2, visible.json().path("items").size());
+        assertTrue(visible.json().path("nextCursor").isTextual());
+        assertStatus(get("/api/review-queue?projectId=P002&limit=101", token(USER_ADMIN)), 422);
+        assertStatus(get("/api/review-queue?projectId=P002&limit=2", null), 401);
+        ApiResponse visibleSummary = get("/api/review-queue/summary?projectId=P002", token(USER_ADMIN));
+        assertStatus(visibleSummary, 200);
+        assertEquals(summary.pendingCount(), visibleSummary.json().path("pendingCount").asLong());
+        assertTrue(visibleSummary.json().path("recentMeeting").path("title").isTextual());
+        assertStatus(get("/api/review-queue/summary?projectId=P002", null), 401);
     }
 
     @Test
     void summaryCountsRemainingProposalsAndApprovedExecutions() {
-        ReviewQueueIndexService.Summary before = index.summary();
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+        ReviewQueueIndexService.Summary before = index.summary("P002");
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,?,?)",
                 meetingId, "多提案汇总测试", "测试原文", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,2,10,0)));
         String analysisId = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,transcript,result_json,snapshots_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -182,30 +216,30 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         jdbc.update("INSERT INTO meeting_status_proposal_reviews(analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,original_json,approved_json,execution_status) VALUES(?,?,?,?,?,?,?,?,?)",
                 analysisId, 1, "two", "reject", "rejected", 1, "{}", null, "not_applicable");
 
-        ReviewQueueIndexService.Summary summary = index.summary();
+        ReviewQueueIndexService.Summary summary = index.summary("P002");
         assertEquals(before.pendingCount() + 1, summary.pendingCount());
         assertEquals(before.executionCount() + 1, summary.executionCount());
-        assertEquals(1, index.page("pending", "daily", null, null, null, null, 10).items().size());
+        assertEquals(1, index.page("P002", "pending", "daily", null, null, null, null, 10).items().size());
         jdbc.update("UPDATE meeting_status_proposal_reviews SET execution_status='succeeded' WHERE analysis_id=? AND proposal_index=0", analysisId);
-        assertEquals(before.executionCount(), index.summary().executionCount());
+        assertEquals(before.executionCount(), index.summary("P002").executionCount());
     }
 
     @Test
     void cursorUsesBinaryOrderForMixedCaseIdsAtTheSameTimestamp() {
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,?,?)",
                 meetingId, "同秒游标测试", "测试", 1, Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,0)));
         Timestamp time = Timestamp.valueOf(LocalDateTime.of(2025,1,1,10,1));
         for (String id : List.of("SAzz00001", "SaAA00001", "SBaa00001")) {
             suggestionIds.add(id);
             jdbc.update("INSERT INTO suggestions(id,agent,kind,evidence,affected,note,change_json,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
                     id, "meeting", "meeting", "测试", "US01", "测试", "{}", "pending", time);
-            jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,?,?,?,?,?,?,?)",
+            jdbc.update("INSERT INTO meeting_suggestion_records(suggestion_id,project_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) VALUES(?,'P002',?,?,?,?,?,?,?)",
                     id, meetingId, "queue-" + id, "test-hash", 1, "manual", "", "not_started");
         }
         String cursor = null;
         List<String> ids = new ArrayList<>();
         for (int pageNumber = 0; pageNumber < 8; pageNumber++) {
-            var page = index.page("pending", "general", "同秒游标测试", null, null, cursor, 1);
+            var page = index.page("P002", "pending", "general", "同秒游标测试", null, null, cursor, 1);
             ids.addAll(page.items().stream().map(ReviewQueueIndexService.Item::proposalId).toList());
             cursor = page.nextCursor();
             if (cursor == null) break;

@@ -195,28 +195,30 @@ function generalRow(suggestion) {
 
 /** One server-filtered cursor page; only details for that page are read. */
 export async function loadReviewQueuePage(filters = {}, cursor = null, limit = 50) {
-  const params = new URLSearchParams({ status: filters.status || 'pending', source: filters.source || 'all', limit: String(limit) })
+  if (!filters.projectId) throw new Error('请先选择项目')
+  const params = new URLSearchParams({ projectId: filters.projectId, status: filters.status || 'pending', source: filters.source || 'all', limit: String(limit) })
   if (filters.search) params.set('search', filters.search)
   if (filters.fromDate) params.set('from', filters.fromDate)
   if (filters.toDate) params.set('to', filters.toDate)
   if (cursor) params.set('cursor', cursor)
   const page = await api(`/api/review-queue?${params}`)
   if (!page || !Array.isArray(page.items) || !Object.hasOwn(page, 'nextCursor')) throw new Error('审核队列分页响应无效')
-  return hydrateReviewQueuePage(page)
+  return hydrateReviewQueuePage(page, filters.projectId)
 }
 
-export async function loadReviewQueueSummary() {
-  const summary = await api('/api/review-queue/summary')
+export async function loadReviewQueueSummary(projectId) {
+  if (!projectId) throw new Error('请先选择项目')
+  const summary = await api(`/api/review-queue/summary?projectId=${encodeURIComponent(projectId)}`)
   if (!summary || !Number.isSafeInteger(summary.pendingCount) || !Number.isSafeInteger(summary.executionCount)
       || !Object.hasOwn(summary, 'latest') || !Object.hasOwn(summary, 'recentMeeting')) throw new Error('审核队列摘要响应无效')
   const details = summary.latest
-    ? await hydrateReviewQueuePage({ items: [summary.latest], nextCursor: null })
+    ? await hydrateReviewQueuePage({ items: [summary.latest], nextCursor: null }, projectId)
     : { entries: [], errors: [] }
   return { pendingCount: summary.pendingCount, executionCount: summary.executionCount,
     latestEntry: details.entries[0] || null, recentMeeting: summary.recentMeeting, errors: details.errors }
 }
 
-async function hydrateReviewQueuePage(page) {
+async function hydrateReviewQueuePage(page, projectId) {
   const entries = [], errors = []
   const read = createReadLimiter(6)
   const groups = new Map()
@@ -229,7 +231,7 @@ async function hydrateReviewQueuePage(page) {
     const ref = refs[0]
     try {
       if (ref.source === 'general') {
-        const s = await read(() => api(`/api/suggestions/${encodeURIComponent(ref.proposalId)}`))
+        const s = await read(() => api(`/api/suggestions/${encodeURIComponent(ref.proposalId)}?projectId=${encodeURIComponent(projectId)}`))
         entries.push(generalRow(s))
         return
       }

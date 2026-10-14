@@ -81,11 +81,15 @@ watch(online, v => {
 
 watch(() => projects.currentProjectId, (next, previous) => {
   if (next === previous || !meeting.online) return
+  ++loadSequence
+  sourceQueueRows.value = []
+  queueErrors.value = []
+  nextCursor.value = null
   meeting.meetings = []
   meeting.suggestions = []
   meeting.selected = ''
   meeting.agentRun = null
-  meeting.loadAll().catch(() => { /* 可手动刷新 */ })
+  if (next) refresh().catch(() => { /* 可手动刷新 */ })
 })
 
 async function refresh() {
@@ -106,7 +110,7 @@ async function refreshQueue() {
   finally { queueLoading.value = false }
 }
 
-const currentFilters = () => ({ status: queueFilter.value, source: queueSource.value,
+const currentFilters = () => ({ projectId: projects.currentProjectId, status: queueFilter.value, source: queueSource.value,
   search: queueSearch.value.trim(), fromDate: queueFrom.value, toDate: queueTo.value })
 let loadSequence = 0
 async function loadFirstPage() {

@@ -50,11 +50,14 @@ watch(() => projects.currentProjectId, (next, previous) => {
 })
 
 async function refreshQueueSummary() {
+  const projectId = projects.currentProjectId
+  if (!projectId) return
   queueLoading.value = true
   queueError.value = ''
   try {
     try {
-      const result = await loadReviewQueueSummary()
+      const result = await loadReviewQueueSummary(projectId)
+      if (projectId !== projects.currentProjectId) return
       summaryCounts.value = { pendingCount: result.pendingCount, executionCount: result.executionCount }
       queueEntries.value = result.latestEntry ? [result.latestEntry] : []
       recentMeeting.value = result.recentMeeting
@@ -64,6 +67,7 @@ async function refreshQueueSummary() {
       if (error.message !== '审核队列摘要响应无效' && error.status !== 404) throw error
       await meeting.loadAll()
       const result = await loadReviewQueue(meeting.meetings)
+      if (projectId !== projects.currentProjectId) return
       queueEntries.value = result.entries
       recentMeeting.value = meeting.meetings[0] || null
       summaryCounts.value = {
@@ -73,8 +77,11 @@ async function refreshQueueSummary() {
       indexedSummary.value = false
       if (result.errors.length) queueError.value = `部分来源读取失败（${result.errors.length} 项），数字可能不完整`
     }
-  } catch (error) { queueError.value = error.message || '读取队列失败' }
-  finally { queueLoading.value = false }
+  } catch (error) {
+    if (projectId === projects.currentProjectId) queueError.value = error.message || '读取队列失败'
+  } finally {
+    if (projectId === projects.currentProjectId) queueLoading.value = false
+  }
 }
 function continueProposal(row) {
   if (row.source === 'general' || row.source === 'offline') {

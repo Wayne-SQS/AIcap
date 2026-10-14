@@ -33,9 +33,9 @@ class ReviewQueueCapacityBenchmark {
         jdbc.execute("SET SESSION cte_max_recursion_depth = 11000");
         String meetingId = UUID.randomUUID().toString();
         String suggestionPrefix = "B" + UUID.randomUUID().toString().substring(0, 3);
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,1,NOW())",
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,1,NOW())",
                 meetingId, "七来源容量基准", "synthetic");
-        long pendingBefore = index.summary().pendingCount();
+        long pendingBefore = index.summary("P002").pendingCount();
 
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String sql = "INSERT INTO meeting_" + source + "_analyses " +
@@ -61,17 +61,17 @@ class ReviewQueueCapacityBenchmark {
                 "'synthetic','{}','pending',TIMESTAMPADD(SECOND,n,'2025-01-01 00:00:00') FROM seq";
         assertEquals(perSource, jdbc.update(suggestionSql, perSource, suggestionPrefix));
         String recordsSql = "INSERT INTO meeting_suggestion_records " +
-                "(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) " +
-                "SELECT id,?,CONCAT('benchmark-',id),'benchmark',1,'manual','','not_started' " +
+                "(suggestion_id,project_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) " +
+                "SELECT id,'P002',?,CONCAT('benchmark-',id),'benchmark',1,'manual','','not_started' " +
                 "FROM suggestions WHERE id>=? AND id<=?";
         assertEquals(perSource, jdbc.update(recordsSql, meetingId,
                 suggestionPrefix + "000001", suggestionPrefix + String.format("%06d", perSource)));
 
         long start = System.nanoTime();
-        ReviewQueueIndexService.Page page = index.page("pending", "all", null, null, null, null, 50);
+        ReviewQueueIndexService.Page page = index.page("P002", "pending", "all", null, null, null, null, 50);
         long pageMillis = (System.nanoTime() - start) / 1_000_000;
         start = System.nanoTime();
-        ReviewQueueIndexService.Summary summary = index.summary();
+        ReviewQueueIndexService.Summary summary = index.summary("P002");
         long summaryMillis = (System.nanoTime() - start) / 1_000_000;
         assertEquals(50, page.items().size());
         assertNotNull(page.nextCursor());

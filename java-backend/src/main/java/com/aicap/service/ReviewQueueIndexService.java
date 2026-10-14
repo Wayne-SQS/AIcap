@@ -42,7 +42,7 @@ public class ReviewQueueIndexService {
             String table = "meeting_" + source + "_analyses";
             String reviews = "meeting_" + source + "_proposal_reviews";
             String key = source.equals("status") ? "daily" : source;
-            parts.put(key, "SELECT '" + key + "' AS source,a.meeting_id,m.title AS meeting_title,a.id AS analysis_id," +
+            parts.put(key, "SELECT '" + key + "' AS source,m.project_id,a.meeting_id,m.title AS meeting_title,a.id AS analysis_id," +
                     "jt.proposal_id,jt.ordinal-1 AS proposal_index,a.created_at," +
                     "CASE WHEN r.decision IS NULL THEN 'pending' WHEN r.decision='reject' THEN 'rejected' ELSE 'approved' END AS status," +
                     "COALESCE(r.execution_status,'not_started') AS execution_status " +
@@ -51,12 +51,12 @@ public class ReviewQueueIndexService {
                     "proposal_id VARCHAR(80) PATH '$.proposal_id')) jt " +
                     "LEFT JOIN " + reviews + " r ON r.analysis_id=a.id AND r.proposal_index=jt.ordinal-1");
         }
-        parts.put("assignment", "SELECT 'assignment' AS source,a.meeting_id,m.title AS meeting_title,a.id AS analysis_id," +
+        parts.put("assignment", "SELECT 'assignment' AS source,m.project_id,a.meeting_id,m.title AS meeting_title,a.id AS analysis_id," +
                 "a.id AS proposal_id,0 AS proposal_index,a.created_at," +
                 "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.review_json,'$.status')),'pending') AS status," +
                 "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.review_json,'$.execution_status')),'not_started') AS execution_status " +
                 "FROM meeting_assignment_analyses a JOIN meetings m ON m.id=a.meeting_id");
-        parts.put("general", "SELECT 'general' AS source,r.meeting_id,COALESCE(m.title,'') AS meeting_title," +
+        parts.put("general", "SELECT 'general' AS source,r.project_id,r.meeting_id,COALESCE(m.title,'') AS meeting_title," +
                 "s.id AS analysis_id,s.id AS proposal_id,0 AS proposal_index," +
                 "COALESCE(s.created_at,CAST('1970-01-01 00:00:00' AS DATETIME)) AS created_at," +
                 "s.status,COALESCE(r.execution_status,'not_started') AS execution_status " +
@@ -89,7 +89,8 @@ public class ReviewQueueIndexService {
     }
 
     @Transactional(readOnly = true)
-    public Summary summary() {
+    public Summary summary(String projectId) {
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
         long pending = 0, execution = 0;
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String analyses = "meeting_" + source + "_analyses";
@@ -101,7 +102,8 @@ public class ReviewQueueIndexService {
                     "FROM " + analyses + " a JOIN meetings m ON m.id=a.meeting_id " +
                     "LEFT JOIN (SELECT analysis_id,COUNT(*) AS reviewed_count," +
                     "SUM(CASE WHEN decision<>'reject' AND execution_status='not_started' THEN 1 ELSE 0 END)" +
-                    " AS execution_count FROM " + reviews + " GROUP BY analysis_id) r ON r.analysis_id=a.id");
+                    " AS execution_count FROM " + reviews + " GROUP BY analysis_id) r ON r.analysis_id=a.id " +
+                    "WHERE m.project_id=?", scopedProjectId);
             pending += ((Number) counts.get("pending_count")).longValue();
             execution += ((Number) counts.get("execution_count")).longValue();
         }
@@ -111,20 +113,22 @@ public class ReviewQueueIndexService {
             Map<String, Object> counts = jdbc.queryForMap("SELECT " +
                     "COALESCE(SUM(CASE WHEN q.status='pending' THEN 1 ELSE 0 END),0) AS pending_count," +
                     "COALESCE(SUM(CASE WHEN q.status='approved' AND q.execution_status='not_started' THEN 1 ELSE 0 END),0) AS execution_count " +
-                    "FROM (" + sourceSql + ") q");
+                    "FROM (" + sourceSql + ") q WHERE q.project_id=?", scopedProjectId);
             pending += ((Number) counts.get("pending_count")).longValue();
             execution += ((Number) counts.get("execution_count")).longValue();
         }
-        List<Item> latest = page("all", "all", null, null, null, null, 1).items();
-        List<RecentMeeting> meetings = jdbc.query("SELECT id,title FROM meetings ORDER BY created_at DESC,BINARY id DESC LIMIT 1",
-                (rs, rowNum) -> new RecentMeeting(rs.getString("id"), rs.getString("title")));
+        List<Item> latest = page(scopedProjectId, "all", "all", null, null, null, null, 1).items();
+        List<RecentMeeting> meetings = jdbc.query("SELECT id,title FROM meetings WHERE project_id=? " +
+                        "ORDER BY created_at DESC,BINARY id DESC LIMIT 1",
+                (rs, rowNum) -> new RecentMeeting(rs.getString("id"), rs.getString("title")), scopedProjectId);
         return new Summary(pending, execution, latest.isEmpty() ? null : latest.getFirst(),
                 meetings.isEmpty() ? null : meetings.getFirst());
     }
 
     @Transactional(readOnly = true)
-    public Page page(String status, String source, String search, LocalDate from, LocalDate to,
+    public Page page(String projectId, String status, String source, String search, LocalDate from, LocalDate to,
                      String cursorText, Integer limitValue) {
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
         String selectedStatus = status == null || status.isBlank() ? "pending" : status;
         String selectedSource = source == null || source.isBlank() ? "all" : source;
         if (!STATUSES.contains(selectedStatus) || (!selectedSource.equals("all") && !SOURCES.contains(selectedSource)))
@@ -140,8 +144,9 @@ public class ReviewQueueIndexService {
         for (var entry : sql().entrySet()) {
             if (!selectedSource.equals("all") && !selectedSource.equals(entry.getKey())) continue;
             StringBuilder statement = new StringBuilder("SELECT q.*,CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED) AS sort_time FROM (")
-                    .append(entry.getValue()).append(") q WHERE 1=1");
+                    .append(entry.getValue()).append(") q WHERE q.project_id=?");
             List<Object> args = new ArrayList<>();
+            args.add(scopedProjectId);
             if (!selectedStatus.equals("all")) {
                 if (selectedStatus.equals("pending")) statement.append(" AND q.status='pending'");
                 else if (selectedStatus.equals("reviewed")) statement.append(" AND q.status IN ('approved','rejected','modified')");

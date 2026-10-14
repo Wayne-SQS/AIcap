@@ -48,15 +48,15 @@ class ReviewQueueHttpCapacityBenchmark {
         assertTrue(samples >= 2 && samples <= 30);
         String meetingId = UUID.randomUUID().toString();
         String suggestionPrefix = "B" + UUID.randomUUID().toString().substring(0, 3);
-        long pendingBefore = index.summary().pendingCount();
+        long pendingBefore = index.summary("P002").pendingCount();
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status -> seed(rows, meetingId, suggestionPrefix));
         try {
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             String token = jwt.createToken(1);
-            sample(client, token, "/api/review-queue?status=pending&source=all&limit=50", rows, samples,
+            sample(client, token, "/api/review-queue?projectId=P002&status=pending&source=all&limit=50", rows, samples,
                     "items", 50);
-            sample(client, token, "/api/review-queue/summary", rows, samples,
+            sample(client, token, "/api/review-queue/summary?projectId=P002", rows, samples,
                     "pendingCount", pendingBefore + 12L * rows);
         } finally {
             transaction.executeWithoutResult(status -> cleanup(meetingId, suggestionPrefix, rows));
@@ -66,7 +66,7 @@ class ReviewQueueHttpCapacityBenchmark {
 
     private void seed(int rows, String meetingId, String prefix) {
         jdbc.execute("SET SESSION cte_max_recursion_depth=11000");
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,1,NOW())",
+        jdbc.update("INSERT INTO meetings(id,project_id,title,transcript,created_by,created_at) VALUES(?,'P002',?,?,1,NOW())",
                 meetingId, "七来源 HTTP 容量基准", "synthetic");
         for (String source : List.of("status", "planning", "review", "retro", "refinement")) {
             String sql = "INSERT INTO meeting_" + source + "_analyses " +
@@ -91,8 +91,8 @@ class ReviewQueueHttpCapacityBenchmark {
                 "'synthetic','{}','pending',TIMESTAMPADD(SECOND,n,'2025-01-01 00:00:00') FROM seq";
         assertEquals(rows, jdbc.update(suggestions, rows, prefix));
         String records = "INSERT INTO meeting_suggestion_records " +
-                "(suggestion_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) " +
-                "SELECT id,?,CONCAT('benchmark-http-',id),'benchmark',1,'manual','','not_started' " +
+                "(suggestion_id,project_id,meeting_id,client_request_id,request_hash,submitted_by,origin,reason,execution_status) " +
+                "SELECT id,'P002',?,CONCAT('benchmark-http-',id),'benchmark',1,'manual','','not_started' " +
                 "FROM suggestions WHERE id>=? AND id<=?";
         assertEquals(rows, jdbc.update(records, meetingId, prefix + "000001", prefix + String.format("%06d", rows)));
     }

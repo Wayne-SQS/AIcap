@@ -2,6 +2,7 @@ package com.aicap.controller;
 
 import com.aicap.security.Roles;
 import com.aicap.service.ReviewQueueIndexService;
+import com.aicap.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,15 +17,18 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class ReviewQueueIndexController {
     private final ReviewQueueIndexService service;
+    private final ProjectAccessService projectAccess;
 
     @GetMapping("/summary")
-    public ReviewQueueIndexService.Summary summary() {
+    public ReviewQueueIndexService.Summary summary(@RequestParam String projectId) {
         Roles.any();
-        return service.summary();
+        projectAccess.requireMember(projectId);
+        return service.summary(projectId);
     }
 
     @GetMapping
     public ReviewQueueIndexService.Page page(
+            @RequestParam String projectId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String search,
@@ -33,6 +37,7 @@ public class ReviewQueueIndexController {
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) Integer limit) {
         Roles.any();
-        return service.page(status, source, search, from, to, cursor, limit);
+        projectAccess.requireMember(projectId);
+        return service.page(projectId, status, source, search, from, to, cursor, limit);
     }
 }
