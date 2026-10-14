@@ -30,4 +30,6 @@ public class MeetingAudio {
     private String source;
     private Integer uploadedBy;
     private LocalDateTime createdAt;
+    /** 上传者确认已告知并取得与会者同意的服务器时间；旧音频为空。 */
+    private LocalDateTime consentConfirmedAt;
 }

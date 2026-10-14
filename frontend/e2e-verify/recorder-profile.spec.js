@@ -88,6 +88,8 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   await expect(recorder).toBeVisible()
 
   // 录音(虚拟麦克风;真实走 getUserMedia + MediaRecorder)
+  await expect(page.locator('#rec-start')).toBeDisabled()
+  await recorder.locator('.consent-check input').check()
   await page.locator('#rec-start').click()
   await expect(page.locator('#rec-live, .rec-live')).toBeVisible()
   await page.waitForTimeout(3500)
@@ -112,6 +114,7 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   expect(rowText).toContain('网页录音')
   expect(rowText).toContain('.mp3')
   expect(rowText).toMatch(/sha256\s+[0-9a-f]{10}/)
+  expect(rowText).toContain('已记录同意确认')
   console.log('[recorder] uploaded row=' + rowText.replace(/\s+/g, ' ').trim())
 
   // 回放:鉴权取字节 → objectURL

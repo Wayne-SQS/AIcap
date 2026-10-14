@@ -1,8 +1,11 @@
 package com.aicap.contract;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
@@ -12,8 +15,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -39,6 +44,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MeetingAudioContractTest extends ContractTestSupport {
+    private static final String PROJECT = "P002";
+    private static final String PROJECT_QUERY = "?projectId=" + PROJECT;
+
+    @Autowired JdbcTemplate jdbc;
+    private final List<Integer> addedMemberIds = new ArrayList<>();
+
+    @BeforeAll
+    void joinTestMembers() {
+        for (String name : List.of(USER_MEMBER, USER_VIEWER)) {
+            Integer userId = jdbc.queryForObject("SELECT id FROM users WHERE username=?", Integer.class, name);
+            Integer existing = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM project_members WHERE project_id=? AND user_id=?",
+                    Integer.class, PROJECT, userId);
+            if (existing != null && existing > 0) continue;
+            String role = name.equals(USER_VIEWER) ? "viewer" : "member";
+            jdbc.update("INSERT INTO project_members(project_id,user_id,project_role,capacity_hours,joined_at) "
+                            + "VALUES (?,?,?,60,NOW())",
+                    PROJECT, userId, role);
+            addedMemberIds.add(userId);
+        }
+    }
+
+    @AfterAll
+    void leaveTestMembers() {
+        for (Integer userId : addedMemberIds) {
+            jdbc.update("DELETE FROM project_members WHERE project_id=? AND user_id=?", PROJECT, userId);
+        }
+    }
 
     /** 结构合法的最小 mp3:ID3v2 头 + 一帧 MPEG 帧同步(0xFFFB90 64) */
     private static byte[] tinyMp3() {
@@ -70,6 +103,11 @@ class MeetingAudioContractTest extends ContractTestSupport {
 
     private ApiResponse upload(String meetingId, String token, String filename, byte[] bytes,
                                String source, Integer durationMs) {
+        return upload(meetingId, token, filename, bytes, source, durationMs, true);
+    }
+
+    private ApiResponse upload(String meetingId, String token, String filename, byte[] bytes,
+                               String source, Integer durationMs, Boolean consentConfirmed) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         if (token != null) headers.setBearerAuth(token);
@@ -85,6 +123,8 @@ class MeetingAudioContractTest extends ContractTestSupport {
         }
         if (source != null) body.add("source", source);
         if (durationMs != null) body.add("duration_ms", String.valueOf(durationMs));
+        body.add("projectId", PROJECT);
+        if (consentConfirmed != null) body.add("consent_confirmed", consentConfirmed.toString());
         HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
         return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio", HttpMethod.POST, entity, byte[].class));
     }
@@ -92,12 +132,12 @@ class MeetingAudioContractTest extends ContractTestSupport {
     private ResponseEntity<byte[]> fetchBytes(String audioId, String token) {
         HttpHeaders headers = new HttpHeaders();
         if (token != null) headers.setBearerAuth(token);
-        return rest.exchange("/api/audio/" + audioId, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        return rest.exchange("/api/audio/" + audioId + PROJECT_QUERY, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
     }
 
     private String createMeeting(String title) {
         ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", title, "transcript", "音频契约测试会议转写。")));
+                json(map("project_id", PROJECT, "title", title, "transcript", "音频契约测试会议转写。")));
         assertStatus(r, 201);
         return r.json().path("id").asText();
     }
@@ -114,11 +154,13 @@ class MeetingAudioContractTest extends ContractTestSupport {
         assertEquals("audio/mpeg", up.json().path("content_type").asText());
         assertEquals("recorder", up.json().path("source").asText());
         assertEquals(3000, up.json().path("duration_ms").asInt());
+        assertTrue(up.json().path("consent_confirmed_at").isTextual(), up.body());
         assertTrue(up.json().path("url").asText().contains(id), up.body());
 
-        ApiResponse list = get("/api/meetings/" + meetingId + "/audio", token(USER_MEMBER));
+        ApiResponse list = get("/api/meetings/" + meetingId + "/audio" + PROJECT_QUERY, token(USER_MEMBER));
         assertStatus(list, 200);
         assertEquals(1, list.json().size(), list.body());
+        assertEquals(up.json().path("consent_confirmed_at"), list.json().get(0).path("consent_confirmed_at"));
 
         // 回放字节与上传完全一致
         ResponseEntity<byte[]> play = fetchBytes(id, token(USER_MEMBER));
@@ -127,7 +169,7 @@ class MeetingAudioContractTest extends ContractTestSupport {
         assertEquals("audio/mpeg", play.getHeaders().getContentType().toString());
 
         // 删除后不可读
-        assertStatus(delete("/api/audio/" + id, token(USER_ADMIN)), 200);
+        assertStatus(delete("/api/audio/" + id + PROJECT_QUERY, token(USER_ADMIN)), 200);
         assertEquals(404, fetchBytes(id, token(USER_ADMIN)).getStatusCode().value());
     }
 
@@ -138,7 +180,7 @@ class MeetingAudioContractTest extends ContractTestSupport {
         assertStatus(up, 200);
         assertEquals("upload", up.json().path("source").asText());
         assertTrue(up.json().path("filename").asText().endsWith(".mp3"), up.body());
-        assertStatus(delete("/api/audio/" + up.json().path("id").asText(), token(USER_ADMIN)), 200);
+        assertStatus(delete("/api/audio/" + up.json().path("id").asText() + PROJECT_QUERY, token(USER_ADMIN)), 200);
     }
 
     @Test
@@ -166,6 +208,16 @@ class MeetingAudioContractTest extends ContractTestSupport {
     }
 
     @Test
+    void upload_requiresConsentAttestation_beforeSavingAudio() {
+        String meetingId = createMeeting(uniq("音频契约会议-知情同意"));
+        assertStatus(upload(meetingId, token(USER_ADMIN), "a.mp3", tinyMp3(), "recorder", 3000, null), 422);
+        assertStatus(upload(meetingId, token(USER_ADMIN), "a.mp3", tinyMp3(), "upload", null, false), 422);
+        ApiResponse list = get("/api/meetings/" + meetingId + "/audio" + PROJECT_QUERY, token(USER_ADMIN));
+        assertStatus(list, 200);
+        assertEquals(0, list.json().size(), list.body());
+    }
+
+    @Test
     void upload_viewer_403_andMissingPart_422() {
         String meetingId = createMeeting(uniq("音频契约会议-权限"));
         assertStatus(upload(meetingId, token(USER_VIEWER), "a.mp3", tinyMp3(), "upload", null), 403);
@@ -188,18 +240,18 @@ class MeetingAudioContractTest extends ContractTestSupport {
         assertStatus(up, 200);
         String id = up.json().path("id").asText();
 
-        ApiResponse byMember = delete("/api/audio/" + id, token(USER_MEMBER));
+        ApiResponse byMember = delete("/api/audio/" + id + PROJECT_QUERY, token(USER_MEMBER));
         assertStatus(byMember, 403);
         assertEquals(200, fetchBytes(id, token(USER_ADMIN)).getStatusCode().value(), "越权删除后音频仍应存在");
 
-        assertStatus(delete("/api/audio/" + id, token(USER_ADMIN)), 200);
+        assertStatus(delete("/api/audio/" + id + PROJECT_QUERY, token(USER_ADMIN)), 200);
         assertEquals(404, fetchBytes(id, token(USER_ADMIN)).getStatusCode().value());
     }
 
     @Test
     void audioEndpoints_requireAuth_401() {
         String meetingId = createMeeting(uniq("音频契约会议-鉴权"));
-        assertStatus(get("/api/meetings/" + meetingId + "/audio", null), 401);
+        assertStatus(get("/api/meetings/" + meetingId + "/audio" + PROJECT_QUERY, null), 401);
         assertEquals(401, fetchBytes("whatever", null).getStatusCode().value());
         assertNotNull(meetingId);
     }

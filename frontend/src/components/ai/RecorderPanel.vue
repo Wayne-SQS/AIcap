@@ -24,6 +24,7 @@ const busy = ref(false)
 const error = ref('')
 const audios = ref([])
 const clip = ref(null)          // { blob, url, ms, bytes }
+const consentConfirmed = ref(false)
 const playUrls = ref({})        // id -> objectURL(鉴权取字节后生成)
 const audioElements = new Map()
 const rangeStops = new Map()
@@ -81,6 +82,7 @@ function pickMime() {
 async function start() {
   error.value = ''
   if (!meetingId.value) { error.value = '请先选择一个已保存会议'; return }
+  if (!consentConfirmed.value) { error.value = '请先确认与会者已知情并同意录音'; return }
   if (!supported) { error.value = '当前浏览器不支持录音（需要麦克风权限与 MediaRecorder）'; return }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
@@ -165,14 +167,16 @@ async function toMp3(blob) {
 /* ---------- 提交 / 列表 / 回放 ---------- */
 async function submitClip() {
   if (!clip.value) return
+  if (!consentConfirmed.value) { error.value = '请先确认与会者已知情并同意录音'; return }
   busy.value = true
   error.value = ''
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const file = new File([clip.value.blob], `录音-${stamp}.mp3`, { type: 'audio/mpeg' })
-    const row = await audioApi.upload(meetingId.value, file, { source: 'recorder', durationMs: clip.value.ms, projectId: projects.currentProjectId })
+    const row = await audioApi.upload(meetingId.value, file, { source: 'recorder', durationMs: clip.value.ms, projectId: projects.currentProjectId, consentConfirmed: true })
     notify(`录音已提交到会议（${fmtSize(row.byte_size)}）`)
     clearClip()
+    consentConfirmed.value = false
     await refresh()
   } catch (e) {
     error.value = e.message
@@ -186,12 +190,14 @@ async function submitFile(ev) {
   const file = ev.target.files && ev.target.files[0]
   ev.target.value = ''
   if (!file) return
+  if (!consentConfirmed.value) { error.value = '请先确认与会者已知情并同意上传此音频'; return }
   if (!file.name.toLowerCase().endsWith('.mp3')) { error.value = '仅支持 .mp3 文件'; return }
   busy.value = true
   error.value = ''
   try {
-    const row = await audioApi.upload(meetingId.value, file, { source: 'upload', projectId: projects.currentProjectId })
+    const row = await audioApi.upload(meetingId.value, file, { source: 'upload', projectId: projects.currentProjectId, consentConfirmed: true })
     notify(`已提交本地音频（${fmtSize(row.byte_size)}）`)
+    consentConfirmed.value = false
     await refresh()
   } catch (e) {
     error.value = e.message
@@ -274,6 +280,7 @@ async function remove(row) {
 
 watch(meetingId, () => {
   clearClip()
+  consentConfirmed.value = false
   rangeStops.forEach(stop=>stop()); rangeStops.clear(); audioElements.clear()
   Object.values(playUrls.value).forEach(u => URL.revokeObjectURL(u))
   playUrls.value = {}
@@ -294,14 +301,15 @@ onUnmounted(() => {
       <b>会议录音</b> · 浏览器调用麦克风录制，直接编码为 <b>.mp3</b> 后提交到当前会议；也可选择本地 .mp3 文件提交。
       音频随会议留存，可回放/下载；删除仅管理员与负责人。
     </p>
+    <label class="consent-check"><input type="checkbox" v-model="consentConfirmed" :disabled="recording || busy || !maySubmit">我已告知与会者录音或上传音频、转写及保存的用途，并确认已取得同意。此确认将由服务器记录提交者和时间。</label>
 
     <div class="rec-actions">
-      <button v-if="!recording" class="primary" id="rec-start" :disabled="!meetingId || busy || !maySubmit" :title="readonlyTitle" @click="start">
+      <button v-if="!recording" class="primary" id="rec-start" :disabled="!meetingId || busy || !maySubmit || !consentConfirmed" :title="readonlyTitle" @click="start">
         ● 开始录音
       </button>
       <button v-else class="danger" id="rec-stop" @click="stop">■ 停止录音（{{ fmtMs(elapsedMs) }}）</button>
       <label class="file-pick" :title="readonlyTitle">
-        <input type="file" accept=".mp3,audio/mpeg" :disabled="!meetingId || busy || !maySubmit" @change="submitFile">
+        <input type="file" accept=".mp3,audio/mpeg" :disabled="!meetingId || busy || !maySubmit || !consentConfirmed" @change="submitFile">
         <span>选择本地 .mp3 提交</span>
       </label>
       <span v-if="recording" class="rec-live"><i class="dot"></i>录音中 · {{ fmtMs(elapsedMs) }}</span>
@@ -316,7 +324,7 @@ onUnmounted(() => {
       <div class="clip-head">待提交录音 · {{ fmtMs(clip.ms) }} · {{ fmtSize(clip.bytes) }}（已编码 MP3）</div>
       <audio :src="clip.url" controls preload="metadata"></audio>
       <div class="clip-actions">
-        <button class="primary" id="rec-submit" :disabled="busy || !maySubmit" :title="readonlyTitle" @click="submitClip">提交到会议</button>
+        <button class="primary" id="rec-submit" :disabled="busy || !maySubmit || !consentConfirmed" :title="readonlyTitle" @click="submitClip">提交到会议</button>
         <a :href="clip.url" download="录音.mp3" class="btn-link">下载 mp3</a>
         <button @click="clearClip">丢弃</button>
       </div>
@@ -330,7 +338,9 @@ onUnmounted(() => {
         <span class="small">
           {{ a.source === 'recorder' ? '网页录音' : '本地上传' }} ·
           {{ fmtSize(a.byte_size) }}<template v-if="a.duration_ms"> · {{ fmtMs(a.duration_ms) }}</template> ·
-          sha256 {{ (a.sha256 || '').slice(0, 10) }}…
+          sha256 {{ (a.sha256 || '').slice(0, 10) }}… ·
+          <template v-if="a.consent_confirmed_at">已记录同意确认 · 提交者 #{{ a.uploaded_by }} · {{ a.consent_confirmed_at.replace('T', ' ') }}</template>
+          <template v-else>历史音频：未记录同意确认</template>
         </span>
       </div>
       <div class="audio-actions">
@@ -346,6 +356,8 @@ onUnmounted(() => {
 
 <style scoped>
 .recorder { border: 1px solid var(--line, #d8d8d8); border-radius: 10px; padding: 12px; margin: 10px 0; }
+.consent-check { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; font-size: 13px; }
+.consent-check input { margin-top: 3px; flex: none; }
 .rec-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
 .rec-actions button { min-width: 120px; }
 .file-pick { position: relative; overflow: hidden; display: inline-flex; align-items: center; border: 1px dashed var(--line, #bbb); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px; }

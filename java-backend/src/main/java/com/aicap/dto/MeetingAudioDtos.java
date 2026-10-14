@@ -27,6 +27,7 @@ public final class MeetingAudioDtos {
                            String source,
                            @JsonProperty("uploaded_by") Integer uploadedBy,
                            @JsonProperty("created_at") LocalDateTime createdAt,
+                           @JsonProperty("consent_confirmed_at") LocalDateTime consentConfirmedAt,
                            /** 回放/下载地址(带鉴权头访问) */
                            String url) {
     }

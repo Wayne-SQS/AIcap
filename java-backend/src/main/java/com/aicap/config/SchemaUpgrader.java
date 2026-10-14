@@ -62,6 +62,10 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"weekly_capacity_hours", "`weekly_capacity_hours` int DEFAULT NULL"},
     };
 
+    private static final String[][] MEETING_AUDIO_COLUMNS = {
+            {"consent_confirmed_at", "`consent_confirmed_at` datetime DEFAULT NULL"},
+    };
+
     private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
             {"embedding_model", "`embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
             {"acl_rank", "`acl_rank` int DEFAULT NULL"},
@@ -81,6 +85,9 @@ public class SchemaUpgrader implements ApplicationRunner {
             }
             if (tableExists(conn, "project_members")) {
                 added.addAll(addMissing(conn, "project_members", PROJECT_MEMBER_COLUMNS));
+            }
+            if (tableExists(conn, "meeting_audio")) {
+                added.addAll(addMissing(conn, "meeting_audio", MEETING_AUDIO_COLUMNS));
             }
             ensureTaskStoryRelations(conn);
             if (tableExists(conn, "tasks")) {

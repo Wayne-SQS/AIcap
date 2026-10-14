@@ -37,9 +37,10 @@ public class MeetingAudioController {
     public MeetingAudioDtos.AudioOut upload(@PathVariable String meetingId, @RequestParam String projectId,
                                             @RequestParam("file") MultipartFile file,
                                             @RequestParam(value = "source", required = false) String source,
-                                            @RequestParam(value = "duration_ms", required = false) Integer durationMs) {
+                                            @RequestParam(value = "duration_ms", required = false) Integer durationMs,
+                                            @RequestParam(value = "consent_confirmed", required = false) Boolean consentConfirmed) {
         User actor = Roles.writer();
-        return audioService.store(projectId, meetingId, file, source, durationMs, actor);
+        return audioService.store(projectId, meetingId, file, source, durationMs, consentConfirmed, actor);
     }
 
     @GetMapping("/meetings/{meetingId}/audio")

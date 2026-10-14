@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS `meeting_audio` (
   `source` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'recorder=网页录音 / upload=本地文件',
   `uploaded_by` int NOT NULL,
   `created_at` datetime NOT NULL,
+  `consent_confirmed_at` datetime DEFAULT NULL COMMENT '上传者确认已告知并取得与会者同意的服务器时间',
   PRIMARY KEY (`id`),
   KEY `ix_meeting_audio_meeting_id` (`meeting_id`),
   KEY `ix_meeting_audio_uploaded_by` (`uploaded_by`),

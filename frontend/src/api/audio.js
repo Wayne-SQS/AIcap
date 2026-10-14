@@ -7,11 +7,12 @@ export const audioApi = {
 
   remove: (id, projectId) => api(`/api/audio/${id}?projectId=${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
 
-  async upload(meetingId, file, { source = 'upload', durationMs = null, projectId } = {}) {
+  async upload(meetingId, file, { source = 'upload', durationMs = null, projectId, consentConfirmed = false } = {}) {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('source', source)
     fd.append('projectId', projectId)
+    fd.append('consent_confirmed', String(consentConfirmed))
     if (durationMs != null) fd.append('duration_ms', String(Math.round(durationMs)))
     const token = getAuthToken()
     const headers = token ? { Authorization: 'Bearer ' + token } : {}

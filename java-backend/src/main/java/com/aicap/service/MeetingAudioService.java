@@ -21,6 +21,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HexFormat;
@@ -56,8 +57,11 @@ public class MeetingAudioService {
 
     /** 上传:写盘 + 入库,任一步失败都不留半份数据 */
     public MeetingAudioDtos.AudioOut store(String projectId, String meetingId, MultipartFile file, String source,
-                                           Integer durationMs, User actor) {
+                                           Integer durationMs, Boolean consentConfirmed, User actor) {
         meetingService.requireMeeting(projectId, meetingId);
+        if (!Boolean.TRUE.equals(consentConfirmed)) {
+            throw ApiException.unprocessable("请先确认已告知与会者录音、转写和保存用途，并取得同意");
+        }
         if (file == null || file.isEmpty()) {
             throw ApiException.unprocessable("请选择或录制一段音频后再提交");
         }
@@ -107,7 +111,8 @@ public class MeetingAudioService {
         audio.setStoragePath(relative);
         audio.setSource(normalizedSource);
         audio.setUploadedBy(actor.getId());
-        audio.setCreatedAt(LocalDateTime.now());
+        audio.setCreatedAt(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
+        audio.setConsentConfirmedAt(audio.getCreatedAt());
         try {
             audioMapper.insert(audio);
         } catch (RuntimeException e) {
@@ -229,6 +234,6 @@ public class MeetingAudioService {
     private MeetingAudioDtos.AudioOut toOut(MeetingAudio a) {
         return new MeetingAudioDtos.AudioOut(a.getId(), a.getMeetingId(), a.getFilename(),
                 a.getContentType(), a.getByteSize(), a.getDurationMs(), a.getSha256(), a.getSource(),
-                a.getUploadedBy(), a.getCreatedAt(), "/api/audio/" + a.getId());
+                a.getUploadedBy(), a.getCreatedAt(), a.getConsentConfirmedAt(), "/api/audio/" + a.getId());
     }
 }

@@ -20,6 +20,7 @@ test('real speech version survives reload and confirmed text enters meeting anal
   await page.locator('#meeting-save-form button').click()
   await expect(page.locator('#saved-transcript')).toHaveText('原会议文本，转写草稿不得覆盖。')
   await page.getByRole('tab', { name: '语音会议' }).click()
+  await page.locator('#meeting-recorder .consent-check input').check()
   await page.locator('#meeting-recorder input[type=file]').setInputFiles(process.env.AICAP_STT_EVAL_AUDIO)
   const panel = page.getByRole('region', { name: `音频转写：${audioName}`, exact: true })
   await expect(panel).toBeVisible()
