@@ -48,6 +48,7 @@ public class MeetingAudioService {
     private final MeetingAudioMapper audioMapper;
     private final MeetingService meetingService;
     private final MeetingMapper meetingMapper;
+    private final ProjectAccessService projectAccess;
 
     @Value("${aicap.audio.dir:./data/audio}")
     private String audioDir;
@@ -59,6 +60,7 @@ public class MeetingAudioService {
     public MeetingAudioDtos.AudioOut store(String projectId, String meetingId, MultipartFile file, String source,
                                            Integer durationMs, Boolean consentConfirmed, User actor) {
         meetingService.requireMeeting(projectId, meetingId);
+        projectAccess.requireWriter(projectId);
         if (!Boolean.TRUE.equals(consentConfirmed)) {
             throw ApiException.unprocessable("请先确认已告知与会者录音、转写和保存用途，并取得同意");
         }
@@ -159,6 +161,7 @@ public class MeetingAudioService {
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
         meetingService.requireMeeting(projectId, audio.getMeetingId());
+        projectAccess.requireOwner(projectId);
         try {
             audioMapper.deleteById(audioId);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {

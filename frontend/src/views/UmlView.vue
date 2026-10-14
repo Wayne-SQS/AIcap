@@ -1,6 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useSessionStore } from '@/stores/session'
+import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
@@ -19,6 +21,7 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
    这里保持同一口径,只是数据源换成了响应式 store。 */
 
 const project = useProjectStore()
+const session = useSessionStore()
 const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${project.currentProjectId || 'none'}`)
 
 /* ==================== 用例图 ==================== */
@@ -433,6 +436,7 @@ function updateUmlLayout(diagram, id, position) {
   if (diagram === 'participant') Object.assign(participants.find(p => p.id === id), position)
 }
 function beginLayoutDrag(event, diagram, item) {
+  if (session.isViewer) return
   const svg = diagram === 'participant' ? sequenceSvg.value : usecaseSvg.value
   const point = svgPoint(event, svg)
   layoutDrag.value = { diagram, id: item.id, svg, dx: point.x - item.x, dy: point.y - (item.y || 0), moved: false }
@@ -490,6 +494,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
     <p class="uml-note">
       用例图按当前正式需求聚合为 {{ usecases.length }} 个系统功能；点击功能用例可查看其关联的原始 Story。
       Story 新增、删除或重命名后，功能用例明细同步更新；节点可拖动并保存布局。
+      {{ session.isViewer ? '当前项目为只读权限，布局不可调整。' : '' }}
       时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
     </p>
 
@@ -502,7 +507,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       :set-zoom-percent="setUsecaseZoomPercent" />
     <div ref="usecaseViewport" class="uml-canvas usecase-canvas canvas-zoom-viewport" @click="clearSelection">
       <div ref="usecaseShell" class="canvas-zoom-shell" :style="usecaseShellStyle">
-      <svg ref="usecaseSvg" class="uml-svg usecase-svg notranslate" translate="no" :style="usecaseCanvasStyle" :viewBox="usecaseBounds.viewBox" role="img"
+      <svg ref="usecaseSvg" class="uml-svg usecase-svg notranslate" :class="{ 'is-readonly': session.isViewer }" translate="no" :style="usecaseCanvasStyle" :viewBox="usecaseBounds.viewBox" role="img"
            :aria-label="`爱管理系统用例图：${actors.length} 个角色、${usecases.length} 个用例`">
         <rect class="system-boundary" :x="usecaseBounds.boundary.x" :y="usecaseBounds.boundary.y" :width="usecaseBounds.boundary.width" :height="usecaseBounds.boundary.height" />
         <rect class="system-title-bg" x="195" y="17" width="114" height="22" />
@@ -516,6 +521,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
            :class="{ 'is-on': ucOn(u), 'is-sel': !hover && u.id === selectedId, 'is-muted': !!hover && !ucOn(u) }"
            role="button" tabindex="0" :aria-pressed="u.id === selectedId"
            :aria-label="`用例：${u.name}（${u.ref}）`"
+           :title="session.isViewer ? READONLY_TITLE : ''"
            @mouseenter="setHover('usecase', u.id)" @mouseleave="clearHover"
            @focus="setHover('usecase', u.id)" @blur="clearHover"
            @pointerdown.stop="beginLayoutDrag($event, 'usecase', u)"
@@ -583,7 +589,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       :set-zoom-percent="setSequenceZoomPercent" />
     <div ref="sequenceViewport" class="uml-canvas sequence-canvas canvas-zoom-viewport">
       <div ref="sequenceShell" class="canvas-zoom-shell" :style="sequenceShellStyle">
-      <svg ref="sequenceSvg" class="uml-svg sequence-svg notranslate" translate="no" :style="sequenceCanvasStyle" :viewBox="sequenceViewBox" role="img"
+      <svg ref="sequenceSvg" class="uml-svg sequence-svg notranslate" :class="{ 'is-readonly': session.isViewer }" translate="no" :style="sequenceCanvasStyle" :viewBox="sequenceViewBox" role="img"
            aria-label="登录并加载项目工作台时序图">
         <defs>
           <marker id="seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -679,6 +685,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
 /* ============ 交互:悬停高亮 / 选中 / 键盘焦点(纯 class 绑定,不操作 DOM) ============ */
 .uml-svg .uc-hit,.uml-svg .actor-hit{cursor:pointer;pointer-events:bounding-box;transition:none!important}
 .uml-svg .draggable-node,.uml-svg .participant-hit{cursor:grab;touch-action:none}
+.uml-svg.is-readonly .draggable-node,.uml-svg.is-readonly .participant-hit{cursor:default;touch-action:auto}
 .uml-svg .draggable-node:active,.uml-svg .participant-hit:active{cursor:grabbing}
 .uml-svg .participant-hit .lifeline{pointer-events:none}
 .uml-svg .uc-hit:focus-visible{outline:3px dashed var(--ink);outline-offset:3px}

@@ -3,6 +3,7 @@ import { authApi } from '@/api/auth'
 import { health, setAuthToken, getAuthToken } from '@/api/client'
 import { useToast } from '@/composables/useToast'
 import { useProjectsStore } from '@/stores/projects'
+import { isProjectReadOnly, canReviewProject } from '@/utils/projectPermissions'
 
 /* 会话与在线/离线模式:对齐旧版 index.html L1262-1341 的
    apiMode/authToken/currentUser/bootstrap/doLogin/logout/updateChip/openLogin 全套语义 */
@@ -15,10 +16,11 @@ export const useSessionStore = defineStore('session', {
     booting: false
   }),
   getters: {
-    isViewer: s => s.apiMode && s.currentUser && s.currentUser.role === 'viewer',
-    /** 在线且角色为 admin/owner —— 与后端 `Roles.reviewer()` 同口径(删除故事/会议等入口的后端要求);
-     *  离线演示模式下后端不可达,不参与判定,写入口不受限 */
-    canReview: s => s.apiMode && !!s.currentUser && ['admin', 'owner'].includes(s.currentUser.role),
+    isViewer: s => isProjectReadOnly(
+      s.apiMode && !!s.currentUser, s.currentUser?.role, useProjectsStore().currentProject?.project_role),
+    /** 审核/删除同时遵守账号角色和当前项目角色。 */
+    canReview: s => canReviewProject(
+      s.apiMode && !!s.currentUser, s.currentUser?.role, useProjectsStore().currentProject?.project_role),
     online: s => s.apiMode && !!s.currentUser
   },
   actions: {

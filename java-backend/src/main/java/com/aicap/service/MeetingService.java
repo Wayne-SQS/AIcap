@@ -125,6 +125,7 @@ public class MeetingService {
     @Transactional
     public MeetingDeletion deleteMeeting(String projectId, String meetingId) {
         Meeting meeting = requireMeeting(projectId, meetingId);
+        projectAccess.requireOwner(projectId);
         deletionGuard.check(meetingId);
 
         // 1) Agent 事件 → 分析任务(meeting_agent_events.run_id → meeting_agent_runs.id)
@@ -186,6 +187,7 @@ public class MeetingService {
     /** 生成建议(幂等):同 client_request_id 返回既有建议;不同 payload 409 */
     @Transactional
     public SuggestionOutHolder stage(String projectId, MeetingDtos.SuggestionIn in, User user) {
+        projectAccess.requireWriter(projectId);
         Meeting meeting = requireMeeting(projectId, in.meetingId());
         if (meeting == null) throw ApiException.notFound("会议不存在");
         if (meeting.getTranscript() == null || !meeting.getTranscript().contains(in.evidence())) {
@@ -281,6 +283,7 @@ public class MeetingService {
      *  (对齐 FastAPI 版 rollback 后新事务重读的语义;RR 快照会把同结论并发误判为 409) */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public SuggestionOutHolder review(String projectId, String suggestionId, MeetingDtos.ReviewIn in, User user) {
+        projectAccess.requireOwner(projectId);
         // 决策⇔载荷一致性(对齐 FastAPI ReviewIn model_validator):modify_and_approve 必须带 changes,其余不得带
         boolean isModify = "modify_and_approve".equals(in.decision());
         if (isModify != (in.changes() != null)) {

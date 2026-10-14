@@ -20,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -215,6 +216,42 @@ class MeetingAudioContractTest extends ContractTestSupport {
         ApiResponse list = get("/api/meetings/" + meetingId + "/audio" + PROJECT_QUERY, token(USER_ADMIN));
         assertStatus(list, 200);
         assertEquals(0, list.json().size(), list.body());
+    }
+
+    @Test
+    void projectViewerCanReadButCannotChangeMeetingOrAudio() {
+        String admin = token(USER_ADMIN);
+        String meetingId = createMeeting(uniq("项目只读会议"));
+        ApiResponse audio = upload(meetingId, admin, "原音频.mp3", tinyMp3(), "upload", null);
+        assertStatus(audio, 200);
+        String audioId = audio.json().path("id").asText();
+        ApiResponse suggestion = post("/api/suggestions" + PROJECT_QUERY, admin, json(map(
+                "meeting_id", meetingId, "client_request_id", UUID.randomUUID().toString(),
+                "evidence", "音频契约测试会议转写", "changes", map("title", "待审核需求"))));
+        assertStatus(suggestion, 200);
+        String suggestionId = suggestion.json().path("id").asText();
+        Integer adminId = jdbc.queryForObject("SELECT id FROM users WHERE username=?", Integer.class, USER_ADMIN);
+        String originalRole = jdbc.queryForObject(
+                "SELECT project_role FROM project_members WHERE project_id=? AND user_id=?",
+                String.class, PROJECT, adminId);
+        jdbc.update("UPDATE project_members SET project_role='viewer' WHERE project_id=? AND user_id=?", PROJECT, adminId);
+        try {
+            assertStatus(get("/api/meetings/" + meetingId + PROJECT_QUERY, admin), 200);
+            assertEquals(200, fetchBytes(audioId, admin).getStatusCode().value());
+            assertStatus(upload(meetingId, admin, "新音频.mp3", tinyMp3(), "upload", null), 403);
+            assertStatus(delete("/api/audio/" + audioId + PROJECT_QUERY, admin), 403);
+            assertStatus(post("/api/suggestions" + PROJECT_QUERY, admin, json(map(
+                    "meeting_id", meetingId, "client_request_id", UUID.randomUUID().toString(),
+                    "evidence", "音频契约测试会议转写", "changes", map("title", "越权需求")))), 403);
+            assertStatus(post("/api/suggestions/" + suggestionId + "/review" + PROJECT_QUERY,
+                    admin, json(map("decision", "reject", "reason", "项目只读"))), 403);
+            assertStatus(delete("/api/meetings/" + meetingId + PROJECT_QUERY, admin), 403);
+        } finally {
+            jdbc.update("UPDATE project_members SET project_role=? WHERE project_id=? AND user_id=?",
+                    originalRole, PROJECT, adminId);
+            assertStatus(delete("/api/audio/" + audioId + PROJECT_QUERY, admin), 200);
+            assertStatus(delete("/api/meetings/" + meetingId + PROJECT_QUERY, admin), 200);
+        }
     }
 
     @Test

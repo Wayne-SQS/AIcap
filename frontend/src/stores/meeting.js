@@ -26,11 +26,11 @@ export const useMeetingStore = defineStore('meeting', {
     },
     maySubmit: () => {
       const s = useSessionStore()
-      return !!s.currentUser && ['admin', 'owner', 'member'].includes(s.currentUser.role)
+      return !!s.currentUser && !s.isViewer
     },
     mayReview: () => {
       const s = useSessionStore()
-      return !!s.currentUser && ['admin', 'owner'].includes(s.currentUser.role)
+      return s.canReview
     },
     selectedMeeting: s => s.meetings.find(m => m.id === s.selected) || null,
     runActive: s => !!s.agentRun && ['queued', 'running'].includes(s.agentRun.status)
