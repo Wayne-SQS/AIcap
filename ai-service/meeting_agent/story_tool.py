@@ -4,7 +4,7 @@ import json
 import math
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from pydantic import ValidationError
@@ -94,8 +94,10 @@ class StoryReadTool:
     def get_stories(self, *, access_token: str) -> list[StorySnapshot]:
         return self._read_stories(access_token=access_token, projection=StorySnapshot)
 
-    def get_planning_stories(self, *, access_token: str) -> list[PlanningStorySnapshot]:
-        return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot)
+    def get_planning_stories(self, *, access_token: str,
+                             project_id: str | None = None) -> list[PlanningStorySnapshot]:
+        return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot,
+                                  project_id=project_id)
 
     def get_refinement_stories(self, *, access_token: str) -> list[PlanningStorySnapshot]:
         # Same business fields; no new endpoint or write permission.
@@ -105,11 +107,13 @@ class StoryReadTool:
         return self._read_stories(access_token=access_token, projection=ReviewStorySnapshot)
 
     def _read_stories(self, *, access_token: str,
-                      projection: type[StoryProjection]) -> list[StoryProjection]:
+                      projection: type[StoryProjection],
+                      project_id: str | None = None) -> list[StoryProjection]:
         if (not isinstance(access_token, str) or not access_token
                 or any(not 33 <= ord(c) <= 126 for c in access_token)):
             raise StoryToolError("authentication_required")
-        request = Request(self._url, method="GET", headers={
+        url = self._url + ("?projectId=" + quote(project_id, safe="") if project_id else "")
+        request = Request(url, method="GET", headers={
             "Authorization": "Bearer " + access_token,
             "Accept": "application/json",
         })

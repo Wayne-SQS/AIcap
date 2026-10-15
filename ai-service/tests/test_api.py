@@ -30,7 +30,7 @@ class ApiTests(unittest.TestCase):
                 fixture.calls.append((self.path, self.headers.get("Authorization")))
                 data = {
                     "/api/auth/me": {"id": 1, "role": fixture.role, "username": "fixture-user"},
-                    "/api/meetings/m1": {"id": "m1", "transcript": fixture.transcript, "created_by": 2},
+                    "/api/meetings/m1": {"id": "m1", "project_id": "P002", "transcript": fixture.transcript, "created_by": 2},
                     "/api/stories": [{"id": "US13", "title": "登录", "status": 1, "sprint": 2, "owner_id": None}],
                 }
                 if any('/' + resource + '/by-request/' in self.path for resource in
@@ -38,8 +38,8 @@ class ApiTests(unittest.TestCase):
                     key = self.path.rsplit("/", 1)[1]
                     default = (200, fixture.records[key]) if key in fixture.records else (404, {})
                 else:
-                    default = (200, data.get(self.path))
-                status, body = fixture.overrides.get(self.path, default)
+                    default = (200, data.get(self.path.split('?', 1)[0]))
+                status, body = fixture.overrides.get(self.path, fixture.overrides.get(self.path.split('?', 1)[0], default))
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 if status == 302:

@@ -3,7 +3,7 @@
 import os
 from typing import Annotated, Callable, Literal
 
-from fastapi import Depends, FastAPI, Path
+from fastapi import Depends, FastAPI, Path, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -150,10 +150,11 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.post('/api/meetings/{meeting_id}/assignment/context', response_model=AssignmentContextReport)
     def assignment_context(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                           body: AssignmentContextRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                           body: AssignmentContextRequest, token: Annotated[str, Depends(current_token)],
+                           projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         context = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
-            access_token=token, target_sprint=body.target_sprint)
+            access_token=token, target_sprint=body.target_sprint, project_id=projectId)
         try:
             return prepare_assignment(context, body)
         except AssignmentContextError as error:
@@ -179,10 +180,11 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.post('/api/meetings/{meeting_id}/assignment/recommendations', response_model=AssignmentRecommendations)
     def assignment_recommendations(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                                   body: AssignmentRecommendationRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                                   body: AssignmentRecommendationRequest, token: Annotated[str, Depends(current_token)],
+                                   projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
-            access_token=token, target_sprint=body.target_sprint)
+            access_token=token, target_sprint=body.target_sprint, project_id=projectId)
         try:
             context = prepare_assignment(source, AssignmentContextRequest(story_ids=body.story_ids, target_sprint=body.target_sprint))
             return recommend(context, body)
@@ -191,8 +193,9 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.post('/api/meetings/{meeting_id}/assignment/suggestions', response_model=StoredAssignment)
     def save_assignment(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                        body: AssignmentSaveRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                        body: AssignmentSaveRequest, token: Annotated[str, Depends(current_token)],
+                        projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         request = AssignmentRecommendationRequest.model_validate(body.model_dump(exclude={'client_request_id'}))
         existing = assignment_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
@@ -200,7 +203,7 @@ def create_app(*, backend_origin: str | None = None,
                 raise StorageError('storage_conflict', 409, body.client_request_id)
             return existing
         source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
-            access_token=token, target_sprint=body.target_sprint)
+            access_token=token, target_sprint=body.target_sprint, project_id=projectId)
         try:
             context = prepare_assignment(source, AssignmentContextRequest(story_ids=body.story_ids, target_sprint=body.target_sprint))
             result = recommend(context, request)

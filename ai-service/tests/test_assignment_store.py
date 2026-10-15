@@ -12,7 +12,7 @@ class AssignmentStoreTests(unittest.TestCase):
     def post(self, **kwargs):
         body = {'story_ids': ['US13'], 'target_sprint': 2, 'requirements': [
             {'dimension': 'tech_stack', 'name': 'Python', 'minimum_level': 3}], 'client_request_id': 'r1'}
-        return self.client.post('/api/meetings/m1/assignment/suggestions', **dict(dict(
+        return self.client.post('/api/meetings/m1/assignment/suggestions?projectId=P002', **dict(dict(
             headers={'Authorization': 'Bearer fixture-token'}, json=body), **kwargs))
 
     def test_save_then_retry_returns_original_without_reloading_changed_facts(self):

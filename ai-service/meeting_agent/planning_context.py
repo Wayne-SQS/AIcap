@@ -71,7 +71,8 @@ class PlanningContextReader:
         self._tasks = tasks
 
     def load(self, *, meeting_id: str, transcript: str, access_token: str,
-             current_sprint: int | None = None, target_sprint: int | None = None) -> SprintPlanningInput:
+             current_sprint: int | None = None, target_sprint: int | None = None,
+             project_id: str | None = None) -> SprintPlanningInput:
         """Caller must authorize/read the meeting first; no auth token enters output.
 
         Three consecutive Java reads are not an atomic database snapshot. A later
@@ -90,9 +91,10 @@ class PlanningContextReader:
             })
         except ValueError:
             raise PlanningContextError('invalid_planning_input') from None
-        stories = self._stories.get_planning_stories(access_token=access_token)
-        members = self._members.get_member_profiles(access_token=access_token)
-        tasks = self._tasks.get_tasks(access_token=access_token)
+        scope = {'project_id': project_id} if project_id else {}
+        stories = self._stories.get_planning_stories(access_token=access_token, **scope)
+        members = self._members.get_member_profiles(access_token=access_token, **scope)
+        tasks = self._tasks.get_tasks(access_token=access_token, **scope)
         data = context.model_dump()
         try:
             # Revalidate nested model content instead of trusting mutable list members.

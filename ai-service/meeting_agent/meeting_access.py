@@ -19,6 +19,7 @@ class AccessError(Exception):
 class SavedMeeting(Contract):
     id: Identifier
     transcript: Annotated[NonBlank, Field(max_length=16000)]
+    project_id: Identifier | None = None
 
 
 class JavaMeetingAccess:
@@ -57,16 +58,21 @@ class JavaMeetingAccess:
             raise AccessError("invalid_backend_response", 502) from None
         return data
 
-    def authorize_and_load(self, *, token: str, meeting_id: str) -> SavedMeeting:
+    def authorize_and_load(self, *, token: str, meeting_id: str,
+                           project_id: str | None = None) -> SavedMeeting:
         user = self._get("/api/auth/me", token)
         if type(user.get("id")) is not int or user["id"] <= 0 or not isinstance(user.get("role"), str):
             raise AccessError("invalid_backend_response", 502)
         if user["role"] not in ("admin", "owner", "member"):
             raise AccessError("analysis_forbidden", 403)
-        data = self._get("/api/meetings/" + quote(meeting_id, safe=""), token)
+        path = "/api/meetings/" + quote(meeting_id, safe="")
+        if project_id is not None:
+            path += "?projectId=" + quote(project_id, safe="")
+        data = self._get(path, token)
         try:
-            meeting = SavedMeeting.model_validate({"id": data["id"], "transcript": data["transcript"]})
-            if meeting.id != meeting_id:
+            meeting = SavedMeeting.model_validate({"id": data["id"], "transcript": data["transcript"],
+                "project_id": data.get("project_id")})
+            if meeting.id != meeting_id or (project_id is not None and meeting.project_id != project_id):
                 raise ValueError("meeting mismatch")
         except (ValueError, KeyError):
             raise AccessError("invalid_backend_response", 502) from None

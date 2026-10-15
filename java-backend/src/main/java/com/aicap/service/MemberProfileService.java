@@ -5,6 +5,8 @@ import com.aicap.dto.MemberProfileDtos;
 import com.aicap.entity.MemberProfile;
 import com.aicap.entity.User;
 import com.aicap.mapper.MemberProfileMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.entity.ProjectMember;
 import com.aicap.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -35,6 +37,8 @@ public class MemberProfileService {
 
     private final UserMapper userMapper;
     private final MemberProfileMapper profileMapper;
+    private final ProjectMemberMapper projectMemberMapper;
+    private final ProjectAccessService projectAccess;
     private final ObjectMapper objectMapper;
 
     public List<MemberProfileDtos.ProfileOut> list() {
@@ -48,6 +52,27 @@ public class MemberProfileService {
             out.add(toOut(u, byUser.get(u.getId())));
         }
         return out;
+    }
+
+    public List<MemberProfileDtos.ProfileOut> listProject(String projectId) {
+        String scoped = ProjectAccessService.normalize(projectId);
+        projectAccess.requireMember(scoped);
+        List<ProjectMember> links = projectMemberMapper.selectList(new QueryWrapper<ProjectMember>()
+                .eq("project_id", scoped).orderByAsc("user_id"));
+        Map<Integer, MemberProfileDtos.ProfileOut> profiles = new LinkedHashMap<>();
+        list().forEach(profile -> profiles.put(profile.userId(), profile));
+        List<MemberProfileDtos.ProfileOut> result = new ArrayList<>();
+        for (ProjectMember link : links) {
+            MemberProfileDtos.ProfileOut profile = profiles.get(link.getUserId());
+            if (profile == null) continue;
+            result.add(new MemberProfileDtos.ProfileOut(profile.userId(), profile.username(),
+                    profile.displayName(), link.getProjectRole(), profile.color(), link.getCapacityHours(),
+                    ProjectCapacityPolicy.weeklyCapacity(link.getWeeklyCapacityHours(),
+                            link.getCapacityHours(), link.getUserId()),
+                    profile.title(), profile.techStack(), profile.capabilities(), profile.processDomains(),
+                    profile.summary(), profile.yearsExperience(), profile.updatedAt()));
+        }
+        return result;
     }
 
     /** 整体替换画像:admin/owner 可改任意成员,member 只能改本人;viewer 只读(连本人画像也不可改) */
@@ -115,6 +140,7 @@ public class MemberProfileService {
         return new MemberProfileDtos.ProfileOut(
                 user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.getColor(),
                 user.getCapacityHours() == null ? 60 : user.getCapacityHours(),
+                null,
                 p == null ? "" : p.getTitle(),
                 p == null ? List.of() : read(p.getTechStack()),
                 p == null ? List.of() : read(p.getCapabilities()),

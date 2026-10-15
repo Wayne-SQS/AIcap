@@ -52,6 +52,7 @@ public final class MemberProfileDtos {
                              String role,
                              String color,
                              @JsonProperty("capacity_hours") Integer capacityHours,
+                             @JsonProperty("weekly_capacity_hours") Double weeklyCapacityHours,
                              String title,
                              @JsonProperty("tech_stack") List<SkillItem> techStack,
                              List<SkillItem> capabilities,

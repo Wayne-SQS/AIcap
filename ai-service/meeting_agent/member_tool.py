@@ -3,7 +3,7 @@
 import json
 import math
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 
 import httpx
 from pydantic import Field, model_validator
@@ -21,6 +21,7 @@ class MemberProfileSnapshot(Contract):
     display_name: Annotated[NonBlank, Field(max_length=50)]
     role: Literal['admin', 'owner', 'member', 'viewer']
     six_week_capacity_hours: Annotated[int, Field(ge=0)]
+    weekly_capacity_hours: Annotated[float, Field(ge=0)] | None = None
     title: Annotated[str, Field(max_length=50)]
     tech_stack: Annotated[list[ProfileSkill], Field(max_length=20)]
     capabilities: Annotated[list[ProfileSkill], Field(max_length=20)]
@@ -76,14 +77,16 @@ class MemberReadTool:
         self._timeout = timeout_seconds
         self._transport = transport
 
-    def get_member_profiles(self, *, access_token: str) -> list[MemberProfileSnapshot]:
+    def get_member_profiles(self, *, access_token: str,
+                            project_id: str | None = None) -> list[MemberProfileSnapshot]:
         if (not isinstance(access_token, str) or not access_token
                 or any(not 33 <= ord(c) <= 126 for c in access_token)):
             raise MemberToolError('authentication_required')
         try:
             with httpx.Client(timeout=self._timeout, follow_redirects=False, trust_env=False,
                               transport=self._transport) as client:
-                with client.stream('GET', self._url, headers={
+                url = self._url + ('?projectId=' + quote(project_id, safe='') if project_id else '')
+                with client.stream('GET', url, headers={
                     'Authorization': 'Bearer ' + access_token, 'Accept': 'application/json',
                 }) as response:
                     status = response.status_code
@@ -104,10 +107,11 @@ class MemberReadTool:
             profiles = []
             for row in rows:
                 fields = {key: row[key] for key in MemberProfileSnapshot.model_fields
-                          if key != 'six_week_capacity_hours'}
+                          if key not in ('six_week_capacity_hours', 'weekly_capacity_hours')}
                 # Java User/schema explicitly defines capacity_hours as six weeks.
                 # Do not interpret it as remaining capacity or a Sprint allocation.
                 fields['six_week_capacity_hours'] = row['capacity_hours']
+                fields['weekly_capacity_hours'] = row.get('weekly_capacity_hours')
                 profiles.append(MemberProfileSnapshot.model_validate(fields))
             if len({p.user_id for p in profiles}) != len(profiles):
                 raise ValueError('duplicate member')

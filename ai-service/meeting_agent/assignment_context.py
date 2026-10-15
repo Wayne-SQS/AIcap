@@ -25,15 +25,16 @@ class MemberWorkload(Contract):
     active_task_ids: list[Identifier]
     # Includes a task overlapping the target Sprint; not prorated work or capacity.
     target_sprint_task_ids: list[Identifier] | None
-    sprint_available_hours: None = None
-    sprint_remaining_hours: None = None
+    sprint_available_hours: Annotated[float, Field(ge=0)] | None = None
+    sprint_remaining_hours: float | None = None
 
 
 class AssignmentGap(Contract):
     code: Literal['target_sprint_unknown', 'story_estimates_unavailable',
         'sprint_capacity_unavailable', 'members_empty',
         'profile_dimensions_empty', 'story_owner_unresolved', 'task_owner_unresolved',
-        'task_story_unresolved', 'target_sprint_task_schedule_unavailable']
+        'task_story_unresolved', 'target_sprint_task_schedule_unavailable',
+        'task_dependency_pending', 'task_blocked', 'sprint_capacity_overloaded']
     story_ids: list[StoryId] = Field(default_factory=list)
     task_ids: list[Identifier] = Field(default_factory=list)
     member_ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list)
@@ -67,21 +68,38 @@ def prepare_assignment(context: SprintPlanningInput, request: AssignmentContextR
     if any(s not in stories for s in request.story_ids):
         raise AssignmentContextError('assignment_story_not_found')
     target = request.target_sprint
-    gaps = [AssignmentGap(code='story_estimates_unavailable', story_ids=request.story_ids),
-            AssignmentGap(code='sprint_capacity_unavailable', member_ids=sorted(member_ids))]
+    gaps = [AssignmentGap(code='story_estimates_unavailable', story_ids=request.story_ids)]
     if target is None:
         gaps.append(AssignmentGap(code='target_sprint_unknown'))
     if target == 4:
         gaps.append(AssignmentGap(code='target_sprint_task_schedule_unavailable'))
+    if target is None or target == 4 or any(m.weekly_capacity_hours is None for m in context.members):
+        gaps.append(AssignmentGap(code='sprint_capacity_unavailable', member_ids=sorted(member_ids)))
     if not context.members:
         gaps.append(AssignmentGap(code='members_empty'))
     workloads = []
     for member in context.members:
         owned = [s.id for s in context.stories if s.owner_id == member.user_id]
         active = [t for t in context.tasks if t.owner_id == member.user_id and t.status in (0, 1)]
+        available = remaining = None
+        if target in (1, 2, 3) and member.weekly_capacity_hours is not None:
+            available = round(member.weekly_capacity_hours * 2, 2)
+            planned = 0.0
+            for task in active:
+                overlap = sum((week - 1) // 2 + 1 == target
+                              for week in range(task.week_start, task.week_end + 1))
+                if not overlap:
+                    continue
+                estimate = task.estimated_hours or task.hours
+                planned += estimate * (1 - task.progress / 100) * overlap / (task.week_end - task.week_start + 1)
+            remaining = round(available - planned, 2)
+            if remaining < 0:
+                gaps.append(AssignmentGap(code='sprint_capacity_overloaded', member_ids=[member.user_id],
+                    task_ids=[t.id for t in active if target in t.sprints]))
         workloads.append(MemberWorkload(profile=member, owned_story_ids=owned,
             active_task_ids=[t.id for t in active], target_sprint_task_ids=None if target in (None, 4)
-            else [t.id for t in active if target in t.sprints]))
+            else [t.id for t in active if target in t.sprints],
+            sprint_available_hours=available, sprint_remaining_hours=remaining))
         if not member.tech_stack or not member.capabilities or not member.process_domains:
             gaps.append(AssignmentGap(code='profile_dimensions_empty', member_ids=[member.user_id]))
     for story in context.stories:
@@ -92,6 +110,13 @@ def prepare_assignment(context: SprintPlanningInput, request: AssignmentContextR
             gaps.append(AssignmentGap(code='task_owner_unresolved', task_ids=[task.id], member_ids=[task.owner_id]))
         if task.kanban_card_id is not None and task.kanban_card_id not in stories:
             gaps.append(AssignmentGap(code='task_story_unresolved', task_ids=[task.id]))
+        if target in (1, 2, 3) and target in task.sprints and task.status in (0, 1):
+            if task.blocked:
+                gaps.append(AssignmentGap(code='task_blocked', task_ids=[task.id]))
+            predecessors = [code.strip() for code in (task.depends_on or '').split(',') if code.strip()]
+            task_by_id = {item.id: item for item in context.tasks}
+            if any(task_by_id.get(code) is None or task_by_id[code].status != 2 for code in predecessors):
+                gaps.append(AssignmentGap(code='task_dependency_pending', task_ids=[task.id]))
     # IDs are associations, not suitability rankings. Keep original input ordering.
     return AssignmentContextReport(meeting_id=context.meeting_id, target_sprint=target,
         selected_stories=[stories[s] for s in request.story_ids], members=workloads,

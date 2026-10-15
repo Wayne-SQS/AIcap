@@ -1,7 +1,7 @@
 import json
 import math
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 
 import httpx
 from pydantic import Field, model_validator
@@ -81,14 +81,15 @@ class TaskReadTool:
         self._timeout = timeout_seconds
         self._transport = transport
 
-    def get_tasks(self, *, access_token: str) -> list[TaskSnapshot]:
+    def get_tasks(self, *, access_token: str, project_id: str | None = None) -> list[TaskSnapshot]:
         if (not isinstance(access_token, str) or not access_token
                 or any(not 33 <= ord(c) <= 126 for c in access_token)):
             raise TaskToolError('authentication_required')
         try:
             with httpx.Client(timeout=self._timeout, follow_redirects=False, trust_env=False,
                               transport=self._transport) as client:
-                with client.stream('GET', self._url, headers={
+                url = self._url + ('?projectId=' + quote(project_id, safe='') if project_id else '')
+                with client.stream('GET', url, headers={
                     'Authorization': 'Bearer ' + access_token, 'Accept': 'application/json',
                 }) as response:
                     status = response.status_code

@@ -69,6 +69,19 @@ class AssignmentContextTests(unittest.TestCase):
         self.assertEqual(0,result.members[0].profile.six_week_capacity_hours)
         self.assertIsNone(result.members[0].sprint_available_hours)
 
+    def test_weekly_capacity_and_pending_dependencies_are_reported_as_estimates(self):
+        task = task_row(id='T01', status=1, owner_id=7, estimated_hours=50,
+            week_start=3, week_end=4, sprints=[2], progress=0, blocked=True,
+            depends_on='T99')
+        result = self.report(self.context(members=[member(weekly_capacity_hours=10)], tasks=[task]))
+        workload = result.members[0]
+        self.assertEqual(20, workload.sprint_available_hours)
+        self.assertEqual(-30, workload.sprint_remaining_hours)
+        codes = {gap.code for gap in result.gaps}
+        self.assertTrue({'task_dependency_pending', 'task_blocked', 'sprint_capacity_overloaded'} <= codes)
+        self.assertNotIn('sprint_capacity_unavailable', codes)
+        self.assertIn('story_estimates_unavailable', codes)
+
 
 class AssignmentContextApiTests(unittest.TestCase):
     stop_server = fixtures.ApiTests.stop_server
@@ -80,14 +93,15 @@ class AssignmentContextApiTests(unittest.TestCase):
             '/api/tasks':(200,[task_row(status=1)])})
 
     def post(self, **kwargs):
-        return self.client.post('/api/meetings/m1/assignment/context', **dict(dict(
+        return self.client.post('/api/meetings/m1/assignment/context?projectId=P002', **dict(dict(
             headers={'Authorization':'Bearer fixture-token'}, json={'story_ids':['US13'],'target_sprint':2}), **kwargs))
 
     def test_authenticated_read_sequence_never_models_or_saves(self):
         response=self.post()
         self.assertEqual(200,response.status_code,response.text)
         self.assertEqual('read_only_preparation',response.json()['scope'])
-        self.assertEqual(['/api/auth/me','/api/meetings/m1','/api/stories','/api/members/profiles','/api/tasks'],[p for p,t in self.calls])
+        self.assertEqual(['/api/auth/me','/api/meetings/m1?projectId=P002','/api/stories?projectId=P002',
+            '/api/members/profiles?projectId=P002','/api/tasks?projectId=P002'],[p for p,t in self.calls])
         self.assertTrue(all(t=='Bearer fixture-token' for p,t in self.calls))
         self.assertNotIn('fixture-token',response.text)
         self.assertEqual([],self.model_calls)
@@ -120,7 +134,7 @@ class AssignmentContextApiTests(unittest.TestCase):
 
     def test_recommendations_are_authenticated_read_only_and_explain_unknowns(self):
         body={'story_ids':['US13'],'target_sprint':2,'requirements':[{'dimension':'tech_stack','name':'Python','minimum_level':3}]}
-        path='/api/meetings/m1/assignment/recommendations'
+        path='/api/meetings/m1/assignment/recommendations?projectId=P002'
         response=self.client.post(path,json=body,headers={'Authorization':'Bearer fixture-token'})
         self.assertEqual(200,response.status_code,response.text)
         self.assertEqual('no_recorded_skill_match',response.json()['status'])

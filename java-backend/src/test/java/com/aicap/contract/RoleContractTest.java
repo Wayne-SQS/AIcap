@@ -76,6 +76,18 @@ class RoleContractTest extends ContractTestSupport {
     }
 
     @Test
+    void memberProfiles_projectProjectionExcludesOtherUsers() {
+        ApiResponse rows = getProject("/api/members/profiles", token(USER_VIEWER));
+        assertStatus(rows, 200);
+        assertTrue(rows.json().isArray(), rows.body());
+        assertTrue(java.util.stream.StreamSupport.stream(rows.json().spliterator(), false)
+                .noneMatch(row -> row.path("user_id").asInt() == 4), rows.body());
+        assertTrue(java.util.stream.StreamSupport.stream(rows.json().spliterator(), false)
+                .anyMatch(row -> row.path("user_id").asInt() == 5
+                        && "viewer".equals(row.path("role").asText())), rows.body());
+    }
+
+    @Test
     void viewer_postStory_403() {
         ApiResponse r = postProject("/api/stories", token(USER_VIEWER),
                 json(map("title", uniq("CT越权"))));

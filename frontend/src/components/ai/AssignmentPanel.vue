@@ -17,7 +17,7 @@ const requirements = ref([{ dimension: 'tech_stack', name: '', minimum_level: 3 
 const result = ref(null), error = ref(''), storyError = ref(''), loading = ref(false), busy = ref(false)
 const dimensions = { tech_stack: '技术栈', capabilities: '工作能力', process_domains: '流程领域' }
 const statuses = { provisional: '技能候选，仅供人工核对', requirements_needed: '请补充技能要求后再查询', no_eligible_members: '没有符合角色范围的候选成员', no_recorded_skill_match: '画像中暂无满足要求的记录，不代表成员不具备能力' }
-const gapNames = { target_sprint_unknown: '目标Sprint尚未确定', story_estimates_unavailable: '故事估时尚不可用', sprint_capacity_unavailable: 'Sprint可用工时和剩余工时尚不可用', members_empty: '成员目录为空', profile_dimensions_empty: '成员画像存在空维度', story_owner_unresolved: '故事负责人未在成员目录中找到', task_owner_unresolved: '任务负责人未在成员目录中找到', task_story_unresolved: '任务关联的故事未找到', target_sprint_task_schedule_unavailable: '现有任务周排期不覆盖Sprint 4' }
+const gapNames = { target_sprint_unknown: '目标Sprint尚未确定', story_estimates_unavailable: '故事估时尚不可用', sprint_capacity_unavailable: '项目周容量或目标 Sprint 排期不足，无法估算剩余工时', members_empty: '成员目录为空', profile_dimensions_empty: '成员画像存在空维度', story_owner_unresolved: '故事负责人未在成员目录中找到', task_owner_unresolved: '任务负责人未在成员目录中找到', task_story_unresolved: '任务关联的故事未找到', target_sprint_task_schedule_unavailable: '现有任务周排期不覆盖Sprint 4', task_dependency_pending: '目标 Sprint 的任务存在未完成或未找到的前置任务', task_blocked: '目标 Sprint 的任务当前被标记为阻塞', sprint_capacity_overloaded: '按任务估时与进度估算，现有任务已超过该成员的 Sprint 容量' }
 let mounted = true, version = 0
 onBeforeUnmount(() => { mounted = false; ++version })
 watch([storyId, sprint, requirements], () => { ++version; result.value = null; error.value = ''; busy.value = false }, { deep: true, flush: 'sync' })
@@ -106,14 +106,15 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
     <div v-if="result" aria-label="候选结果" role="region">
       <h4>{{ statuses[result.status] }}</h4>
       <p>故事 {{ result.context.selected_stories[0].id }} · {{ result.context.selected_stories[0].title }}；目标Sprint：{{ result.context.target_sprint ?? '未知' }}</p>
-      <p><strong>容量尚未验证，不能据此直接分配。</strong> 六周容量不能当作Sprint剩余容量；故事、成员和任务为分次读取。</p>
+      <p><strong>候选仍须人工核对，不能据此直接分配。</strong> Sprint 剩余工时由项目周容量、任务估时、进度和排期按周均摊估算；故事自身估时缺失时不能验证新增分工是否可行。故事、成员和任务为分次读取。</p>
       <h4>数据缺口</h4>
       <ul><li v-for="(gap, index) in result.context.gaps" :key="index">{{ gapNames[gap.code] || '存在未识别的数据缺口，请核对' }}<span v-if="gap.member_ids?.length"> · 成员 #{{ gap.member_ids.join('、#') }}</span><span v-if="gap.story_ids?.length"> · {{ gap.story_ids.join('、') }}</span><span v-if="gap.task_ids?.length"> · {{ gap.task_ids.join('、') }}</span></li></ul>
       <article v-for="candidate in result.candidates" :key="candidate.member_id" class="candidate">
         <h4>第 {{ candidate.rank }} 名 · {{ candidate.display_name }}（#{{ candidate.member_id }}）</h4>
-        <p>满足 {{ candidate.matched_requirements }}/{{ candidate.total_requirements }} 项要求 · 容量未知 · 待人工核对</p>
+        <p>满足 {{ candidate.matched_requirements }}/{{ candidate.total_requirements }} 项要求 · 新故事容量校验未知 · 待人工核对</p>
         <ul><li v-for="(match, index) in candidate.matches" :key="index">{{ dimensions[match.requirement.dimension] }} / {{ match.requirement.name }}：要求 ≥ {{ match.requirement.minimum_level }}；画像 {{ match.recorded_level ?? '无记录' }}；{{ match.meets_requirement ? '满足' : '未有满足要求的记录' }}</li></ul>
         <p>六周容量：{{ workload(candidate.member_id).profile.six_week_capacity_hours }} 小时（不是本Sprint可用工时）</p>
+        <p>目标 Sprint 周容量合计：{{ workload(candidate.member_id).sprint_available_hours ?? '未知' }} 小时；扣除已有任务后的预计余量：{{ workload(candidate.member_id).sprint_remaining_hours ?? '未知' }} 小时。</p>
         <p>已关联故事：{{ ids(workload(candidate.member_id).owned_story_ids) }}<br>未完成任务：{{ ids(workload(candidate.member_id).active_task_ids) }}<br>与目标Sprint重叠的任务：{{ ids(workload(candidate.member_id).target_sprint_task_ids) }}</p>
       </article>
       <p v-if="result.excluded_viewer_ids.length">只读角色不进入候选：#{{ result.excluded_viewer_ids.join('、#') }}</p>

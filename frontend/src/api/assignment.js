@@ -1,7 +1,10 @@
 import { api } from './client'
+import { useProjectsStore } from '@/stores/projects'
+
+const scope = () => `?projectId=${encodeURIComponent(useProjectsStore().currentProjectId || '')}`
 
 export async function recommendAssignment(meetingId, payload) {
-  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/assignment/recommendations`, {
+  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/assignment/recommendations${scope()}`, {
     method: 'POST', body: JSON.stringify(payload)
   }, '/meeting-ai')
   return validateRecommendations(result, meetingId, payload)
@@ -78,7 +81,7 @@ function validateExecution(value, record) {
 }
 export const assignmentSuggestionsApi = {
   async save(meetingId, payload) {
-    const record = validateRecord(await api(`/api/meetings/${encodeURIComponent(meetingId)}/assignment/suggestions`, { method: 'POST', body: JSON.stringify(payload) }, '/meeting-ai'), meetingId)
+    const record = validateRecord(await api(`/api/meetings/${encodeURIComponent(meetingId)}/assignment/suggestions${scope()}`, { method: 'POST', body: JSON.stringify(payload) }, '/meeting-ai'), meetingId)
     if (record.client_request_id !== payload.client_request_id
         || JSON.stringify(record.input.story_ids) !== JSON.stringify(payload.story_ids)
         || record.input.target_sprint !== payload.target_sprint
