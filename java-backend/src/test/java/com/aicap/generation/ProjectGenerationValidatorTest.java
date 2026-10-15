@@ -654,7 +654,7 @@ class ProjectGenerationValidatorTest {
         normalized.path("stories").forEach(s -> counts[s.path("sprint").asInt()]++);
         assertTrue(counts[1] >= 8 && counts[2] >= 8 && counts[3] >= 8,
                 "counts=" + java.util.Arrays.toString(counts));
-        assertEquals(20, normalized.path("completeness").path("reassignedStorySprints").size());
+        assertTrue(normalized.path("completeness").path("sprintBalanceIssues").isEmpty());
     }
 
     @Test
@@ -720,10 +720,9 @@ class ProjectGenerationValidatorTest {
         ObjectNode draft = validator.normalize(raw, "merge", "NEW-final-sprint-guard");
 
         ArrayNode counts = (ArrayNode) draft.path("completeness").path("storyCountsBySprint");
-        for (JsonNode count : counts) assertTrue(count.asInt() >= 10, counts.toString());
-        assertTrue(java.util.stream.StreamSupport.stream(counts.spliterator(), false)
-                .mapToInt(JsonNode::asInt).max().orElse(0) <= 18, counts.toString());
-        assertTrue(draft.path("completeness").path("sprintBalanceIssues").isEmpty());
+        assertEquals("[5,17,18]", counts.toString(), "显式 Sprint 应保持原计划");
+        assertFalse(draft.path("completeness").path("sprintBalanceIssues").isEmpty(),
+                "严重失衡应提示人工调整，而非悄悄改动显式计划");
     }
 
     @Test

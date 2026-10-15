@@ -224,7 +224,9 @@ class ProjectGenerationCompletenessTest {
           """);
     }
     @Test void conciseThreeSprintPlanIsMarkedIncompleteWithScaleTargets() throws Exception {
-        var v=validator(); var d=v.normalize(raw(),"merge","NEW-test"); var report=v.completenessReport(d);
+        ObjectNode source = raw();
+        source.put("_preserve_activity_domains", true);
+        var v=validator(); var d=v.normalize(source,"merge","NEW-test"); var report=v.completenessReport(d);
         assertFalse(report.path("sufficient").asBoolean()); assertEquals(25,report.path("storyTarget").asInt()); assertEquals(22,report.path("storyMinimum").asInt());
         assertTrue(report.path("min_task_count").asInt()>=20); assertTrue(d.path("warnings").toString().contains("规划完整度不足"));
     }

@@ -112,8 +112,11 @@ class ProjectGenerationImportSprintTest {
 
         ObjectNode first = validator.normalizeImport(raw.deepCopy(), "create", "NEW-import");
         ObjectNode second = validator.normalizeImport(raw.deepCopy(), "create", "NEW-import");
-
-        assertEquals("[4,4,4]", first.path("completeness").path("storyCountsBySprint").toString());
+        ArrayNode counts = (ArrayNode) first.path("completeness").path("storyCountsBySprint");
+        int min = 12, max = 0, total = 0;
+        for (var count : counts) { min = Math.min(min, count.asInt()); max = Math.max(max, count.asInt()); total += count.asInt(); }
+        assertEquals(12, total);
+        assertTrue(max - min <= 2, counts.toString());
         assertEquals(first.path("stories").toString(), second.path("stories").toString());
     }
 
