@@ -15,6 +15,7 @@ import { defineStore } from 'pinia'
 import { SUPERVISOR_SESSION_KEY } from '@/constants'
 import { chatHealth, openChatStream, startChat, SupervisorOfflineError } from '@/api/supervisor'
 import { describeEvent } from '@/utils/supervisorTimeline'
+import { useProjectsStore } from '@/stores/projects'
 
 /** 上次的会话 handle —— 事件真相全在服务端,前端只需记住这个 id 就能续传 */
 function loadSessionId() {
@@ -144,7 +145,10 @@ export const useSupervisorStore = defineStore('supervisor', {
       this.messages.push({ id: 'u' + Date.now(), role: 'user', text: utterance })
       this.running = true
       try {
-        const { session_id: sid } = await startChat(utterance, this.sessionId)
+        // 当前项目随每一轮带上:多项目之后工具调用普遍需要 project_id,
+        // 不带就只能靠模型猜(见 api/supervisor.js 的 startChat 注释)
+        const { session_id: sid } = await startChat(utterance, this.sessionId,
+          useProjectsStore().currentProjectId)
         if (sid && sid !== this.sessionId) {
           this.sessionId = sid
           saveSessionId(sid)

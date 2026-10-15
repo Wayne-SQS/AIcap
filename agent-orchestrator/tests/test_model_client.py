@@ -55,6 +55,63 @@ async def _send(client: ModelClient, *, final: bool = False):
 
 
 # --------------------------------------------------------------------------
+# final 那一发与 json_object 的供应商硬约束
+# --------------------------------------------------------------------------
+
+
+async def test_final_request_supplies_the_word_json_the_provider_demands(configured):
+    """`final=True` 带 `response_format=json_object`，而供应商要求**这一发的 prompt 里出现
+    "json" 字样**。实测 api.deepseek.com 的原文是：
+
+        Prompt must contain the word 'json' in some form to use 'response_format' of type 'json_object'.
+
+    本层的 prompt 是纯中文，没有这个词 —— 不补这一句，"问一句 → 出最终答案"这条路
+    每一步都会死在最后一发上（真机上就是这样：工具全调成功、路由全对，最后 400）。"""
+    captured: list[httpx.Request] = []
+    client = _client(_ok(_reply({"role": "assistant", "content": "{}"}), captured=captured))
+
+    await client.complete(MESSAGES, TOOLS, final=True)
+
+    body = json.loads(captured[0].content)
+    assert body["response_format"] == {"type": "json_object"}
+    assert "tools" not in body and "tool_choice" not in body
+    assert any("json" in str(m.get("content") or "").lower() for m in body["messages"])
+
+
+async def test_final_request_does_not_mutate_the_callers_messages(configured):
+    """补的那句只进**本次请求体**：`messages` 会被写进检查点，改它等于污染恢复现场。"""
+    captured: list[httpx.Request] = []
+    client = _client(_ok(_reply({"role": "assistant", "content": "{}"}), captured=captured))
+    messages = [dict(m) for m in MESSAGES]
+
+    await client.complete(messages, TOOLS, final=True)
+
+    assert len(messages) == 1, "调用方的 messages 不得被追加"
+    assert len(json.loads(captured[0].content)["messages"]) == 2, "请求体里应有补的那一句"
+
+
+async def test_final_request_is_not_doubled_when_prompt_already_mentions_json(configured):
+    captured: list[httpx.Request] = []
+    client = _client(_ok(_reply({"role": "assistant", "content": "{}"}), captured=captured))
+    messages = [{"role": "user", "content": "请用 json 回答"}]
+
+    await client.complete(messages, TOOLS, final=True)
+
+    assert len(json.loads(captured[0].content)["messages"]) == 1, "已经有了就不重复补"
+
+
+async def test_tool_turn_keeps_tools_and_needs_no_json_mention(configured):
+    captured: list[httpx.Request] = []
+    client = _client(_ok(_reply({"role": "assistant", "content": "…"}), captured=captured))
+
+    await client.complete(MESSAGES, TOOLS, final=False)
+
+    body = json.loads(captured[0].content)
+    assert body["tool_choice"] == "auto" and body["tools"] == TOOLS
+    assert "response_format" not in body
+
+
+# --------------------------------------------------------------------------
 # 配置面
 # --------------------------------------------------------------------------
 

@@ -240,9 +240,14 @@ def _plan_messages(
     utterance: str,
     routes: Sequence[Route],
     limitations: Sequence[str],
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """拼规划用的两条消息。`limitations` 必须带上（契约 §2.2）：
-    不带的话模型会假设平台有它没有的能力，然后按那个假设派活。"""
+    不带的话模型会假设平台有它没有的能力，然后按那个假设派活。
+
+    `project_id` 同理：多项目之后触发型工具的入参普遍要求它，不告诉模型它就只能猜
+    （实测：读查询猜中过 P001，而派活那枚漏传 `project_id` → 平台以
+    `invalid_arguments` 拒收，路由对、活派不出去）。"""
     system = [
         _ROLE,
         "",
@@ -258,6 +263,12 @@ def _plan_messages(
     if limitations:
         system += ["", "平台能力边界（必须遵守，不得假设超出范围的能力）："]
         system += [f"- {item}" for item in limitations]
+    if project_id:
+        system += [
+            "",
+            f"当前项目:project_id = {project_id}。调用任何需要 project_id 的工具时都必须用它，"
+            "不要另猜、也不要省略。",
+        ]
     return [
         {"role": "system", "content": "\n".join(system)},
         {"role": "user", "content": utterance},
@@ -525,6 +536,7 @@ async def plan(
     utterance: str,
     user_jwt: str,
     *,
+    project_id: str | None = None,
     model: ModelProtocol | None = None,
     catalog: Catalog | None = None,
     client: JavaClient | None = None,
@@ -556,7 +568,7 @@ async def plan(
         catalog = await client.catalog(user_jwt)
 
     routes = routes_from_catalog(catalog)
-    messages = _plan_messages(utterance, routes, catalog.limitations)
+    messages = _plan_messages(utterance, routes, catalog.limitations, project_id=project_id)
     resolved = model if model is not None else ModelClient()
     # `final=True` 要的是**结论**那一发：真实 `ModelClient` 会据此带上
     # `response_format=json_object` 并去掉 tools（见 model_client.complete）。

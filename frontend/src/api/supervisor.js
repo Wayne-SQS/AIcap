@@ -69,10 +69,17 @@ export async function chatHealth() {
   }
 }
 
-/** `POST /chat` —— 起一轮。省 session_id 则后端新建会话。409 表示已有 run 在跑。 */
-export async function startChat(utterance, sessionId) {
+/** `POST /chat` —— 起一轮。省 session_id 则后端新建会话。409 表示已有 run 在跑。
+ *
+ *  `projectId` 是**当前项目上下文**:多项目之后工具调用普遍需要 project_id,
+ *  不带的话模型只能猜(读查询猜中过,触发型工具漏传会被平台以 invalid_arguments 拒)。
+ *  省略仍然可用,只是回到"靠模型猜"的老行为。 */
+export async function startChat(utterance, sessionId, projectId) {
   const token = getAuthToken()
   if (!token) throw new SupervisorOfflineError('未登录,无法与主管对话')
+  const payload = { utterance }
+  if (sessionId) payload.session_id = sessionId
+  if (projectId) payload.project_id = projectId
   let res
   try {
     res = await fetch(orchestratorPath('/chat'), {
@@ -81,7 +88,7 @@ export async function startChat(utterance, sessionId) {
         'Content-Type': 'application/json',
         Authorization: 'Bearer ' + token
       },
-      body: JSON.stringify(sessionId ? { utterance, session_id: sessionId } : { utterance })
+      body: JSON.stringify(payload)
     })
   } catch (e) {
     throw new SupervisorOfflineError('连接不上主管服务(编排层未启动?)')

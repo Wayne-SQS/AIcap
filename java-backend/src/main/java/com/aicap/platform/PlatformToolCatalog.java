@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -88,6 +89,23 @@ public class PlatformToolCatalog {
     private final ObjectMapper mapper;
 
     /**
+     * 会议分析的触发面(可选)。**它决定那枚工具是否发布** —— 见 {@link #catalogJson()}。
+     *
+     * <p>为什么会为"某个工具是否有实现"专门注入一个 provider:2026-10-13 老会议 Agent 整包退役后,
+     * {@link MeetingAnalysisTrigger} 一直没有实现类,而 catalog 仍然发布着
+     * {@code start_meeting_analysis} —— 主管看得见就会去派它,然后稳定吃到
+     * {@code agent_tool_unavailable}。比"没有这个能力"更糟的是"看起来有"。
+     * 所以清单按实现发布:补上实现(例如接到 {@code ai-service} 的会议分析)它自动重新出现,
+     * 不需要改这里一行 —— 与"新增工具只改 Java"是同一条纪律。
+     */
+    private final ObjectProvider<MeetingAnalysisTrigger> meetingTriggers;
+
+    /** 会议分析的触发面当前是否有实现 */
+    private boolean meetingTriggerAvailable() {
+        return meetingTriggers.getIfAvailable() != null;
+    }
+
+    /**
      * 归一化后的工具清单。
      *
      * <p>每次现算,不做缓存:两个来源都明确"每次单独构建,防调用方修改污染",
@@ -138,7 +156,13 @@ public class PlatformToolCatalog {
                 START_PLAN_DRAFT,
                 AGENT_PLATFORM,
                 "为一句规划请求生成结构化修改草案(草案仍需人工确认后才执行)。只创建 run,不修改任何业务数据。",
-                objectSchema(Map.of("request", strField("Planning request", 1, 2000)), "request"),
+                // project_id 必须声明:多项目之后 planning run 的作用域就是它,
+                // 服务端缺它会以 invalid_arguments 拒绝(PlatformToolService.startPlanDraft)。
+                // 不声明 = 模型不知道要传 = 主管路由对了也派不出去(真机实测过一次)。
+                objectSchema(Map.of(
+                                "project_id", strField("Project id", 1, 20),
+                                "request", strField("Planning request", 1, 2000)),
+                        "project_id", "request"),
                 null,
                 false,
                 false));
@@ -174,6 +198,10 @@ public class PlatformToolCatalog {
     public Map<String, Object> catalogJson() {
         List<Map<String, Object>> tools = new ArrayList<>();
         for (ToolSpec spec : specs()) {
+            if (START_MEETING_ANALYSIS.equals(spec.name()) && !meetingTriggerAvailable()) {
+                // 没有实现的触发型工具不发布:否则主管会路由到它、用户会以为能派活(见 meetingTriggers 注释)
+                continue;
+            }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("name", spec.name());
             item.put("agent", spec.agent());
@@ -187,8 +215,17 @@ public class PlatformToolCatalog {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("platform_version", PLATFORM_VERSION);
         out.put("tools", tools);
-        out.put("limitations", LIMITATIONS);
+        out.put("limitations", meetingTriggerAvailable() ? LIMITATIONS
+                : concat(LIMITATIONS,
+                        "会议分析触发当前不可用:平台侧没有 MeetingAnalysisTrigger 实现,"
+                                + "start_meeting_analysis 未在清单中(不要假设它存在)"));
         return out;
+    }
+
+    private static List<String> concat(List<String> base, String extra) {
+        List<String> out = new ArrayList<>(base);
+        out.add(extra);
+        return List.copyOf(out);
     }
 
     private JsonNode semanticSearchSchema() {

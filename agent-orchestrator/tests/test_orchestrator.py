@@ -70,6 +70,35 @@ def system_prompt_of(model: ScriptedModel) -> str:
 
 
 # ==========================================================================
+# 当前项目上下文：多项目之后工具调用普遍要 project_id
+# ==========================================================================
+
+
+async def test_prompt_carries_the_current_project_when_given():
+    """当前项目必须进 prompt：不告诉模型它只能猜 project_id。
+    真机实测过这条缺口 —— 读查询猜中了 P001，而派活那枚漏传 project_id，
+    被平台以 `invalid_arguments` 拒收（路由全对、活派不出去）。"""
+    platform = FakePlatform()
+    model = ScriptedModel(plan_reply())
+
+    async with JavaClient(BASE, transport=platform.transport()) as client:
+        await plan("分析一下上次评审会", TOKEN, model=model, client=client, project_id="P007")
+
+    system = system_prompt_of(model)
+    assert "P007" in system, "当前项目必须进 prompt"
+    assert "project_id" in system
+
+
+async def test_prompt_omits_the_project_line_when_not_given():
+    """不传 project_id 时不得凭空写一行 —— 老调用方(省略该参数)的 prompt 形状不变。"""
+    model = ScriptedModel(plan_reply())
+
+    await run_plan(FakePlatform(), model)
+
+    assert "当前项目" not in system_prompt_of(model)
+
+
+# ==========================================================================
 # 路由集合：运行时从 /catalog 拉、零硬编码
 # ==========================================================================
 

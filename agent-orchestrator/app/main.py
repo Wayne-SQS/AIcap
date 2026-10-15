@@ -56,6 +56,10 @@ class ChatRequest(BaseModel):
 
     utterance: str
     session_id: str | None = None
+    # 当前项目(前端从路由/项目选择器带上来)。多项目之后工具调用普遍需要 project_id,
+    # 不传就只能靠模型猜:读查询猜中过 P001,而触发型工具会被平台以
+    # invalid_arguments 拒收。省略仍然可用(向后兼容老调用方)。
+    project_id: str | None = None
 
 
 def _bearer(request: Request) -> str:
@@ -130,6 +134,7 @@ async def _background_run(
     jwt: str,
     registry: RunRegistry,
     model: ModelProtocol,
+    project_id: str | None = None,
 ) -> None:
     """后台任务自持一个 `JavaClient`。
 
@@ -145,6 +150,7 @@ async def _background_run(
             jwt=jwt,
             registry=registry,
             model=model,
+            project_id=project_id,
             # 规划相挂在 claim 窗口内（见 loop.run 的 `pre_loop` 说明）：
             # 它决定这一轮是"反问"还是"派活"，并且是 loop 之前唯一发事件的地方。
             pre_loop=lambda: _plan_phase(
@@ -155,6 +161,7 @@ async def _background_run(
                 run_id=run_id,
                 utterance=utterance,
                 jwt=jwt,
+                project_id=project_id,
             ),
         )
     finally:
@@ -174,6 +181,7 @@ async def _plan_phase(
     run_id: str,
     utterance: str,
     jwt: str,
+    project_id: str | None = None,
 ) -> bool:
     """主管规划相：`plan()` → 留痕 → 反问或派活。返回 `True` 表示可以进工具循环。
 
@@ -204,7 +212,8 @@ async def _plan_phase(
     try:
         # 清单在同一个 run 里只拉一次：plan() 用它派生路由，本层用它拼留痕的 candidates。
         catalog = await client.catalog(jwt)
-        decision = await orchestrator.plan(utterance, jwt, model=model, catalog=catalog)
+        decision = await orchestrator.plan(utterance, jwt, model=model, catalog=catalog,
+                                           project_id=project_id)
     except ModelError as error:
         # 没配密钥（`not_configured`）、模型不可达、返回的不是合法 JSON —— 全部如实上报。
         # **没有任何兜底路由**：这里绝不会"猜一个 route 让它继续跑"。
@@ -259,7 +268,13 @@ async def _plan_phase(
 
     route = decision.route
     try:
-        outcome = await client.call_tool(route, decision.args, jwt)
+        # 派活时把当前项目补进 args(模型漏传/猜错都不至于让整次派发失败)。
+        # 服务端从 args 读 project_id 且忽略多余字段,所以这里是安全的兜底;
+        # 模型自己给了值就以它为准(它可能被要求派到别的项目上)。
+        dispatch_args = decision.args if isinstance(decision.args, dict) else {}
+        if project_id and not dispatch_args.get("project_id") and not dispatch_args.get("projectId"):
+            dispatch_args = {**dispatch_args, "project_id": project_id}
+        outcome = await client.call_tool(route, dispatch_args, jwt)
     except PlatformError as error:
         return await fail(error.code, error.message)
     if outcome.is_failure:
@@ -444,6 +459,7 @@ def create_app(
                     jwt=jwt,
                     registry=registry,
                     model=model,
+                    project_id=payload.project_id,
                 )
             )
             registry.attach_task(session_id, task)

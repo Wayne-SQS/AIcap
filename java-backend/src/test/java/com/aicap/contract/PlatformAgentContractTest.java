@@ -8,7 +8,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 
+import com.aicap.platform.MeetingAnalysisTrigger;
 import com.aicap.platform.PlatformToolCatalog;
+import org.springframework.beans.factory.ObjectProvider;
 import java.util.LinkedHashSet;
 import java.util.UUID;
 import java.util.List;
@@ -57,6 +59,22 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** 清单项允许出现的字段;多一个都算把业务数据漏进了能力声明 */
     private static final Set<String> ALLOWED_TOOL_FIELDS = Set.of(
             "name", "agent", "description", "args_schema", "args_hint", "read_only", "uses_retrieval");
+
+    /**
+     * 会议分析的触发面(可选)。catalog **按实现发布**触发型工具:没有实现就不发布,
+     * 所以这条用例的期望集合也必须按同一口径算(见 PlatformToolCatalog.catalogJson)。
+     */
+    @Autowired
+    private ObjectProvider<MeetingAnalysisTrigger> meetingTriggers;
+
+    /** 本环境清单里**应该**出现的触发型工具 = 设计口径 ∩ 有实现的那些 */
+    private Set<String> expectedTriggers() {
+        Set<String> triggers = new LinkedHashSet<>(PlatformToolCatalog.TRIGGER_TOOLS);
+        if (meetingTriggers.getIfAvailable() == null) {
+            triggers.remove(PlatformToolCatalog.START_MEETING_ANALYSIS);
+        }
+        return triggers;
+    }
 
     @Autowired
     private LlmProperties llmProperties;
@@ -123,7 +141,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
     @Test
     void plat04_catalog_hasNoWriteToolExceptTheThreeTriggers() {
         ApiResponse r = get(CATALOG, token(USER_ADMIN));
-        Set<String> triggers = new LinkedHashSet<>(PlatformToolCatalog.TRIGGER_TOOLS);
+        Set<String> triggers = expectedTriggers();
         Set<String> nonReadOnly = new LinkedHashSet<>();
         for (JsonNode tool : r.json().path("tools")) {
             String name = tool.path("name").asText();
@@ -132,12 +150,13 @@ class PlatformAgentContractTest extends ContractTestSupport {
                         "触发型工具不该被标成只读: " + name);
                 continue;
             }
-            assertTrue(triggers.contains(name),
+            assertTrue(PlatformToolCatalog.TRIGGER_TOOLS.contains(name),
                     "工具层出现计划外的写工具: " + name);
             nonReadOnly.add(name);
         }
         assertEquals(triggers, nonReadOnly,
-                "三枚触发型工具必须都在册且都标为非只读: " + r.body());
+                "触发型工具必须都标为非只读,且**没有实现的不发布**"
+                        + "(期望 " + triggers + "): " + r.body());
     }
 
     /** PLAT-05:能力限制必须随清单下发 —— 主管规划时要带着它们,不能让人以为数据是全的 */

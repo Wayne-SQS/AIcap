@@ -216,7 +216,12 @@ export function describeEvent(env) {
         label: '中断',
         text: ERROR_TEXT[code] || ('出错:' + code),
         detail: [data.message, bits.join('')].filter(Boolean).join(' · '),
-        answer: null,
+        // answer **必须给值**：它同时是对话气泡的内容，而时间轴只在
+        // `v-for="m in messages"` 里用 stepsFor(m.runId) 渲染 —— answer 为 null 时
+        // 这轮既没有气泡、事件也挂不上任何消息节点，于是 run.error 的那几条
+        // **一条都进不了 DOM**：用户看到"发出去、转一圈、什么都没有"，与成功无法区分。
+        // （真实浏览器走查里实际发生过：派活被平台拒，窗口里毫无反应、console 也干净。）
+        answer: '这一轮没跑完：' + (data.message || ERROR_TEXT[code] || code),
         done: true,
         at
       }

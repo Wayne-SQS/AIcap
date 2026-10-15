@@ -85,6 +85,7 @@ def initial_state(
     utterance: str,
     system_prompt: str | None = None,
     required_tools: frozenset[str] | set[str] = frozenset(),
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """一个 run 的初始循环状态 —— 也就是写进 `state_json` 的那份结构。
 
@@ -104,6 +105,9 @@ def initial_state(
         "call_ids": [],
         "tool_call_count": 0,
         "required_tools": sorted(required_tools),
+        # 当前项目上下文。放进 state 而不是只放请求里:检查点恢复要把同一上下文带回来,
+        # 否则"崩了重连接着跑"的那一半会退化成"模型又开始猜 project_id"。
+        "project_id": project_id,
         "elapsed_seconds": 0.0,
     }
 
@@ -125,6 +129,7 @@ async def run(
     system_prompt: str | None = None,
     required_tools: frozenset[str] | set[str] = frozenset(),
     pre_loop: Callable[[], Awaitable[bool]] | None = None,
+    project_id: str | None = None,
 ) -> None:
     """开一个新 run（`POST /chat` 起它，作为独立后台任务）。
 
@@ -147,6 +152,7 @@ async def run(
         utterance=utterance,
         system_prompt=system_prompt,
         required_tools=required_tools,
+        project_id=project_id,
     )
 
     async def on_claim() -> None:
@@ -269,13 +275,15 @@ async def _run_loop(
             state["messages"] = [
                 {
                     "role": "system",
-                    "content": _prompt_with_limits(state["system_prompt"], catalog.limitations),
+                    "content": _prompt_with_limits(state["system_prompt"], catalog.limitations)
+                    + _project_line(state.get("project_id")),
                 },
                 {"role": "user", "content": state["utterance"]},
             ]
         schemas = function_schemas(catalog)
 
         messages: list[dict[str, Any]] = state["messages"]
+        project_id: str | None = state.get("project_id")
         called: set[str] = set(state.get("called") or ())
         call_ids: set[str] = set(state.get("call_ids") or ())
         total_calls = int(state.get("tool_call_count") or 0)
@@ -345,6 +353,10 @@ async def _run_loop(
                     raise _Gate("invalid_tool_arguments", "模型工具参数不是 JSON") from None
                 if not isinstance(arguments, dict):
                     raise _Gate("invalid_tool_arguments", "模型工具参数不是 JSON 对象")
+                # 当前项目兜底注入:模型漏传 project_id 时补上(服务端读 args 并忽略多余字段)。
+                # 模型自己给了值就以它为准 —— 它可能被要求操作别的项目。
+                if project_id and not arguments.get("project_id") and not arguments.get("projectId"):
+                    arguments = {**arguments, "project_id": project_id}
 
                 await emit("tool.call", {"name": name, "arguments": arguments})
                 outcome = await _invoke(client, name, arguments, jwt, used)
@@ -409,6 +421,15 @@ def function_schemas(catalog: Catalog) -> list[dict[str, Any]]:
             }
         )
     return schemas
+
+
+def _project_line(project_id: str | None) -> str:
+    """当前项目上下文一行。多项目之后工具调用普遍要 project_id，
+    不告诉模型它只能猜（实测：读查询猜中过，触发型工具漏传就被平台拒）。"""
+    if not project_id:
+        return ""
+    return ("\n\n当前项目：project_id = " + project_id
+            + "。调用任何需要 project_id 的工具时都必须用它，不要另猜、也不要省略。")
 
 
 def _prompt_with_limits(system_prompt: str, limitations: list[str]) -> str:

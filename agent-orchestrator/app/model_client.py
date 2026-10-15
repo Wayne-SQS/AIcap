@@ -114,6 +114,19 @@ class ModelClient:
             body["thinking"] = {"type": "disabled"}
         if final:
             body["response_format"] = {"type": "json_object"}
+            # 供应商硬约束（实测 api.deepseek.com）:`json_object` 模式要求**这一发的 prompt 里
+            # 出现 "json" 字样**,否则直接 400:
+            #   "Prompt must contain the word 'json' in some form to use 'response_format' of type 'json_object'."
+            # 本科目的 prompt 是纯中文,通篇没有这个词 —— 于是"问一句→出最终答案"这条路
+            # 每一步都会死在最后一发上(真机实测过一次)。
+            # 只补进**本次请求体**,不追加进 `messages`:后者会被写进检查点,
+            # 污染后续上下文与崩溃恢复的现场。
+            if not any("json" in str(m.get("content") or "").lower() for m in messages):
+                body["messages"] = [
+                    *messages,
+                    {"role": "user",
+                     "content": "请把最终答案组织成一个 json 对象返回(字段自定,供前端展示)。"},
+                ]
         else:
             body.update(tools=tools, tool_choice="auto")
 
