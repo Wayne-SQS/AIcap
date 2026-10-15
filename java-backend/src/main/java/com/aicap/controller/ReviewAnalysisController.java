@@ -16,7 +16,7 @@ public class ReviewAnalysisController {
 
     @PostMapping
     public ObjectNode save(@PathVariable String meetingId, @RequestBody JsonNode body) {
-        return service.save(meetingId, body, Roles.any().getId());
+        return service.save(meetingId, body, Roles.writer().getId());
     }
 
     @GetMapping
@@ -27,7 +27,7 @@ public class ReviewAnalysisController {
 
     @GetMapping("/by-request/{clientRequestId}")
     public ObjectNode findByRequest(@PathVariable String meetingId, @PathVariable String clientRequestId) {
-        return service.findByRequest(meetingId, clientRequestId, Roles.any().getId());
+        return service.findByRequest(meetingId, clientRequestId, Roles.writer().getId());
     }
 
     @GetMapping("/{analysisId}")

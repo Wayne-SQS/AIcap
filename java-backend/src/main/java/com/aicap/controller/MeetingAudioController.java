@@ -24,7 +24,7 @@ import java.util.Map;
 
 /**
  * 会议音频接口:网页麦克风录音(前端编码为 mp3)与本地 .mp3 文件提交、列表、回放、删除。
- * 上传需项目写权限,回放需项目成员身份,删除仅项目 owner/admin。
+ * 上传需写角色(admin/owner/member),回放任意登录用户,删除仅 admin/owner。
  */
 @RestController
 @RequestMapping("/api")
@@ -39,7 +39,7 @@ public class MeetingAudioController {
                                             @RequestParam(value = "source", required = false) String source,
                                             @RequestParam(value = "duration_ms", required = false) Integer durationMs,
                                             @RequestParam(value = "consent_confirmed", required = false) Boolean consentConfirmed) {
-        User actor = Roles.any();
+        User actor = Roles.writer();
         return audioService.store(projectId, meetingId, file, source, durationMs, consentConfirmed, actor);
     }
 
@@ -69,8 +69,8 @@ public class MeetingAudioController {
 
     @DeleteMapping("/audio/{audioId}")
     public Map<String, Object> delete(@PathVariable String audioId, @RequestParam String projectId) {
-        Roles.any();
-        audioService.delete(projectId, audioId);
+        User actor = Roles.any();
+        audioService.delete(projectId, audioId, actor);
         return Map.of("ok", true);
     }
 }

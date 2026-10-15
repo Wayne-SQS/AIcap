@@ -35,7 +35,7 @@ public class AgentController {
 
     @PostMapping("/meetings/{meetingId}/runs")
     public Map<String, Object> startRun(@PathVariable String meetingId, @RequestParam String projectId) {
-        User user = Roles.any();
+        User user = Roles.writer();
         projectAccess.requireWriter(projectId);
         return agentService.createRun(projectId, meetingId, user);
     }
@@ -54,7 +54,7 @@ public class AgentController {
 
     @PostMapping("/agent-runs/{runId}/retry")
     public Map<String, Object> retryRun(@PathVariable String runId, @RequestParam String projectId) {
-        User user = Roles.any();
+        User user = Roles.writer();
         projectAccess.requireWriter(projectId);
         return agentService.retryRun(projectId, runId, user);
     }

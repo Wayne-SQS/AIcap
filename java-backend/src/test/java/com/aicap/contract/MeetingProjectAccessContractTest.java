@@ -58,13 +58,18 @@ class MeetingProjectAccessContractTest extends ContractTestSupport {
             String reviewPath = base + "/planning-analyses/absent/proposal-reviews";
             String validReview = "{\"proposal_id\":\"p1\",\"decision\":\"reject\",\"reason\":\"不采用\"}";
             assertStatus(post(reviewPath, admin, validReview), 403);
-            assertStatus(post(reviewPath, member, validReview), 404);
+            assertStatus(post(reviewPath, member, validReview), 403);
             String executionPath = base + "/planning-analyses/absent/proposal-executions";
             assertStatus(post(executionPath, admin, "{\"proposal_id\":\"p1\"}"), 403);
-            assertStatus(post(executionPath, member, "{\"proposal_id\":\"p1\"}"), 404);
+            assertStatus(post(executionPath, member, "{\"proposal_id\":\"p1\"}"), 403);
             assertStatus(post(base + "/assignment-suggestions/absent/review", admin, "{}"), 403);
             assertStatus(delete(base + "?projectId=" + projectId, admin), 403);
-            assertStatus(delete(base + "?projectId=" + projectId, member), 200);
+            assertStatus(delete(base + "?projectId=" + projectId, member), 403);
+            jdbc.update("UPDATE project_members SET project_role='owner' WHERE project_id=? AND user_id=?",
+                    projectId, adminId);
+            assertStatus(post(reviewPath, admin, validReview), 404);
+            assertStatus(post(executionPath, admin, "{\"proposal_id\":\"p1\"}"), 404);
+            assertStatus(delete(base + "?projectId=" + projectId, admin), 200);
             assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM meetings WHERE id=?", Integer.class, meetingId));
         } finally {
             jdbc.update("DELETE FROM meetings WHERE id=?", meetingId);

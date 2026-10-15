@@ -153,8 +153,11 @@ public class MeetingAudioService {
         }
     }
 
-    /** 删除:仅项目 owner/admin;先删库再删盘,盘上缺失不报错 */
-    public void delete(String projectId, String audioId) {
+    /** 删除:仅 admin/owner;先删库再删盘,盘上缺失不报错 */
+    public void delete(String projectId, String audioId, User actor) {
+        if (!Set.of("admin", "owner").contains(actor.getRole())) {
+            throw ApiException.forbidden("仅管理员/负责人可删除会议音频");
+        }
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
         meetingService.requireMeeting(projectId, audio.getMeetingId());
