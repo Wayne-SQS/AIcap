@@ -22,6 +22,9 @@ public class MeetingAgentRun {
     private String workerToken;   // 可空
     private LocalDateTime leaseUntil; // 可空
     private String resultJson;    // 可空, LONGTEXT
+    private String editedResultJson; // 人工修订稿；原始 resultJson 保持不可变
+    private Integer editedBy;
+    private LocalDateTime editedAt;
     private String errorCode;     // 可空
     private String errorMessage;  // 可空
     private LocalDateTime createdAt;

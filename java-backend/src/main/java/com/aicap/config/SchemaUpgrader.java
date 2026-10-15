@@ -76,6 +76,12 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"task_code_snapshot", "`task_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
     };
 
+    private static final String[][] MEETING_RUN_EDIT_COLUMNS = {
+            {"edited_result_json", "`edited_result_json` longtext COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"edited_by", "`edited_by` int DEFAULT NULL"},
+            {"edited_at", "`edited_at` datetime DEFAULT NULL"},
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
@@ -93,6 +99,9 @@ public class SchemaUpgrader implements ApplicationRunner {
             }
             if (tableExists(conn, "meeting_audio")) {
                 added.addAll(addMissing(conn, "meeting_audio", MEETING_AUDIO_COLUMNS));
+            }
+            if (tableExists(conn, "meeting_agent_runs")) {
+                added.addAll(addMissing(conn, "meeting_agent_runs", MEETING_RUN_EDIT_COLUMNS));
             }
             ensureTaskStoryRelations(conn);
             if (tableExists(conn, "tasks")) {

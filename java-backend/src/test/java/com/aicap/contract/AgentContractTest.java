@@ -181,7 +181,32 @@ class AgentContractTest extends ContractTestSupport {
         String mid = createMeeting(uniq("CT只读会议"));
         assertStatus(postProject("/api/meetings/" + mid + "/runs", viewer, null), 403);
         assertStatus(postProject("/api/agent-runs/not-exist/retry", viewer, null), 403);
+        assertStatus(patchProject("/api/agent-runs/not-exist/minutes", viewer,
+                json(map("summary", "越权修订"))), 403);
         assertEquals(200, getProject("/api/meetings/" + mid + "/runs", viewer).status());
+    }
+
+    @Test
+    void agentMinutes_humanDraftPreservesModelResultAndAuditEvent() {
+        String mid = createMeeting(uniq("CT纪要修订"));
+        String runId = startRun(mid);
+        JsonNode original = awaitTerminal(runId);
+        assertEquals("awaiting_review", original.path("status").asText(), original.toString());
+        ApiResponse edited = patchProject("/api/agent-runs/" + runId + "/minutes",
+                token(USER_OWNER), json(map("summary", "人工核对后的摘要",
+                        "unresolved_questions", List.of("字段映射待确认"))));
+        assertStatus(edited, 200);
+        assertEquals(original.path("result"), edited.json().path("result"),
+                "人工修订不能覆盖模型原文");
+        assertEquals("人工核对后的摘要", edited.json().path("edited_result").path("summary").asText());
+        assertEquals("字段映射待确认",
+                edited.json().path("edited_result").path("unresolved_questions").path(0).asText());
+        assertEquals(2, edited.json().path("edited_by").asInt());
+        assertTrue(edited.json().path("events").toString().contains("minutes_edited"), edited.body());
+        assertStatus(patchProject("/api/agent-runs/" + runId + "/minutes",
+                token(USER_OWNER), json(map("decisions", List.of("不可凭空增加决议")))), 422);
+        ApiResponse reread = getProject("/api/agent-runs/" + runId, token(USER_ADMIN));
+        assertEquals("人工核对后的摘要", reread.json().path("edited_result").path("summary").asText());
     }
 
     /** AGENT-05:会议不存在 → 404(发起/列表);run 不存在 → 404(读取/重试) */

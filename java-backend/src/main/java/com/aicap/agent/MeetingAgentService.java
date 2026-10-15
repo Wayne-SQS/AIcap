@@ -12,9 +12,13 @@ import com.aicap.service.MeetingService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -108,6 +112,80 @@ public class MeetingAgentService {
         return runOut(updated);
     }
 
+    /** Keep the model output immutable while storing a human-reviewed minutes draft. */
+    @Transactional
+    public Map<String, Object> editMinutes(String projectId, String runId, JsonNode edits, User editor) {
+        MeetingAgentRun run = runMapper.selectById(runId);
+        if (run == null) throw ApiException.notFound("分析记录不存在");
+        meetingService.requireMeeting(projectId, run.getMeetingId());
+        if (!List.of("awaiting_review", "completed").contains(run.getStatus()) || run.getResultJson() == null) {
+            throw ApiException.conflict("分析完成后才能修订会议纪要");
+        }
+        if (edits == null || !edits.isObject()) throw ApiException.unprocessable("纪要修订格式无效");
+        try {
+            JsonNode base = objectMapper.readTree(run.getEditedResultJson() == null
+                    ? run.getResultJson() : run.getEditedResultJson());
+            if (!(base instanceof ObjectNode draft)) throw ApiException.unprocessable("原始分析结果格式无效");
+            boolean changed = false;
+            if (edits.has("summary")) {
+                draft.put("summary", requiredText(edits.get("summary"), 4000));
+                changed = true;
+            }
+            for (String field : List.of("decisions", "action_items")) {
+                if (!edits.has(field)) continue;
+                JsonNode original = draft.path(field);
+                JsonNode replacement = edits.get(field);
+                if (!(original instanceof ArrayNode rows) || !replacement.isArray()
+                        || replacement.size() != rows.size()) {
+                    throw ApiException.unprocessable(field + " 的条目数必须与原始分析一致");
+                }
+                for (int i = 0; i < rows.size(); i++) {
+                    if (!(rows.get(i) instanceof ObjectNode item)) {
+                        throw ApiException.unprocessable(field + " 的原始条目格式无效");
+                    }
+                    item.put("text", requiredText(replacement.get(i), 2000));
+                }
+                changed = true;
+            }
+            if (edits.has("unresolved_questions")) {
+                JsonNode items = edits.get("unresolved_questions");
+                if (!items.isArray() || items.size() > 30) {
+                    throw ApiException.unprocessable("未决问题须为不超过 30 条的列表");
+                }
+                ArrayNode updated = objectMapper.createArrayNode();
+                for (JsonNode item : items) updated.add(requiredText(item, 2000));
+                draft.set("unresolved_questions", updated);
+                changed = true;
+            }
+            if (!changed) throw ApiException.unprocessable("没有可保存的纪要修订");
+            run.setEditedResultJson(objectMapper.writeValueAsString(draft));
+            run.setEditedBy(editor.getId());
+            run.setEditedAt(LocalDateTime.now());
+            runMapper.updateById(run);
+            MeetingAgentEvent event = new MeetingAgentEvent();
+            event.setRunId(runId);
+            event.setAttempt(run.getAttempt());
+            event.setKind("minutes_edited");
+            event.setDetailJson(objectMapper.writeValueAsString(Map.of(
+                    "edited_by", editor.getId(), "edited_result", draft)));
+            event.setCreatedAt(run.getEditedAt());
+            eventMapper.insert(event);
+            return getRun(projectId, runId);
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw ApiException.unprocessable("纪要修订无法解析");
+        }
+    }
+
+    private String requiredText(JsonNode value, int limit) {
+        if (value == null || !value.isTextual() || value.asText().isBlank()
+                || value.asText().length() > limit) {
+            throw ApiException.unprocessable("纪要文字不能为空且不得超过 " + limit + " 字");
+        }
+        return value.asText().trim();
+    }
+
     // ---------- 组装 ----------
 
     private Map<String, Object> runOut(MeetingAgentRun run) {
@@ -124,6 +202,9 @@ public class MeetingAgentService {
         out.put("created_at", run.getCreatedAt());
         out.put("updated_at", run.getUpdatedAt());
         out.put("result", parseResult(run.getResultJson()));
+        out.put("edited_result", parseResult(run.getEditedResultJson()));
+        out.put("edited_by", run.getEditedBy());
+        out.put("edited_at", run.getEditedAt());
         return out;
     }
 

@@ -10,5 +10,8 @@ export const meetingsApi = {
   runs: (id, projectId) => api(`/api/meetings/${id}/runs?projectId=${encodeURIComponent(projectId || '')}`),
   startRun: (id, projectId) => api(`/api/meetings/${id}/runs?projectId=${encodeURIComponent(projectId || '')}`, { method: 'POST' }),
   getRun: (runId, projectId) => api(`/api/agent-runs/${runId}?projectId=${encodeURIComponent(projectId || '')}`),
-  retryRun: (runId, projectId) => api(`/api/agent-runs/${runId}/retry?projectId=${encodeURIComponent(projectId || '')}`, { method: 'POST' })
+  retryRun: (runId, projectId) => api(`/api/agent-runs/${runId}/retry?projectId=${encodeURIComponent(projectId || '')}`, { method: 'POST' }),
+  editMinutes: (runId, projectId, edits) => api(`/api/agent-runs/${runId}/minutes?projectId=${encodeURIComponent(projectId || '')}`, {
+    method: 'PATCH', body: JSON.stringify(edits)
+  })
 }

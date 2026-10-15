@@ -18,7 +18,36 @@ const labels = { queued: '排队中', running: '正在分析', awaiting_review: 
 const run = computed(() => meeting.agentRun)
 const config = computed(() => meeting.agentConfig)
 const configured = computed(() => config.value?.configured && config.value?.worker_enabled)
-const result = computed(() => run.value?.result)
+const result = computed(() => run.value?.edited_result || run.value?.result)
+const editingMinutes = ref(false)
+const minutesBusy = ref(false)
+const minutes = ref({ summary: '', decisions: [], action_items: [], unresolved_questions: '' })
+
+function beginMinutesEdit() {
+  if (!result.value || !meeting.maySubmit) return
+  minutes.value = {
+    summary: result.value.summary || '',
+    decisions: (result.value.decisions || []).map(item => item.text || ''),
+    action_items: (result.value.action_items || []).map(item => item.text || ''),
+    unresolved_questions: (result.value.unresolved_questions || []).join('\n')
+  }
+  editingMinutes.value = true
+}
+async function saveMinutes() {
+  if (minutesBusy.value) return
+  minutesBusy.value = true
+  try {
+    await meeting.editMinutes({
+      summary: minutes.value.summary.trim(),
+      decisions: minutes.value.decisions.map(text => text.trim()),
+      action_items: minutes.value.action_items.map(text => text.trim()),
+      unresolved_questions: minutes.value.unresolved_questions.split('\n').map(text => text.trim()).filter(Boolean)
+    })
+    editingMinutes.value = false
+    notify('会议纪要修订已保存')
+  } catch (err) { meeting.agentError = '保存纪要失败：' + err.message }
+  finally { minutesBusy.value = false }
+}
 
 async function refreshRun() {
   try { await meeting.refreshRun() }
@@ -64,6 +93,7 @@ function facts(items) {
 onMounted(() => { generation++; refreshRun() })
 /* SPA 重载/后到数据:loadAll 异步补选会议后(selected 由空变有值)补拉运行状态并恢复轮询 */
 watch(() => meeting.selected, v => { if (v) { generation++; refreshRun() } })
+watch(() => run.value?.id, () => { editingMinutes.value = false })
 onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 
@@ -79,6 +109,18 @@ onUnmounted(() => { generation++; clearTimeout(timer) })
     <button v-if="result && meeting.maySubmit" id="agent-reanalyze" @click="reanalyze">复制会议并重新分析</button>
 
     <template v-if="result">
+      <p class="small">{{ run.edited_result ? `人工修订版 · 修改人 #${run.edited_by} · ${run.edited_at}` : '模型原始版 · 尚未人工修订' }}</p>
+      <button v-if="meeting.maySubmit" type="button" @click="beginMinutesEdit">修订摘要、决议、行动项与未决问题</button>
+      <details v-if="run.edited_result"><summary>查看模型原始纪要</summary><pre style="white-space:pre-wrap">{{ JSON.stringify(run.result, null, 2) }}</pre></details>
+      <div v-if="editingMinutes" class="minutes-editor">
+        <label>摘要<textarea v-model="minutes.summary" maxlength="4000" rows="3" /></label>
+        <label v-for="(_, index) in minutes.decisions" :key="`decision-${index}`">决议 {{ index + 1 }}<textarea v-model="minutes.decisions[index]" maxlength="2000" rows="2" /></label>
+        <label v-for="(_, index) in minutes.action_items" :key="`action-${index}`">行动项 {{ index + 1 }}<textarea v-model="minutes.action_items[index]" maxlength="2000" rows="2" /></label>
+        <label>未决问题（每行一条）<textarea v-model="minutes.unresolved_questions" rows="4" /></label>
+        <p class="small">原始分析和证据保持可查；修订不会自动创建项目任务。</p>
+        <button type="button" :disabled="minutesBusy" @click="saveMinutes">保存人工修订</button>
+        <button type="button" :disabled="minutesBusy" @click="editingMinutes = false">取消</button>
+      </div>
       <div class="sum-grid">
         <div class="sum-card"><h4>摘要</h4><p>{{ result.summary }}</p></div>
         <div class="sum-card"><h4>决议</h4><ul><li v-for="(f, i) in facts(result.decisions)" :key="'d' + i">{{ f.text }}<br><span class="small">依据 {{ f.seg }}：{{ f.quote }}</span></li></ul></div>

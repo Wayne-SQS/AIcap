@@ -6,11 +6,14 @@ import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -57,5 +60,13 @@ public class AgentController {
         User user = Roles.writer();
         projectAccess.requireWriter(projectId);
         return agentService.retryRun(projectId, runId, user);
+    }
+
+    @PatchMapping("/agent-runs/{runId}/minutes")
+    public Map<String, Object> editMinutes(@PathVariable String runId, @RequestParam String projectId,
+                                           @RequestBody JsonNode edits) {
+        User user = Roles.writer();
+        projectAccess.requireWriter(projectId);
+        return agentService.editMinutes(projectId, runId, edits, user);
     }
 }

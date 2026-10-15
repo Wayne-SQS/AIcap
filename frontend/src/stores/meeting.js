@@ -124,6 +124,14 @@ export const useMeetingStore = defineStore('meeting', {
         this.agentLoading = false
       }
     },
+    async editMinutes(edits) {
+      const id = this.selected
+      const runId = this.agentRun?.id
+      if (!id || !runId || !this.maySubmit) throw new Error('当前会议不可修订')
+      const updated = await meetingsApi.editMinutes(runId, useProjectsStore().currentProjectId, edits)
+      if (this.selected === id && this.agentRun?.id === runId) this.agentRun = updated
+      return updated
+    },
     /* 复制会议并重新分析 */
     async reanalyze() {
       const original = this.selectedMeeting
