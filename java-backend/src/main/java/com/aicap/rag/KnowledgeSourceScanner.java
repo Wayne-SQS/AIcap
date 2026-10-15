@@ -105,7 +105,7 @@ public class KnowledgeSourceScanner {
 
     private List<Chunk> scanStories() {
         List<Chunk> out = new ArrayList<>();
-        for (Story s : storyMapper.selectList(new QueryWrapper<Story>().orderByAsc("id"))) {
+        for (Story s : storyMapper.selectList(new QueryWrapper<Story>().orderByAsc("project_id", "code"))) {
             out.addAll(chunker.chunkStory(s));
         }
         return out;
@@ -122,7 +122,7 @@ public class KnowledgeSourceScanner {
     private List<Chunk> scanTasks() {
         Map<String, String> titles = storyTitles();
         List<Chunk> out = new ArrayList<>();
-        for (Task t : taskMapper.selectList(new QueryWrapper<Task>().orderByAsc("id"))) {
+        for (Task t : taskMapper.selectList(new QueryWrapper<Task>().orderByAsc("project_id", "code"))) {
             out.addAll(chunker.chunkTask(t, titles));
         }
         return out;

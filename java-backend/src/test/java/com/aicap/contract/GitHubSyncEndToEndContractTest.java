@@ -104,6 +104,10 @@ class GitHubSyncEndToEndContractTest {
 
     @BeforeEach
     void clearEvents() {
+        githubProperties.getRepositoryProjectMapping().put("acme/core", "P002");
+        seedTask("T03");
+        seedTask("T06");
+        seedTask("T08");
         // 各测试方法独立:先清掉本测试的 GitHub 事件,保证 synced 计数确定
         activityMapper.delete(new QueryWrapper<ActivityRecord>()
                 .in("github_event_id", "abc111", "abc222", "abc333", "abc444", "pr-42-merged", "review-9001", "issue-7"));
@@ -120,6 +124,21 @@ class GitHubSyncEndToEndContractTest {
     private GitHubActivitySyncService syncService;
     @Autowired
     private ActivityRecordMapper activityMapper;
+    @Autowired
+    private com.aicap.profile.GitHubProperties githubProperties;
+    @Autowired
+    private com.aicap.mapper.TaskMapper taskMapper;
+
+    private void seedTask(String code) {
+        if (taskMapper.selectCount(new QueryWrapper<com.aicap.entity.Task>()
+                .eq("project_id", "P002").eq("code", code)) > 0) return;
+        com.aicap.entity.Task row = new com.aicap.entity.Task();
+        row.setProjectId("P002"); row.setId(code); row.setName("GitHub 映射测试任务 " + code);
+        row.setOwnerId(1); row.setHours(8); row.setWeekStart(1); row.setWeekEnd(1);
+        row.setEstimatedHours(8); row.setTaskType("feature"); row.setStatus(0);
+        row.setProgress(0); row.setBlocked(0);
+        taskMapper.insert(row);
+    }
 
     @Test
     void sync_endToEnd_persistsMappedEventsWithTaskLinks() {

@@ -2,6 +2,8 @@ package com.aicap.contract;
 
 import com.aicap.rag.Chunk;
 import com.aicap.rag.RagProperties;
+import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.TaskMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -65,12 +67,16 @@ abstract class KnowledgeIndexContractTest extends ContractTestSupport {
     @Autowired
     protected RagProperties ragProperties;
 
+    @Autowired private StoryMapper storyMapper;
+    @Autowired private TaskMapper taskMapper;
+
     private final EmbeddingFixture fixture = new EmbeddingFixture();
 
     private Path docsDir;
 
     @BeforeAll
     void startFixtureAndPointDocsAtTempDir() throws IOException {
+        RagProjectFixture.ensure(storyMapper, taskMapper);
         fixture.start();
         // 文档源用临时目录:内容可控、索引快,且不受仓库文档变化影响
         docsDir = Files.createTempDirectory("aicap-rag-docs");

@@ -76,7 +76,7 @@ public class AgentTools {
                 projectTasksSchema()));
         list.add(function("list_members",
                 "查询真实成员ID及显示名，名称有歧义时不能猜测。",
-                emptySchema()));
+                projectOnlySchema()));
         list.add(function("project_summary",
                 "查询真实故事统计及当前数据能力限制。",
                 projectOnlySchema()));
@@ -224,8 +224,7 @@ public class AgentTools {
                 return projectSummary(requireProjectContext(arguments, projectId));
             }
             case "list_members" -> {
-                emptyArgs(name, arguments);
-                return listMembers(scopedProjectId);
+                return listMembers(requireProjectContext(arguments, projectId));
             }
             case "list_tasks" -> {
                 requireProjectContext(arguments, projectId);

@@ -151,7 +151,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** PLAT-10:参数不合法 → 200 + ok=false(模型要能读到错误并自我纠正,不能变 HTTP 异常) */
     @Test
     void plat10_invalidArguments_200_okFalse() {
-        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("wrong_field", "x")));
+        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID, "wrong_field", "x")));
         assertEquals(200, r.status(), "业务失败必须是 200: " + r.body());
         assertFalse(r.json().path("ok").asBoolean(), "应 ok=false: " + r.body());
         assertEquals("invalid_tool_arguments", r.json().path("error_code").asText(), r.body());
@@ -161,7 +161,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** PLAT-11:信封字段是 snake_case —— 契约文档写 latency_ms,回 camelCase 就会让编排层取到 null */
     @Test
     void plat11_envelope_usesSnakeCase() {
-        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("keyword", "登录")));
+        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID, "keyword", "登录")));
         assertEquals(200, r.status(), r.body());
         assertTrue(r.json().has("latency_ms"), "应回 latency_ms: " + r.body());
         assertTrue(r.json().has("limitations"), "应回 limitations: " + r.body());
@@ -173,16 +173,21 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** PLAT-12:会议域工具取真实数据(items 是数组) */
     @Test
     void plat12_meetingTool_returnsRealData() {
-        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("keyword", "登录")));
+        ApiResponse r = post(TOOLS + "search_stories", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID, "keyword", "登录")));
         assertEquals(200, r.status(), r.body());
         assertTrue(r.json().path("ok").asBoolean(), "应 ok=true: " + r.body());
         assertTrue(r.json().path("result").path("items").isArray(), "应回 items: " + r.body());
+
+        ApiResponse members = post(TOOLS + "list_members", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID)));
+        assertEquals(200, members.status(), members.body());
+        assertTrue(members.json().path("ok").asBoolean(), "成员工具也必须接受项目上下文: " + members.body());
+        assertTrue(members.json().path("result").path("items").isArray(), members.body());
     }
 
     /** PLAT-13:画像域工具经统一端点包装后仍如实回数据(两个注册表形态不同,映射不得丢字段) */
     @Test
     void plat13_profileTool_wrappedFaithfully() {
-        ApiResponse r = post(TOOLS + "query_members", token(USER_ADMIN), null);
+        ApiResponse r = post(TOOLS + "query_members", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID)));
         assertEquals(200, r.status(), r.body());
         assertTrue(r.json().path("ok").asBoolean(), "应 ok=true: " + r.body());
         assertTrue(r.json().path("result").path("members").isArray(), "应回 members: " + r.body());
@@ -198,14 +203,14 @@ class PlatformAgentContractTest extends ContractTestSupport {
      */
     @Test
     void plat16_queryMembers_neverExposesPasswordHash() {
-        ApiResponse list = post(TOOLS + "query_members", token(USER_ADMIN), null);
+        ApiResponse list = post(TOOLS + "query_members", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID)));
         assertEquals(200, list.status(), list.body());
         for (var member : list.json().path("result").path("members")) {
             assertFalse(member.has("passwordHash"),
                     "列表分支把 User 实体直接序列化出去了,泄露 bcrypt 哈希: " + member);
         }
 
-        ApiResponse one = post(TOOLS + "query_members", token(USER_ADMIN), json(map("userId", 1)));
+        ApiResponse one = post(TOOLS + "query_members", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID, "userId", 1)));
         assertEquals(200, one.status(), one.body());
         assertTrue(one.json().path("result").path("found").asBoolean(), one.body());
         assertFalse(one.json().path("result").path("member").has("passwordHash"),

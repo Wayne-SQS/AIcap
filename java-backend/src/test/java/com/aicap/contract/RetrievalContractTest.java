@@ -54,10 +54,14 @@ abstract class RetrievalContractTest extends ContractTestSupport {
     @Autowired
     protected RagProperties ragProperties;
 
+    @Autowired private com.aicap.mapper.StoryMapper storyMapper;
+    @Autowired private com.aicap.mapper.TaskMapper taskMapper;
+
     private Path docsDir;
 
     @BeforeAll
     void startFixtureAndIndex() throws IOException {
+        RagProjectFixture.ensure(storyMapper, taskMapper);
         fixture.start();
         docsDir = Files.createTempDirectory("aicap-rag-retrieval-docs");
         write(docsDir.resolve("需求说明.md"), """

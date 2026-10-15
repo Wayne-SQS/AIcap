@@ -28,7 +28,7 @@ public interface RetrievalGraphMapper {
 
     /** 故事 → 挂载它的任务。返回任务 id(用于再取 task 类 chunk) */
     @Select("""
-            SELECT DISTINCT t.`id`
+            SELECT DISTINCT t.`code`
             FROM `tasks` t
             WHERE t.`kanban_card_id` = #{storyId}
                OR FIND_IN_SET(#{storyId}, t.`story_ref`) > 0
@@ -39,7 +39,7 @@ public interface RetrievalGraphMapper {
     @Select("""
             SELECT t.`story_ref` AS storyRef, t.`kanban_card_id` AS kanbanCardId
             FROM `tasks` t
-            WHERE t.`id` = #{taskId}
+            WHERE t.`code` = #{taskId}
             """)
     TaskEdges findStoryRefsOfTask(@Param("taskId") String taskId);
 }

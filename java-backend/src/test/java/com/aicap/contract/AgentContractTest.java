@@ -352,7 +352,7 @@ class AgentContractTest extends ContractTestSupport {
             assertEquals(1, result.path("items").size(), result.toString());
             assertEquals(ownId, result.path("items").get(0).path("id").asText());
 
-            JsonNode members = agentTools.execute("list_members", om.createObjectNode(), 1, TEST_PROJECT_ID);
+            JsonNode members = agentTools.execute("list_members", om.createObjectNode().put("project_id", TEST_PROJECT_ID), 1, TEST_PROJECT_ID);
             for (JsonNode member : members.path("items")) {
                 assertFalse(member.path("id").asInt() == 3, "非项目成员不得进入 Agent 成员上下文");
             }
@@ -360,7 +360,7 @@ class AgentContractTest extends ContractTestSupport {
                     () -> agentTools.execute("search_pool", args.put("project_id", "P099"), 1, TEST_PROJECT_ID));
             assertEquals("project_context_mismatch", wrongProject.getCode());
             AgentError removedMember = assertThrows(AgentError.class,
-                    () -> agentTools.execute("list_members", om.createObjectNode(), 3, TEST_PROJECT_ID));
+                    () -> agentTools.execute("list_members", om.createObjectNode().put("project_id", TEST_PROJECT_ID), 3, TEST_PROJECT_ID));
             assertEquals("permission_changed", removedMember.getCode());
         } finally {
             deletePoolItem(ownId);
