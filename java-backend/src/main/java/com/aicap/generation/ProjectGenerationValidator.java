@@ -2462,6 +2462,12 @@ public class ProjectGenerationValidator {
             int from = story.path("sprint").asInt(1);
             int to = storySprintFromTasks(story, tasks, sprints, counts);
             if (from == to) continue;
+            // 与 finalQualityPass(:2337-2338)同一道闸:只有"看得出来歪了"才搬。
+            // 少了它,无任务故事会走 storySprintFromTasks:2378 的语义回落,按**实时计数**
+            // 在已经均衡的分布里反复挑最小下标的 sprint,把 4/4/4 推成 5/4/3 ——
+            // 即"为了均衡而制造失衡"(ProjectGenerationImportSprintTest 实测)。
+            if (counts.getOrDefault(from, 0) - counts.getOrDefault(to, 0) <= 1
+                    && counts.getOrDefault(from, 0) * 4 <= stories.size() * 2) continue;
             story.put("sprint", to);
             counts.merge(from, -1, Integer::sum);
             counts.merge(to, 1, Integer::sum);

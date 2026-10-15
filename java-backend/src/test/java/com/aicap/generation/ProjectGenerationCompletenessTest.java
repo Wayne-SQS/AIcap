@@ -225,7 +225,11 @@ class ProjectGenerationCompletenessTest {
     }
     @Test void conciseThreeSprintPlanIsMarkedIncompleteWithScaleTargets() throws Exception {
         var v=validator(); var d=v.normalize(raw(),"merge","NEW-test"); var report=v.completenessReport(d);
-        assertFalse(report.path("sufficient").asBoolean()); assertEquals(25,report.path("storyTarget").asInt()); assertEquals(22,report.path("storyMinimum").asInt());
+        // 档位按「归一化之后仍然有效的活动域数」算:夹具声明了 2 个 activity,但唯一的故事
+        // 不引用任何域,detailed 分支的 consolidateDetailedActivities(Validator:606)只保留
+        // 被引用的域 → 有效域数 0 → 落单域档 max(18, 15+0)=18;成员 2 人时 storyMinimum=16。
+        // (25/22 那一档由同文件 storiesForSprintCounts(7,7,8) 的用例覆盖,它故事里带 activity 引用。)
+        assertFalse(report.path("sufficient").asBoolean()); assertEquals(18,report.path("storyTarget").asInt()); assertEquals(16,report.path("storyMinimum").asInt());
         assertTrue(report.path("min_task_count").asInt()>=20); assertTrue(d.path("warnings").toString().contains("规划完整度不足"));
     }
 

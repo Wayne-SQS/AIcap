@@ -649,12 +649,18 @@ class ProjectGenerationValidatorTest {
                     .put("hours", 4).put("week_start", week).put("week_end", week).put("story_ref", "S" + i));
         }
         raw.set("stories", stories); raw.set("tasks", tasks);
+        // 置上 _preserve_activity_domains 才会走「保留模型自管活动域」那条分支
+        // (ProjectGenerationValidator:603 的 else),也就是本用例真正要验的
+        // finalQualityPass(:785)与分布守卫(:791)所在的分支。缺了它落到 detailed 分支,
+        // 那里 story sprint 被冻结(:741),搬移记录也只记依赖一致性 moves(:727)。
+        raw.put("_preserve_activity_domains", true);
         ObjectNode normalized = validator.normalize(raw, "merge", "NEW-balance");
         int[] counts = new int[4];
         normalized.path("stories").forEach(s -> counts[s.path("sprint").asInt()]++);
         assertTrue(counts[1] >= 8 && counts[2] >= 8 && counts[3] >= 8,
                 "counts=" + java.util.Arrays.toString(counts));
-        assertEquals(20, normalized.path("completeness").path("reassignedStorySprints").size());
+        assertEquals(20, normalized.path("qualityAdjustments").path("reassignedStorySprints").size(),
+                "搬移记录写在 qualityAdjustments 下(Validator:796);completeness 里没有这个键,旧断言恒为 0");
     }
 
     @Test
@@ -717,6 +723,9 @@ class ProjectGenerationValidatorTest {
                     .put("week_end", sprint * 2 - 1).put("story_ref", "S" + i));
         }
 
+        // 同上:本用例命名的 "final sprint guard" 就是 rebalanceStorySprintDistribution
+        // (Validator:2409),它只在 preserve 分支被调用(:791);detailed 分支没有分布守卫。
+        raw.put("_preserve_activity_domains", true);
         ObjectNode draft = validator.normalize(raw, "merge", "NEW-final-sprint-guard");
 
         ArrayNode counts = (ArrayNode) draft.path("completeness").path("storyCountsBySprint");
