@@ -3,14 +3,12 @@
 -- 每次 Spring 测试上下文启动时,spring.sql.init 先执行 classpath:db/schema.sql
 -- (CREATE TABLE IF NOT EXISTS,含 tasks.depends_on / tasks.progress / tasks.blocked /
 --  users.capacity_hours 等新列),随后执行本脚本,把 aicap_java_test 全部表清空并
--- 重置自增计数器。随后 DataSeeder(ApplicationRunner)从空库播种,
--- 保证确定性基线:
+-- 重置自增计数器。随后 DataSeeder(ApplicationRunner)补齐演示用户与 P002 项目。
+-- 当前多项目基线:
 --   users   5 行(id=1..5:李锐铭 admin 60h / 高思晗 owner 48h / 孙秋实 member 60h /
 --            罗子涵 member 54h / 成员5 viewer 60h;登录支持真名 ↔「成员N」双向别名)
---   stories 37 行 US01..US37(sprint 1..4 / activity 1..5 / status 0..2 / owner_id 1..4)
---   tasks   16 行 T01..T16(含 depends_on / progress / blocked;sprints 由 week_start..week_end
---            派生不落库;12 条开发任务挂 USxx 看板卡,管理任务 T01/T02/T15/T16 挂空)
---   pool    空(需求池基线为空)
+--   stories/tasks/pool 空，旧 P001 演示故事与任务不会自动重建；当前契约须显式传 projectId。
+--   projects/project_members 与 app_migrations 保留，以验证现有项目的隔离与迁移行为。
 -- 清空顺序遵循外键依赖:tasks.kanban_card_id → stories、story_logs、pool_items 先清,
 -- 最后清 users(否则 stories.owner_id / meetings.created_by 外键失败)。
 -- 修复场景:历史 DELETE 残留使 users 自增从 6 起步,导致故事 owner_id(1..5)外键失败。
