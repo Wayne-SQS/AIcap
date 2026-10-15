@@ -404,9 +404,18 @@ def function_schemas(catalog: Catalog) -> list[dict[str, Any]]:
 
     画像域工具只有 `args_hint` 没有 `args_schema`（契约 §2.1），所以参数说明要拼进
     `description`，否则模型根本不知道该传什么。
+
+    **只给只读工具。** 触发型工具（`read_only=false`）不进循环 —— 派活只发生在规划相
+    （`main._plan_phase`，契约 §3.4 的 `intent.routed → agent.dispatched → 循环里的 tool.call`
+    就是这个顺序）。放进循环的后果真机实测过：一句"生成规划草案"被派出**两个** run
+    （第二个是模型在循环里自发重派、自己编了段更长的 request，因而绕过了"同 request
+    未完成即去重"的幂等），第二个 run 以"模型服务返回了无法解析的响应"失败，
+    用户凭空多出一条失败记录。
     """
     schemas: list[dict[str, Any]] = []
     for tool in catalog.tools:
+        if not tool.read_only:
+            continue
         description = tool.description
         if tool.args_hint:
             description = f"{description}（{tool.args_hint}）"

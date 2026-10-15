@@ -16,14 +16,39 @@ import pytest
 
 from app import loop as loop_module
 from app.java_client import JavaClient
-from app.loop import MAX_CALLS_PER_TURN, MAX_STEPS, MAX_TOOL_CALLS, MAX_SECONDS
+from app.loop import MAX_CALLS_PER_TURN, MAX_STEPS, MAX_TOOL_CALLS, MAX_SECONDS, function_schemas
 from app.runtime import RunRegistry
-from app.schemas import ModelError
+from app.schemas import Catalog, CatalogTool, ModelError
 
 from fake_platform import UTTERANCE, FakePlatform, ScriptedModel, final, tool_call
 
 TOKEN = "tok-ok"
 BASE = "http://java.test"
+
+
+# --------------------------------------------------------------------------
+# 循环只拿只读工具
+# --------------------------------------------------------------------------
+
+
+def test_function_schemas_skip_trigger_tools():
+    """触发型工具不进循环：派活只发生在规划相（`main._plan_phase`）。
+
+    放进循环的后果真机实测过 —— 一句"生成规划草案"被派出两个 run（第二个是模型在
+    循环里自发重派，自己编了段更长的 request 绕过幂等），第二个以"无法解析的响应"失败。"""
+    catalog = Catalog(
+        platform_version="1.0",
+        tools=[
+            CatalogTool(name="query_tasks", agent="profile", description="查询任务"),
+            CatalogTool(name="start_plan_draft", agent="platform", description="派活",
+                        read_only=False),
+        ],
+        limitations=[],
+    )
+
+    names = [schema["function"]["name"] for schema in function_schemas(catalog)]
+
+    assert names == ["query_tasks"], f"触发型工具不该出现在循环的 tools 里: {names}"
 
 
 # --------------------------------------------------------------------------
