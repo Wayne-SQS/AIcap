@@ -47,6 +47,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "github.enabled=true",
         "github.token=fake-token-for-contract-test",
         "github.repo=acme/core",
+        // 仓库 → 项目 映射。多项目改造(见 fe66b33「完善项目生成与多项目管理功能」)之后
+        // 它是必需项:缺了 projectId 解析为 null,GitHubActivitySyncService:120 会多发一条
+        // "仓库未配置项目映射" 告警,且 commit/PR/Issue 文本里的 Txx 任务关联全部失效
+        // (同文件 :466 判空即返回 null)。本用例同时断言"恰一条告警"与"T03 已关联",两条都依赖它。
+        "github.repository-project-mapping[acme/core]=P001",
         "github.api-base=http://127.0.0.1:18923",
         "github.user-mapping-json={\"li-ming\":\"李锐铭\",\"zhang-san\":\"孙秋实\",\"gao-owner\":\"高思晗\",\"mcc-dev\":\"高思晗\"}"
 })

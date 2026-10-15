@@ -632,9 +632,13 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             // 会议本体消失
             assertEquals(404, get("/api/meetings/" + mid, token(USER_ADMIN)).status(), "会议应已删除");
             assertFalse(meetingListed(mid), "GET /api/meetings 中不应再有该会议");
-            // 建议与审核载荷消失
-            assertEquals(0, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size(),
-                    "该会议的建议应清空");
+            // 建议与审核载荷消失。
+            // 断言的是 404,不是"空数组":listRecords 会先做 requireMeeting
+            // (MeetingService:263 → :93-98,会议不存在即 notFound),所以会议删除后这个查询不再返回
+            // 空列表而是 404。旧写法 `.json().size()==0` 想验"列表为空",但 404 的错误 JSON 是**对象**,
+            // 对对象取 size() 得到的是字段数(1) —— 于是"已经清空"反而被报成"还有 1 条"。
+            assertEquals(404, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).status(),
+                    "会议已删除,按 meetingId 查询应 404(会议不存在)");
             assertEquals(404, get("/api/suggestions/" + suggestionId, token(USER_ADMIN)).status());
             // 音频元数据与落盘文件消失
             assertEquals(404, get("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).status());
