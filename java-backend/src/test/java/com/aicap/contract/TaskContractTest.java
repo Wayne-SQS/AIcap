@@ -1,12 +1,22 @@
 package com.aicap.contract;
 
+import com.aicap.entity.Story;
+import com.aicap.entity.Task;
+import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.TaskMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,6 +46,68 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TaskContractTest extends ContractTestSupport {
+
+    @Autowired private StoryMapper stories;
+    @Autowired private TaskMapper tasks;
+
+    private static final List<String> FIXTURE_STORIES = List.of("US01", "US02", "US07", "US24", "US25", "US37");
+    private final List<Long> fixtureTaskIds = new ArrayList<>();
+
+    /** 任务没有创建 API；此夹具只在独立测试库构造旧回归用例需要的关联图。 */
+    @BeforeAll
+    void seedTaskContractFixture() {
+        assertEquals(0, tasks.selectCount(new QueryWrapper<Task>().eq("project_id", TEST_PROJECT_ID)),
+                "任务契约应从空测试项目开始");
+        for (String code : FIXTURE_STORIES) {
+            Story story = new Story();
+            story.setProjectId(TEST_PROJECT_ID);
+            story.setId(code);
+            story.setTitle("任务契约故事 " + code);
+            story.setDescription("");
+            story.setAcceptance("");
+            story.setPriority("Should");
+            story.setSprint(1);
+            story.setActivity(2);
+            story.setStatus(0);
+            story.setOwnerId(1);
+            story.setCreatedAt(LocalDateTime.now());
+            stories.insert(story);
+        }
+        Map<String, String> dependencies = Map.of(
+                "T05", "T03,T04", "T07", "T02,T04,T06", "T09", "T07",
+                "T10", "T09", "T12", "T05,T07");
+        for (int number = 1; number <= 16; number++) {
+            String code = String.format("T%02d", number);
+            Task task = new Task();
+            task.setProjectId(TEST_PROJECT_ID);
+            task.setId(code);
+            task.setName("任务契约 " + code);
+            task.setOwnerId(1);
+            task.setHours(12);
+            task.setWeekStart(number == 5 ? 2 : 1);
+            task.setWeekEnd(number == 5 ? 2 : 1);
+            task.setStoryRef(number == 16 ? "US07,US24,US37" : "");
+            task.setKanbanCardId(number == 6 ? "US25" : null);
+            task.setEstimatedHours(12);
+            task.setTaskType(List.of(1, 2, 15, 16).contains(number) ? "management" : "feature");
+            task.setStatus(0);
+            task.setDependsOn(dependencies.getOrDefault(code, ""));
+            task.setPriority("Should");
+            task.setProgress(0);
+            task.setBlocked(0);
+            tasks.insert(task);
+            fixtureTaskIds.add(task.getInternalId());
+        }
+    }
+
+    @AfterAll
+    void removeTaskContractFixture() {
+        if (!fixtureTaskIds.isEmpty()) {
+            tasks.delete(new QueryWrapper<Task>().eq("project_id", TEST_PROJECT_ID)
+                    .in("internal_id", fixtureTaskIds));
+        }
+        stories.delete(new QueryWrapper<Story>().eq("project_id", TEST_PROJECT_ID).in("code", FIXTURE_STORIES));
+    }
 
     /** 管理类任务:无看板卡、无前置依赖 */
     private static final String TASK_T01 = "T01";
@@ -67,7 +139,7 @@ class TaskContractTest extends ContractTestSupport {
 
     /** 恢复 status+progress(两个一起给,避免单给一个触发联动推导) */
     private void restoreStatusProgress(String taskId, JsonNode original) {
-        ApiResponse r = patch("/api/tasks/" + taskId, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + taskId, token(USER_ADMIN),
                 json(map("status", original.path("status").asInt(), "progress", original.path("progress").asInt())));
         assertEquals(200, r.status(), "恢复 status/progress 失败: " + r.body());
     }
@@ -76,10 +148,10 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void listTasks_16() {
-        ApiResponse r = get("/api/tasks", token(USER_ADMIN));
+        ApiResponse r = getProject("/api/tasks", token(USER_ADMIN));
         assertEquals(200, r.status(), r.body());
         assertTrue(r.json().isArray());
-        assertEquals(16, r.json().size(), "任务基线应为 16 条: " + r.body());
+        assertEquals(16, r.json().size(), "任务契约夹具应为 16 条: " + r.body());
     }
 
     @Test
@@ -89,7 +161,7 @@ class TaskContractTest extends ContractTestSupport {
         int originalProgress = before.path("progress").asInt();
         try {
             int target = originalStatus == 1 ? 2 : 1;
-            ApiResponse r = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", target)));
+            ApiResponse r = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", target)));
             assertEquals(200, r.status(), r.body());
             assertEquals(target, r.json().path("status").asInt(), r.body());
             // 新字段必须一起输出
@@ -100,7 +172,7 @@ class TaskContractTest extends ContractTestSupport {
             assertEquals(target, taskFromListOrFail(TASK_T01).path("status").asInt(),
                     "PATCH 后复读状态应已变更");
         } finally {
-            ApiResponse restore = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+            ApiResponse restore = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                     json(map("status", originalStatus, "progress", originalProgress)));
             assertEquals(200, restore.status(), restore.body());
             assertEquals(originalStatus, restore.json().path("status").asInt(), restore.body());
@@ -114,20 +186,20 @@ class TaskContractTest extends ContractTestSupport {
         String storyId = null;
         try {
             // 建一张临时故事卡
-            ApiResponse created = post("/api/stories", token(USER_ADMIN),
+            ApiResponse created = postProject("/api/stories", token(USER_ADMIN),
                     json(map("title", uniq("CT挂卡"), "owner_id", 1)));
             assertEquals(200, created.status(), created.body());
             storyId = created.json().path("id").asText();
             assertTrue(storyId.matches("^US\\d+$"), "临时卡也应是 US 编号: " + storyId);
 
-            ApiResponse attach = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+            ApiResponse attach = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                     json(map("kanban_card_id", storyId)));
             assertEquals(200, attach.status(), attach.body());
             assertEquals(storyId, attach.json().path("kanban_card_id").asText(), attach.body());
             assertEquals(storyId, strField(taskFromListOrFail(TASK_T01), "kanban_card_id"),
                     "挂卡后复读应真的挂上");
 
-            ApiResponse detach = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+            ApiResponse detach = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                     json(map("kanban_card_id", null)));
             assertEquals(200, detach.status(), detach.body());
             assertTrue(detach.json().path("kanban_card_id").isNull(),
@@ -136,7 +208,7 @@ class TaskContractTest extends ContractTestSupport {
                     "解绑后复读 GET /api/tasks,kanban_card_id 必须为 null");
         } finally {
             // T01 本来就是管理任务(无卡),确保回到无卡状态再清理临时卡
-            patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("kanban_card_id", null)));
+            patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("kanban_card_id", null)));
             if (storyId != null) {
                 deleteStory(storyId);
             }
@@ -145,26 +217,26 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_statusOutOfRange_422() {
-        ApiResponse r1 = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", 5)));
+        ApiResponse r1 = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", 5)));
         assertEquals(422, r1.status(), r1.body());
-        ApiResponse r2 = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", -1)));
+        ApiResponse r2 = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", -1)));
         assertEquals(422, r2.status(), r2.body());
         // status 只允许 0..3(4 也不合法)
-        ApiResponse r3 = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", 4)));
+        ApiResponse r3 = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("status", 4)));
         assertEquals(422, r3.status(), "status 上限为 3: " + r3.body());
     }
 
     @Test
     void patchTask_weekOutOfRange_422() {
-        ApiResponse r1 = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("week_start", 0)));
+        ApiResponse r1 = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("week_start", 0)));
         assertEquals(422, r1.status(), r1.body());
-        ApiResponse r2 = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("week_end", 7)));
+        ApiResponse r2 = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("week_end", 7)));
         assertEquals(422, r2.status(), r2.body());
     }
 
     @Test
     void patchTask_weekEndBeforeStart_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                 json(map("week_start", 4, "week_end", 2)));
         assertEquals(400, r.status(), r.body());
         assertEquals("开始周不能晚于结束周", detail(r),
@@ -177,14 +249,14 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_notFound_404() {
-        ApiResponse r = patch("/api/tasks/T99", token(USER_ADMIN), json(map("status", 1)));
+        ApiResponse r = patchProject("/api/tasks/T99", token(USER_ADMIN), json(map("status", 1)));
         assertEquals(404, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
 
     @Test
     void patchTask_attachNonexistentStory_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                 json(map("kanban_card_id", "US99")));
         assertEquals(400, r.status(), r.body());
         assertEquals("所属看板卡不存在", detail(r), "挂不存在的看板卡应 400: " + r.body());
@@ -196,26 +268,26 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_newFields_outOfRange_422() {
-        ApiResponse progressHigh = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+        ApiResponse progressHigh = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                 json(map("progress", 101)));
         assertEquals(422, progressHigh.status(), "progress>100 应 422: " + progressHigh.body());
-        ApiResponse progressLow = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+        ApiResponse progressLow = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                 json(map("progress", -1)));
         assertEquals(422, progressLow.status(), "progress<0 应 422: " + progressLow.body());
 
-        ApiResponse hours = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("hours", 1000)));
+        ApiResponse hours = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("hours", 1000)));
         assertEquals(422, hours.status(), "hours>999 应 422: " + hours.body());
-        ApiResponse est = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("estimated_hours", 1000)));
+        ApiResponse est = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("estimated_hours", 1000)));
         assertEquals(422, est.status(), "estimated_hours>999 应 422: " + est.body());
 
-        ApiResponse name = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("name", "")));
+        ApiResponse name = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("name", "")));
         assertEquals(422, name.status(), "name 为空应 422: " + name.body());
 
-        ApiResponse type = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("task_type", "bugfix")));
+        ApiResponse type = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("task_type", "bugfix")));
         assertEquals(422, type.status(), "task_type 非 feature/management 应 422: " + type.body());
         assertTrue(detail(type).contains("feature/management"), "task_type 文案应说明取值范围: " + type.body());
 
-        ApiResponse blocked = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", "yes")));
+        ApiResponse blocked = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", "yes")));
         assertEquals(422, blocked.status(), "blocked 非布尔应 422: " + blocked.body());
     }
 
@@ -225,7 +297,7 @@ class TaskContractTest extends ContractTestSupport {
     void patchTask_dependsOn_ok_writeNormalizeAndReadBack() {
         String original = strField(taskFromListOrFail(TASK_T16), "depends_on");
         try {
-            ApiResponse single = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse single = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("depends_on", "T01")));
             assertEquals(200, single.status(), single.body());
             assertEquals("T01", strField(single.json(), "depends_on"), single.body());
@@ -233,7 +305,7 @@ class TaskContractTest extends ContractTestSupport {
                     "depends_on 必须真的落库(复读验证)");
 
             // 多值 + 大小写/空白规范化
-            ApiResponse multi = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse multi = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("depends_on", " t01 , t02 ")));
             assertEquals(200, multi.status(), multi.body());
             assertEquals("T01,T02", strField(multi.json(), "depends_on"),
@@ -241,7 +313,7 @@ class TaskContractTest extends ContractTestSupport {
             assertEquals("T01,T02", strField(taskFromListOrFail(TASK_T16), "depends_on"),
                     "规范化结果必须真的落库");
         } finally {
-            ApiResponse clear = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse clear = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("depends_on", "")));
             assertEquals(200, clear.status(), clear.body());
             assertEquals("", strField(taskFromListOrFail(TASK_T16), "depends_on"),
@@ -251,13 +323,13 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_dependsOn_duplicate_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T01,T01")));
         assertEquals(400, r.status(), r.body());
         assertEquals("关联编号不能重复", detail(r), r.body());
 
         // 规范化后才重复(大小写不同)也应被识别
-        ApiResponse r2 = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r2 = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T01,t01")));
         assertEquals(400, r2.status(), r2.body());
         assertEquals("关联编号不能重复", detail(r2), r2.body());
@@ -267,12 +339,12 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_dependsOn_badFormat_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "US01")));
         assertEquals(400, r.status(), r.body());
         assertEquals("关联编号必须使用 Txx 格式，并以逗号分隔", detail(r), r.body());
 
-        ApiResponse r2 = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r2 = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T01,X02")));
         assertEquals(400, r2.status(), r2.body());
         assertEquals("关联编号必须使用 Txx 格式，并以逗号分隔", detail(r2), r2.body());
@@ -280,12 +352,12 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_dependsOn_selfReference_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T16")));
         assertEquals(400, r.status(), r.body());
         assertEquals("任务不能依赖自身", detail(r), r.body());
 
-        ApiResponse r2 = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r2 = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T01,T16")));
         assertEquals(400, r2.status(), r2.body());
         assertEquals("任务不能依赖自身", detail(r2), r2.body());
@@ -293,7 +365,7 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_dependsOn_missingPrerequisite_400() {
-        ApiResponse r = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("depends_on", "T99")));
         assertEquals(400, r.status(), r.body());
         assertEquals("前置任务不存在：T99", detail(r), r.body());
@@ -306,7 +378,7 @@ class TaskContractTest extends ContractTestSupport {
         // 种子依赖链:T12.depends_on="T05,T07" → 让 T05 依赖 T12 即构成环 T05→T12→T05
         assertEquals("T03,T04", strField(taskFromListOrFail(TASK_T05), "depends_on"),
                 "前置条件:T05 种子依赖应为 T03,T04");
-        ApiResponse r = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                 json(map("depends_on", "T12")));
         assertEquals(400, r.status(), r.body());
         assertEquals("任务依赖不能形成循环", detail(r), r.body());
@@ -314,7 +386,7 @@ class TaskContractTest extends ContractTestSupport {
                 "成环被拒后不得改动原依赖");
 
         // 间接成环:T07 依赖 T10,T10→T09,T09→T07
-        ApiResponse r2 = patch("/api/tasks/T07", token(USER_ADMIN), json(map("depends_on", "T10")));
+        ApiResponse r2 = patchProject("/api/tasks/T07", token(USER_ADMIN), json(map("depends_on", "T10")));
         assertEquals(400, r2.status(), r2.body());
         assertEquals("任务依赖不能形成循环", detail(r2), r2.body());
         assertEquals("T02,T04,T06", strField(taskFromListOrFail("T07"), "depends_on"),
@@ -327,19 +399,19 @@ class TaskContractTest extends ContractTestSupport {
     void patchTask_statusOnly_derivesProgress() {
         JsonNode original = taskFromListOrFail(TASK_T05);
         try {
-            ApiResponse done = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 2)));
+            ApiResponse done = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 2)));
             assertEquals(200, done.status(), done.body());
             assertEquals(2, done.json().path("status").asInt(), done.body());
             assertEquals(100, done.json().path("progress").asInt(),
                     "status=2 应推导 progress=100: " + done.body());
 
-            ApiResponse doing = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 1)));
+            ApiResponse doing = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 1)));
             assertEquals(200, doing.status(), doing.body());
             assertEquals(1, doing.json().path("status").asInt(), doing.body());
             assertEquals(50, doing.json().path("progress").asInt(),
                     "status=1 应推导 progress=50: " + doing.body());
 
-            ApiResponse todo = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 0)));
+            ApiResponse todo = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 0)));
             assertEquals(200, todo.status(), todo.body());
             assertEquals(0, todo.json().path("status").asInt(), todo.body());
             assertEquals(0, todo.json().path("progress").asInt(),
@@ -358,19 +430,19 @@ class TaskContractTest extends ContractTestSupport {
     void patchTask_progressOnly_derivesStatus() {
         JsonNode original = taskFromListOrFail(TASK_T05);
         try {
-            ApiResponse full = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 100)));
+            ApiResponse full = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 100)));
             assertEquals(200, full.status(), full.body());
             assertEquals(100, full.json().path("progress").asInt(), full.body());
             assertEquals(2, full.json().path("status").asInt(),
                     "progress=100 应推导 status=2: " + full.body());
 
-            ApiResponse partial = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 40)));
+            ApiResponse partial = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 40)));
             assertEquals(200, partial.status(), partial.body());
             assertEquals(40, partial.json().path("progress").asInt(), partial.body());
             assertEquals(1, partial.json().path("status").asInt(),
                     "progress=40 应推导 status=1: " + partial.body());
 
-            ApiResponse zero = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 0)));
+            ApiResponse zero = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("progress", 0)));
             assertEquals(200, zero.status(), zero.body());
             assertEquals(0, zero.json().path("progress").asInt(), zero.body());
             assertEquals(0, zero.json().path("status").asInt(),
@@ -385,13 +457,13 @@ class TaskContractTest extends ContractTestSupport {
         JsonNode original = taskFromListOrFail(TASK_T05);
         try {
             // 同时给 status+progress → 按给定值落库(不推导)
-            ApiResponse seed = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+            ApiResponse seed = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                     json(map("status", 1, "progress", 73)));
             assertEquals(200, seed.status(), seed.body());
             assertEquals(73, seed.json().path("progress").asInt(), seed.body());
 
             // 只给 status=3(已取消)→ 保留原 progress
-            ApiResponse cancelled = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 3)));
+            ApiResponse cancelled = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("status", 3)));
             assertEquals(200, cancelled.status(), cancelled.body());
             assertEquals(3, cancelled.json().path("status").asInt(), cancelled.body());
             assertEquals(73, cancelled.json().path("progress").asInt(),
@@ -419,7 +491,7 @@ class TaskContractTest extends ContractTestSupport {
             assertEquals(List.of(3), patchWeeks(5, 6), "week 5..6 应派生 [3]");
             assertEquals(List.of(1, 2, 3), patchWeeks(2, 5), "week 2..5 应派生 [1,2,3]");
         } finally {
-            ApiResponse restore = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+            ApiResponse restore = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                     json(map("week_start", owStart, "week_end", owEnd)));
             assertEquals(200, restore.status(), restore.body());
             assertEquals(oSprints, sprintsOf(taskFromListOrFail(TASK_T05)),
@@ -429,7 +501,7 @@ class TaskContractTest extends ContractTestSupport {
 
     /** PATCH 排期并返回复读(不是响应体)得到的派生 sprints */
     private List<Integer> patchWeeks(int weekStart, int weekEnd) {
-        ApiResponse r = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+        ApiResponse r = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                 json(map("week_start", weekStart, "week_end", weekEnd)));
         assertEquals(200, r.status(), r.body());
         assertEquals(weekStart, r.json().path("week_start").asInt(), r.body());
@@ -448,7 +520,7 @@ class TaskContractTest extends ContractTestSupport {
         JsonNode original = taskFromListOrFail(TASK_T05);
         boolean oBlocked = original.path("blocked").asBoolean();
         try {
-            ApiResponse on = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", true)));
+            ApiResponse on = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", true)));
             assertEquals(200, on.status(), on.body());
             assertTrue(on.json().path("blocked").isBoolean(),
                     "blocked 必须是 JSON 布尔(true/false),不是 1/0: " + on.body());
@@ -460,7 +532,7 @@ class TaskContractTest extends ContractTestSupport {
             assertTrue(reOn.path("blocked").isBoolean(), "复读 blocked 也必须是布尔: " + reOn);
             assertTrue(reOn.path("blocked").asBoolean(), "blocked=true 必须落库(库中 1 → 输出 true): " + reOn);
 
-            ApiResponse off = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", false)));
+            ApiResponse off = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN), json(map("blocked", false)));
             assertEquals(200, off.status(), off.body());
             assertTrue(off.json().path("blocked").isBoolean(), off.body());
             assertFalse(off.json().path("blocked").asBoolean(), off.body());
@@ -471,7 +543,7 @@ class TaskContractTest extends ContractTestSupport {
             assertTrue(reOff.path("blocked").isBoolean(), reOff.toString());
             assertFalse(reOff.path("blocked").asBoolean(), "blocked=false 必须落库: " + reOff);
         } finally {
-            ApiResponse restore = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+            ApiResponse restore = patchProject("/api/tasks/" + TASK_T05, token(USER_ADMIN),
                     json(map("blocked", oBlocked)));
             assertEquals(200, restore.status(), restore.body());
         }
@@ -490,18 +562,18 @@ class TaskContractTest extends ContractTestSupport {
         String tempStoryId = null;
         try {
             // 阶段一:临时卡 → 挂上 → 显式 null 解绑 → 复读
-            ApiResponse created = post("/api/stories", token(USER_ADMIN),
+            ApiResponse created = postProject("/api/stories", token(USER_ADMIN),
                     json(map("title", uniq("CT解绑回归"), "owner_id", 1)));
             assertEquals(200, created.status(), created.body());
             tempStoryId = created.json().path("id").asText();
 
-            ApiResponse attach = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+            ApiResponse attach = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                     json(map("kanban_card_id", tempStoryId)));
             assertEquals(200, attach.status(), attach.body());
             assertEquals(tempStoryId, strField(taskFromListOrFail(TASK_T01), "kanban_card_id"),
                     "挂卡后复读应真的挂上临时卡");
 
-            ApiResponse detach = patch("/api/tasks/" + TASK_T01, token(USER_ADMIN),
+            ApiResponse detach = patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN),
                     json(map("kanban_card_id", null)));
             assertEquals(200, detach.status(), detach.body());
             assertTrue(detach.json().path("kanban_card_id").isNull(), "PATCH 响应应为已解绑: " + detach.body());
@@ -511,7 +583,7 @@ class TaskContractTest extends ContractTestSupport {
                             + "(期望 null);说明 null 未真正写库: " + reread);
 
             // 阶段二:把种子卡 T06→某 USxx 也解绑一次,复读必须为 null
-            ApiResponse detachSeeded = patch("/api/tasks/" + TASK_T06, token(USER_ADMIN),
+            ApiResponse detachSeeded = patchProject("/api/tasks/" + TASK_T06, token(USER_ADMIN),
                     json(map("kanban_card_id", null)));
             assertEquals(200, detachSeeded.status(), detachSeeded.body());
             assertTrue(detachSeeded.json().path("kanban_card_id").isNull(), detachSeeded.body());
@@ -520,8 +592,8 @@ class TaskContractTest extends ContractTestSupport {
                     "回归:解绑种子卡(" + t06Card + ")后复读应为 null,实际: " + rereadSeeded);
         } finally {
             // 清理 + 还原:T01 回无卡;T06 回原卡
-            patch("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("kanban_card_id", null)));
-            ApiResponse restore = patch("/api/tasks/" + TASK_T06, token(USER_ADMIN),
+            patchProject("/api/tasks/" + TASK_T01, token(USER_ADMIN), json(map("kanban_card_id", null)));
+            ApiResponse restore = patchProject("/api/tasks/" + TASK_T06, token(USER_ADMIN),
                     json(map("kanban_card_id", t06Card)));
             assertEquals(200, restore.status(), "还原 T06 挂卡失败: " + restore.body());
             assertEquals(t06Card, strField(taskFromListOrFail(TASK_T06), "kanban_card_id"),
@@ -538,7 +610,7 @@ class TaskContractTest extends ContractTestSupport {
     void patchTask_storyRef_okNormalizeAndReadBack() {
         String original = strField(taskFromListOrFail(TASK_T16), "story_ref");
         try {
-            ApiResponse single = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse single = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("story_ref", "us01")));
             assertEquals(200, single.status(), single.body());
             assertEquals("US01", strField(single.json(), "story_ref"),
@@ -546,14 +618,14 @@ class TaskContractTest extends ContractTestSupport {
             assertEquals("US01", strField(taskFromListOrFail(TASK_T16), "story_ref"),
                     "story_ref 必须真的落库");
 
-            ApiResponse multi = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse multi = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("story_ref", "US01, US02")));
             assertEquals(200, multi.status(), multi.body());
             assertEquals("US01,US02", strField(multi.json(), "story_ref"), multi.body());
             assertEquals("US01,US02", strField(taskFromListOrFail(TASK_T16), "story_ref"),
                     "多值 story_ref 必须真的落库");
         } finally {
-            ApiResponse restore = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+            ApiResponse restore = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("story_ref", original)));
             assertEquals(200, restore.status(), restore.body());
             assertEquals(original, strField(taskFromListOrFail(TASK_T16), "story_ref"),
@@ -563,23 +635,23 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_storyRef_invalid_400() {
-        ApiResponse unknown = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse unknown = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("story_ref", "US99")));
         assertEquals(400, unknown.status(), unknown.body());
         assertEquals("关联故事不存在：US99", detail(unknown), unknown.body());
 
-        ApiResponse dup = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse dup = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("story_ref", "US01,US01")));
         assertEquals(400, dup.status(), dup.body());
         assertEquals("关联编号不能重复", detail(dup), dup.body());
 
-        ApiResponse format = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse format = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("story_ref", "US1x")));
         assertEquals(400, format.status(), format.body());
         assertEquals("关联编号必须使用 USxx 格式，并以逗号分隔", detail(format), format.body());
 
         // 旧 M 编号已废弃:不再是合法 story_ref
-        ApiResponse legacy = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
+        ApiResponse legacy = patchProject("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("story_ref", "M01")));
         assertEquals(400, legacy.status(), "旧 M 编号应被拒: " + legacy.body());
         assertEquals("关联编号必须使用 USxx 格式，并以逗号分隔", detail(legacy), legacy.body());

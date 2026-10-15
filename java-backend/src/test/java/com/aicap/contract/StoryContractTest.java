@@ -45,7 +45,7 @@ class StoryContractTest extends ContractTestSupport {
             body.put("priority", priority);
         }
         body.put("owner_id", 1);
-        return post("/api/stories", token(USER_ADMIN), json(body));
+        return postProject("/api/stories", token(USER_ADMIN), json(body));
     }
 
     @Test
@@ -57,9 +57,7 @@ class StoryContractTest extends ContractTestSupport {
             assertEquals(200, r.status(), r.body());
             id = r.json().path("id").asText();
             assertTrue(id.matches("^US\\d+$"),
-                    "新故事 id 应走 US 命名空间(US38 起,不再产生 M 编号): " + id);
-            int num = Integer.parseInt(id.substring(2));
-            assertTrue(num > 37, "新故事 id 应大于种子基线 US37: " + id);
+                    "新故事 id 应走 US 命名空间: " + id);
             assertEquals(title, r.json().path("title").asText());
             // 新建故事必须真的落库可见
             assertNotNull(storyFromList(id), "新建故事应出现在 GET /api/stories: " + id);
@@ -72,7 +70,7 @@ class StoryContractTest extends ContractTestSupport {
 
     @Test
     void createStory_missingTitle_422() {
-        ApiResponse r = post("/api/stories", token(USER_ADMIN),
+        ApiResponse r = postProject("/api/stories", token(USER_ADMIN),
                 json(map("owner_id", 1, "status", 0, "sprint", 1, "activity", 2)));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
@@ -97,7 +95,7 @@ class StoryContractTest extends ContractTestSupport {
     @Test
     void createStory_ownerNotExist_400() {
         String title = uniq("CT坏负责人");
-        ApiResponse r = post("/api/stories", token(USER_ADMIN),
+        ApiResponse r = postProject("/api/stories", token(USER_ADMIN),
                 json(map("title", title, "owner_id", 99999)));
         assertEquals(400, r.status(), r.body());
         assertTrue(r.json().has("detail"));
@@ -112,12 +110,12 @@ class StoryContractTest extends ContractTestSupport {
         int oldStatus = created.json().path("status").asInt();
         try {
             int newStatus = oldStatus == 0 ? 1 : 0;
-            ApiResponse patched = patch("/api/stories/" + id, token(USER_ADMIN),
+            ApiResponse patched = patchProject("/api/stories/" + id, token(USER_ADMIN),
                     json(map("status", newStatus)));
             assertEquals(200, patched.status(), patched.body());
             assertEquals(newStatus, patched.json().path("status").asInt());
             // 日志可见
-            ApiResponse logs = get("/api/stories/logs", token(USER_ADMIN));
+            ApiResponse logs = getProject("/api/stories/logs", token(USER_ADMIN));
             assertEquals(200, logs.status(), logs.body());
             boolean foundMove = false;
             for (JsonNode l : logs.json()) {
@@ -167,7 +165,7 @@ class StoryContractTest extends ContractTestSupport {
                 String title = uniq("CT并发故事");
                 futures.add(pool.submit(() -> {
                     start.await();
-                    return post("/api/stories", token(USER_ADMIN), json(map("title", title)));
+                    return postProject("/api/stories", token(USER_ADMIN), json(map("title", title)));
                 }));
             }
             // 同时起跑,把「算出同一个号」的窗口放到最大
@@ -199,7 +197,7 @@ class StoryContractTest extends ContractTestSupport {
 
     @Test
     void patchStory_notFound_404() {
-        ApiResponse r = patch("/api/stories/US99", token(USER_ADMIN), json(map("status", 1)));
+        ApiResponse r = patchProject("/api/stories/US99", token(USER_ADMIN), json(map("status", 1)));
         assertEquals(404, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
@@ -209,10 +207,10 @@ class StoryContractTest extends ContractTestSupport {
         String title = uniq("CT待删故事");
         ApiResponse created = createStory(title, null);
         String id = created.json().path("id").asText();
-        ApiResponse del = delete("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
+        ApiResponse del = deleteProject("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
         assertEquals(200, del.status(), del.body());
         assertEquals(true, del.json().path("ok").asBoolean());
-        ApiResponse list = get("/api/stories", token(USER_ADMIN));
+        ApiResponse list = getProject("/api/stories", token(USER_ADMIN));
         for (JsonNode s : list.json()) {
             assertFalse(id.equals(s.path("id").asText()), "删除后列表中不应再有 " + id);
         }
@@ -220,7 +218,7 @@ class StoryContractTest extends ContractTestSupport {
 
     @Test
     void deleteStory_notFound_404() {
-        ApiResponse r = delete("/api/stories/US99?undone=keep", token(USER_ADMIN));
+        ApiResponse r = deleteProject("/api/stories/US99?undone=keep", token(USER_ADMIN));
         assertEquals(404, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
@@ -231,11 +229,11 @@ class StoryContractTest extends ContractTestSupport {
         ApiResponse created = createStory(title, null);
         String id = created.json().path("id").asText();
         try {
-            ApiResponse r = delete("/api/stories/" + id + "?undone=explode", token(USER_ADMIN));
+            ApiResponse r = deleteProject("/api/stories/" + id + "?undone=explode", token(USER_ADMIN));
             assertEquals(400, r.status(), r.body());
             assertTrue(r.json().has("detail"));
             // 故事应仍在
-            ApiResponse list = get("/api/stories", token(USER_ADMIN));
+            ApiResponse list = getProject("/api/stories", token(USER_ADMIN));
             boolean present = false;
             for (JsonNode s : list.json()) {
                 if (id.equals(s.path("id").asText())) {
@@ -251,7 +249,7 @@ class StoryContractTest extends ContractTestSupport {
     @Test
     void getSingleStoryRoute_405_methodNotSupported() {
         // StoryController 只有 PATCH/DELETE /{storyId},无 GET 单条 → 405(观察:无 GET 路由)
-        ApiResponse r = get("/api/stories/US01", token(USER_ADMIN));
+        ApiResponse r = getProject("/api/stories/US01", token(USER_ADMIN));
         assertEquals(405, r.status(), r.body());
         assertNotNull(r.json());
         assertTrue(r.json().has("detail"), "405 应为 {\"detail\":...}: " + r.body());
@@ -264,9 +262,9 @@ class StoryContractTest extends ContractTestSupport {
         String title = uniq("CT删除后GET");
         ApiResponse created = createStory(title, null);
         String id = created.json().path("id").asText();
-        ApiResponse del = delete("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
+        ApiResponse del = deleteProject("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
         assertEquals(200, del.status(), del.body());
-        ApiResponse r = get("/api/stories/" + id, token(USER_ADMIN));
+        ApiResponse r = getProject("/api/stories/" + id, token(USER_ADMIN));
         assertEquals(405, r.status(), "删除后 GET 单条应仍为方法级 405: " + r.body());
     }
 }

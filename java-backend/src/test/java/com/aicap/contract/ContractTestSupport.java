@@ -53,6 +53,7 @@ public abstract class ContractTestSupport {
     protected static final String USER_MEMBER2 = "罗子涵";
     protected static final String USER_VIEWER = "成员5";
     protected static final String PASSWORD = "123456";
+    protected static final String TEST_PROJECT_ID = "P002";
 
     /** 登录别名(存量库的"成员N"叫法);与 {@link #USER_ADMIN} 等真名指向同一账号 */
     protected static final String ALIAS_ADMIN = "成员1";
@@ -154,6 +155,27 @@ public abstract class ContractTestSupport {
         return request(HttpMethod.DELETE, path, token, null);
     }
 
+    /** 仅供显式选择项目契约的用例使用；原始 HTTP 工具保留缺参测试能力。 */
+    protected String projectPath(String path) {
+        return path + (path.contains("?") ? "&" : "?") + "projectId=" + TEST_PROJECT_ID;
+    }
+
+    protected ApiResponse getProject(String path, String token) {
+        return get(projectPath(path), token);
+    }
+
+    protected ApiResponse postProject(String path, String token, String jsonBody) {
+        return post(projectPath(path), token, jsonBody);
+    }
+
+    protected ApiResponse patchProject(String path, String token, String jsonBody) {
+        return patch(projectPath(path), token, jsonBody);
+    }
+
+    protected ApiResponse deleteProject(String path, String token) {
+        return delete(projectPath(path), token);
+    }
+
     /** 序列化请求体(LinkedHashMap 保持字段顺序稳定) */
     protected String json(Map<String, Object> body) {
         try {
@@ -239,7 +261,7 @@ public abstract class ContractTestSupport {
 
     /** 需求池中匹配指定 title 的条目数 */
     protected int poolCountByTitle(String title, String token) {
-        ApiResponse pool = get("/api/pool", token);
+        ApiResponse pool = getProject("/api/pool", token);
         if (pool.json() == null || !pool.json().isArray()) {
             return 0;
         }
@@ -257,7 +279,7 @@ public abstract class ContractTestSupport {
         if (poolId == null || poolId.isEmpty()) {
             return;
         }
-        ApiResponse r = delete("/api/pool/" + poolId, token(USER_ADMIN));
+        ApiResponse r = deleteProject("/api/pool/" + poolId, token(USER_ADMIN));
         assertEquals(200, r.status(), "清理 pool 条目失败: " + r.body());
     }
 
@@ -266,7 +288,7 @@ public abstract class ContractTestSupport {
         if (storyId == null || storyId.isEmpty()) {
             return;
         }
-        ApiResponse r = delete("/api/stories/" + storyId + "?undone=keep", token(USER_ADMIN));
+        ApiResponse r = deleteProject("/api/stories/" + storyId + "?undone=keep", token(USER_ADMIN));
         assertEquals(200, r.status(), "清理 story 失败: " + r.body());
     }
 
@@ -276,7 +298,7 @@ public abstract class ContractTestSupport {
 
     /** 从 GET /api/tasks 复读指定任务;不存在返回 null。断言失败时带完整列表实体 */
     protected JsonNode taskFromList(String taskId) {
-        ApiResponse r = get("/api/tasks", token(USER_ADMIN));
+        ApiResponse r = getProject("/api/tasks", token(USER_ADMIN));
         assertEquals(200, r.status(), "GET /api/tasks 失败: " + r.body());
         assertNotNull(r.json(), "GET /api/tasks 非 JSON: " + r.body());
         assertTrue(r.json().isArray(), "GET /api/tasks 应为数组: " + r.body());
@@ -297,7 +319,7 @@ public abstract class ContractTestSupport {
 
     /** 从 GET /api/stories 复读指定故事;不存在返回 null */
     protected JsonNode storyFromList(String storyId) {
-        ApiResponse r = get("/api/stories", token(USER_ADMIN));
+        ApiResponse r = getProject("/api/stories", token(USER_ADMIN));
         assertEquals(200, r.status(), "GET /api/stories 失败: " + r.body());
         assertNotNull(r.json(), "GET /api/stories 非 JSON: " + r.body());
         for (JsonNode s : r.json()) {

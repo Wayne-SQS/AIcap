@@ -27,6 +27,9 @@ public class MeetingProjectAccessInterceptor implements HandlerInterceptor {
         Object meetingId = pathVariables.get("meetingId");
         if (!(meetingId instanceof String id)) return true;
 
+        // 删除会议只有全局 reviewer 可执行；先拒绝低权限账号，避免通过 403/404 区分会议是否存在。
+        if ("DELETE".equalsIgnoreCase(request.getMethod())) Roles.reviewer();
+
         var rows = jdbc.queryForList("SELECT project_id FROM meetings WHERE id=?", id);
         if (rows.isEmpty()) throw ApiException.notFound("会议不存在");
         String projectId = rows.getFirst().get("project_id").toString();

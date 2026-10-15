@@ -1,9 +1,19 @@
 package com.aicap.contract;
 
+import com.aicap.entity.ProjectMember;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,20 +36,48 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RoleContractTest extends ContractTestSupport {
 
+    @Autowired
+    private ProjectMemberMapper projectMembers;
+    private final List<Long> fixtureMemberIds = new ArrayList<>();
+
+    @BeforeAll
+    void addRoleFixtures() {
+        addProjectMember(3, "member");
+        addProjectMember(5, "viewer");
+    }
+
+    private void addProjectMember(int userId, String role) {
+        if (projectMembers.selectCount(new QueryWrapper<ProjectMember>()
+                .eq("project_id", TEST_PROJECT_ID).eq("user_id", userId)) > 0) return;
+        ProjectMember member = new ProjectMember();
+        member.setProjectId(TEST_PROJECT_ID);
+        member.setUserId(userId);
+        member.setProjectRole(role);
+        member.setCapacityHours(60);
+        member.setJoinedAt(LocalDateTime.now());
+        projectMembers.insert(member);
+        fixtureMemberIds.add(member.getId());
+    }
+
+    @AfterAll
+    void removeRoleFixtures() {
+        fixtureMemberIds.forEach(projectMembers::deleteById);
+    }
+
     @Test
     void viewer_readEndpoints_200() {
         String t = token(USER_VIEWER);
-        assertEquals(200, get("/api/stories", t).status());
-        assertEquals(200, get("/api/tasks", t).status());
-        assertEquals(200, get("/api/pool", t).status());
-        assertEquals(200, get("/api/dashboard", t).status());
+        assertEquals(200, getProject("/api/stories", t).status());
+        assertEquals(200, getProject("/api/tasks", t).status());
+        assertEquals(200, getProject("/api/pool", t).status());
+        assertEquals(200, getProject("/api/dashboard", t).status());
         assertEquals(200, get("/api/auth/me", t).status());
-        assertEquals(200, get("/api/meetings", t).status());
+        assertEquals(200, getProject("/api/meetings", t).status());
     }
 
     @Test
     void viewer_postStory_403() {
-        ApiResponse r = post("/api/stories", token(USER_VIEWER),
+        ApiResponse r = postProject("/api/stories", token(USER_VIEWER),
                 json(map("title", uniq("CT越权"))));
         assertEquals(403, r.status(), r.body());
         assertTrue(r.json().has("detail"), "403 应为 {\"detail\":...}: " + r.body());
@@ -47,37 +85,42 @@ class RoleContractTest extends ContractTestSupport {
 
     @Test
     void viewer_patchTask_403() {
-        ApiResponse r = patch("/api/tasks/T01", token(USER_VIEWER), json(map("status", 1)));
+        ApiResponse r = patchProject("/api/tasks/T01", token(USER_VIEWER), json(map("status", 1)));
         assertEquals(403, r.status(), r.body());
     }
 
     @Test
     void viewer_postPool_403() {
-        ApiResponse r = post("/api/pool", token(USER_VIEWER),
+        ApiResponse r = postProject("/api/pool", token(USER_VIEWER),
                 json(map("title", uniq("CT越权池"))));
         assertEquals(403, r.status(), r.body());
     }
 
     @Test
     void viewer_deleteStory_403_storyUntouched() {
-        ApiResponse r = delete("/api/stories/US01?undone=keep", token(USER_VIEWER));
-        assertEquals(403, r.status(), r.body());
-        // 种子故事必须原封不动
-        ApiResponse list = get("/api/stories", token(USER_VIEWER));
-        boolean present = false;
-        for (JsonNode it : list.json()) {
-            if ("US01".equals(it.path("id").asText())) {
-                present = true;
+        ApiResponse created = postProject("/api/stories", token(USER_ADMIN),
+                json(map("title", uniq("CT只读保护"))));
+        assertStatus(created, 200);
+        String id = created.json().path("id").asText();
+        try {
+            ApiResponse r = deleteProject("/api/stories/" + id + "?undone=keep", token(USER_VIEWER));
+            assertEquals(403, r.status(), r.body());
+            ApiResponse list = getProject("/api/stories", token(USER_VIEWER));
+            boolean present = false;
+            for (JsonNode it : list.json()) {
+                if (id.equals(it.path("id").asText())) present = true;
             }
+            assertTrue(present, "viewer 删除被拒后故事应仍在: " + r.body());
+        } finally {
+            deleteStory(id);
         }
-        assertTrue(present, "viewer 删除被拒后 US01 应仍在: " + r.body());
     }
 
     @Test
     void viewer_deletePool_403() {
-        ApiResponse r = delete("/api/pool/R99", token(USER_VIEWER));
+        ApiResponse r = deleteProject("/api/pool/R99", token(USER_VIEWER));
         assertEquals(403, r.status(), r.body());
-        assertEquals(0, get("/api/pool", token(USER_ADMIN)).json().size(),
+        assertEquals(0, getProject("/api/pool", token(USER_ADMIN)).json().size(),
                 "viewer 操作不应产生池副作用");
     }
 
@@ -88,7 +131,7 @@ class RoleContractTest extends ContractTestSupport {
                 "client_request_id", uniq("cr"),
                 "evidence", EVIDENCE_FRAGMENT,
                 "changes", map("title", uniq("CT越权建议"))));
-        ApiResponse r = post("/api/suggestions", token(USER_VIEWER), body);
+        ApiResponse r = postProject("/api/suggestions", token(USER_VIEWER), body);
         assertEquals(403, r.status(), r.body());
     }
 
@@ -97,15 +140,15 @@ class RoleContractTest extends ContractTestSupport {
         String id = null;
         try {
             // member 属 writer:POST story 可
-            ApiResponse created = post("/api/stories", token(USER_MEMBER),
+            ApiResponse created = postProject("/api/stories", token(USER_MEMBER),
                     json(map("title", uniq("CT成员建卡"), "owner_id", 3)));
             assertEquals(200, created.status(), created.body());
             id = created.json().path("id").asText();
             // member 不属 reviewer:DELETE story → 403
-            ApiResponse denied = delete("/api/stories/" + id + "?undone=keep", token(USER_MEMBER));
+            ApiResponse denied = deleteProject("/api/stories/" + id + "?undone=keep", token(USER_MEMBER));
             assertEquals(403, denied.status(), denied.body());
             // admin(reviewer)可删
-            ApiResponse adminDel = delete("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
+            ApiResponse adminDel = deleteProject("/api/stories/" + id + "?undone=keep", token(USER_ADMIN));
             assertEquals(200, adminDel.status(), adminDel.body());
             id = null; // 已删
         } finally {
@@ -120,12 +163,12 @@ class RoleContractTest extends ContractTestSupport {
         String mid = null;
         String sid = null;
         try {
-            ApiResponse m = post("/api/meetings", token(USER_ADMIN),
-                    json(map("title", uniq("CT角色会议"),
+            ApiResponse m = postProject("/api/meetings", token(USER_ADMIN),
+                    json(map("project_id", TEST_PROJECT_ID, "title", uniq("CT角色会议"),
                             "transcript", "议题含 " + EVIDENCE_FRAGMENT + "。")));
             assertEquals(201, m.status(), m.body());
             mid = m.json().path("id").asText();
-            ApiResponse s = post("/api/suggestions", token(USER_ADMIN), json(map(
+            ApiResponse s = postProject("/api/suggestions", token(USER_ADMIN), json(map(
                     "meeting_id", mid,
                     "client_request_id", uniq("cr"),
                     "evidence", EVIDENCE_FRAGMENT,
@@ -133,14 +176,16 @@ class RoleContractTest extends ContractTestSupport {
             assertEquals(200, s.status(), s.body());
             sid = s.json().path("id").asText();
             // member 不属 reviewer → review 403
-            ApiResponse denied = post("/api/suggestions/" + sid + "/review",
+            ApiResponse denied = postProject("/api/suggestions/" + sid + "/review",
                     token(USER_MEMBER), json(map("decision", "approve")));
             assertEquals(403, denied.status(), denied.body());
             // 建议仍 pending
-            ApiResponse after = get("/api/suggestions/" + sid, token(USER_ADMIN));
+            ApiResponse after = getProject("/api/suggestions/" + sid, token(USER_ADMIN));
             assertEquals("pending", after.json().path("status").asText());
         } finally {
-            // 若中途被批准落池则清掉(正常流程 member 被拒,pending 无池副作用)
+            if (mid != null) {
+                assertStatus(deleteProject("/api/meetings/" + mid, token(USER_ADMIN)), 200);
+            }
         }
     }
 }

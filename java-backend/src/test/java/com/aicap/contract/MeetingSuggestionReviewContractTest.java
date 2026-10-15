@@ -72,7 +72,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
     private ApiResponse createMeetingOk() {
         String title = uniq("CT会议");
         String transcript = "会议内容:讨论看板与需求管理,其中提到 " + EVIDENCE_FRAGMENT + "。";
-        return post("/api/meetings", token(USER_ADMIN), json(map("title", title, "transcript", transcript)));
+        return postProject("/api/meetings", token(USER_ADMIN), json(map("project_id", TEST_PROJECT_ID, "title", title, "transcript", transcript)));
     }
 
     /** 断言创建成功并登记会议 id(本类所有建会路径都经过这里,保证 @AfterAll 能清干净) */
@@ -87,7 +87,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
     @AfterAll
     void deleteMeetingsCreatedByThisClass() {
         for (String id : createdMeetingIds) {
-            ApiResponse r = delete("/api/meetings/" + id, token(USER_ADMIN));
+            ApiResponse r = deleteProject("/api/meetings/" + id, token(USER_ADMIN));
             assertTrue(r.status() == 200 || r.status() == 404,
                     "清理本类会议失败 " + id + ": " + r.status() + " " + r.body());
         }
@@ -112,7 +112,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         if (extra != null) {
             body.putAll(extra);
         }
-        return post("/api/suggestions", token(USER_ADMIN), json(body));
+        return postProject("/api/suggestions", token(USER_ADMIN), json(body));
     }
 
     private ApiResponse reviewSuggestion(String suggestionId, String decision, String changeTitle) {
@@ -120,7 +120,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         if (changeTitle != null) {
             body.put("changes", map("title", changeTitle, "priority", "Should"));
         }
-        return post("/api/suggestions/" + suggestionId + "/review", token(USER_ADMIN), json(body));
+        return postProject("/api/suggestions/" + suggestionId + "/review", token(USER_ADMIN), json(body));
     }
 
     @Test
@@ -136,13 +136,13 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
                 "SELECT status,execution_status FROM review_queue_proposals WHERE source='general' AND analysis_id=?", sid);
         assertEquals("rejected", reviewed.get("status"));
         assertEquals("not_needed", reviewed.get("execution_status"));
-        assertEquals(200, delete("/api/meetings/" + mid, token(USER_ADMIN)).status());
+        assertEquals(200, deleteProject("/api/meetings/" + mid, token(USER_ADMIN)).status());
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM review_queue_proposals WHERE analysis_id=?", Integer.class, sid));
     }
 
     private String cleanupPoolByTitle(String title) {
-        ApiResponse pool = get("/api/pool", token(USER_ADMIN));
+        ApiResponse pool = getProject("/api/pool", token(USER_ADMIN));
         String id = null;
         if (pool.json() != null) {
             for (JsonNode it : pool.json()) {
@@ -165,7 +165,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         ApiResponse m = createMeetingOk();
         String mid = meetingId(m);
         assertTrue(!mid.isEmpty());
-        ApiResponse list = get("/api/meetings", token(USER_ADMIN));
+        ApiResponse list = getProject("/api/meetings", token(USER_ADMIN));
         assertEquals(200, list.status(), list.body());
         boolean present = false;
         for (JsonNode it : list.json()) {
@@ -178,32 +178,32 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
 
     @Test
     void meeting_missingTitle_422() {
-        ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("transcript", "只有转写")));
+        ApiResponse r = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "transcript", "只有转写")));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
 
     @Test
     void meeting_missingTranscript_422() {
-        ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", uniq("CT无转写"))));
+        ApiResponse r = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "title", uniq("CT无转写"))));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
 
     @Test
     void meeting_titleTooLong_422() {
-        ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", "题".repeat(201), "transcript", "正文")));
+        ApiResponse r = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "title", "题".repeat(201), "transcript", "正文")));
         assertEquals(422, r.status(), r.body());
     }
 
     @Test
     void meeting_unknownField_422_strictJson() {
         // MeetingIn 未加 @JsonIgnoreProperties;全局 failOnUnknownProperties → 未知字段 422(JB-06)
-        ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", uniq("CT多余字段"), "transcript", "正文", "bogus_field", 1)));
+        ApiResponse r = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "title", uniq("CT多余字段"), "transcript", "正文", "bogus_field", 1)));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
@@ -219,7 +219,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         assertEquals("pending", r.json().path("status").asText());
         assertEquals(title, r.json().path("changes").path("title").asText());
         // 按 meeting 过滤可见
-        ApiResponse list = get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN));
+        ApiResponse list = getProject("/api/suggestions?meetingId=" + mid, token(USER_ADMIN));
         boolean present = false;
         for (JsonNode it : list.json()) {
             if (sid.equals(it.path("id").asText())) {
@@ -241,8 +241,8 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
     @Test
     void suggestion_submit_evidenceNotInTranscript_422() {
         // 会议转写不含 EVIDENCE_FRAGMENT
-        ApiResponse m = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", uniq("CT异转写"), "transcript", "本场只讨论无关于建议的日常事务安排。")));
+        ApiResponse m = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "title", uniq("CT异转写"), "transcript", "本场只讨论无关于建议的日常事务安排。")));
         String mid = meetingId(m);
         ApiResponse r = submitSuggestion(mid, uniq("cr"), uniq("CT伪证据"), "Could", null);
         assertEquals(422, r.status(), r.body());
@@ -258,7 +258,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
                 "action", "pool.create",
                 "origin", "manual",
                 "evidence", EVIDENCE_FRAGMENT);
-        ApiResponse r = post("/api/suggestions", token(USER_ADMIN), json(body));
+        ApiResponse r = postProject("/api/suggestions", token(USER_ADMIN), json(body));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
@@ -273,7 +273,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
                 "origin", "manual",
                 "evidence", EVIDENCE_FRAGMENT,
                 "changes", map("priority", "Should"));
-        ApiResponse r = post("/api/suggestions", token(USER_ADMIN), json(body));
+        ApiResponse r = postProject("/api/suggestions", token(USER_ADMIN), json(body));
         assertEquals(422, r.status(), r.body());
         assertTrue(r.json().has("detail"));
     }
@@ -340,7 +340,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             assertEquals(1, poolCountByTitle(title, token(USER_ADMIN)),
                     "同结论幂等应只有 1 条落池: " + title);
             // 池内确实存在该条目且标题一致
-            ApiResponse pool = get("/api/pool", token(USER_ADMIN));
+            ApiResponse pool = getProject("/api/pool", token(USER_ADMIN));
             boolean found = false;
             for (JsonNode it : pool.json()) {
                 if (poolItemId.equals(it.path("id").asText())
@@ -371,7 +371,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             poolItemId = rev.json().path("pool_item_id").asText();
             assertTrue(!poolItemId.isEmpty());
             // 落池标题应为修改后的 title
-            ApiResponse pool = get("/api/pool", token(USER_ADMIN));
+            ApiResponse pool = getProject("/api/pool", token(USER_ADMIN));
             boolean found = false;
             for (JsonNode it : pool.json()) {
                 if (poolItemId.equals(it.path("id").asText())
@@ -393,12 +393,12 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         ApiResponse s = submitSuggestion(mid, uniq("cr"), uniq("CT改审缺载荷"), "Could", null);
         String sid = s.json().path("id").asText();
         // modify_and_approve 必须带 changes → 422(JB-05)
-        ApiResponse rev = post("/api/suggestions/" + sid + "/review", token(USER_ADMIN),
+        ApiResponse rev = postProject("/api/suggestions/" + sid + "/review", token(USER_ADMIN),
                 json(map("decision", "modify_and_approve")));
         assertEquals(422, rev.status(), rev.body());
         assertTrue(rev.json().has("detail"));
         // 建议保持 pending
-        ApiResponse after = get("/api/suggestions/" + sid, token(USER_ADMIN));
+        ApiResponse after = getProject("/api/suggestions/" + sid, token(USER_ADMIN));
         assertEquals(200, after.status(), after.body());
         assertEquals("pending", after.json().path("status").asText());
     }
@@ -528,8 +528,9 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         });
         body.add("source", "recorder");
         body.add("duration_ms", "2000");
+        body.add("consent_confirmed", "true");
         HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
-        return toApi(rest.exchange("/api/meetings/" + meetingId + "/audio",
+        return toApi(rest.exchange(projectPath("/api/meetings/" + meetingId + "/audio"),
                 HttpMethod.POST, entity, byte[].class));
     }
 
@@ -568,7 +569,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
     }
 
     private boolean meetingListed(String meetingId) {
-        ApiResponse list = get("/api/meetings", token(USER_ADMIN));
+        ApiResponse list = getProject("/api/meetings", token(USER_ADMIN));
         assertEquals(200, list.status(), list.body());
         for (JsonNode it : list.json()) {
             if (meetingId.equals(it.path("id").asText())) {
@@ -580,7 +581,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
 
     /** 兜底清理:已删则 404,两种都算"无残留"(不让清理异常掩盖主断言的失败原因) */
     private void cleanupMeeting(String meetingId) {
-        ApiResponse r = delete("/api/meetings/" + meetingId, token(USER_ADMIN));
+        ApiResponse r = deleteProject("/api/meetings/" + meetingId, token(USER_ADMIN));
         assertTrue(r.status() == 200 || r.status() == 404,
                 "清理会议失败(期望 200 或 404): " + r.status() + " " + r.body());
     }
@@ -608,19 +609,19 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             assertNotNull(findStoredAudio(audioId), "上传后音频文件应已落盘: " + audioId);
 
             // 造数据 3:发起一次分析 → run + queued 事件(worker 关闭,不会真的调用模型)
-            ApiResponse run = post("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
+            ApiResponse run = postProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
             assertEquals(200, run.status(), run.body());
             String runId = run.json().path("id").asText();
             assertEquals("queued", run.json().path("status").asText(), run.body());
 
             // 删除前确认三类从属数据都真实存在(否则"删除后为空"没有意义)
-            assertEquals(1, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size());
-            assertEquals(1, get("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).json().size());
-            assertEquals(1, get("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).json().size());
+            assertEquals(1, getProject("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size());
+            assertEquals(1, getProject("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).json().size());
+            assertEquals(1, getProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).json().size());
             assertTrue(meetingListed(mid), "删除前会议应在列表中");
 
             // 删除
-            ApiResponse del = delete("/api/meetings/" + mid, token(USER_ADMIN));
+            ApiResponse del = deleteProject("/api/meetings/" + mid, token(USER_ADMIN));
             assertEquals(200, del.status(), del.body());
             assertEquals(mid, del.json().path("id").asText(), del.body());
             assertTrue(del.json().path("deleted").asBoolean(), del.body());
@@ -629,18 +630,21 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
             assertEquals(1, del.json().path("runs_deleted").asInt(-1), del.body());
 
             // 会议本体消失
-            assertEquals(404, get("/api/meetings/" + mid, token(USER_ADMIN)).status(), "会议应已删除");
+            assertEquals(404, getProject("/api/meetings/" + mid, token(USER_ADMIN)).status(), "会议应已删除");
             assertFalse(meetingListed(mid), "GET /api/meetings 中不应再有该会议");
             // 分析任务消失(事件外键先删才可能删得掉 run)→ GET /api/agent-runs 404
-            assertEquals(404, get("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).status());
-            assertEquals(404, get("/api/agent-runs/" + runId, token(USER_ADMIN)).status(),
+            assertEquals(404, getProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN)).status());
+            assertEquals(404, getProject("/api/agent-runs/" + runId, token(USER_ADMIN)).status(),
                     "分析任务行应已随会议删除");
             // 建议与审核载荷消失
-            assertEquals(0, get("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)).json().size(),
-                    "该会议的建议应清空");
-            assertEquals(404, get("/api/suggestions/" + suggestionId, token(USER_ADMIN)).status());
+            // 当前接口要求 meetingId 指向存在的会议；删除后按该 ID 过滤应为 404。
+            assertStatus(getProject("/api/suggestions?meetingId=" + mid, token(USER_ADMIN)), 404);
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM meeting_suggestion_records WHERE meeting_id=?", Integer.class, mid),
+                    "该会议的建议记录应被物理清空");
+            assertEquals(404, getProject("/api/suggestions/" + suggestionId, token(USER_ADMIN)).status());
             // 音频元数据与落盘文件消失
-            assertEquals(404, get("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).status());
+            assertEquals(404, getProject("/api/meetings/" + mid + "/audio", token(USER_ADMIN)).status());
             assertNull(findStoredAudio(audioId), "音频文件必须从 aicap.audio.dir 消失: " + audioId);
             // 已审核通过落库的需求池条目是独立产物,不随会议删除
             assertEquals(1, poolCountByTitle(title, token(USER_ADMIN)),
@@ -655,7 +659,7 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
     @Test
     void meeting_delete_notFound_404() {
         String missing = "00000000-0000-0000-0000-0000000000ff";
-        ApiResponse r = delete("/api/meetings/" + missing, token(USER_ADMIN));
+        ApiResponse r = deleteProject("/api/meetings/" + missing, token(USER_ADMIN));
         assertEquals(404, r.status(), r.body());
         assertTrue(r.json().has("detail"), "404 响应应为 {\"detail\":...}: " + r.body());
         assertEquals("会议不存在", detail(r), r.body());
@@ -667,22 +671,22 @@ class MeetingSuggestionReviewContractTest extends ContractTestSupport {
         String mid = meetingId(createMeetingOk());
         try {
             // 仅 admin/owner:viewer 与 member 一律 403(与故事删除、音频删除同口径)
-            assertStatus(delete("/api/meetings/" + mid, token(USER_VIEWER)), 403);
-            assertStatus(delete("/api/meetings/" + mid, token(USER_MEMBER)), 403);
+            assertStatus(deleteProject("/api/meetings/" + mid, token(USER_VIEWER)), 403);
+            assertStatus(deleteProject("/api/meetings/" + mid, token(USER_MEMBER)), 403);
             // 越权尝试后会议必须仍然存在
-            ApiResponse still = get("/api/meetings/" + mid, token(USER_ADMIN));
+            ApiResponse still = getProject("/api/meetings/" + mid, token(USER_ADMIN));
             assertEquals(200, still.status(), "越权删除不得删掉会议: " + still.body());
             assertEquals(mid, still.json().path("id").asText(), still.body());
             assertTrue(meetingListed(mid), "越权删除后会议仍应在列表中");
 
             // 无 token → 401
-            assertStatus(delete("/api/meetings/" + mid, null), 401);
+            assertStatus(deleteProject("/api/meetings/" + mid, null), 401);
 
             // 权限校验先于存在性校验:viewer 删不存在的会议同样 403(不泄露存在性)
-            assertStatus(delete("/api/meetings/00000000-0000-0000-0000-0000000000fe", token(USER_VIEWER)), 403);
+            assertStatus(deleteProject("/api/meetings/00000000-0000-0000-0000-0000000000fe", token(USER_VIEWER)), 403);
 
             // 三轮越权/未鉴权尝试后,会议依旧存在
-            assertEquals(200, get("/api/meetings/" + mid, token(USER_ADMIN)).status(),
+            assertEquals(200, getProject("/api/meetings/" + mid, token(USER_ADMIN)).status(),
                     "越权与未鉴权尝试后会议仍应存在");
         } finally {
             cleanupMeeting(mid);
