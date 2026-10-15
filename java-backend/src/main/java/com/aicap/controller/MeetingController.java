@@ -51,7 +51,7 @@ public class MeetingController {
     @PostMapping("/meetings")
     @ResponseStatus(HttpStatus.CREATED)
     public MeetingDtos.MeetingOut createMeeting(@Valid @RequestBody MeetingDtos.MeetingIn in) {
-        Meeting m = meetingService.createMeeting(in, Roles.writer());
+        Meeting m = meetingService.createMeeting(in, Roles.any());
         return toOut(m);
     }
 
@@ -70,8 +70,7 @@ public class MeetingController {
     /**
      * DELETE /api/meetings/{meetingId}:无五类分析记录时删除会议及旧从属数据，200 + JSON body。
      * 已有五类分析（包括无变更结果）返回409，保留原文和审核执行审计，不清理任何文件或业务成果。
-     * <p><b>权限</b>:admin/owner({@link Roles#reviewer()}),与同类敏感删除
-     * ({@code StoryController#delete}、{@code MeetingAudioController#delete})口径一致;会议不存在 → 404 {"detail":...}。
+     * <p><b>权限</b>:项目 owner/admin;会议不存在 → 404 {"detail":...}。
      * <p><b>级联顺序</b>(表间外键均无 ON DELETE CASCADE,必须手工反序清理):
      * meeting_agent_events → meeting_agent_runs → meeting_audio → meeting_approval_payloads
      * → meeting_suggestion_records → suggestions → meetings。已审核通过落库的 pool_items 不删(独立产物)。
@@ -82,7 +81,7 @@ public class MeetingController {
      */
     @DeleteMapping("/meetings/{meetingId}")
     public MeetingDtos.DeleteOut deleteMeeting(@PathVariable String meetingId, @RequestParam String projectId) {
-        Roles.reviewer();
+        Roles.any();
         MeetingService.MeetingDeletion deletion = meetingService.deleteMeeting(projectId, meetingId);
         int audioFilesDeleted = audioService.deleteStoredFiles(deletion.audioStoragePaths());
         return new MeetingDtos.DeleteOut(meetingId, true, audioFilesDeleted,
@@ -93,7 +92,7 @@ public class MeetingController {
 
     @PostMapping("/suggestions")
     public MeetingDtos.SuggestionOut submitSuggestion(@RequestParam String projectId, @Valid @RequestBody MeetingDtos.SuggestionIn in) {
-        var holder = meetingService.submitSuggestionIdempotent(projectId, in, Roles.writer());
+        var holder = meetingService.submitSuggestionIdempotent(projectId, in, Roles.any());
         return toOut(projectId, holder.suggestion(), holder.record());
     }
 
@@ -121,7 +120,7 @@ public class MeetingController {
     @PostMapping("/suggestions/{suggestionId}/review")
     public MeetingDtos.SuggestionOut review(@PathVariable String suggestionId, @RequestParam String projectId,
                                             @Valid @RequestBody MeetingDtos.ReviewIn in) {
-        var holder = meetingService.review(projectId, suggestionId, in, Roles.reviewer());
+        var holder = meetingService.review(projectId, suggestionId, in, Roles.any());
         return toOut(projectId, holder.suggestion(), holder.record());
     }
 

@@ -3,6 +3,7 @@ package com.aicap.controller;
 import com.aicap.agent.MeetingAgentService;
 import com.aicap.entity.User;
 import com.aicap.security.Roles;
+import com.aicap.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +25,7 @@ import java.util.Map;
 public class AgentController {
 
     private final MeetingAgentService agentService;
+    private final ProjectAccessService projectAccess;
 
     @GetMapping("/agent/config")
     public Map<String, Object> agentConfig() {
@@ -33,7 +35,8 @@ public class AgentController {
 
     @PostMapping("/meetings/{meetingId}/runs")
     public Map<String, Object> startRun(@PathVariable String meetingId, @RequestParam String projectId) {
-        User user = Roles.writer();
+        User user = Roles.any();
+        projectAccess.requireWriter(projectId);
         return agentService.createRun(projectId, meetingId, user);
     }
 
@@ -51,7 +54,8 @@ public class AgentController {
 
     @PostMapping("/agent-runs/{runId}/retry")
     public Map<String, Object> retryRun(@PathVariable String runId, @RequestParam String projectId) {
-        User user = Roles.writer();
+        User user = Roles.any();
+        projectAccess.requireWriter(projectId);
         return agentService.retryRun(projectId, runId, user);
     }
 }

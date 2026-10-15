@@ -13,7 +13,7 @@ public class StatusProposalExecutionController {
     private final StatusProposalExecutionService service;
     @PostMapping
     public JsonNode execute(@PathVariable String meetingId,@PathVariable String analysisId,@RequestBody JsonNode body) {
-        return service.execute(meetingId,analysisId,body,Roles.reviewer().getId());
+        return service.execute(meetingId,analysisId,body,Roles.any().getId());
     }
     @GetMapping
     public JsonNode list(@PathVariable String meetingId,@PathVariable String analysisId) {

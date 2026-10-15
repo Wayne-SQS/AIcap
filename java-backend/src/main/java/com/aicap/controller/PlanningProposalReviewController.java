@@ -14,7 +14,7 @@ public class PlanningProposalReviewController {
     private final PlanningProposalReviewService service;
     @PostMapping
     public ObjectNode review(@PathVariable String meetingId,@PathVariable String analysisId,@RequestBody JsonNode body) {
-        return service.review(meetingId,analysisId,body,Roles.reviewer().getId());
+        return service.review(meetingId,analysisId,body,Roles.any().getId());
     }
     @GetMapping
     public ObjectNode list(@PathVariable String meetingId,@PathVariable String analysisId) {
