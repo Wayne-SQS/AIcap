@@ -28,7 +28,7 @@ from app.orchestrator import (
     plan,
     routes_from_catalog,
 )
-from app.schemas import Catalog, ModelError, PlatformProtocolError, PlatformUnavailable
+from app.schemas import Catalog, CatalogTool, ModelError, PlatformProtocolError, PlatformUnavailable
 
 from fake_platform import (
     MEETING_ROUTE,
@@ -96,6 +96,33 @@ async def test_prompt_omits_the_project_line_when_not_given():
     await run_plan(FakePlatform(), model)
 
     assert "当前项目" not in system_prompt_of(model)
+
+
+def test_catalog_declares_project_id_follows_the_schema_only():
+    """`declares_project_id` 只认 schema 的 properties，不认猜。
+
+    它决定"能不能给这枚工具兜底注入 project_id"：会议域的 list_members 严格校验未知参数，
+    多塞一个就会被判 invalid_tool_arguments（真机实测的回归），所以只有自己声明了要它的
+    工具才允许补。只有 args_hint 的画像工具一律 False（无从判断，交给模型）。"""
+    catalog = Catalog(
+        platform_version="1.0",
+        tools=[
+            CatalogTool(name="start_plan_draft", agent="platform", description="派活",
+                        args_schema={"type": "object",
+                                     "properties": {"project_id": {"type": "string"},
+                                                    "request": {"type": "string"}}},
+                        read_only=False),
+            CatalogTool(name="list_members", agent="meeting", description="成员名单",
+                        args_schema={"type": "object", "properties": {}}),
+            CatalogTool(name="query_member_profile", agent="profile", description="画像",
+                        args_hint="参数：userId（必填）"),
+        ],
+    )
+
+    assert catalog.declares_project_id("start_plan_draft") is True
+    assert catalog.declares_project_id("list_members") is False
+    assert catalog.declares_project_id("query_member_profile") is False
+    assert catalog.declares_project_id("不存在") is False
 
 
 # ==========================================================================

@@ -133,6 +133,7 @@ async def _drive(
     *,
     required_tools: frozenset[str] = frozenset(),
     registry: RunRegistry | None = None,
+    project_id: str | None = None,
 ) -> tuple[str, str]:
     session_id = platform.make_session()
     run_id = str(uuid.uuid4())
@@ -146,8 +147,22 @@ async def _drive(
             registry=registry if registry is not None else RunRegistry(),
             model=model,
             required_tools=required_tools,
+            project_id=project_id,
         )
     return session_id, run_id
+
+
+async def test_project_id_is_not_injected_into_tools_that_do_not_declare_it():
+    """兜底注入只给**schema 里声明了 project_id** 的工具。
+
+    会议域的 `list_members` 严格校验未知参数：`{}` 通过、多塞 `project_id` 就被判
+    `invalid_tool_arguments`（真机实测的回归）。假清单里的 `query_tasks` 也是
+    "schema 有 properties 但没有 project_id"，正好钉住这条边界。"""
+    platform = FakePlatform()
+    model = tool_then_answer(tool_call("c1", "query_tasks", {}))
+    await _drive(platform, model, project_id="P007")
+
+    assert platform.calls[-1]["arguments"] == {}, platform.calls[-1]
 
 
 def _error_of(platform: FakePlatform, run_id: str) -> dict[str, Any]:

@@ -268,11 +268,12 @@ async def _plan_phase(
 
     route = decision.route
     try:
-        # 派活时把当前项目补进 args(模型漏传/猜错都不至于让整次派发失败)。
-        # 服务端从 args 读 project_id 且忽略多余字段,所以这里是安全的兜底;
-        # 模型自己给了值就以它为准(它可能被要求派到别的项目上)。
+        # 派活时把当前项目补进 args(模型漏传/猜错都不至于让整次派发失败),但**只在这枚工具
+        # 的 schema 真的声明了 project_id 时**才补 —— 个别工具严格校验未知参数,多塞会被拒
+        # (见 Catalog.declares_project_id)。模型自己给了值就以它为准。
         dispatch_args = decision.args if isinstance(decision.args, dict) else {}
-        if project_id and not dispatch_args.get("project_id") and not dispatch_args.get("projectId"):
+        if (project_id and catalog.declares_project_id(route)
+                and not dispatch_args.get("project_id") and not dispatch_args.get("projectId")):
             dispatch_args = {**dispatch_args, "project_id": project_id}
         outcome = await client.call_tool(route, dispatch_args, jwt)
     except PlatformError as error:
