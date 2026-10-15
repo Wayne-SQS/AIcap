@@ -34,8 +34,15 @@ mybatis-plus:
 # 与 FastAPI 版相同的 JWT 契约(python-jose HS256,payload: {sub: str(user_id), exp})
 aicap:
   jwt:
-    # 与 FastAPI .env 的 JWT_SECRET 同一把 key;默认值 ≥32 字节以满足 HS256 最低要求(生产必须用环境变量覆盖)
-    secret: ${JWT_SECRET:aicap-dev-secret-change-me-please-use-env-0123456789}
+    # 与 FastAPI .env 的 JWT_SECRET 同一把 key。**刻意没有可用默认值**:
+    #   开发 → backend\.env 的 JWT_SECRET(启动后端.ps1 / run.ps1 都会注入)
+    #   生产 → deploy\.env 的 JWT_SECRET(deploy/compose.yaml 已用 ${JWT_SECRET:?...} 失败关闭)
+    #   测试 → src/test/resources/application.properties 的夹具密钥
+    # 为什么不留一个"开发默认值":本仓是公开的,留了它,任何绕过 compose 的启动
+    # (裸 java -jar / IDE / 忘了配)都会静默用一把人人能签 admin token 的密钥 ——
+    # 那种错法不报错、接口照常通,只是身份可伪造。所以宁可留空:忘了配就起不来。
+    # 长度与占位值的校验在 JwtUtil 的构造器里(启动即失败)。
+    secret: ${JWT_SECRET:}
     algorithm: HS256
     expire-minutes: ${JWT_EXPIRE_MINUTES:720}
   seed-on-start: ${AICAP_SEED_ON_START:true}
