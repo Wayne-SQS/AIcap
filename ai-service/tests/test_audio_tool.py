@@ -19,14 +19,16 @@ class AudioInputTests(unittest.TestCase):
         self.digest = self.sha
         self.content_type = 'audio/mpeg'
         self.calls = []
+        self.urls = []
         def handler(request):
             self.calls.append((request.url.path, request.headers.get('authorization')))
+            self.urls.append(str(request.url))
             if request.url.path == '/api/auth/me': return httpx.Response(200, json=self.user)
             if request.url.path.endswith('/audio'): return httpx.Response(200, json=self.rows)
             return httpx.Response(self.status, content=self.content, headers={'content-type': self.content_type, 'x-audio-sha256': self.digest})
         self.tool = AudioReadTool('http://localhost:8080', transport=httpx.MockTransport(handler))
 
-    def read(self): return self.tool.read(meeting_id='m1', audio_id='a1', token='fixture-token')
+    def read(self): return self.tool.read(meeting_id='m1', audio_id='a1', token='fixture-token', project_id='P002')
     def test_verified_identity_fixed_origin_and_unknown_duration(self):
         meta, content = self.read()
         self.assertEqual(self.content, content)
@@ -35,6 +37,8 @@ class AudioInputTests(unittest.TestCase):
         self.assertEqual('not_started', meta.transcription_status)
         self.assertEqual('not_started', meta.diarization_status)
         self.assertEqual([('/api/auth/me', 'Bearer fixture-token'), ('/api/meetings/m1/audio', 'Bearer fixture-token'), ('/api/audio/a1', 'Bearer fixture-token')], self.calls)
+        self.assertTrue(self.urls[1].endswith('/api/meetings/m1/audio?projectId=P002'))
+        self.assertTrue(self.urls[2].endswith('/api/audio/a1?projectId=P002'))
         self.assertNotIn('fixture-token', meta.model_dump_json())
 
     def test_viewer_denied_before_listing_or_downloading(self):
@@ -83,7 +87,7 @@ class AudioInputTests(unittest.TestCase):
 
     def test_api_auth_validation_and_safe_metadata_only_response(self):
         with patch('meeting_agent.api.AudioReadTool', return_value=self.tool), TestClient(create_app()) as client:
-            path = '/api/meetings/m1/transcription/prepare'
+            path = '/api/meetings/m1/transcription/prepare?projectId=P002'
             self.assertEqual(401,client.post(path,json={'audio_id':'a1'}).status_code)
             headers={'Authorization':'Bearer fixture-token'}
             bad=client.post(path,headers=headers,json={'audio_id':'a1','api_key':'private-value'})

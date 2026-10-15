@@ -37,7 +37,7 @@ class DailyScrumWorkflow:
         self._skill = DailyScrumSkill()
 
     def run(self, *, meeting_id: str, transcript: str, access_token: str,
-            current_sprint: int | None = None) -> DailyScrumOutput:
+            current_sprint: int | None = None, project_id: str | None = None) -> DailyScrumOutput:
         """Caller must authorize the meeting and analysis before invoking.
 
         Token is scoped to this call's closure, never graph state or LLM input.
@@ -62,6 +62,7 @@ class DailyScrumWorkflow:
             loaded = self._stories.load_daily_context(
                 access_token=access_token, meeting_id=context.meeting_id,
                 transcript_segments=context.transcript_segments, current_sprint=context.current_sprint,
+                project_id=project_id,
             )
             return {"context": loaded.model_dump()}
 

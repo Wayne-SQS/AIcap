@@ -16,7 +16,7 @@ class SprintReviewWorkflow:
         self._skill = SprintReviewSkill()
 
     def run(self, *, meeting_id: str, transcript: str, access_token: str,
-            current_sprint: int | None = None) -> SprintReviewOutput:
+            current_sprint: int | None = None, project_id: str | None = None) -> SprintReviewOutput:
         # Token stays in the invocation closure; no checkpoint, tracing or writes.
         def load_context(state: MeetingState):
             try:
@@ -27,7 +27,8 @@ class SprintReviewWorkflow:
                         for i, line in enumerate(transcript.splitlines(), 1) if line.strip()], stories=[])
             except ValueError:
                 raise WorkflowError('invalid_meeting_input') from None
-            stories = self._stories.get_review_stories(access_token=access_token)
+            scope = {'project_id': project_id} if project_id else {}
+            stories = self._stories.get_review_stories(access_token=access_token, **scope)
             try:
                 context = SprintReviewInput.model_validate({**context.model_dump(), 'stories': stories})
             except ValueError:

@@ -20,7 +20,7 @@ class PlanningApiTests(unittest.TestCase):
             '/api/members/profiles': (200, []), '/api/tasks': (200, [])})
 
     def post(self, **changes):
-        return self.client.post('/api/meetings/m1/planning/analyze', **dict({
+        return self.client.post('/api/meetings/m1/planning/analyze?projectId=P002', **dict({
             'json': {'meeting_type': 'sprint_planning', 'client_request_id': 'plan-1', 'target_sprint': 3},
             'headers': {'Authorization': 'Bearer fixture-token'}}, **changes))
 

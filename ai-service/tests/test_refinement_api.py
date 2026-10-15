@@ -17,7 +17,7 @@ class RefinementApiTests(unittest.TestCase):
                 evidence=[dict(segment_id='S1',quote=self.transcript)])])
 
     def post(self, **changes):
-        return self.client.post('/api/meetings/m1/refinement/analyze', **dict({
+        return self.client.post('/api/meetings/m1/refinement/analyze?projectId=P002', **dict({
             'headers': {'Authorization':'Bearer fixture-token'},
             'json': {'meeting_type':'backlog_refinement','client_request_id':'refinement-1'}}, **changes))
 

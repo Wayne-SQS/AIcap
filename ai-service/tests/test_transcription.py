@@ -95,7 +95,7 @@ class TranscriptionTests(unittest.TestCase):
         reader=Mock(); reader.read.return_value=(self.meta,b'a')
         engine=Mock(); engine.run.return_value=TranscriptionDraft(audio=self.meta,**self.data)
         with patch('meeting_agent.api.AudioReadTool',return_value=reader), patch('meeting_agent.api.LocalTranscriber',return_value=engine), TestClient(create_app()) as client:
-            path='/api/meetings/m1/transcription/run'; headers={'Authorization':'Bearer fixture-token'}
+            path='/api/meetings/m1/transcription/run?projectId=P002'; headers={'Authorization':'Bearer fixture-token'}
             self.assertEqual(401,client.post(path,json={'audio_id':'a1'}).status_code)
             self.assertEqual(422,client.post(path,headers=headers,json={'audio_id':'a1','speaker_id':7}).status_code)
             engine.run.assert_not_called()

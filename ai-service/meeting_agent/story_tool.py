@@ -91,20 +91,25 @@ class StoryReadTool:
         # Never forward a caller's Bearer token via redirects or environment proxies.
         self._opener = build_opener(ProxyHandler({}), _NoRedirect())
 
-    def get_stories(self, *, access_token: str) -> list[StorySnapshot]:
-        return self._read_stories(access_token=access_token, projection=StorySnapshot)
+    def get_stories(self, *, access_token: str, project_id: str | None = None) -> list[StorySnapshot]:
+        return self._read_stories(access_token=access_token, projection=StorySnapshot,
+                                  project_id=project_id)
 
     def get_planning_stories(self, *, access_token: str,
                              project_id: str | None = None) -> list[PlanningStorySnapshot]:
         return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot,
                                   project_id=project_id)
 
-    def get_refinement_stories(self, *, access_token: str) -> list[PlanningStorySnapshot]:
+    def get_refinement_stories(self, *, access_token: str,
+                               project_id: str | None = None) -> list[PlanningStorySnapshot]:
         # Same business fields; no new endpoint or write permission.
-        return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot)
+        return self._read_stories(access_token=access_token, projection=PlanningStorySnapshot,
+                                  project_id=project_id)
 
-    def get_review_stories(self, *, access_token: str) -> list[ReviewStorySnapshot]:
-        return self._read_stories(access_token=access_token, projection=ReviewStorySnapshot)
+    def get_review_stories(self, *, access_token: str,
+                           project_id: str | None = None) -> list[ReviewStorySnapshot]:
+        return self._read_stories(access_token=access_token, projection=ReviewStorySnapshot,
+                                  project_id=project_id)
 
     def _read_stories(self, *, access_token: str,
                       projection: type[StoryProjection],
@@ -151,6 +156,7 @@ class StoryReadTool:
     def load_daily_context(
         self, *, access_token: str, meeting_id: str,
         transcript_segments: list[TranscriptSegment], current_sprint: int | None = None,
+        project_id: str | None = None,
     ) -> DailyScrumInput:
         """Compose trusted meeting data and freshly read stories, without caching.
 
@@ -165,5 +171,6 @@ class StoryReadTool:
         except ValidationError:
             raise StoryToolError("invalid_meeting_context") from None
         data = context.model_dump()
-        data["stories"] = [story.model_dump() for story in self.get_stories(access_token=access_token)]
+        data["stories"] = [story.model_dump() for story in self.get_stories(
+            access_token=access_token, project_id=project_id)]
         return DailyScrumInput.model_validate(data)

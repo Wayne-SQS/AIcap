@@ -1,6 +1,9 @@
 import { api } from './client'
+import { useProjectsStore } from '@/stores/projects'
 export async function transcribeAudio(meetingId, audio, language) {
-  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/transcription/run`, {
+  const projectId = useProjectsStore().currentProjectId
+  if (!projectId) throw new Error('请先选择项目')
+  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/transcription/run?projectId=${encodeURIComponent(projectId)}`, {
     method: 'POST', body: JSON.stringify({ audio_id: audio.id, language })
   }, '/meeting-ai')
   if (result?.audio?.meeting_id !== meetingId || result.audio.audio_id !== audio.id || result.audio.sha256 !== audio.sha256

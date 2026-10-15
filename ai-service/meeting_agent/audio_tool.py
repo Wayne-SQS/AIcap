@@ -66,14 +66,15 @@ class AudioReadTool:
         except (ValueError, RecursionError):
             raise AudioReadError('invalid_audio_metadata', 502) from None
 
-    def read(self, *, meeting_id, audio_id, token):
+    def read(self, *, meeting_id, audio_id, token, project_id=None):
         user = self._json('/api/auth/me', token)
         if not isinstance(user, dict) or type(user.get('id')) is not int or user['id'] <= 0:
             raise AudioReadError('invalid_audio_identity', 502)
         if user.get('role') not in ('admin', 'owner', 'member'):
             raise AudioReadError('transcription_forbidden', 403)
         # Listing authorizes the meeting and establishes association before downloading.
-        rows = self._json('/api/meetings/' + quote(meeting_id, safe='') + '/audio', token)
+        scope = '?projectId=' + quote(project_id, safe='') if project_id else ''
+        rows = self._json('/api/meetings/' + quote(meeting_id, safe='') + '/audio' + scope, token)
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise AudioReadError('invalid_audio_metadata', 502)
         matches = [row for row in rows if row.get('id') == audio_id]
@@ -88,7 +89,8 @@ class AudioReadTool:
         except (KeyError, ValueError):
             raise AudioReadError('invalid_audio_metadata', 502) from None
         # Never follow the supplied metadata URL or pass the user's token to a provider.
-        content, digest = self._get('/api/audio/' + quote(audio_id, safe=''), token, prepared.byte_size, binary=True)
+        content, digest = self._get('/api/audio/' + quote(audio_id, safe='') + scope,
+                                    token, prepared.byte_size, binary=True)
         if len(content) != prepared.byte_size or hashlib.sha256(content).hexdigest() != prepared.sha256 or digest != prepared.sha256:
             raise AudioReadError('audio_integrity_mismatch', 502)
         return prepared, content

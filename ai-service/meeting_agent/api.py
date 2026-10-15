@@ -162,20 +162,26 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.post('/api/meetings/{meeting_id}/transcription/prepare', response_model=PreparedAudio)
     def prepare_transcription(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                              body: AudioInputRequest, token: Annotated[str, Depends(current_token)]):
-        prepared, _ = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+                              body: AudioInputRequest, token: Annotated[str, Depends(current_token)],
+                              projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        prepared, _ = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token,
+                                        project_id=projectId)
         return prepared
 
     @app.post('/api/meetings/{meeting_id}/diarization/run', response_model=DiarizationPreview)
     def run_diarization(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                        body: DiarizationRequest, token: Annotated[str, Depends(current_token)]):
-        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+                        body: DiarizationRequest, token: Annotated[str, Depends(current_token)],
+                        projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token,
+                                              project_id=projectId)
         return diarizer.run(prepared, content, body.num_speakers)
 
     @app.post('/api/meetings/{meeting_id}/transcription/run', response_model=TranscriptionDraft)
     def run_transcription(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                          body: TranscriptionRequest, token: Annotated[str, Depends(current_token)]):
-        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token)
+                          body: TranscriptionRequest, token: Annotated[str, Depends(current_token)],
+                          projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        prepared, content = audio_reader.read(meeting_id=meeting_id, audio_id=body.audio_id, token=token,
+                                              project_id=projectId)
         return transcriber.run(prepared, content, body.language)
 
     @app.post('/api/meetings/{meeting_id}/assignment/recommendations', response_model=AssignmentRecommendations)
@@ -213,63 +219,68 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.post("/api/meetings/{meeting_id}/analyze", response_model=PersistedResult)
     def analyze(meeting_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,80}$")],
-                body: AnalyzeRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                body: AnalyzeRequest, token: Annotated[str, Depends(current_token)],
+                projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         existing = store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedResult.from_record(existing)
         workflow = DailyScrumWorkflow(stories, make_model())
         result = workflow.run(meeting_id=meeting.id, transcript=meeting.transcript,
-                            access_token=token, current_sprint=body.current_sprint)
+                            access_token=token, current_sprint=body.current_sprint, project_id=projectId)
         saved = store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedResult.from_record(saved)
 
     @app.post('/api/meetings/{meeting_id}/planning/analyze', response_model=PersistedPlanningResult)
     def analyze_planning(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                         body: PlanningAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                         body: PlanningAnalyzeRequest, token: Annotated[str, Depends(current_token)],
+                         projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         existing = planning_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedPlanningResult.from_record(existing)
         result = SprintPlanningWorkflow(planning_reader, make_model()).run(
             meeting_id=meeting.id, transcript=meeting.transcript, access_token=token,
-            current_sprint=body.current_sprint, target_sprint=body.target_sprint)
+            current_sprint=body.current_sprint, target_sprint=body.target_sprint, project_id=projectId)
         saved = planning_store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedPlanningResult.from_record(saved)
 
     @app.post('/api/meetings/{meeting_id}/review/analyze', response_model=PersistedReviewResult)
     def analyze_review(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                       body: ReviewAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                       body: ReviewAnalyzeRequest, token: Annotated[str, Depends(current_token)],
+                       projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         existing = review_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedReviewResult.from_record(existing)
         result = SprintReviewWorkflow(stories, make_model()).run(meeting_id=meeting.id,
-            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint, project_id=projectId)
         saved = review_store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedReviewResult.from_record(saved)
 
     @app.post('/api/meetings/{meeting_id}/retro/analyze', response_model=PersistedRetroResult)
     def analyze_retro(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                      body: RetroAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                      body: RetroAnalyzeRequest, token: Annotated[str, Depends(current_token)],
+                      projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         existing = retro_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedRetroResult.from_record(existing)
         result = SprintRetroWorkflow(members, make_model()).run(meeting_id=meeting.id,
-            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint, project_id=projectId)
         saved = retro_store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedRetroResult.from_record(saved)
 
     @app.post('/api/meetings/{meeting_id}/refinement/analyze', response_model=PersistedRefinementResult)
     def analyze_refinement(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
-                          body: RefinementAnalyzeRequest, token: Annotated[str, Depends(current_token)]):
-        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+                          body: RefinementAnalyzeRequest, token: Annotated[str, Depends(current_token)],
+                          projectId: Annotated[str, Query(min_length=1, max_length=20)]):
+        meeting = access.authorize_and_load(token=token, meeting_id=meeting_id, project_id=projectId)
         existing = refinement_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedRefinementResult.from_record(existing)
         result = BacklogRefinementWorkflow(stories, make_model()).run(meeting_id=meeting.id,
-            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
+            transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint, project_id=projectId)
         saved = refinement_store.save(token=token, request_id=body.client_request_id, result=result)
         return PersistedRefinementResult.from_record(saved)
 

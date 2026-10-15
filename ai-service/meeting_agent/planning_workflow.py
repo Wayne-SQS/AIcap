@@ -24,7 +24,8 @@ class SprintPlanningWorkflow:
         self._skill = SprintPlanningSkill()
 
     def run(self, *, meeting_id: str, transcript: str, access_token: str,
-            current_sprint: int | None = None, target_sprint: int | None = None) -> SprintPlanningOutput:
+            current_sprint: int | None = None, target_sprint: int | None = None,
+            project_id: str | None = None) -> SprintPlanningOutput:
         """Caller authorizes meeting/analysis first. No persistence or execution.
 
         Token stays in this invocation's closure, outside graph state and model
@@ -33,7 +34,8 @@ class SprintPlanningWorkflow:
         """
         def load_context(state: PlanningState):
             context = self._reader.load(meeting_id=meeting_id, transcript=transcript,
-                access_token=access_token, current_sprint=current_sprint, target_sprint=target_sprint)
+                access_token=access_token, current_sprint=current_sprint, target_sprint=target_sprint,
+                project_id=project_id)
             return {'context': context.model_dump(warnings=False)}
 
         def analyze(state: PlanningState):

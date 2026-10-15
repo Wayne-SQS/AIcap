@@ -16,7 +16,7 @@ class SprintRetroWorkflow:
         self._skill = SprintRetroSkill()
 
     def run(self, *, meeting_id: str, transcript: str, access_token: str,
-            current_sprint: int | None = None) -> SprintRetroOutput:
+            current_sprint: int | None = None, project_id: str | None = None) -> SprintRetroOutput:
         # Token stays in the invocation closure; no checkpoint, tracing or writes.
         def load_context(state: MeetingState):
             try:
@@ -27,7 +27,8 @@ class SprintRetroWorkflow:
                         for i, line in enumerate(transcript.splitlines(), 1) if line.strip()], members=[])
             except ValueError:
                 raise WorkflowError('invalid_meeting_input') from None
-            profiles = self._members.get_member_profiles(access_token=access_token)
+            scope = {'project_id': project_id} if project_id else {}
+            profiles = self._members.get_member_profiles(access_token=access_token, **scope)
             try:
                 context = SprintRetroInput.model_validate({**context.model_dump(), 'members': [{'user_id': m.user_id, 'display_name': m.display_name} for m in profiles]})
             except ValueError:

@@ -60,7 +60,7 @@ class DiarizationTests(unittest.TestCase):
         reader=Mock(); reader.read.return_value=(self.meta,b'a')
         engine=Mock(); engine.run.return_value=DiarizationPreview(audio=self.meta,requested_num_speakers=2,**self.data)
         with patch('meeting_agent.api.AudioReadTool',return_value=reader),patch('meeting_agent.api.LocalDiarizer',return_value=engine),TestClient(create_app()) as client:
-            path='/api/meetings/m1/diarization/run'; headers={'Authorization':'Bearer token'}
+            path='/api/meetings/m1/diarization/run?projectId=P002'; headers={'Authorization':'Bearer token'}
             self.assertEqual(401,client.post(path,json={'audio_id':'a1'}).status_code)
             for value in (0,9,2.5,True): self.assertEqual(422,client.post(path,headers=headers,json={'audio_id':'a1','num_speakers':value}).status_code)
             engine.run.assert_not_called()

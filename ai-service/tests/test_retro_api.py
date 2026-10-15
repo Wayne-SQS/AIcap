@@ -16,7 +16,7 @@ class RetroApiTests(unittest.TestCase):
                 evidence=[dict(segment_id='S1',quote=self.transcript)])])
 
     def post(self, **changes):
-        return self.client.post('/api/meetings/m1/retro/analyze', **dict({
+        return self.client.post('/api/meetings/m1/retro/analyze?projectId=P002', **dict({
             'headers': {'Authorization':'Bearer fixture-token'},
             'json': {'meeting_type':'sprint_retrospective','client_request_id':'retro-1'}}, **changes))
 

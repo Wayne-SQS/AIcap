@@ -98,7 +98,7 @@ class ApiTests(unittest.TestCase):
         self.thread.join()
 
     def post(self, **kwargs):
-        return self.client.post("/api/meetings/m1/analyze", **{
+        return self.client.post("/api/meetings/m1/analyze?projectId=P002", **{
             "json": {"meeting_type": "daily_scrum", "client_request_id": "request-1"}, "headers": {"Authorization": "Bearer fixture-token"}, **kwargs})
 
     def test_authorized_roles_analyze_java_transcript_in_order(self):
@@ -109,7 +109,7 @@ class ApiTests(unittest.TestCase):
             response = self.post()
             self.assertEqual(200, response.status_code, response.text)
             self.assertEqual([], response.json()["proposed_actions"])
-            self.assertEqual(["/api/auth/me", "/api/meetings/m1", "/api/meetings/m1/status-analyses/by-request/request-1", "/api/stories", "/api/meetings/m1/status-analyses"], [x[0] for x in self.calls])
+            self.assertEqual(["/api/auth/me", "/api/meetings/m1?projectId=P002", "/api/meetings/m1/status-analyses/by-request/request-1", "/api/stories?projectId=P002", "/api/meetings/m1/status-analyses"], [x[0] for x in self.calls])
             self.assertTrue(all(x[1] == "Bearer fixture-token" for x in self.calls))
             context = json.loads(self.model_calls[-1][1]["content"])
             self.assertEqual("US13 基本完成但未验收。", context["transcript_segments"][0]["text"])
@@ -131,6 +131,22 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(status, response.status_code)
             self.assertNotIn("secret", response.text)
         self.assertEqual([], self.model_calls)
+
+    def test_meeting_project_mismatch_stops_before_story_read_or_model(self):
+        response = self.client.post('/api/meetings/m1/analyze?projectId=P099',
+            json={'meeting_type': 'daily_scrum', 'client_request_id': 'wrong-project'},
+            headers={'Authorization': 'Bearer fixture-token'})
+        self.assertEqual(502, response.status_code)
+        self.assertEqual(['/api/auth/me', '/api/meetings/m1?projectId=P099'],
+                         [path for path, _ in self.calls])
+        self.assertEqual([], self.model_calls)
+
+        self.calls.clear()
+        missing = self.client.post('/api/meetings/m1/analyze',
+            json={'meeting_type': 'daily_scrum', 'client_request_id': 'no-project'},
+            headers={'Authorization': 'Bearer fixture-token'})
+        self.assertEqual(422, missing.status_code)
+        self.assertEqual([], self.calls)
 
     def test_viewer_and_unknown_roles_are_denied_before_meeting_read(self):
         for role in ("viewer", "superadmin"):
@@ -158,7 +174,7 @@ class ApiTests(unittest.TestCase):
         for body in ({}, {"meeting_type": "sprint_planning"}, {"meeting_type": "daily_scrum", "current_sprint": True},
                      {"meeting_type": "daily_scrum", "current_sprint": 5}):
             self.assertEqual(422, self.post(json=body).status_code)
-        response = self.client.post("/api/meetings/m1/analyze", content="{secret",
+        response = self.client.post("/api/meetings/m1/analyze?projectId=P002", content="{secret",
                                     headers={"Authorization": "Bearer token", "Content-Type": "application/json"})
         self.assertEqual(422, response.status_code)
         self.assertNotIn("secret", response.text)
@@ -186,11 +202,11 @@ class ApiTests(unittest.TestCase):
     def test_unconfigured_model_is_503_after_authorization(self):
         app = create_app(backend_origin=self.origin)
         with patch.dict("os.environ", {"AICAP_LLM_API_KEY": ""}), TestClient(app) as client:
-            response = client.post("/api/meetings/m1/analyze", json={"meeting_type": "daily_scrum", "client_request_id": "request-1"},
+            response = client.post("/api/meetings/m1/analyze?projectId=P002", json={"meeting_type": "daily_scrum", "client_request_id": "request-1"},
                                    headers={"Authorization": "Bearer fixture-token"})
         self.assertEqual(503, response.status_code)
         self.assertEqual("model_not_configured", response.json()["detail"])
-        self.assertEqual(["/api/auth/me", "/api/meetings/m1", "/api/meetings/m1/status-analyses/by-request/request-1"], [x[0] for x in self.calls])
+        self.assertEqual(["/api/auth/me", "/api/meetings/m1?projectId=P002", "/api/meetings/m1/status-analyses/by-request/request-1"], [x[0] for x in self.calls])
 
     def test_model_and_proposal_errors_have_safe_http_statuses(self):
         for code, status in (("provider_timeout", 504), ("provider_unavailable", 503), ("provider_http_error", 502)):

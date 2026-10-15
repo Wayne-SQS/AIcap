@@ -1,7 +1,10 @@
 import { api } from './client'
+import { useProjectsStore } from '@/stores/projects'
 
 export async function analyzeRefinement(meetingId, payload) {
-  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/refinement/analyze`, {
+  const projectId = useProjectsStore().currentProjectId
+  if (!projectId) throw new Error('请先选择项目')
+  const result = await api(`/api/meetings/${encodeURIComponent(meetingId)}/refinement/analyze?projectId=${encodeURIComponent(projectId)}`, {
     method: 'POST', body: JSON.stringify(payload)
   }, '/meeting-ai')
   if (!result || typeof result.analysis_id !== 'string' || !result.analysis_id
