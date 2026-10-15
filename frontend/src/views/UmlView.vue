@@ -264,6 +264,35 @@ const selectedStories = computed(() => {
   if (!uc) return []
   return uc.stories.map(id => ({ id, story: project.stories.find(s => s.id === id) || null }))
 })
+const sequenceStoryId = ref('')
+const sequenceStory = computed(() => project.stories.find(story => story.id === sequenceStoryId.value) || null)
+const sequenceEdits = reactive({})
+const sequenceEditKey = computed(() => `aiguanli-uml-sequence-v1-${projects.currentProjectId || 'none'}-${sequenceStoryId.value}`)
+
+function selectSequenceStory(id) {
+  sequenceStoryId.value = id
+  Object.keys(sequenceEdits).forEach(key => delete sequenceEdits[key])
+  try {
+    const saved = JSON.parse(localStorage.getItem(sequenceEditKey.value) || '{}')
+    if (saved && typeof saved === 'object') {
+      Object.entries(saved).forEach(([key, value]) => {
+        if (/^[0-5]$/.test(key) && typeof value === 'string') sequenceEdits[key] = value.slice(0, 100)
+      })
+    }
+  } catch { /* malformed local draft is ignored */ }
+}
+function saveSequenceEdits() {
+  if (!sequenceStory.value || session.isViewer) return
+  localStorage.setItem(sequenceEditKey.value, JSON.stringify(sequenceEdits))
+}
+function clearSequenceEdits() {
+  if (session.isViewer) return
+  localStorage.removeItem(sequenceEditKey.value)
+  Object.keys(sequenceEdits).forEach(key => delete sequenceEdits[key])
+}
+watch(() => project.stories.map(story => story.id).join(','), ids => {
+  if (sequenceStoryId.value && !ids.split(',').includes(sequenceStoryId.value)) selectSequenceStory('')
+})
 
 /* ==================== 时序图 ==================== */
 const TOP = 116
@@ -297,6 +326,24 @@ const MSG = [
   ['backend', 'frontend', '返回各接口 JSON', ['snake_case 字段 · 200 OK'], 'return'],
   ['frontend', 'user', '渲染看板 / 故事地图 / 甘特 / 成员视图', [], 'return']
 ]
+const storyMessages = computed(() => {
+  const story = sequenceStory.value
+  if (!story) return MSG
+  const title = String(story.title || story.id).slice(0, 50)
+  const role = String(story.role || '用户').slice(0, 60)
+  const goal = String(story.goal || story.description || '目标待补充').slice(0, 72)
+  const acceptance = String(story.acceptance || '验收条件待补充').slice(0, 72)
+  const rows = [
+    ['user', 'frontend', `提出场景：${title}`, [`角色：${role}`], 'request'],
+    ['frontend', 'backend', '提交故事场景', [`来源：${story.id} · 当前项目正式故事`], 'request'],
+    ['backend', 'db', '读取故事与关联任务', [`故事目标：${goal}`], 'request'],
+    ['db', 'backend', '返回故事上下文', [`当前状态：${STATUS_TXT[story.status] || '待确认'}`], 'return'],
+    ['backend', 'frontend', '返回场景结果', [`验收依据：${acceptance}`], 'return'],
+    ['frontend', 'user', '展示结果并核对验收', ['交互步骤为可编辑的业务草图'], 'return']
+  ]
+  return rows.map((row, index) => [row[0], row[1], sequenceEdits[index]?.trim() || row[2], row[3], row[4]])
+})
+const sequenceBottom = computed(() => sequenceStory.value ? 570 : BOTTOM)
 
 /* 激活条(时间轴上的执行区间):与 MSG 下标一一对应 */
 const ACTIVATIONS = [
@@ -304,23 +351,26 @@ const ACTIVATIONS = [
   { id: 'db', from: 2, to: 3 }, { id: 'auth', from: 4, to: 5 },
   { id: 'backend', from: 7, to: 12 }, { id: 'auth', from: 8, to: 9 }, { id: 'db', from: 10, to: 11 }
 ]
+const activeIntervals = computed(() => sequenceStory.value
+  ? [{ id: 'frontend', from: 0, to: 5 }, { id: 'backend', from: 1, to: 4 }, { id: 'db', from: 2, to: 3 }]
+  : ACTIVATIONS)
 
 const participantById = computed(() => Object.fromEntries(participants.map(p => [p.id, p])))
 
 function activationEdge(participantId, messageIndex, direction) {
   const p = participantById.value[participantId]
-  const active = ACTIVATIONS.find(a => a.id === participantId && messageIndex >= a.from && messageIndex <= a.to)
+  const active = activeIntervals.value.find(a => a.id === participantId && messageIndex >= a.from && messageIndex <= a.to)
   if (!active) return p.x
   return p.x + (direction === 'right' ? 5 : -5)
 }
 
-const activationBars = computed(() => ACTIVATIONS.map(a => {
+const activationBars = computed(() => activeIntervals.value.map(a => {
   const p = participantById.value[a.id]
   return { key: `${a.id}-${a.from}`, x: p.x - 5, y: ROW_START + a.from * ROW_GAP - 8, height: (a.to - a.from) * ROW_GAP + 18 }
 }))
 
 /* 文案+明细整体贴着箭头向上排布,最多 2 行明细,不越过上一条消息 */
-const messages = computed(() => MSG.map(([from, to, label, details, type], i) => {
+const messages = computed(() => storyMessages.value.map(([from, to, label, details, type], i) => {
   const a = participantById.value[from], b = participantById.value[to]
   const y = ROW_START + i * ROW_GAP
   const direction = b.x > a.x ? 'right' : 'left'
@@ -354,9 +404,12 @@ const layoutDrag = ref(null)
 const suppressClick = ref(false)
 
 function restoreSequenceCanvas() {
-  sequenceViewBox.value = SEQUENCE_VIEWBOX_DEFAULT
-  sequenceFrame.value = { ...SEQUENCE_FRAME_DEFAULT }
+  sequenceViewBox.value = sequenceStory.value ? '0 0 1290 600' : SEQUENCE_VIEWBOX_DEFAULT
+  sequenceFrame.value = sequenceStory.value
+    ? { x: 20, y: 10, width: 1250, height: 565 }
+    : { ...SEQUENCE_FRAME_DEFAULT }
 }
+watch(sequenceStoryId, async () => { restoreSequenceCanvas(); await nextTick(); sequenceFitToCanvas() })
 function sequenceZoomIn() {
   restoreSequenceCanvas()
   rawSequenceZoomIn()
@@ -423,6 +476,7 @@ watch(() => project.stories.map(story => [story.id, story.title, story.activity,
   syncUsecaseLayout(project.stories)
 }, { immediate: true })
 watch(() => projects.currentProjectId, async () => {
+  selectSequenceStory('')
   resetUmlLayout()
   syncUsecaseLayout(project.stories)
   await nextTick()
@@ -501,7 +555,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       用例图按当前正式需求聚合为 {{ usecases.length }} 个系统功能；点击功能用例可查看其关联的原始 Story。
       Story 新增、删除或修改叙述字段后，功能用例关联同步更新；节点可拖动并按项目保存布局。
       {{ session.isViewer ? '当前项目为只读权限，布局不可调整。' : '' }}
-      时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
+      选择关联故事可查看由角色、目标与验收描述生成的业务场景时序草图；默认展示登录协议图。
     </p>
 
     <div class="h-sec">
@@ -580,6 +634,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
             <span class="tag" :class="item.story.priority">{{ item.story.priority }}</span>
             <span class="small">Sprint {{ item.story.sprint }}</span>
             <span class="small">{{ STATUS_TXT[item.story.status] || '—' }}</span>
+            <button type="button" @click="selectSequenceStory(item.story.id)">查看故事时序</button>
           </span>
           <span v-else class="uc-story missing">
             <b class="mono">{{ item.id }}</b>
@@ -589,14 +644,23 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       </div>
     </div>
 
-    <div class="h-sec">时序图 · Sequence（登录并加载项目工作台）</div>
+    <div class="h-sec">时序图 · Sequence（{{ sequenceStory ? `${sequenceStory.id} ${sequenceStory.title}` : '登录并加载项目工作台' }}）</div>
+    <p v-if="sequenceStory" class="small">来源：当前项目 {{ projects.currentProjectId }} 的正式故事 {{ sequenceStory.id }}。此图按故事角色、目标和验收描述生成业务交互草图；具体接口与实现须以代码和测试为准。</p>
+    <div v-if="sequenceStory && !session.isViewer" class="sequence-editor">
+      <label v-for="(step, index) in messages" :key="index" class="field">步骤 {{ index + 1 }} · {{ step.from }} → {{ step.to }}
+        <input v-model="sequenceEdits[index]" :placeholder="step.label" maxlength="100" />
+      </label>
+      <button type="button" @click="saveSequenceEdits">保存步骤文案到当前浏览器</button>
+      <button type="button" @click="clearSequenceEdits">恢复故事生成文案</button>
+    </div>
+    <button v-if="sequenceStory" type="button" @click="selectSequenceStory('')">返回登录协议图</button>
     <CanvasZoomControls :zoom="sequenceZoom" :min-zoom="sequenceMinZoom" :max-zoom="sequenceMaxZoom" :zoom-mode="sequenceZoomMode"
       :reset-zoom="sequenceResetZoom" :fit-to-canvas="sequenceFitToCanvas" :zoom-in="sequenceZoomIn" :zoom-out="sequenceZoomOut"
       :set-zoom-percent="setSequenceZoomPercent" />
     <div ref="sequenceViewport" class="uml-canvas sequence-canvas canvas-zoom-viewport">
       <div ref="sequenceShell" class="canvas-zoom-shell" :style="sequenceShellStyle">
       <svg ref="sequenceSvg" class="uml-svg sequence-svg notranslate" :class="{ 'is-readonly': session.isViewer }" translate="no" :style="sequenceCanvasStyle" :viewBox="sequenceViewBox" role="img"
-           aria-label="登录并加载项目工作台时序图">
+           :aria-label="sequenceStory ? `${sequenceStory.id} 业务场景时序草图` : '登录并加载项目工作台时序图'">
         <defs>
           <marker id="seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 Z" fill="var(--ink)" />
@@ -608,9 +672,9 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
 
         <rect class="sequence-frame" :x="sequenceFrame.x" :y="sequenceFrame.y" :width="sequenceFrame.width" :height="sequenceFrame.height" />
         <g ref="sequenceDrawing" class="sequence-drawing">
-        <text class="sequence-caption" x="38" y="34">sd 登录并加载项目工作台</text>
+        <text class="sequence-caption" x="38" y="34">sd {{ sequenceStory ? `${sequenceStory.id} ${String(sequenceStory.title || '').slice(0, 40)}` : '登录并加载项目工作台' }}</text>
 
-        <g v-for="p in participants" :key="p.id" class="participant-hit" @pointerdown="beginLayoutDrag($event, 'participant', p)">
+        <g v-for="p in participants" v-show="!sequenceStory || p.id !== 'auth'" :key="p.id" class="participant-hit" @pointerdown="beginLayoutDrag($event, 'participant', p)">
           <circle v-if="p.actor" class="actor-head" :cx="p.x" cy="55" r="8" />
           <path v-if="p.actor" class="actor-stroke"
                 :d="`M${p.x} 63 V83 M${p.x - 14} 71 H${p.x + 14} M${p.x} 83 L${p.x - 11} 100 M${p.x} 83 L${p.x + 11} 100`" />
@@ -619,7 +683,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
             <tspan :x="p.x">{{ p.name }}</tspan>
             <tspan v-if="p.sub" class="participant-sub" :x="p.x" dy="12">{{ p.sub }}</tspan>
           </text>
-          <line class="lifeline" :x1="p.x" :y1="TOP + 42" :x2="p.x" :y2="BOTTOM" />
+          <line class="lifeline" :x1="p.x" :y1="TOP + 42" :x2="p.x" :y2="sequenceBottom" />
         </g>
 
         <rect v-for="bar in activationBars" :key="bar.key" class="activation"
@@ -645,6 +709,9 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
 .uml-svg{display:block;width:100%;height:auto;min-width:1100px;font-family:Arial,"Microsoft YaHei",sans-serif;letter-spacing:0;animation:none!important;filter:none!important}
 .uml-svg,.uml-svg *{animation:none!important;filter:none!important}
 .sequence-canvas.canvas-zoom-viewport{height:clamp(680px,70vw,820px);overscroll-behavior-y:auto}
+.sequence-editor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.sequence-editor .field{display:grid;gap:4px;font-size:12px}
+.sequence-editor input{width:100%}
 .uml-canvas.canvas-zoom-viewport{padding:0}
 .usecase-canvas.canvas-zoom-viewport{contain:layout paint;overscroll-behavior-y:auto}
 .usecase-svg{min-width:0}
