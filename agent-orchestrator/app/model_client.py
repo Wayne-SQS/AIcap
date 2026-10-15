@@ -122,10 +122,19 @@ class ModelClient:
             # 只补进**本次请求体**,不追加进 `messages`:后者会被写进检查点,
             # 污染后续上下文与崩溃恢复的现场。
             if not any("json" in str(m.get("content") or "").lower() for m in messages):
+                # 信封**必须点名**：原先这里写的是"字段自定"，于是模型每轮自己发明字段
+                # （write_actions_taken / data_source / next_step_suggestion …），前端认不出来，
+                # 只能把整坨 JSON 灌进对话气泡 —— 真机实测被用户直接骂"垃圾"。
+                # 现在只保证一个字段：`answer` 是**给用户看的人话**，且要求放最前
+                # （同会话纪要按 400 字截断，人话在前才不会被截掉）；机器字段一律进 `details`。
                 body["messages"] = [
                     *messages,
-                    {"role": "user",
-                     "content": "请把最终答案组织成一个 json 对象返回(字段自定,供前端展示)。"},
+                    {"role": "user", "content": (
+                        "请用 json 返回最终答案，字段固定为两种："
+                        "answer（字符串，必填，直接给用户看的一到三句话，放在最前面，"
+                        "正文里不要出现 write_actions_taken 这类机器字段名）；"
+                        "details（对象，可选，结构化明细放这里）。"
+                    )},
                 ]
         else:
             body.update(tools=tools, tool_choice="auto")

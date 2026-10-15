@@ -27,6 +27,7 @@ import json
 import time
 from typing import Any, Awaitable, Callable
 
+from . import config
 from .java_client import JavaClient
 from .model_client import MAX_CALLS_PER_TURN, ModelProtocol
 from .runtime import RunRegistry
@@ -57,7 +58,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "2. 工具返回的 observation 是平台真实数据。其中 failure 为 true 表示这次调用"
     "没拿到数据，要如实告知用户，不要编造替代结果。\n"
     "3. 写操作（创建、修改、删除、开启采集）你不能执行，只能给出建议并说明需要人工确认。\n"
-    "4. 用中文回答，简洁具体。"
+    "4. 用中文回答，简洁具体。\n"
+    "5. 当前消息之前若有更早的 user/assistant 消息，那是本会话此前的轮次（会话纪要）："
+    "其中注明的 run_id（编号）是你此前派发给子智能体的活。用户追问这些活的进展时，"
+    "必须先调用 query_agent_runs 查询实时状态再回答 —— 派活由后台异步执行，"
+    "纪要里记录的派发时刻状态可能早已变化，不得凭纪要断言进展。"
 )
 
 # 接地闸的中途提醒。归档用的是会议域的工具名，这里按缺失的工具名动态拼。
@@ -272,12 +277,18 @@ async def _run_loop(
 
         catalog = await client.catalog(jwt)
         if not state.get("messages"):
+            # 会话纪要(契约 §2.7):同会话此前已终局轮次的 user/assistant 消息对。
+            # 只在**全新拼装**时注入 —— 检查点恢复路径的 messages 已在里面,不重复注入。
+            history = await _history_messages(
+                client=client, jwt=jwt, session_id=session_id, current_run_id=run_id
+            )
             state["messages"] = [
                 {
                     "role": "system",
                     "content": _prompt_with_limits(state["system_prompt"], catalog.limitations)
                     + _project_line(state.get("project_id")),
                 },
+                *history,
                 {"role": "user", "content": state["utterance"]},
             ]
         schemas = function_schemas(catalog)
@@ -399,6 +410,92 @@ async def _run_loop(
 # --------------------------------------------------------------------------
 # 辅助
 # --------------------------------------------------------------------------
+
+
+async def _history_messages(
+    *,
+    client: JavaClient,
+    jwt: str,
+    session_id: str,
+    current_run_id: str,
+) -> list[dict[str, Any]]:
+    """同会话历史纪要：把此前**已终局**轮次合成 user/assistant 消息对。
+
+    为什么从 `agent_events` 现拼而不是自己存一份：编排层不持有 DB 连接
+    （`tests/test_no_db.py` 钉死），而事件本来就先落 Java（契约 §3.2）——
+    `list_events` 是现成的读通道，重启、换进程都不丢。
+
+    为什么排除 `current_run_id`：本 run 的 `session.start` / 规划相事件
+    （`intent.routed` / `agent.dispatched`）此刻**已经落库**（`pre_loop` 在循环前
+    执行），不排除就会把自己这轮也算进"历史"。
+
+    只取已终局（有 `run.end` / `run.error`）的 run：未终局的不该被当成"说过的
+    话"（它还没有答复）；同会话并发 run 被 409 挡住，这里只是防御。
+
+    取不到（Java 没起 / 端点异常）就降级为空纪要 —— 记忆是增强，不能反过来
+    打断对话。JWT 只用于这次读取，绝不进返回的 messages（红线）。
+    """
+    try:
+        rows: list[Any] = []
+        after_seq = 0
+        while len(rows) < config.HISTORY_MAX_EVENTS:
+            page = await client.list_events(session_id=session_id, after_seq=after_seq, jwt=jwt)
+            if not page:
+                break
+            rows.extend(page)
+            after_seq = page[-1].id
+            if len(page) < config.EVENT_PAGE_LIMIT:
+                break
+        rows = rows[-config.HISTORY_MAX_EVENTS :]
+    except PlatformError:
+        return []
+
+    slots: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for row in rows:
+        if row.run_id == current_run_id:
+            continue
+        slot = slots.get(row.run_id)
+        if slot is None:
+            slot = {"utterance": None, "reply": None, "dispatched": [], "error": None,
+                    "terminal": False}
+            slots[row.run_id] = slot
+            order.append(row.run_id)
+        data = row.detail or {}
+        if row.type == "session.start":
+            slot["utterance"] = data.get("utterance")
+        elif row.type == "clarify.request":
+            # 反问轮的"答复"就是那个问题（run.end{status:clarify} 本身没有 output）
+            slot["reply"] = f"（主管反问）{data.get('question', '')}"
+        elif row.type == "run.end":
+            slot["terminal"] = True
+            if data.get("status") != "clarify":
+                slot["reply"] = data.get("output")
+        elif row.type == "run.error":
+            slot["terminal"] = True
+            slot["error"] = f"{data.get('code', 'error')}: {data.get('message', '')}"
+        elif row.type == "agent.dispatched":
+            note = (f"{data.get('agent')} → run_id {data.get('job_id')}, "
+                    f"派发时状态 {data.get('status')}")
+            if data.get("deduplicated"):
+                note += "（复用既有 run）"
+            slot["dispatched"].append(note)
+
+    messages: list[dict[str, Any]] = []
+    for run_id in order[-config.HISTORY_MAX_RUNS :]:
+        slot = slots[run_id]
+        if not slot["terminal"] or not slot["utterance"]:
+            continue
+        parts = []
+        if slot["reply"]:
+            parts.append(str(slot["reply"])[: config.HISTORY_OUTPUT_CHARS])
+        parts.extend(f"[已派活: {note}]" for note in slot["dispatched"])
+        if slot["error"]:
+            parts.append(f"[本轮失败: {slot['error']}]")
+        messages.append({"role": "user",
+                         "content": str(slot["utterance"])[: config.HISTORY_OUTPUT_CHARS]})
+        messages.append({"role": "assistant", "content": "\n".join(parts) or "（本轮无答复）"})
+    return messages
 
 
 def function_schemas(catalog: Catalog) -> list[dict[str, Any]]:

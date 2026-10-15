@@ -8,7 +8,9 @@
 #
 # 用法:powershell -ExecutionPolicy Bypass -File "java-backend\启动后端.ps1"
 #   加 -Build 可顺带重新构建(注意:java -jar 会锁住 jar,必须先把旧进程停掉再构建)
-param([switch]$Build)
+#   默认**连会议智能体一起起**(它是独立进程,见 ai-service\启动会议智能体.ps1);
+#   只要 Java 用 -SkipAi。规划/画像/项目生成是 Java 进程内的 worker,不需要单独起。
+param([switch]$Build, [switch]$SkipAi, [int]$AiPort = 8090)
 
 $ErrorActionPreference = 'Stop'
 $jb = Split-Path -Parent $MyInvocation.MyCommand.Path          # java-backend
@@ -100,3 +102,33 @@ if ($embReady) {
     Write-Host "RAG 检索层=未启用(backend\.env 缺 AICAP_EMBEDDING_API_KEY;注意它不能用 DeepSeek 的 key)"
 }
 Write-Host "日志: java-backend\target\backend-dev.log"
+
+# --- 等 Java 健康:起得来 ≠ 能服务(DB 没就绪时它会"半死":只有 /api/health 响应) ---
+$deadline = (Get-Date).AddSeconds(60)
+$h = $null
+while ((Get-Date) -lt $deadline) {
+    try {
+        $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/health' -TimeoutSec 3
+        if ($h.status -eq 'ok') { break }
+    } catch { Start-Sleep -Seconds 2 }
+}
+if ($h -and $h.status -eq 'ok') {
+    $names = ($h.workers.PSObject.Properties | ForEach-Object { $_.Name }) -join ','
+    Write-Host "Java 健康: ok  db=$($h.db)  进程内 worker=[$names]"
+} else {
+    Write-Host "[警告] 8080 健康检查未通过;看 java-backend\target\backend-dev.err.log" -ForegroundColor Yellow
+}
+
+# --- 会议智能体:与 Java 是两个进程/两种技术栈(且它不持数据库连接,写回经 Java 接口),
+#     所以它**必须**单独起 —— 这里替用户带起来,免得每次都要多开一个终端。 ---
+if ($SkipAi) {
+    Write-Host "会议智能体: 已按 -SkipAi 跳过(前端会议面板与五类分析将不可用)"
+} else {
+    $aiLauncher = Join-Path $repoRoot 'ai-service\启动会议智能体.ps1'
+    if (Test-Path $aiLauncher) {
+        Write-Host ""
+        & $aiLauncher -Port $AiPort
+    } else {
+        Write-Host "[警告] 找不到 $aiLauncher,跳过会议智能体" -ForegroundColor Yellow
+    }
+}

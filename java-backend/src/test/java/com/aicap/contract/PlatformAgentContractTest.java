@@ -368,4 +368,105 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertFalse(projectId.isEmpty(), response.body());
         return projectId;
     }
+
+    // ==================== query_agent_runs(run 回查,契约 §2.4 第 17 枚) ====================
+
+    /** PLAT-21:catalog 发布 query_agent_runs —— 只读、platform 域、schema 声明 project_id 必填 */
+    @Test
+    void plat21_queryAgentRuns_publishedAsReadOnlyPlatformTool() {
+        ApiResponse r = get(CATALOG, token(USER_ADMIN));
+        assertEquals(200, r.status(), r.body());
+        JsonNode target = null;
+        for (JsonNode tool : r.json().path("tools")) {
+            if ("query_agent_runs".equals(tool.path("name").asText())) {
+                target = tool;
+                break;
+            }
+        }
+        assertTrue(target != null, "query_agent_runs 应在册: " + r.body());
+        assertEquals("platform", target.path("agent").asText(), r.body());
+        assertTrue(target.path("read_only").asBoolean(), "run 回查必须是只读工具: " + r.body());
+        assertFalse(target.path("uses_retrieval").asBoolean(), r.body());
+        assertTrue(target.path("args_schema").path("properties").has("project_id"),
+                "schema 必须声明 project_id —— 编排层只给声明了它的工具兜底注入(Catalog.declares_project_id): "
+                        + r.body());
+    }
+
+    /**
+     * PLAT-22:触发一个 planning run 后,回查必须看到它,且状态与触发回执一致。
+     * 本类 properties 里 {@code agent-worker-enabled=false},worker 不会把它领走 ——
+     * 所以"queued"是确定值,不与后台执行赛跑。result_json 一律不整包回(草案可能很大)。
+     */
+    @Test
+    void plat22_queryAgentRuns_findsDispatchedPlanningRun() {
+        String projectId = firstProjectId();
+        String request = "回查用例 " + UUID.randomUUID();
+        ApiResponse created = post(TOOLS + "start_plan_draft", token(USER_ADMIN),
+                json(map("request", request, "project_id", projectId)));
+        assertEquals(200, created.status(), created.body());
+        String runId = created.json().path("result").path("run_id").asText();
+        assertFalse(runId.isEmpty(), created.body());
+
+        ApiResponse r = post(TOOLS + "query_agent_runs", token(USER_ADMIN),
+                json(map("project_id", projectId, "kind", "planning", "run_id", runId)));
+        assertEquals(200, r.status(), r.body());
+        assertTrue(r.json().path("ok").asBoolean(), r.body());
+        JsonNode runs = r.json().path("result").path("runs");
+        assertEquals(1, runs.size(), "按 run_id 精查应恰好一行: " + r.body());
+        assertEquals("planning", runs.get(0).path("kind").asText(), r.body());
+        assertEquals(runId, runs.get(0).path("run_id").asText(), r.body());
+        assertEquals("queued", runs.get(0).path("status").asText(), r.body());
+        assertFalse(r.json().path("result").has("result_json"),
+                "result_json 不得整包返回,只允许 has_result: " + r.body());
+    }
+
+    /** PLAT-23:参数不合法走 200 + ok=false(invalid_arguments),与触发型工具同口径 */
+    @Test
+    void plat23_queryAgentRuns_badArgsAreOkFalse() {
+        ApiResponse badKind = post(TOOLS + "query_agent_runs", token(USER_ADMIN),
+                json(map("project_id", firstProjectId(), "kind", "generation")));
+        assertEquals(200, badKind.status(), badKind.body());
+        assertFalse(badKind.json().path("ok").asBoolean(), badKind.body());
+        assertEquals("invalid_arguments", badKind.json().path("error_code").asText(), badKind.body());
+
+        // 多项目之后 project_id 就是查询作用域,缺它必须拒绝而不是回全量
+        ApiResponse noProject = requestWithoutProject(HttpMethod.POST, TOOLS + "query_agent_runs",
+                token(USER_ADMIN), json(map("kind", "planning")));
+        assertEquals(200, noProject.status(), noProject.body());
+        assertFalse(noProject.json().path("ok").asBoolean(), noProject.body());
+        assertEquals("invalid_arguments", noProject.json().path("error_code").asText(), noProject.body());
+    }
+
+    /**
+     * PLAT-24:回查按项目隔离 —— P1 的 run 在 P2 的回查里必须看不见;
+     * 且与所有工具同门槛:viewer 403。
+     */
+    @Test
+    void plat24_queryAgentRuns_scopedToProject_andWriterOnly() {
+        String projectId = firstProjectId();
+        ApiResponse created = post(TOOLS + "start_plan_draft", token(USER_ADMIN),
+                json(map("request", "跨项目隔离用例 " + UUID.randomUUID(), "project_id", projectId)));
+        String runId = created.json().path("result").path("run_id").asText();
+        assertFalse(runId.isEmpty(), created.body());
+
+        String otherProject = null;
+        ApiResponse projects = get("/api/projects", token(USER_ADMIN));
+        for (JsonNode p : projects.json()) {
+            String id = p.path("id").asText();
+            if (!id.isEmpty() && !id.equals(projectId)) {
+                otherProject = id;
+                break;
+            }
+        }
+        assertTrue(otherProject != null,
+                "种子应有第二个项目(DataSeeder 保证 P001/P002): " + projects.body());
+        ApiResponse r = post(TOOLS + "query_agent_runs", token(USER_ADMIN),
+                json(map("project_id", otherProject, "kind", "planning", "run_id", runId)));
+        assertEquals(200, r.status(), r.body());
+        assertEquals(0, r.json().path("result").path("runs").size(),
+                "本项目的 run 不得出现在另一项目的回查里: " + r.body());
+
+        assertStatus(post(TOOLS + "query_agent_runs", token(USER_VIEWER),
+                json(map("project_id", projectId))), 403);
+    }
 }

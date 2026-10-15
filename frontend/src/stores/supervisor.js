@@ -142,13 +142,25 @@ export const useSupervisorStore = defineStore('supervisor', {
       await this.probe()
       if (!this.health.reachable || !this.health.java) return
 
+      // 停在项目列表页(currentProjectId=null)时不发 /chat:那一轮注定只得到
+      // 「缺 project_id」的反问,而反问给不出缺的是什么 —— 不如本地明说。
+      // 不静默挑项目:替用户选一个项目等于让主管在错的上下文里干活。
+      const projectId = useProjectsStore().currentProjectId
+      if (!projectId) {
+        this.messages.push({
+          id: 'e' + Date.now(),
+          role: 'agent',
+          text: '请先进入一个具体项目,再和主管对话 —— 我需要知道你在说哪个项目。'
+        })
+        return
+      }
+
       this.messages.push({ id: 'u' + Date.now(), role: 'user', text: utterance })
       this.running = true
       try {
         // 当前项目随每一轮带上:多项目之后工具调用普遍需要 project_id,
         // 不带就只能靠模型猜(见 api/supervisor.js 的 startChat 注释)
-        const { session_id: sid } = await startChat(utterance, this.sessionId,
-          useProjectsStore().currentProjectId)
+        const { session_id: sid } = await startChat(utterance, this.sessionId, projectId)
         if (sid && sid !== this.sessionId) {
           this.sessionId = sid
           saveSessionId(sid)

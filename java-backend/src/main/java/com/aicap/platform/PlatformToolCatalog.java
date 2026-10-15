@@ -53,6 +53,13 @@ public class PlatformToolCatalog {
     public static final String START_PLAN_DRAFT = "start_plan_draft";
     public static final String START_PROFILE_ANALYSIS = "start_profile_analysis";
 
+    /**
+     * run 状态回查工具(契约 §2.4 第 17 枚):触发型工具只回 {@code run_id},
+     * "刚才派的活好了吗"这个问题原先无人能答 —— 本枚补上回程的查询半边。
+     * 只读,不进触发型集合:派活仍只发生在规划相,这里只是让主管能看队列。
+     */
+    public static final String QUERY_AGENT_RUNS = "query_agent_runs";
+
     /** 触发型工具的名字集合:PLAT-04 与分派共用一处,避免两处清单分叉 */
     public static final List<String> TRIGGER_TOOLS =
             List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT, START_PROFILE_ANALYSIS);
@@ -144,6 +151,21 @@ public class PlatformToolCatalog {
                 null,
                 true,
                 true));
+        out.add(new ToolSpec(
+                QUERY_AGENT_RUNS,
+                AGENT_PLATFORM,
+                "查询本项目三个智能体域的 run 状态与产物存在性:planning=规划草案 / profile=画像分析 /"
+                        + " meeting=会议分析。用于回答「刚才派的活好了吗/到哪一步了/失败了吗」,"
+                        + "按创建时间倒序最多 20 条;kind 与 run_id 可省。"
+                        + "注意:run 状态随后台执行随时变化,回答进展前必须现查,不得凭记忆断言。",
+                objectSchema(Map.of(
+                                "project_id", strField("Project id", 1, 20),
+                                "kind", strField("planning|profile|meeting, optional", 1, 20),
+                                "run_id", strField("Exact run id, optional", 1, 36)),
+                        "project_id"),
+                null,
+                true,
+                false));
         out.add(new ToolSpec(
                 START_MEETING_ANALYSIS,
                 AGENT_PLATFORM,

@@ -9,8 +9,8 @@
    三个同事的名字取自 `docs/01-产品/智能体产品契约.md`:译(会议)/ 衡(画像)/ 绘(画图)。
    派活目标是**触发型工具名**(契约 §2.4,route 即工具名),所以要反查同事。 */
 
-/* 触发型工具 → 同事。第三枚 start_profile_analysis 暂缓(画像域无后台消费者),
-   这里先登记,Java 侧一旦上线就自动能用 —— 本表是展示层,不影响编排层路由。 */
+/* 触发型工具 → 同事。三枚都已上线(2026-10-15 画像域补了后台消费者),
+   本表是展示层,不影响编排层路由 —— Java 侧新增触发型工具时会显示原始工具名。 */
 const ROUTE_AGENTS = {
   start_meeting_analysis: { name: '译', role: '会议智能体', color: 'blue' },
   start_plan_draft: { name: '绘', role: '画图智能体', color: 'lilac' },
@@ -46,6 +46,31 @@ export function toolLabel(name) {
 /** route(触发型工具名)→ 同事;认不出返回 null */
 export function routeAgent(route) {
   return route ? ROUTE_AGENTS[route] || null : null
+}
+
+/** `run.end.output` → 直接给用户看的一句话（契约 §3.3「最终答复信封」）。
+ *
+ *  编排层最后那一发带 `response_format=json_object`（供应商硬约束），所以 output 通常是一坨
+ *  JSON —— **必须取 `answer` 字段再渲染**，否则对话气泡里就是裸 JSON。
+ *  回退顺序 answer → summary/headline/message/text → 原样；历史 run 没有 answer 时保持原样，
+ *  不做破坏性改写（宁可不美化，也不丢信息）。 */
+export function readableAnswer(output) {
+  const text = String(output == null ? '' : output).trim()
+  if (!text) return '（本轮没有产出文本）'
+  if (!text.startsWith('{')) return text
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return text
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    for (const key of ['answer', 'summary', 'headline', 'message', 'text']) {
+      const value = parsed[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+  }
+  return text
 }
 
 /** run.error 的 code → 人话。code 来自编排层各处 _Gate / PlatformError / ModelError。 */
@@ -201,7 +226,7 @@ export function describeEvent(env) {
         label: '完成',
         text: '答复已整理好',
         detail: bits.join(' · '),
-        answer: data.output || '（本轮没有产出文本）',
+        answer: readableAnswer(data.output),
         done: true,
         at
       }

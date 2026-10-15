@@ -76,6 +76,9 @@ async def test_final_request_supplies_the_word_json_the_provider_demands(configu
     assert body["response_format"] == {"type": "json_object"}
     assert "tools" not in body and "tool_choice" not in body
     assert any("json" in str(m.get("content") or "").lower() for m in body["messages"])
+    # 信封必须点名 answer：只写"字段自定"会让模型每轮发明字段，前端渲染不了，
+    # 只能把裸 JSON 灌进气泡（真机实测被用户骂"垃圾"）。契约 §3.3「最终答复信封」。
+    assert any("answer" in str(m.get("content") or "") for m in body["messages"])
 
 
 async def test_final_request_does_not_mutate_the_callers_messages(configured):

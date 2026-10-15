@@ -51,6 +51,15 @@ SSE_HEARTBEAT_SECONDS = float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
 # **消费方（`java_client.list_events`）每次调用重读这个属性**，不要在导入时抄走。
 EVENT_PAGE_LIMIT = int(os.getenv("SSE_EVENT_PAGE_LIMIT", "100"))
 
+# 同会话记忆(契约 §2.7「历史纪要」):每轮 /chat 在拼 messages 时从 agent_events
+# 现拼最近几轮(utterance/答复/派活注记),只取**已终局**的 run。
+# 不持久化、不进检查点 —— 检查点里的 messages 是"本 run 的循环状态",这是两回事。
+HISTORY_MAX_RUNS = int(os.getenv("AICAP_HISTORY_MAX_RUNS", "3"))
+# 翻页读事件的硬上限:一个会话的事件总量超过它就只看最近的(纪要本来就是"最近几轮")
+HISTORY_MAX_EVENTS = int(os.getenv("AICAP_HISTORY_MAX_EVENTS", "400"))
+# 纪要里单条答复/发言的截断长度:纪要只负责"记得说过什么",不负责存档
+HISTORY_OUTPUT_CHARS = int(os.getenv("AICAP_HISTORY_OUTPUT_CHARS", "400"))
+
 
 def llm_configured() -> bool:
     """是否配了真实 LLM。没配时如实回报，不假装能干活。"""

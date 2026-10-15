@@ -7,18 +7,29 @@ AIcap「主管智能体」的**编排层**（Python）。Java 作平台，本层
 `docs/主管智能体_需求与规划_v1.1.md`（需求与权限口径）。
 进度口径：`docs/AIcap-Agent能力扩展_实施计划.md`。
 
-## 当前状态：S5′（`plan()` 路由 + 反问阈值 + `routing_logs` + 触发型工具）
+## 当前状态：S5′（`plan()` 路由 + 反问阈值 + `routing_logs` + 触发型工具）+ 回程查询与会话记忆（2026-10-15）
 
 S4′.2 交付了有界循环 + 事件落库 + 检查点恢复；**S5′ 在循环前面接上了主管的规划相**：
 一句话进来先 `plan()`，判要不要反问，派活就调触发型工具（`POST /api/agents/tools/{name}`），
 再进循环作答。
+
+**2026-10-15 增补两项**（修真机实测回归：被追问"刚才那份草案好了吗"时 0 次工具调用、
+答复与事实相反）：
+
+- **回程查询**：Java 侧新增只读工具 `query_agent_runs`（按项目查三域 run 状态与产物指针，
+  `result_json` 不整包返回）。清单运行时拉取 → 本层**零改动**自动获得它；
+- **同会话纪要回填**：每轮 `/chat` 拼装 messages 时从 `agent_events`（经现成的
+  `list_events`，增量翻页）现拼最近 3 轮**已终局** run 的 user/assistant 消息对
+  （含派活注记），插在 system 之后、当前 utterance 之前 —— 修"模型不知道自己上一轮
+  派过活"。上限/截断由 `AICAP_HISTORY_*` 环境变量管；读失败降级空纪要；不持久化、
+  不进检查点（见契约 §2.7 末段）。
 
 | 模块 | 状态 |
 |---|---|
 | `app/java_client.py` | ✅ 真实：唯一 HTTP 出口，透传 JWT（写路径零重试 / 读路径有界重试） |
 | `app/tools.py` | ✅ 真实（薄）：从 `/catalog` 拉清单 + 调用转发 |
 | `app/model_client.py` | ✅ 真实：Chat Completions 传输层（`httpx.AsyncClient`，不引厂商 SDK） |
-| `app/loop.py` | ✅ 真实：有界循环（四道闸 + 接地闸）+ 检查点写入 / 恢复 + 可选 `pre_loop` 钩子 |
+| `app/loop.py` | ✅ 真实：有界循环（四道闸 + 接地闸）+ 检查点写入 / 恢复 + 可选 `pre_loop` 钩子 + 同会话纪要回填（`_history_messages`，2026-10-15） |
 | `app/runtime.py` | ✅ 进程内 run 登记（`claim` 同步、无 `await`，重连只恢复一次） |
 | `app/main.py` | ✅ `/health` / `/chat`（触发口）/ `/chat/stream`（只读通道 + 惰性恢复）+ 规划相 `_plan_phase` |
 | `app/orchestrator.py` | ✅ 真实：`plan()` 路由 + 阈值判定 + 反问（**只有 `plan()`，没有 `execute()`**） |

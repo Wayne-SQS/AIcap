@@ -2,9 +2,15 @@ package com.aicap.platform;
 
 import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
+import com.aicap.entity.Meeting;
+import com.aicap.entity.MeetingAgentRun;
 import com.aicap.entity.PlanningAgentRun;
 import com.aicap.entity.ProfileAgentRun;
 import com.aicap.entity.User;
+import com.aicap.mapper.MeetingAgentRunMapper;
+import com.aicap.mapper.MeetingMapper;
+import com.aicap.mapper.PlanningAgentRunMapper;
+import com.aicap.mapper.ProfileAgentRunMapper;
 import com.aicap.planning.PlanningAgentJobs;
 import com.aicap.profile.ProfileAgentJobs;
 import com.aicap.profile.ProfileToolRegistry;
@@ -14,6 +20,7 @@ import com.aicap.rag.RagProperties;
 import com.aicap.rag.RetrievalContext;
 import com.aicap.rag.RetrievalService;
 import com.aicap.service.ProjectAccessService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,6 +33,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -110,6 +118,15 @@ public class PlatformToolService {
     private final ProfileAgentService profileService;
 
     /**
+     * run 回查(query_agent_runs)用的四个只读 Mapper。经 BaseMapper.selectList 走,
+     * 不新写 SQL:三张 run 表都已有实体映射,归一化发生在本方法内。
+     */
+    private final PlanningAgentRunMapper planningRunMapper;
+    private final ProfileAgentRunMapper profileRunMapper;
+    private final MeetingAgentRunMapper meetingAgentRunMapper;
+    private final MeetingMapper meetingMapper;
+
+    /**
      * 调用一个工具。
      *
      * @param caller 已经过 {@code Roles.writer()} 校验的调用者;工具内部还会再查一次库,
@@ -170,6 +187,9 @@ public class PlatformToolService {
         if (PlatformToolCatalog.SEMANTIC_SEARCH.equals(toolName)) {
             return semanticSearch(args, caller, started);
         }
+        if (PlatformToolCatalog.QUERY_AGENT_RUNS.equals(toolName)) {
+            return queryAgentRuns(args, caller, projectId, started);
+        }
         if (PlatformToolCatalog.START_MEETING_ANALYSIS.equals(toolName)) {
             return startMeetingAnalysis(args, caller, started);
         }
@@ -181,6 +201,120 @@ public class PlatformToolService {
         }
         throw ApiException.notFound("未知工具: " + toolName);
     }
+
+    /** 单次返回的 run 行数上限:够了(20 条状态足够回答"到哪一步了"),也挡住长会话把观测撑爆 */
+    private static final int MAX_RUN_ROWS = 20;
+    /** 域辨认字段(request/range)进单行的截断长度:辨认足够,不做正文回传 */
+    private static final int RUN_LABEL_CHARS = 160;
+
+    /**
+     * 回查三个智能体域的 run 状态(契约 §2.4 第 17 枚,只读)。
+     *
+     * <p>为什么会议域要走 meetings 间接过滤:{@code meeting_agent_runs} 的 project_id 列虽由
+     * SchemaUpgrader 补上,但实体与写入路径都没接它(恒 NULL)—— 按"实体里真有值的列"过滤,
+     * 会议 run 经 {@code meetings.project_id} 圈定;planning / profile 两域实体的 projectId
+     * 是队列作用域,直接过滤。三域各自查询后按创建时间归并,超过上限截尾。
+     *
+     * <p>{@code result_json} 一律不整包返回(规划草案与画像整包都可能很大):只给
+     * {@code has_result},产物本身走各自的审批界面看 —— 本工具的职责是"状态",不是"内容"。
+     */
+    private ToolOutcome queryAgentRuns(JsonNode args, User caller, String projectId, long started) {
+        String tool = PlatformToolCatalog.QUERY_AGENT_RUNS;
+        if (projectId == null || projectId.isBlank()) {
+            return failure(tool, "invalid_arguments", "project_id 必填", started);
+        }
+        String kind = args.path("kind").asText("").trim();
+        if (!kind.isEmpty() && !List.of("planning", "profile", "meeting").contains(kind)) {
+            return failure(tool, "invalid_arguments", "kind 只支持 planning/profile/meeting", started);
+        }
+        String runId = args.path("run_id").asText("").trim();
+
+        List<RunRow> rows = new ArrayList<>();
+        if (kind.isEmpty() || "planning".equals(kind)) {
+            var qw = new LambdaQueryWrapper<PlanningAgentRun>().eq(PlanningAgentRun::getProjectId, projectId);
+            if (!runId.isEmpty()) {
+                qw.eq(PlanningAgentRun::getId, runId);
+            }
+            qw.orderByDesc(PlanningAgentRun::getCreatedAt);
+            for (PlanningAgentRun r : planningRunMapper.selectList(qw)) {
+                rows.add(new RunRow("planning", r.getId(), r.getStatus(), r.getCreatedAt(), r.getUpdatedAt(),
+                        "request: " + truncate(r.getRequestText(), RUN_LABEL_CHARS),
+                        joinError(r.getErrorCode(), r.getErrorMessage()),
+                        r.getResultJson() != null && !r.getResultJson().isBlank()));
+            }
+        }
+        if (kind.isEmpty() || "profile".equals(kind)) {
+            var qw = new LambdaQueryWrapper<ProfileAgentRun>().eq(ProfileAgentRun::getProjectId, projectId);
+            if (!runId.isEmpty()) {
+                qw.eq(ProfileAgentRun::getId, runId);
+            }
+            qw.orderByDesc(ProfileAgentRun::getCreatedAt);
+            for (ProfileAgentRun r : profileRunMapper.selectList(qw)) {
+                String label = "range: " + r.getRangeStart() + ".." + r.getRangeEnd()
+                        + (r.getOnlyUserId() != null ? ", user_id=" + r.getOnlyUserId() : ", 全团队");
+                rows.add(new RunRow("profile", r.getId(), r.getStatus(), r.getCreatedAt(), r.getUpdatedAt(),
+                        label, joinError(null, r.getErrorMessage()),
+                        r.getResultJson() != null && !r.getResultJson().isBlank()));
+            }
+        }
+        if (kind.isEmpty() || "meeting".equals(kind)) {
+            List<Meeting> meetings = meetingMapper.selectList(
+                    new LambdaQueryWrapper<Meeting>().eq(Meeting::getProjectId, projectId).select(Meeting::getId));
+            if (!meetings.isEmpty()) {
+                List<String> meetingIds = meetings.stream().map(Meeting::getId).toList();
+                var qw = new LambdaQueryWrapper<MeetingAgentRun>().in(MeetingAgentRun::getMeetingId, meetingIds);
+                if (!runId.isEmpty()) {
+                    qw.eq(MeetingAgentRun::getId, runId);
+                }
+                qw.orderByDesc(MeetingAgentRun::getCreatedAt);
+                for (MeetingAgentRun r : meetingAgentRunMapper.selectList(qw)) {
+                    rows.add(new RunRow("meeting", r.getId(), r.getStatus(), r.getCreatedAt(), r.getUpdatedAt(),
+                            "meeting_id: " + r.getMeetingId(),
+                            joinError(r.getErrorCode(), r.getErrorMessage()),
+                            r.getResultJson() != null && !r.getResultJson().isBlank()));
+                }
+            }
+        }
+
+        rows.sort(java.util.Comparator.comparing(RunRow::createdAt,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        if (rows.size() > MAX_RUN_ROWS) {
+            rows = rows.subList(0, MAX_RUN_ROWS);
+        }
+
+        ObjectNode result = mapper.createObjectNode();
+        ArrayNode items = mapper.createArrayNode();
+        for (RunRow r : rows) {
+            ObjectNode item = mapper.createObjectNode();
+            item.put("kind", r.kind());
+            item.put("run_id", r.runId());
+            item.put("status", r.status());
+            putOrNull(item, "created_at", r.createdAt() == null ? null : r.createdAt().toString());
+            putOrNull(item, "updated_at", r.updatedAt() == null ? null : r.updatedAt().toString());
+            item.put("label", r.label());
+            putOrNull(item, "error", r.error());
+            item.put("has_result", r.hasResult());
+            items.add(item);
+        }
+        result.set("runs", items);
+        result.put("count", items.size());
+        return success(tool, result, null, started);
+    }
+
+    /** 三域归一化后的 run 行,仅用于排序与组装,不外泄 */
+    private record RunRow(String kind, String runId, String status,
+                          java.time.LocalDateTime createdAt, java.time.LocalDateTime updatedAt,
+                          String label, String error, boolean hasResult) {
+    }
+
+    /** error_code + error_message 合成一行;两者都空返回 null(前端/模型按"无错误"处理) */
+    private static String joinError(String code, String message) {
+        if (code == null || code.isBlank()) {
+            return message == null || message.isBlank() ? null : truncate(message, 200);
+        }
+        return truncate(code + ": " + (message == null ? "" : message), 200);
+    }
+
 
     /**
      * 触发一次会议分析(S5′ 触发型工具,契约 §2.4)。**只创建 run**,不写任何业务表。
