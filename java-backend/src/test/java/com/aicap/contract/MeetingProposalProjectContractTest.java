@@ -78,7 +78,8 @@ class MeetingProposalProjectContractTest extends ContractTestSupport {
             jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         }
         for (String code : storyCodes) {
-            jdbc.update("DELETE FROM story_logs WHERE story_id=?", code);
+            jdbc.update("DELETE FROM story_logs WHERE project_id=? AND story_id=?", PROJECT, code);
+            jdbc.update("DELETE FROM story_logs WHERE project_id=? AND story_id=?", OTHER_PROJECT, code);
             jdbc.update("DELETE FROM stories WHERE project_id=? AND code=?", PROJECT, code);
             jdbc.update("DELETE FROM stories WHERE project_id=? AND code=?", OTHER_PROJECT, code);
         }
