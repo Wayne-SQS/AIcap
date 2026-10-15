@@ -41,16 +41,20 @@ public class PlatformToolCatalog {
     /**
      * S5′ 触发型工具(契约 §2.4):只创建 run 落审批队列,**不写业务表**。
      *
-     * <p>第三枚 {@code start_profile_analysis} **暂缓**:画像域没有后台消费者、
-     * {@code runAnalysis} 是同步的,兑现不了"只建 run 就返回",会吃穿编排层的有界循环预算。
-     * 缺口与两条出路已记进契约 §2.4,待拍板后再加。
+     * <p>三枚都能"只建 run 就返回",靠的是各自域都有后台消费者:
+     * 会议 ← {@code MeetingAnalysisTrigger}(走既有 run 队列)、
+     * 规划 ← {@code PlanningWorkerTask}、
+     * 画像 ← {@code ProfileWorkerTask}(2026-10-15 补齐)。
+     * 画像这枚此前标着"暂缓":当时 {@code runAnalysis} 是同步的,兑现不了"只建 run 就返回",
+     * 会吃穿编排层的有界循环预算 —— 缺口已由画像队列(queued 状态 + 租约)补上。
      */
     public static final String START_MEETING_ANALYSIS = "start_meeting_analysis";
     public static final String START_PLAN_DRAFT = "start_plan_draft";
+    public static final String START_PROFILE_ANALYSIS = "start_profile_analysis";
 
     /** 触发型工具的名字集合:PLAT-04 与分派共用一处,避免两处清单分叉 */
     public static final List<String> TRIGGER_TOOLS =
-            List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT);
+            List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT, START_PROFILE_ANALYSIS);
 
     public static final String PLATFORM_VERSION = "1.0";
 
@@ -138,6 +142,21 @@ public class PlatformToolCatalog {
                 null,
                 false,
                 false));
+        out.add(new ToolSpec(
+                START_PROFILE_ANALYSIS,
+                AGENT_PLATFORM,
+                "触发一次成员画像分析(全团队或单个成员),由后台消费者异步执行;只创建 run,"
+                        + "不修改任何业务数据。start/end 为 yyyy-MM-dd,跨度上限 400 天;"
+                        + "user_id 省略即全团队(成本约为单人评估的 6 倍)。",
+                objectSchema(Map.of(
+                                "project_id", strField("Project id", 1, 20),
+                                "start", strField("Start date (yyyy-MM-dd)", 10, 10),
+                                "end", strField("End date (yyyy-MM-dd)", 10, 10),
+                                "user_id", intField("Only this member (optional)")),
+                        "project_id", "start", "end"),
+                null,
+                false,
+                false));
         return List.copyOf(out);
     }
 
@@ -219,6 +238,14 @@ public class PlatformToolCatalog {
         node.put("type", "string");
         node.put("minLength", minLength);
         node.put("maxLength", maxLength);
+        node.put("title", title);
+        return node;
+    }
+
+    private JsonNode intField(String title) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("type", "integer");
+        node.put("minimum", 1);
         node.put("title", title);
         return node;
     }

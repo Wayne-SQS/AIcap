@@ -256,11 +256,38 @@ java -jar target\aicap-java-backend.jar
 - **手动触发**:前端「AI 工作台 → 任务提交分析 / 成员画像分析 → ⟳ 立即同步」(管理员/负责人/成员可见);或 `POST /api/profile-agent/github/sync?start=YYYY-MM-DD&end=YYYY-MM-DD`。
 - **幂等 / 计数 / 未映射**口径见 §1.5;同步状态查询 `GET /api/profile-agent/github/status`。
 
-## 4.4 一键启动脚本
+## 4.4 RAG 检索层 embedding(知识库索引与语义检索)
+
+RAG 的向量化是**独立于 LLM 的第三套密钥**,**不能用 DeepSeek 的 key 顶替** —— DeepSeek 不提供
+`/embeddings` 端点(2026-10-15 实测 `POST https://api.deepseek.com/embeddings` 返回 404)。
+指过去的表现最坑:key 和 model 都填了,却每次索引都 404,而日志只说"向量化服务返回 HTTP 404",
+看不出是**供应商选错**。
+
+| 环境变量 | 说明 |
+|---|---|
+| `AICAP_EMBEDDING_API_KEY` | 必填。留空则整个 RAG 保持未启用:检索接口返回 `configured=false` 并说明原因,**不发任何外部请求** |
+| `AICAP_EMBEDDING_BASE_URL` | 默认 `https://api.siliconflow.cn/v1`(硅基流动,国内直连) |
+| `AICAP_EMBEDDING_MODEL` | 默认 `BAAI/bge-m3`(免费、1024 维) |
+| `AICAP_EMBEDDING_DIMENSION` | 默认 `1024`。**换模型时必须同步改**,否则写入向量库前的维度校验会直接失败(这是刻意设计,防止新旧向量混算) |
+
+不想接云端、只想先把链路跑通时,用仓库自带的本地桩服务(零密钥、零费用):
+
+```powershell
+python qa/embedding_fixture.py --port 19379 --dim 64
+$env:AICAP_EMBEDDING_BASE_URL  = "http://127.0.0.1:19379"
+$env:AICAP_EMBEDDING_MODEL     = "local-fixture"
+$env:AICAP_EMBEDDING_API_KEY   = "local"
+$env:AICAP_EMBEDDING_DIMENSION = "64"
+```
+
+它按字符哈希确定性生成向量(共享用词的文本余弦更高),所以**排序是有意义的**,但语义质量只是近似
+—— 够联调和演示,不够用来评测检索准确率。
+
+## 4.5 一键启动脚本
 
 `java-backend/启动后端.ps1`(UTF-8 带 BOM,给 PowerShell 5.1 用):检查 8080 是否被占用 → 可选 `-Build` 重新打包 → 从 **Windows 凭据管理器**取 GitHub token、从 `backend/.env` 取 LLM Key → 注入上述环境变量 → 后台启动并把日志写到 `target\backend-dev.log`。**密钥只在运行时读取,不落盘、不进仓库**。
 
-## 4.5 安全须知
+## 4.6 安全须知
 
 - API Key 与 GitHub Token **一律走环境变量**;`.gitignore` 已忽略 `backend/.env` 与运行产物,不要把密钥写进任何 `.md/.bat/.vue/.java` 后提交。
 - 同步与写入口对 `Roles.writer()`(管理员/负责人/成员)开放,只读查看者不可见也不可调用(403)。

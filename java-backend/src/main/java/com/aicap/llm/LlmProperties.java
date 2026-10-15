@@ -26,7 +26,7 @@ public class LlmProperties {
 
     private String apiKey = "";
     private String baseUrl = "https://api.deepseek.com";
-    private String model = "deepseek-v4-flash";
+    private String model = "deepseek-flash";
     private int timeoutSeconds = TIMEOUT_SECONDS;
     private boolean agentWorkerEnabled = true;
 

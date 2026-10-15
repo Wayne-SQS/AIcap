@@ -312,17 +312,23 @@ CREATE TABLE IF NOT EXISTS `profile_snapshots` (
 -- 画像智能体分析运行记录(镜像 meeting_agent_runs:可重试、失败留痕)
 CREATE TABLE IF NOT EXISTS `profile_agent_runs` (
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'P001',
   `range_start` date NOT NULL,
   `range_end` date NOT NULL,
   `requested_by` int NOT NULL,
-  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'pending/running/succeeded/failed',
+  `only_user_id` int DEFAULT NULL COMMENT '单人评估的目标成员;NULL=全团队',
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'queued/running/succeeded/failed',
   `attempt` int NOT NULL DEFAULT '1',
   `result_json` longtext COLLATE utf8mb4_unicode_ci,
   `error_message` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL,
+  `worker_token` varchar(36) DEFAULT NULL COMMENT '后台消费者认领凭据',
+  `lease_until` datetime DEFAULT NULL COMMENT '租约到期时刻;过期即视为中断可回收',
   PRIMARY KEY (`id`),
   KEY `ix_profile_agent_runs_status` (`status`),
+  KEY `ix_profile_agent_runs_project` (`project_id`),
+  KEY `ix_profile_agent_runs_status_created` (`status`, `created_at`),
   CONSTRAINT `profile_agent_runs_ibfk_1` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

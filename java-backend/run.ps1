@@ -16,7 +16,12 @@ $allowedKeys = @(
   'AICAP_LLM_API_KEY',
   'AICAP_LLM_BASE_URL',
   'AICAP_LLM_MODEL',
-  'AICAP_AGENT_WORKER_ENABLED'
+  'AICAP_AGENT_WORKER_ENABLED',
+  # RAG 检索层:AICAP_EMBEDDING_API_KEY 留空则 RAG 保持未启用(检索接口返回 configured=false)
+  'AICAP_EMBEDDING_API_KEY',
+  'AICAP_EMBEDDING_BASE_URL',
+  'AICAP_EMBEDDING_MODEL',
+  'AICAP_EMBEDDING_DIMENSION'
 )
 if (Test-Path $envFile) {
   foreach ($line in Get-Content -LiteralPath $envFile) {
@@ -45,6 +50,10 @@ if ($env:AICAP_LLM_API_KEY) {
   if (-not $env:PROFILE_LLM_BASE_URL) { $env:PROFILE_LLM_BASE_URL = $env:AICAP_LLM_BASE_URL }
   if (-not $env:PROFILE_LLM_MODEL)    { $env:PROFILE_LLM_MODEL    = $env:AICAP_LLM_MODEL }
 }
+
+# 端口写死：shell 里可能残留 SERVER_PORT（实测撞过 60076 —— 被别的进程占着），
+# 后端会起在错误端口上然后启动失败，报错里看不出是端口变量的问题。
+$env:SERVER_PORT = '8080'
 
 # 4. 启动；控制台输出持续写入文件，避免无人消费的 stdout/stderr 管道阻塞 Worker。
 $jar = Join-Path $here 'target\aicap-java-backend.jar'

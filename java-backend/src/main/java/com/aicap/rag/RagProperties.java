@@ -5,7 +5,9 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +35,28 @@ public class RagProperties {
 
     /** 项目文档源目录(相对 java-backend 工作目录;仓库里 docs/ 在上一级) */
     private String docsDir = "../docs";
+
+    /**
+     * 文档源里要跳过的一级目录名。
+     *
+     * <p>默认 {@code _process}:那是开发日志与历史交接稿(详见 application.yml 的同名注释)。
+     * 它们不是"知识"而是"过程",索引进去的代价不是体积,是<b>检索结果被污染</b> ——
+     * 问"现在怎么定的"却捞回三个月前的中间方案,而这种错法不会报错,只会让人不信任检索。
+     */
+    private List<String> docsExclude = new ArrayList<>(List.of("_process"));
+
+    /** 某个一级目录名是否应被文档扫描跳过(空/大小写空白一律不跳过) */
+    public boolean isDocDirExcluded(String dirName) {
+        if (dirName == null || dirName.isBlank()) {
+            return false;
+        }
+        for (String e : docsExclude) {
+            if (e != null && e.trim().equalsIgnoreCase(dirName.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /** 单次索引最多处理的源记录数(0 = 不限),防止首次全量索引把额度打爆 */
     private int maxSourceRecords = 0;

@@ -3,9 +3,12 @@ package com.aicap.platform;
 import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
 import com.aicap.entity.PlanningAgentRun;
+import com.aicap.entity.ProfileAgentRun;
 import com.aicap.entity.User;
 import com.aicap.planning.PlanningAgentJobs;
+import com.aicap.profile.ProfileAgentJobs;
 import com.aicap.profile.ProfileToolRegistry;
+import com.aicap.service.ProfileAgentService;
 import com.aicap.rag.Hit;
 import com.aicap.rag.RagProperties;
 import com.aicap.rag.RetrievalContext;
@@ -21,6 +24,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 /**
@@ -45,8 +50,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PlatformToolService {
 
+    /** 查询词上限:与 {@code KnowledgeController#MAX_QUERY_CHARS} 同值,两个入口对"什么算合法查询"必须给同一个答案 */
     private static final int MAX_QUERY_CHARS = 500;
-    private static final int MAX_CONTENT_CHARS = 600;
+    /**
+     * 单次工具返回里所有 chunk 正文的<b>合计</b>字符预算。
+     *
+     * <p>单条上限挡不住总量:top 最多 50,50 × 600 = 3 万字符 ≈ 2 万 token,一次
+     * 工具调用就能把模型的上下文窗口吃掉一大半,而 DeepSeek 当前档位是推理模型
+     * (慢 + 按 token 计费)。按默认 finalTopK=5 × 600 取 3000,即"满额 5 条不打折,
+     * 超额则后面的只给引用、不给正文"。
+     */
+    private static final int MAX_TOTAL_CONTENT_CHARS = 3000;
 
     /**
      * 统一响应信封。字段恒输出(含 null),与项目其余接口一致。
@@ -85,6 +99,15 @@ public class PlatformToolService {
 
     /** 规划草案的触发面。planning 不是 agent 包,可以直接依赖 */
     private final PlanningAgentJobs planningJobs;
+
+    /**
+     * 画像分析的触发面。与 planning 同形:只建 run,执行交给 {@code ProfileWorkerTask}。
+     * 画像域此前缺后台消费者,第三枚触发工具才一直"暂缓"。
+     */
+    private final ProfileAgentJobs profileJobs;
+
+    /** 入队画像 run 用;它内部的限流与范围校验失败要转成 ok=false,故直接依赖服务 */
+    private final ProfileAgentService profileService;
 
     /**
      * 调用一个工具。
@@ -153,6 +176,9 @@ public class PlatformToolService {
         if (PlatformToolCatalog.START_PLAN_DRAFT.equals(toolName)) {
             return startPlanDraft(args, caller, projectId, started);
         }
+        if (PlatformToolCatalog.START_PROFILE_ANALYSIS.equals(toolName)) {
+            return startProfileAnalysis(args, caller, projectId, started);
+        }
         throw ApiException.notFound("未知工具: " + toolName);
     }
 
@@ -208,6 +234,40 @@ public class PlatformToolService {
         return success(tool, triggerJson(run.getId(), run.getStatus(), false), null, started);
     }
 
+    /**
+     * 触发一次成员画像分析(S5′ 触发型工具,契约 §2.4)。**只创建 run**:
+     * 真正的 6 次 LLM 调用由 {@code ProfileWorkerTask} 在后台跑 —— 同步跑会吃穿
+     * 编排层的有界循环预算,这正是这枚工具此前"暂缓"的原因。
+     *
+     * <p>幂等口径:{@code profile_agent_runs} 没有唯一键,故按"同项目同范围(含同一
+     * 目标成员)已有未完成 run"判定;未完成含 queued/running。
+     */
+    private ToolOutcome startProfileAnalysis(JsonNode args, User caller, String projectId, long started) {
+        String tool = PlatformToolCatalog.START_PROFILE_ANALYSIS;
+        if (projectId == null || projectId.isBlank()) {
+            return failure(tool, "invalid_arguments", "project_id 必填", started);
+        }
+        LocalDate start = dateArg(args, "start");
+        LocalDate end = dateArg(args, "end");
+        if (start == null || end == null) {
+            return failure(tool, "invalid_arguments", "start/end 必填,格式 yyyy-MM-dd", started);
+        }
+        Integer onlyUserId = args.path("user_id").isNumber() ? args.path("user_id").asInt() : null;
+
+        ProfileAgentRun existing = profileJobs.findUnfinished(projectId, start, end, onlyUserId);
+        if (existing != null) {
+            return success(tool, triggerJson(existing.getId(), existing.getStatus(), true), null, started);
+        }
+        try {
+            ProfileAgentRun run = profileService.enqueue(projectId, start, end, caller, onlyUserId);
+            return success(tool, triggerJson(run.getId(), run.getStatus(), false), null, started);
+        } catch (ApiException e) {
+            // 范围不合法(400)与限流(422)都是"这次调用的参数问题",不是服务故障:
+            // 按业务失败回给模型让它改参数重试,而不是让编排层走异常分支。
+            return failure(tool, "invalid_arguments", e.getMessage(), started);
+        }
+    }
+
     /** 触发型工具的统一回执(契约 §2.4):run_id + status + 是否复用了既有 run */
     private JsonNode triggerJson(String runId, String status, boolean deduplicated) {
         ObjectNode node = mapper.createObjectNode();
@@ -255,14 +315,26 @@ public class PlatformToolService {
 
         ObjectNode result = mapper.createObjectNode();
         result.put("configured", r.configured());
+        // 单条上限取精排那一份配置(rerank.max-content-chars),不再在工具类里另立一个 600:
+        // 两个同值的常量一定会各自漂移,而"进 prompt 的正文有多长"应当只有一处口径。
+        int perItem = Math.max(1, cfg.getRerank().getMaxContentChars());
         ArrayNode items = mapper.createArrayNode();
+        int budget = MAX_TOTAL_CONTENT_CHARS;
         for (Hit hit : r.finalHits()) {
             ObjectNode item = mapper.createObjectNode();
             item.put("chunk_id", hit.id());
             item.put("source_type", hit.sourceType());
             item.put("source_id", hit.sourceId());
             item.put("score", round(hit.score()));
-            item.put("content", truncate(hit.rawContent()));
+            // 预算耗尽后仍保留这条(让模型知道还有召回),但正文留空并标注原因 ——
+            // 直接截断到半句话会让模型把它当成完整事实引用。
+            if (budget <= 0) {
+                item.put("content", "");
+                item.put("content_omitted", true);
+            } else {
+                item.put("content", truncate(hit.rawContent(), perItem));
+                budget -= perItem;
+            }
             items.add(item);
         }
         result.set("items", items);
@@ -299,6 +371,19 @@ public class PlatformToolService {
             arr.add(node);
         }
         return arr;
+    }
+
+    /** 解析 yyyy-MM-dd;解析不了返回 null,由调用方统一报 invalid_arguments */
+    private static LocalDate dateArg(JsonNode args, String field) {
+        String raw = args.path(field).asText("").trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(raw);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private String write(JsonNode node) {
@@ -340,11 +425,17 @@ public class PlatformToolService {
         return Math.min(Math.max(v, 1), 50);
     }
 
-    private static String truncate(String content) {
+    /**
+     * 截断到 {@code max} 字符。
+     *
+     * <p>末尾补 {@code …(截断)} 而不是默默切掉:正文进的是模型的上下文,若模型不知道
+     * 自己看到的是半截,就会把这半截当成完整事实引用 —— 那正是"证据校验"要拦的东西。
+     */
+    private static String truncate(String content, int max) {
         if (content == null) {
             return "";
         }
-        return content.length() <= MAX_CONTENT_CHARS ? content : content.substring(0, MAX_CONTENT_CHARS);
+        return content.length() <= max ? content : content.substring(0, max) + "…(截断)";
     }
 
     private static double round(double v) {

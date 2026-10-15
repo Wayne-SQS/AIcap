@@ -26,7 +26,7 @@ JAVA_TIMEOUT = float(os.getenv("JAVA_TIMEOUT", "30"))
 # LLM 提供方：S4′.2 的有界循环才用到。留空即未配置，不降级到假数据。
 AICAP_LLM_API_KEY = os.getenv("AICAP_LLM_API_KEY", "")
 AICAP_LLM_BASE_URL = os.getenv("AICAP_LLM_BASE_URL", "https://api.deepseek.com")
-AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-v4-flash")
+AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-flash")
 
 # 单次模型调用的超时（秒）。有界循环的 180s 总预算由 loop 的 deadline 管，
 # 这里是单步上限，防止某一步卡死把整个预算耗光。

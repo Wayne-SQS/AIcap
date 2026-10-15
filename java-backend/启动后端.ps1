@@ -18,6 +18,10 @@ Set-Location $jb
 $busy = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
 if ($busy) { throw "8080 已被 PID $($busy.OwningProcess) 占用;java -jar 会锁住 jar,请先停掉它再启动" }
 
+# 端口写死:shell 里可能残留 SERVER_PORT(实测撞过 60076 —— WorkBuddy 自己的端口),
+# 后端会起在别的端口上并且因端口被占而启动失败,报错还看不出是端口变量的问题。
+$env:SERVER_PORT = '8080'
+
 if ($Build) {
     $env:JAVA_HOME = 'C:\Program Files\Java\jdk-23'            # pom 用 release 23,JDK 8/17 会编译失败
     Remove-Item 'target\aicap-java-backend.jar','target\aicap-java-backend.jar.original' -Force -ErrorAction SilentlyContinue
@@ -40,7 +44,12 @@ Get-Content (Join-Path $repoRoot 'backend\.env') -Encoding UTF8 | ForEach-Object
 $key = $map['AICAP_LLM_API_KEY']
 if (-not $key) { throw 'backend\.env 里没有 AICAP_LLM_API_KEY' }
 if (-not $map['AICAP_LLM_BASE_URL']) { $map['AICAP_LLM_BASE_URL'] = 'https://api.deepseek.com' }
-if (-not $map['AICAP_LLM_MODEL']) { $map['AICAP_LLM_MODEL'] = 'deepseek-v4-flash' }
+if (-not $map['AICAP_LLM_MODEL']) { $map['AICAP_LLM_MODEL'] = 'deepseek-flash' }
+
+# --- JWT 密钥:必须注入,否则后端用 application.yml 里硬编码的默认 secret。
+#     后果是"换一种方式起服务,之前登录的 token 就全失效",且默认 secret 是明文进仓库的。 ---
+if ($map['JWT_SECRET']) { $env:JWT_SECRET = $map['JWT_SECRET'] }
+if ($map['JWT_EXPIRE_MINUTES']) { $env:JWT_EXPIRE_MINUTES = $map['JWT_EXPIRE_MINUTES'] }
 
 # --- GitHub 活动同步 ---
 $env:GITHUB_ENABLED      = 'true'
@@ -62,6 +71,21 @@ $env:PROFILE_LLM_API_KEY  = $key
 $env:PROFILE_LLM_BASE_URL = $map['AICAP_LLM_BASE_URL']
 $env:PROFILE_LLM_MODEL    = $map['AICAP_LLM_MODEL']
 
+# --- RAG 检索层 embedding(必须是【另一家】供应商:DeepSeek 没有 /embeddings 端点,
+#     用 AICAP_LLM_API_KEY 顶替的表现是每次索引都 HTTP 404。当前默认硅基流动 BAAI/bge-m3,
+#     免费且 1024 维,与 application.yml 的 dimension 默认值一致) ---
+$embReady = $false
+if ($map['AICAP_EMBEDDING_API_KEY']) {
+    if (-not $map['AICAP_EMBEDDING_BASE_URL'])  { $map['AICAP_EMBEDDING_BASE_URL']  = 'https://api.siliconflow.cn/v1' }
+    if (-not $map['AICAP_EMBEDDING_MODEL'])     { $map['AICAP_EMBEDDING_MODEL']     = 'BAAI/bge-m3' }
+    if (-not $map['AICAP_EMBEDDING_DIMENSION']) { $map['AICAP_EMBEDDING_DIMENSION'] = '1024' }
+    $env:AICAP_EMBEDDING_API_KEY     = $map['AICAP_EMBEDDING_API_KEY']
+    $env:AICAP_EMBEDDING_BASE_URL    = $map['AICAP_EMBEDDING_BASE_URL']
+    $env:AICAP_EMBEDDING_MODEL       = $map['AICAP_EMBEDDING_MODEL']
+    $env:AICAP_EMBEDDING_DIMENSION   = $map['AICAP_EMBEDDING_DIMENSION']
+    $embReady = $true
+}
+
 $java = Join-Path ${env:ProgramFiles} 'Java\jdk-23\bin\java.exe'
 $p = Start-Process -FilePath $java -ArgumentList '-jar','target\aicap-java-backend.jar' `
     -WorkingDirectory $jb -WindowStyle Hidden `
@@ -70,4 +94,9 @@ $p = Start-Process -FilePath $java -ArgumentList '-jar','target\aicap-java-backe
 
 Write-Host "后端已启动 PID=$($p.Id)"
 Write-Host "仓库=$($env:GITHUB_REPO)  自动同步=${env:GITHUB_AUTO_SYNC_HOURS}h  画像模型=$($env:PROFILE_LLM_MODEL)"
+if ($embReady) {
+    Write-Host "RAG 检索层=已启用  embedding=$($env:AICAP_EMBEDDING_MODEL) @ $($env:AICAP_EMBEDDING_BASE_URL)"
+} else {
+    Write-Host "RAG 检索层=未启用(backend\.env 缺 AICAP_EMBEDDING_API_KEY;注意它不能用 DeepSeek 的 key)"
+}
 Write-Host "日志: java-backend\target\backend-dev.log"

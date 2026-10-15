@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from .contracts import (Contract, Evidence, Identifier, NonBlank, ResultContractError, StoryId,
-                        require_quoted_evidence)
+                        require_quoted_evidence, require_segment_coverage)
 from .planning_context import SprintPlanningInput
 
 
@@ -50,6 +50,7 @@ def validate_planning_result(context: SprintPlanningInput, payload: dict) -> Spr
     stories = {s.id: s for s in context.stories}
     segments = {s.segment_id: s.text for s in context.transcript_segments}
     ids, targets = set(), set()
+    cited = []
     for index, proposal in enumerate(result.proposed_actions):
         path = ('proposed_actions', index)
         if proposal.proposal_id in ids:
@@ -64,4 +65,6 @@ def validate_planning_result(context: SprintPlanningInput, payload: dict) -> Spr
         if proposal.expected.sprint != story.sprint:
             raise ResultContractError('snapshot mismatch', 'snapshot_mismatch', path + ('expected', 'sprint'))
         require_quoted_evidence(proposal.evidence, segments, path)
+        cited.extend(proposal.evidence)
+    require_segment_coverage(segments, cited)
     return result

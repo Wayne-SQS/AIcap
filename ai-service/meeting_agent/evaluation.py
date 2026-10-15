@@ -96,7 +96,7 @@ def main():
     cases = json.loads(args.cases.read_text(encoding='utf-8'))
     skill = DailyScrumSkill()
     report = {'created_at': datetime.now(timezone.utc).isoformat(), 'skill_version': skill.version,
-              'model': os.environ.get('AICAP_LLM_MODEL', 'deepseek-v4-flash'),
+              'model': os.environ.get('AICAP_LLM_MODEL', 'deepseek-flash'),
               'data': 'synthetic_only', 'repeat': args.repeat, 'cases': [],
               'manual_review_required': True}
     args.output.parent.mkdir(parents=True, exist_ok=True)

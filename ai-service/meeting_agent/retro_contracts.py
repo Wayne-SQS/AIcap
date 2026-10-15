@@ -3,7 +3,8 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from .contracts import (Contract, Evidence, Identifier, NonBlank, ResultContractError, TranscriptSegment,
-                        require_quoted_evidence)
+                        require_quoted_evidence, require_segment_coverage)
+from .evidence_checks import require_grounded_assignment
 
 
 class RetroMember(Contract):
@@ -70,10 +71,12 @@ def validate_retro_result(context: SprintRetroInput, payload: dict) -> SprintRet
     members = {m.user_id: m for m in context.members}
     ids = set()
     contents = set()
+    cited = []
     for group, items in (('decisions', result.decisions), ('proposed_actions', result.proposed_actions)):
         for index, item in enumerate(items):
             path = (group, index)
             require_quoted_evidence(item.evidence, segments, path)
+            cited.extend(item.evidence)
             if group == 'decisions':
                 continue
             if item.proposal_id in ids:
@@ -84,17 +87,16 @@ def validate_retro_result(context: SprintRetroInput, payload: dict) -> SprintRet
             if signature in contents:
                 raise ResultContractError('duplicate action item', 'duplicate_action_item', path)
             contents.add(signature)
-            if item.changes.owner_id is not None:
-                owner = members.get(item.changes.owner_id)
-                if owner is None:
-                    raise ResultContractError('unknown owner', 'unknown_owner', path + ('changes', 'owner_id'))
-                # No reliable speaker-to-user mapping exists. Require an explicit,
-                # unambiguous display name in the proposal's cited original text.
-                if (sum(m.display_name == owner.display_name for m in context.members) != 1
-                        or not any(owner.display_name in e.quote for e in item.evidence)):
-                    raise ResultContractError('unresolved owner', 'unresolved_owner', path + ('changes', 'owner_id'))
-            deadline = item.changes.deadline_text
-            if deadline is not None and not any(deadline in e.quote for e in item.evidence):
-                raise ResultContractError('deadline not quoted', 'deadline_not_quoted', path + ('changes', 'deadline_text'))
+            owner = members.get(item.changes.owner_id) if item.changes.owner_id is not None else None
+            if item.changes.owner_id is not None and owner is None:
+                raise ResultContractError('unknown owner', 'unknown_owner', path + ('changes', 'owner_id'))
+            # 同名成员无法分辨是谁 —— 这一步必须留在本链路:共享的 invented_assignment
+            # 只看"名字有没有出现在原文里",判不出"出现了但指的人不唯一"。
+            if owner is not None and sum(m.display_name == owner.display_name for m in context.members) != 1:
+                raise ResultContractError('unresolved owner', 'unresolved_owner', path + ('changes', 'owner_id'))
+            require_grounded_assignment(item.evidence, path,
+                                        owner_display_name=None if owner is None else owner.display_name,
+                                        deadline_text=item.changes.deadline_text)
+    require_segment_coverage(segments, cited)
     # Quotes establish provenance, not whether a suggestion was agreed or assigned.
     return result

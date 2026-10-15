@@ -2,7 +2,7 @@
 from typing import Annotated, Literal
 from pydantic import Field
 from .contracts import (Contract, DailyScrumInput, Evidence, Identifier, NonBlank, ResultContractError,
-                        require_quoted_evidence)
+                        require_quoted_evidence, require_segment_coverage)
 from .story_tool import PlanningStorySnapshot
 
 
@@ -45,6 +45,7 @@ def validate_refinement_result(context: BacklogRefinementInput, payload: dict) -
     segments = {s.segment_id: s.text for s in context.transcript_segments}
     titles = {s.title.strip().casefold() for s in context.stories}
     proposed_titles, ids = set(), set()
+    cited = []
     for index, proposal in enumerate(result.proposed_actions):
         path = ('proposed_actions', index)
         if proposal.proposal_id in ids:
@@ -55,5 +56,7 @@ def validate_refinement_result(context: BacklogRefinementInput, payload: dict) -
             raise ResultContractError('duplicate story title', 'duplicate_story_title', path + ('changes', 'title'))
         proposed_titles.add(title)
         require_quoted_evidence(proposal.evidence, segments, path)
+        cited.extend(proposal.evidence)
+    require_segment_coverage(segments, cited)
     # Exact-title checks are conservative, not semantic deduplication or approval.
     return result

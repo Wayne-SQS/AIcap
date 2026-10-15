@@ -27,14 +27,14 @@ class ModelError(Exception):
 class ModelSettings:
     api_key: str = field(repr=False)
     base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-v4-flash"
+    model: str = "deepseek-flash"
     timeout_seconds: float = 45.0
 
     @classmethod
     def from_env(cls):
         return cls(api_key=os.environ.get("AICAP_LLM_API_KEY", ""),
                    base_url=os.environ.get("AICAP_LLM_BASE_URL", "https://api.deepseek.com"),
-                   model=os.environ.get("AICAP_LLM_MODEL", "deepseek-v4-flash"))
+                   model=os.environ.get("AICAP_LLM_MODEL", "deepseek-flash"))
 
 
 class _DuplicateKey(ValueError):

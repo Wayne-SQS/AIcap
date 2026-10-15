@@ -13,7 +13,7 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "720"))
 # Meeting Agent: no key means disabled (manual review remains usable).
 AICAP_LLM_API_KEY = (os.getenv("AICAP_LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY", ""))
 AICAP_LLM_BASE_URL = os.getenv("AICAP_LLM_BASE_URL", "https://api.deepseek.com")
-AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-v4-flash")
+AICAP_LLM_MODEL = os.getenv("AICAP_LLM_MODEL", "deepseek-flash")
 AICAP_LLM_TIMEOUT = 45
 AICAP_AGENT_MAX_STEPS = 6
 AICAP_AGENT_MAX_SECONDS = 180

@@ -91,8 +91,13 @@ public class KnowledgeSourceScanner {
                 yield p == null ? List.of() : chunker.chunkProfile(p, userMapper.selectById(userId));
             }
             case Chunk.SRC_DOC -> {
-                Path file = docsRoot() == null ? null : docsRoot().resolve(sourceId);
+                Path base = docsRoot();
+                Path file = base == null ? null : base.resolve(sourceId);
                 if (file == null || !Files.isRegularFile(file)) {
+                    yield List.of();
+                }
+                // 与 scanDocs 同一套排除口径:已排除的目录不该因"单条重索引"又被放进来
+                if (excluded(base.relativize(file))) {
                     yield List.of();
                 }
                 yield chunker.chunkDoc(sourceId, readDoc(file, sourceId));
@@ -179,6 +184,8 @@ public class KnowledgeSourceScanner {
                         }
                         return true;
                     })
+                    // 一级目录在排除名单里则整棵子树跳过(默认 _process/ 开发日志)
+                    .filter(p -> !excluded(root.relativize(p)))
                     .forEach(files::add);
         } catch (IOException e) {
             log.warn("扫描文档目录失败,本次跳过 doc 源: {}", e.getMessage());
@@ -213,6 +220,22 @@ public class KnowledgeSourceScanner {
             return null;
         }
         return p;
+    }
+
+    /**
+     * 相对路径是否落在排除目录里:只看<b>一级</b>目录名。
+     *
+     * <p>为什么是一级:排除的是"一类内容"(如开发日志),而不是某篇文章。
+     * 允许写 {@code _process/会议Agent} 这种更细的路径会让人以为"能只保留子目录里的一部分",
+     * 而实际语义是整类都不要 —— 粒度不匹配的配置比没有配置更容易误用。
+     *
+     * <p>根目录直属的 .md(如 docs/README.md)没有一级目录,不排除。
+     */
+    private boolean excluded(Path relative) {
+        if (relative == null || relative.getNameCount() < 2) {
+            return false;
+        }
+        return props.isDocDirExcluded(relative.getName(0).toString());
     }
 
     private String readDoc(Path file, String rel) {

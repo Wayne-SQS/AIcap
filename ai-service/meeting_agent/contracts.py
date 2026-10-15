@@ -91,13 +91,8 @@ class DailyScrumOutput(Contract):
     open_questions: Annotated[list[Annotated[NonBlank, Field(max_length=500)]], Field(max_length=20)]
 
 
-class ResultContractError(ValueError):
-    """Static diagnostic metadata, with no model-provided values."""
-
-    def __init__(self, message: str, code: str, path: tuple):
-        super().__init__(message)
-        self.code = code
-        self.path = path
+from .evidence_checks import (ResultContractError, require_quoted_evidence,
+                              require_segment_coverage)
 
 
 def validate_daily_result(context: DailyScrumInput, payload: dict) -> DailyScrumOutput:
@@ -113,22 +108,6 @@ def validate_daily_result(context: DailyScrumInput, payload: dict) -> DailyScrum
     return result
 
 
-def require_quoted_evidence(evidence_items, segments, path) -> None:
-    """F11: every quote must appear verbatim in the segment it cites.
-
-    ``path`` points at the item carrying the evidence; the offending index and
-    field are appended. Codes: unknown_segment (no such segment_id),
-    quote_mismatch (quote absent from that segment).
-    """
-    for index, evidence in enumerate(evidence_items):
-        text = segments.get(evidence.segment_id)
-        if text is None or evidence.quote not in text:
-            field = "segment_id" if text is None else "quote"
-            code = "unknown_segment" if text is None else "quote_mismatch"
-            raise ResultContractError("evidence must quote the referenced segment exactly",
-                                      code, path + ("evidence", index, field))
-
-
 def validate_status_provenance(context, result) -> None:
     """Shared snapshot/evidence checks after each meeting contract is validated."""
     if result.meeting_id != context.meeting_id:
@@ -136,6 +115,7 @@ def validate_status_provenance(context, result) -> None:
     segments = {s.segment_id: s.text for s in context.transcript_segments}
     stories = {s.id: s for s in context.stories}
     proposal_ids, targets = set(), set()
+    cited = []
     for index, proposal in enumerate(result.proposed_actions):
         path = ("proposed_actions", index)
         if proposal.proposal_id in proposal_ids:
@@ -150,3 +130,5 @@ def validate_status_provenance(context, result) -> None:
         if proposal.expected.status != story.status:
             raise ResultContractError("expected status does not match project snapshot", "snapshot_mismatch", path + ("expected", "status"))
         require_quoted_evidence(proposal.evidence, segments, path)
+        cited.extend(proposal.evidence)
+    require_segment_coverage(segments, cited)

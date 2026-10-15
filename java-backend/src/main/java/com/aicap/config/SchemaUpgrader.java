@@ -113,9 +113,21 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"lease_until", "lease_until datetime DEFAULT NULL"},
     };
 
-    /** 三个后台队列表:认领查询同形(WHERE status=? ORDER BY created_at LIMIT 1),索引也应同形 */
+    /**
+     * 画像队列(S5′ 触发型工具 {@code start_profile_analysis})需要的列。
+     *
+     * <p>{@code only_user_id} 必须落库而不是留在内存里:run 是<b>跨进程</b>交接的 ——
+     * 工具只建 run 就返回,真正执行的是另一个线程(甚至是另一次轮询)。范围只存在于
+     * 建 run 那次调用的栈里,消费者拿不到,只能全团队分析一遍(成本 6 倍)。
+     */
+    private static final String[][] PROFILE_RUN_COLUMNS = {
+            {"only_user_id", "only_user_id int DEFAULT NULL"},
+    };
+
+    /** 四个后台队列表:认领查询同形(WHERE status=? ORDER BY created_at LIMIT 1),索引也应同形 */
     private static final String[] QUEUE_TABLES = {
             "meeting_agent_runs", "planning_agent_runs", "project_generation_runs",
+            "profile_agent_runs",
     };
 
     @Override
@@ -175,6 +187,13 @@ public class SchemaUpgrader implements ApplicationRunner {
             }
             if (tableExists(conn, "project_generation_runs")) {
                 added.addAll(addMissing(conn, "project_generation_runs", LEASE_COLUMNS));
+            }
+            // 画像队列:原先是"同步跑完再返回",没有队列列。S5′ 的 start_profile_analysis
+            // 要求只建 run 就返回(否则会吃穿编排层的有界循环预算),因此补同样的租约列。
+            if (tableExists(conn, "profile_agent_runs")) {
+                added.addAll(addMissing(conn, "profile_agent_runs", LEASE_COLUMNS));
+                added.addAll(addMissing(conn, "profile_agent_runs", PROFILE_RUN_COLUMNS));
+                addProjectColumnWithDefault(conn, "profile_agent_runs", "P001");
             }
             // 认领查询是 WHERE status=? ORDER BY created_at LIMIT 1,而表上只有 status 单列索引
             // → status 相等的那批仍要 filesort。补 (status, created_at) 复合索引。

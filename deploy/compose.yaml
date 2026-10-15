@@ -57,10 +57,10 @@ services:
       AICAP_AUDIO_DIR: /data/audio
       AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
       AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
-      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-v4-flash}
+      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-flash}
       PROFILE_LLM_API_KEY: ${PROFILE_LLM_API_KEY:-}
       PROFILE_LLM_BASE_URL: ${PROFILE_LLM_BASE_URL:-https://api.deepseek.com}
-      PROFILE_LLM_MODEL: ${PROFILE_LLM_MODEL:-deepseek-v4-flash}
+      PROFILE_LLM_MODEL: ${PROFILE_LLM_MODEL:-deepseek-flash}
       AICAP_AGENT_WORKER_ENABLED: ${AICAP_AGENT_WORKER_ENABLED:-true}
     volumes:
       - audio-data:/data/audio
@@ -97,7 +97,7 @@ services:
     environment:
       AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}
       AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
-      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-v4-flash}
+      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-flash}
       AICAP_STT_MODEL_DIR: /models/stt
       AICAP_DIARIZATION_MODEL_DIR: /models/diarization
     volumes:
@@ -113,10 +113,56 @@ services:
       retries: 12
       start_period: 10s
 
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: deploy/orchestrator.Dockerfile
+    restart: unless-stopped
+    # 内存上限依据:本服务是**纯编排**,不连库、不加载模型权重 —— 常驻内存只有
+    # FastAPI/uvicorn 基线加每轮 run 的事件页(SSE_EVENT_PAGE_LIMIT 默认 100 条),
+    # 单条事件是几 KB 量级,一轮撑死百 KB 级。512M 是给它足够的余量又不让它在
+    # 同一宿主上和 MySQL(1G)/java(2G)/ai(3G) 抢内存。
+    # cpus 给 1:本层不做事密集计算,慢的是等 Java 与等模型,给它更多核不会更快。
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1"
+    environment:
+      # 唯一上游是 java:编排层自己不持数据库连接,一切数据经它取(契约 §1)。
+      JAVA_BASE_URL: http://java:8080
+      JAVA_TIMEOUT: ${JAVA_TIMEOUT:-30}
+      PORT: 8100
+      # 刻意用 `:-`(空而非 `:?`):本层的设计就是"没配模型也起得来,如实报
+      # llm_configured=false,并在事件流里给 run.error{not_configured}" ——
+      # 用 `:?` 会把它从"诚实地不可用"变成"整个编排起不来",反而丢了一条可观测性。
+      AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:-}
+      AICAP_LLM_BASE_URL: ${AICAP_LLM_BASE_URL:-https://api.deepseek.com}
+      AICAP_LLM_MODEL: ${AICAP_LLM_MODEL:-deepseek-flash}
+      AICAP_LLM_TIMEOUT: ${AICAP_LLM_TIMEOUT:-60}
+      AICAP_CLARIFY_CONFIDENCE: ${AICAP_CLARIFY_CONFIDENCE:-0.6}
+      SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      SSE_EVENT_PAGE_LIMIT: ${SSE_EVENT_PAGE_LIMIT:-100}
+    depends_on:
+      java:
+        condition: service_healthy
+    healthcheck:
+      # /health 不探 Java 存活性(java 不在也回 200,只把 java 字段报 false)——
+      # 否则 java 一抖动编排层就被判 unhealthy 并重启,丢掉进程内的 run 登记。
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3))['status']=='ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   web:
     build:
       context: ..
       dockerfile: deploy/frontend.Dockerfile
+      args:
+        # 不设即走前端默认:PROD 下同源相对路径 /orchestrator/(由 nginx 反代)。
+        # 只有当编排层被单独部署到别的域名时才需要显式给。
+        VITE_ORCH_BASE: ${VITE_ORCH_BASE:-}
     restart: unless-stopped
     ports:
       - "${AICAP_BIND_ADDRESS:-127.0.0.1}:${AICAP_HTTP_PORT:-8088}:80"
@@ -124,6 +170,8 @@ services:
       java:
         condition: service_healthy
       ai:
+        condition: service_healthy
+      orchestrator:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]

@@ -1157,13 +1157,65 @@ public class ProfileAgentService {
      * 降到「1 次成员画像」,且只对提交者的提交物做评估。
      */
     public Map<String, Object> runAnalysis(String projectId, LocalDate start, LocalDate end, User user, Integer onlyUserId) {
-        validateRange(start, end);   // M2
-        /* M4 修复:限流防刷额度,但两条通道分开计数——
-           全团队分析(6 次 LLM 调用)30 秒/人;单人评估(1 次调用)只做 3 秒双击去抖,
-           否则同一名成员连续完成两个任务时,第二次评估会被"稍后再试"顶掉。 */
+        assertWithinRateLimit(user.getId(), onlyUserId);
+        ProfileAgentRun run = newRun(projectId, start, end, user.getId(), onlyUserId);
+        run.setStatus("running");   // 同步入口:建 run 的这一步就已经在跑了
+        runMapper.insert(run);
+        return execute(run);
+    }
+
+    /**
+     * 只建 run、<b>不执行</b>(S5′ 触发型工具 {@code start_profile_analysis} 的入口)。
+     *
+     * <p>为什么必须拆出这条路径:编排层的有界循环有 180s 总预算,而一次全团队画像分析
+     * 是 6 次 LLM 调用 —— 同步跑会把预算吃穿。触发型工具的契约是"只创建 run 就返回",
+     * 真正的执行交给后台消费者 {@code ProfileWorkerTask}。
+     *
+     * <p>限流放在<b>入队</b>而不是执行时:限流保护的是"用户狂点",那是入队侧的压力;
+     * 执行侧再限一次会让排队中的 run 被自己限死。
+     */
+    public ProfileAgentRun enqueue(String projectId, LocalDate start, LocalDate end, User user, Integer onlyUserId) {
+        validateRange(start, end);   // M2: 范围不合法要在入队时就拒绝,别等消费者跑起来才失败
+        assertWithinRateLimit(user.getId(), onlyUserId);
+        ProfileAgentRun run = newRun(projectId, start, end, user.getId(), onlyUserId);
+        run.setStatus("queued");
+        runMapper.insert(run);
+        return run;
+    }
+
+    /**
+     * 执行一条已存在的 run 并把终局状态落库(同步入口与后台消费者共用)。
+     *
+     * <p>共用这一处的理由:快照落库、observability 录制、失败时的分类文案这三件事
+     * 只要有两份实现,就一定会有一份漏掉"失败也要 reset 录制"这类补丁。
+     */
+    public Map<String, Object> executeRun(ProfileAgentRun run) {
+        run.setStatus("running");
+        run.setUpdatedAt(LocalDateTime.now());
+        runMapper.updateById(run);
+        return execute(run);
+    }
+
+    /** 建一条未执行的 run 对象(不含 status,由调用方按"同步/入队"决定) */
+    private ProfileAgentRun newRun(String projectId, LocalDate start, LocalDate end, Integer userId, Integer onlyUserId) {
+        ProfileAgentRun run = new ProfileAgentRun();
+        run.setId(UUID.randomUUID().toString());
+        run.setProjectId(ProjectAccessService.normalize(projectId));
+        run.setRangeStart(start);
+        run.setRangeEnd(end);
+        run.setRequestedBy(userId);
+        run.setOnlyUserId(onlyUserId);
+        run.setAttempt(1 + previousAttempt(userId, start, end));   // M5: attempt 递增
+        run.setCreatedAt(LocalDateTime.now());
+        run.setUpdatedAt(LocalDateTime.now());
+        return run;
+    }
+
+    /** 限流:两条通道分开计数,理由见 {@link #runAnalysis} 上的 M4 注释 */
+    private void assertWithinRateLimit(Integer userId, Integer onlyUserId) {
         long now = System.currentTimeMillis();
         boolean scoped = onlyUserId != null;
-        String limitKey = (scoped ? "scoped:" : "team:") + user.getId();
+        String limitKey = (scoped ? "scoped:" : "team:") + userId;
         long limitMs = scoped ? SCOPED_RUN_DEBOUNCE_MS : RUN_RATE_LIMIT_MS;
         Long last = lastRunByUser.get(limitKey);
         if (last != null && now - last < limitMs) {
@@ -1171,17 +1223,14 @@ public class ProfileAgentService {
             throw ApiException.unprocessable("分析请求过于频繁,请 " + (long) waitSec + " 秒后再试");
         }
         lastRunByUser.put(limitKey, now);
+    }
 
-        ProfileAgentRun run = new ProfileAgentRun();
-        run.setId(UUID.randomUUID().toString());
-        run.setRangeStart(start);
-        run.setRangeEnd(end);
-        run.setRequestedBy(user.getId());
-        run.setStatus("running");
-        run.setAttempt(1 + previousAttempt(user.getId(), start, end));   // M5: attempt 递增
-        run.setCreatedAt(LocalDateTime.now());
-        run.setUpdatedAt(LocalDateTime.now());
-        runMapper.insert(run);
+    /** 执行本体:分析 → 快照落库 → 终局状态;参数全部来自 run,便于跨进程交接 */
+    private Map<String, Object> execute(ProfileAgentRun run) {
+        String projectId = run.getProjectId();
+        LocalDate start = run.getRangeStart();
+        LocalDate end = run.getRangeEnd();
+        Integer onlyUserId = run.getOnlyUserId();
         brain.startRecording();
         try {
             // 可观测:录制本轮分析的每步 thought/action/observation/tokens(验收标准 3:决策可回溯)
