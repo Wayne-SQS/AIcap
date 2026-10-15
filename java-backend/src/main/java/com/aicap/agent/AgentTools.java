@@ -4,10 +4,12 @@ import com.aicap.entity.PoolItem;
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
+import com.aicap.entity.ProjectMember;
 import com.aicap.mapper.PoolItemMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.mapper.ProjectMemberMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 
 import com.aicap.service.ProjectAccessService;
-import com.aicap.service.ProjectAccessService;
 
 /**
  * 会议 Agent 只读工具(对齐 FastAPI meeting_agent/tools.py)。
@@ -34,6 +35,7 @@ public class AgentTools {
     public static final Set<String> WRITER_ROLES = Set.of("admin", "owner", "member");
 
     private final UserMapper userMapper;
+    private final ProjectMemberMapper projectMemberMapper;
     private final StoryMapper storyMapper;
     private final PoolItemMapper poolItemMapper;
     private final TaskMapper taskMapper;
@@ -68,7 +70,7 @@ public class AgentTools {
                 projectSearchSchema("按关键词搜索故事标题")));
         list.add(function("search_pool",
                 "按关键词查询真实需求池，避免建议重复需求。最多20条。",
-                searchSchema("按关键词搜索需求池标题")));
+                projectSearchSchema("按关键词搜索需求池标题")));
         list.add(function("list_tasks",
                 "查询已有任务和工时，可按成员ID筛选。当前系统无任务状态或真实容量，不能推断是否过载。",
                 projectTasksSchema()));
@@ -208,27 +210,37 @@ public class AgentTools {
         if (user == null || !WRITER_ROLES.contains(user.getRole())) {
             throw new AgentError("permission_changed", "发起人的权限已变化，分析已停止");
         }
+        if (projectId == null || projectId.isBlank()) {
+            throw new AgentError("project_context_missing", "Agent Run 缺少 projectId");
+        }
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        ProjectMember membership = projectMemberMapper.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", scopedProjectId).eq("user_id", userId).last("LIMIT 1"));
+        if (membership == null || "viewer".equalsIgnoreCase(membership.getProjectRole())) {
+            throw new AgentError("permission_changed", "发起人的项目权限已变化，分析已停止");
+        }
         switch (name) {
             case "project_summary" -> {
                 return projectSummary(requireProjectContext(arguments, projectId));
             }
             case "list_members" -> {
                 emptyArgs(name, arguments);
-                return listMembers();
+                return listMembers(scopedProjectId);
             }
             case "list_tasks" -> {
-                String scopedProjectId = requireProjectContext(arguments, projectId);
+                requireProjectContext(arguments, projectId);
                 JsonNode ownerId = maybeOwnerId(name, arguments);
                 return listTasks(scopedProjectId, ownerId);
             }
             case "search_stories" -> {
-                String scopedProjectId = requireProjectContext(arguments, projectId);
+                requireProjectContext(arguments, projectId);
                 String keyword = keyword(name, arguments);
                 return searchStories(scopedProjectId, keyword);
             }
             case "search_pool" -> {
+                requireProjectContext(arguments, projectId);
                 String keyword = keyword(name, arguments);
-                return searchPool(keyword);
+                return searchPool(scopedProjectId, keyword);
             }
             default -> throw new AgentError("tool_not_allowed", "模型请求了未授权工具，分析已停止");
         }
@@ -251,8 +263,12 @@ public class AgentTools {
         return node;
     }
 
-    private ObjectNode listMembers() {
-        List<User> users = userMapper.selectList(new QueryWrapper<User>().orderByAsc("id").last("LIMIT 101"));
+    private ObjectNode listMembers(String projectId) {
+        List<Integer> memberIds = projectMemberMapper.selectList(new QueryWrapper<ProjectMember>()
+                .eq("project_id", projectId).orderByAsc("user_id").last("LIMIT 101"))
+                .stream().map(ProjectMember::getUserId).toList();
+        List<User> users = memberIds.isEmpty() ? List.of() : userMapper.selectList(
+                new QueryWrapper<User>().in("id", memberIds).orderByAsc("id"));
         ArrayNode items = objectMapper.createArrayNode();
         for (User u : users.subList(0, Math.min(100, users.size()))) {
             ObjectNode item = objectMapper.createObjectNode();
@@ -319,8 +335,8 @@ public class AgentTools {
         return node;
     }
 
-    private ObjectNode searchPool(String keyword) {
-        QueryWrapper<PoolItem> qw = new QueryWrapper<PoolItem>().like("title", keyword)
+    private ObjectNode searchPool(String projectId, String keyword) {
+        QueryWrapper<PoolItem> qw = new QueryWrapper<PoolItem>().eq("project_id", projectId).like("title", keyword)
                 .orderByAsc("id").last("LIMIT 21");
         List<PoolItem> rows = poolItemMapper.selectList(qw);
         ArrayNode items = objectMapper.createArrayNode();

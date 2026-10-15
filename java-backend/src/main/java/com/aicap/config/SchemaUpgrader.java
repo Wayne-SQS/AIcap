@@ -71,6 +71,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"acl_rank", "`acl_rank` int DEFAULT NULL"},
     };
 
+    private static final String[][] PROFILE_TASK_REFERENCE_COLUMNS = {
+            {"task_internal_id", "`task_internal_id` bigint DEFAULT NULL"},
+            {"task_code_snapshot", "`task_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
@@ -100,6 +105,12 @@ public class SchemaUpgrader implements ApplicationRunner {
             }
             if (tableExists(conn, "users")) {
                 added.addAll(addMissing(conn, "users", USER_COLUMNS));
+            }
+            if (tableExists(conn, "activity_records")) {
+                added.addAll(addMissing(conn, "activity_records", PROFILE_TASK_REFERENCE_COLUMNS));
+            }
+            if (tableExists(conn, "difficulty_assessments")) {
+                added.addAll(addMissing(conn, "difficulty_assessments", PROFILE_TASK_REFERENCE_COLUMNS));
             }
             // knowledge_chunks 建表时可不存在;补列后老向量因 embedding_model 为空会被判为过期,
             // 下次重建自动重算 —— 这正是引入该列的目的,无需额外回填。

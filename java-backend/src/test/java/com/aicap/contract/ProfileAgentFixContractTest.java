@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.sql.init.data-locations=classpath:db/reset_test_data.sql"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class ProfileAgentFixContractTest extends ContractTestSupport {
+class ProfileAgentFixContractTest extends ProfileProjectContractSupport {
 
     private static final int MEMBER_ID = 3;      // 孙秋实
     private static final int MEMBER2_ID = 4;     // 罗子涵
@@ -48,16 +48,16 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
     void member_cannotRecordActivityForOthers_butCanForSelf() {
         String member = token(USER_MEMBER);
         Map<String, Object> self = activityBody(MEMBER_ID);
-        ApiResponse ok = post("/api/profile-agent/activities", member, json(self));
+        ApiResponse ok = postProject("/api/profile-agent/activities", member, json(self));
         assertStatus(ok, 200);
 
         Map<String, Object> other = activityBody(MEMBER2_ID);
-        ApiResponse forbidden = post("/api/profile-agent/activities", member, json(other));
+        ApiResponse forbidden = postProject("/api/profile-agent/activities", member, json(other));
         assertStatus(forbidden, 403);
 
         // admin 可代录
         Map<String, Object> byAdmin = activityBody(MEMBER2_ID);
-        ApiResponse adminOk = post("/api/profile-agent/activities", token(USER_ADMIN), json(byAdmin));
+        ApiResponse adminOk = postProject("/api/profile-agent/activities", token(USER_ADMIN), json(byAdmin));
         assertStatus(adminOk, 200);
     }
 
@@ -74,7 +74,7 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
 
     @Test
     void getAnalysis_isReadOnlyPreview_rulesFallback() {
-        ApiResponse r = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
         assertStatus(r, 200);
         assertNotNull(r.json(), r.body());
         // 无 PROFILE_LLM_API_KEY → 全规则引擎,不调 LLM、不落库
@@ -89,13 +89,13 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
     void invalidRange_rejected() {
         String token = token(USER_MEMBER);
         // start > end
-        ApiResponse reversed = get("/api/profile-agent/analysis?start=2026-09-15&end=2026-08-25", token);
+        ApiResponse reversed = getProject("/api/profile-agent/analysis?start=2026-09-15&end=2026-08-25", token);
         assertStatus(reversed, 422);
         // 跨度超过 400 天
-        ApiResponse tooWide = get("/api/profile-agent/analysis?start=2024-01-01&end=2026-09-15", token);
+        ApiResponse tooWide = getProject("/api/profile-agent/analysis?start=2024-01-01&end=2026-09-15", token);
         assertStatus(tooWide, 422);
         // 正常范围通过
-        ApiResponse ok = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token);
+        ApiResponse ok = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token);
         assertStatus(ok, 200);
     }
 
@@ -106,8 +106,8 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
         String admin = token(USER_ADMIN);
         String member = token(USER_MEMBER);
         List<ApiResponse> results = fireConcurrently(
-                () -> post("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", admin, null),
-                () -> post("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", member, null));
+                () -> postProject("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", admin, null),
+                () -> postProject("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", member, null));
         for (ApiResponse r : results) {
             assertStatus(r, 200);
         }
@@ -128,7 +128,7 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
 
     @Test
     void fallbackAssessment_markedAsRules() {
-        ApiResponse r = get("/api/profile-agent/difficulty", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/difficulty", token(USER_MEMBER));
         assertStatus(r, 200);
         assertTrue(r.json().isArray(), r.body());
         List<String> seen = new ArrayList<>();
@@ -147,11 +147,11 @@ class ProfileAgentFixContractTest extends ContractTestSupport {
     @Test
     void runAnalysis_viewerForbidden() {
         // 此前 controller 用 Roles.any(),viewer 也能触发 → 与 US02 只读约束冲突
-        ApiResponse denied = post("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15",
+        ApiResponse denied = postProject("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15",
                 token(USER_VIEWER), null);
         assertStatus(denied, 403);
         // 只读预览仍允许(不落库、不调 LLM)
-        ApiResponse preview = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15",
+        ApiResponse preview = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15",
                 token(USER_VIEWER));
         assertStatus(preview, 200);
     }

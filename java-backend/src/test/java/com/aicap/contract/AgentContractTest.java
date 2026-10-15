@@ -1,7 +1,14 @@
 package com.aicap.contract;
 
 import com.aicap.agent.AgentProperties;
+import com.aicap.agent.AgentTools;
+import com.aicap.agent.AgentError;
 import com.aicap.contract.AgentModelFixture.Scenario;
+import com.aicap.entity.PoolItem;
+import com.aicap.entity.ProjectMember;
+import com.aicap.mapper.PoolItemMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -12,14 +19,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
@@ -64,6 +74,13 @@ class AgentContractTest extends ContractTestSupport {
 
     @Autowired
     private AgentProperties agentProps;
+    @Autowired
+    private ProjectMemberMapper projectMembers;
+    @Autowired
+    private PoolItemMapper poolItems;
+    @Autowired
+    private AgentTools agentTools;
+    private Long viewerMembershipId;
 
     // ------------------------------------------------------------------
     // 生命周期
@@ -75,11 +92,23 @@ class AgentContractTest extends ContractTestSupport {
         agentProps.setApiKey("fixture-test-key");
         agentProps.setBaseUrl("http://127.0.0.1:19377");
         agentProps.setModel("fixture-model");
+        if (projectMembers.selectCount(new QueryWrapper<ProjectMember>()
+                .eq("project_id", TEST_PROJECT_ID).eq("user_id", 5)) == 0) {
+            ProjectMember viewer = new ProjectMember();
+            viewer.setProjectId(TEST_PROJECT_ID);
+            viewer.setUserId(5);
+            viewer.setProjectRole("viewer");
+            viewer.setCapacityHours(60);
+            viewer.setJoinedAt(LocalDateTime.now());
+            projectMembers.insert(viewer);
+            viewerMembershipId = viewer.getId();
+        }
     }
 
     @AfterAll
     void stopFixture() {
         fixture.stop();
+        if (viewerMembershipId != null) projectMembers.deleteById(viewerMembershipId);
     }
 
     @BeforeEach
@@ -102,8 +131,8 @@ class AgentContractTest extends ContractTestSupport {
                 "/api/meetings/whatever/runs", "/api/agent-runs/whatever")) {
             assertStatus(get(path, null), 401);
         }
-        assertStatus(post("/api/meetings/whatever/runs", null, null), 401);
-        assertStatus(post("/api/agent-runs/whatever/retry", null, null), 401);
+        assertStatus(postProject("/api/meetings/whatever/runs", null, null), 401);
+        assertStatus(postProject("/api/agent-runs/whatever/retry", null, null), 401);
     }
 
     /** AGENT-02:已配置模型时 /agent/config 如实上报能力与版本;只读角色也可读 */
@@ -131,12 +160,12 @@ class AgentContractTest extends ContractTestSupport {
                     "无密钥时 configured 必须为 false:" + config.body());
 
             String mid = createMeeting(uniq("CT无密钥会议"));
-            ApiResponse run = post("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
+            ApiResponse run = postProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
             // ApiException.server() 落在 503(Service Unavailable),不是 FastAPI 版的 500
             assertStatus(run, 503);
             assertTrue(detail(run).contains("密钥"), "detail 应说明未配置密钥: " + run.body());
             // 未配置时不得留下任何 run
-            ApiResponse list = get("/api/meetings/" + mid + "/runs", token(USER_ADMIN));
+            ApiResponse list = getProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN));
             assertEquals(200, list.status(), list.body());
             assertEquals(0, list.json().size(), "未配置时不应创建 run: " + list.body());
         } finally {
@@ -150,18 +179,18 @@ class AgentContractTest extends ContractTestSupport {
         String viewer = token(USER_VIEWER);
         assertEquals(200, get("/api/agent/config", viewer).status());
         String mid = createMeeting(uniq("CT只读会议"));
-        assertStatus(post("/api/meetings/" + mid + "/runs", viewer, null), 403);
-        assertStatus(post("/api/agent-runs/not-exist/retry", viewer, null), 403);
-        assertEquals(200, get("/api/meetings/" + mid + "/runs", viewer).status());
+        assertStatus(postProject("/api/meetings/" + mid + "/runs", viewer, null), 403);
+        assertStatus(postProject("/api/agent-runs/not-exist/retry", viewer, null), 403);
+        assertEquals(200, getProject("/api/meetings/" + mid + "/runs", viewer).status());
     }
 
     /** AGENT-05:会议不存在 → 404(发起/列表);run 不存在 → 404(读取/重试) */
     @Test
     void agent05_meetingAndRunNotFound_404() {
-        assertStatus(post("/api/meetings/no-such-meeting/runs", token(USER_ADMIN), null), 404);
-        assertStatus(get("/api/meetings/no-such-meeting/runs", token(USER_ADMIN)), 404);
-        assertStatus(get("/api/agent-runs/no-such-run", token(USER_ADMIN)), 404);
-        assertStatus(post("/api/agent-runs/no-such-run/retry", token(USER_ADMIN), null), 404);
+        assertStatus(postProject("/api/meetings/no-such-meeting/runs", token(USER_ADMIN), null), 404);
+        assertStatus(getProject("/api/meetings/no-such-meeting/runs", token(USER_ADMIN)), 404);
+        assertStatus(getProject("/api/agent-runs/no-such-run", token(USER_ADMIN)), 404);
+        assertStatus(postProject("/api/agent-runs/no-such-run/retry", token(USER_ADMIN), null), 404);
     }
 
     // ------------------------------------------------------------------
@@ -172,16 +201,16 @@ class AgentContractTest extends ContractTestSupport {
     @Test
     void agent06_startRun_twice_isIdempotent_singleRunRow() {
         String mid = createMeeting(uniq("CT幂等会议"));
-        ApiResponse first = post("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
+        ApiResponse first = postProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
         assertEquals(200, first.status(), first.body());
         String runId = first.json().path("id").asText();
         assertFalse(runId.isEmpty(), first.body());
 
-        ApiResponse second = post("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
+        ApiResponse second = postProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN), null);
         assertEquals(200, second.status(), second.body());
         assertEquals(runId, second.json().path("id").asText(), "重复发起应返回同一个 run:" + second.body());
 
-        ApiResponse list = get("/api/meetings/" + mid + "/runs", token(USER_ADMIN));
+        ApiResponse list = getProject("/api/meetings/" + mid + "/runs", token(USER_ADMIN));
         assertEquals(200, list.status(), list.body());
         assertEquals(1, list.json().size(), "同一会议只应有一条 run:" + list.body());
 
@@ -197,7 +226,7 @@ class AgentContractTest extends ContractTestSupport {
         JsonNode run = awaitTerminal(runId);
         assertEquals("awaiting_review", run.path("status").asText(), run.toString());
 
-        ApiResponse retry = post("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
+        ApiResponse retry = postProject("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
         assertStatus(retry, 409);
         assertTrue(detail(retry).contains("只能重试失败的分析"), retry.body());
     }
@@ -254,22 +283,64 @@ class AgentContractTest extends ContractTestSupport {
     /** AGENT-09:建议标题与已有故事重名 → 去重跳过,run 完成但没有建议 */
     @Test
     void agent09_proposalTitleConflict_skipped_completedWithoutSuggestion() {
-        JsonNode us01 = storyFromList("US01");
-        assertNotNull(us01, "种子故事 US01 必须存在");
-        String existingTitle = us01.path("title").asText();
-        fixture.prepare(Scenario.PROPOSAL_CONFLICT, existingTitle);
-        String mid = createMeeting(uniq("CT重名会议"));
+        String existingTitle = uniq("Agent重名故事");
+        ApiResponse existing = postProject("/api/stories", token(USER_ADMIN), json(map("title", existingTitle)));
+        assertStatus(existing, 200);
+        String storyId = existing.json().path("id").asText();
+        try {
+            fixture.prepare(Scenario.PROPOSAL_CONFLICT, existingTitle);
+            String mid = createMeeting(uniq("CT重名会议"));
 
-        JsonNode run = awaitTerminal(startRun(mid));
-        assertEquals("completed", run.path("status").asText(), "无新建议时应为 completed:" + run);
-        JsonNode result = run.path("result");
-        assertEquals(0, result.path("suggestion_ids").size(), result.toString());
-        assertEquals(1, result.path("skipped_proposals").size(), result.toString());
-        assertEquals(existingTitle, result.path("skipped_proposals").path(0).path("title").asText(), result.toString());
-        assertTrue(result.path("skipped_proposals").path(0).path("reason").asText().contains("同名"),
-                result.toString());
-        assertNull(suggestionByTitle(mid, existingTitle), "重名建议不得落库");
-        assertEquals(0, poolSize(), "重名建议不得进需求池");
+            JsonNode run = awaitTerminal(startRun(mid));
+            assertEquals("completed", run.path("status").asText(), "无新建议时应为 completed:" + run);
+            JsonNode result = run.path("result");
+            assertEquals(0, result.path("suggestion_ids").size(), result.toString());
+            assertEquals(1, result.path("skipped_proposals").size(), result.toString());
+            assertEquals(existingTitle, result.path("skipped_proposals").path(0).path("title").asText(), result.toString());
+            assertTrue(result.path("skipped_proposals").path(0).path("reason").asText().contains("同名"),
+                    result.toString());
+            assertNull(suggestionByTitle(mid, existingTitle), "重名建议不得落库");
+            assertEquals(0, poolSize(), "重名建议不得进需求池");
+        } finally {
+            deleteStory(storyId);
+        }
+    }
+
+    @Test
+    void agentTools_readOnlyResultsStayInsideRunProject() {
+        String title = uniq("Agent跨项目池隔离");
+        ApiResponse own = postProject("/api/pool", token(USER_ADMIN), json(map("title", title)));
+        assertStatus(own, 200);
+        String ownId = own.json().path("id").asText();
+        PoolItem foreign = new PoolItem();
+        foreign.setId("R" + UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+        foreign.setProjectId("P099");
+        foreign.setTitle(title);
+        foreign.setDescription("");
+        foreign.setSource("test");
+        foreign.setPriority("Should");
+        foreign.setCreatedAt(LocalDateTime.now());
+        poolItems.insert(foreign);
+        try {
+            var args = om.createObjectNode().put("project_id", TEST_PROJECT_ID).put("keyword", title);
+            JsonNode result = agentTools.execute("search_pool", args, 1, TEST_PROJECT_ID);
+            assertEquals(1, result.path("items").size(), result.toString());
+            assertEquals(ownId, result.path("items").get(0).path("id").asText());
+
+            JsonNode members = agentTools.execute("list_members", om.createObjectNode(), 1, TEST_PROJECT_ID);
+            for (JsonNode member : members.path("items")) {
+                assertFalse(member.path("id").asInt() == 3, "非项目成员不得进入 Agent 成员上下文");
+            }
+            AgentError wrongProject = assertThrows(AgentError.class,
+                    () -> agentTools.execute("search_pool", args.put("project_id", "P099"), 1, TEST_PROJECT_ID));
+            assertEquals("project_context_mismatch", wrongProject.getCode());
+            AgentError removedMember = assertThrows(AgentError.class,
+                    () -> agentTools.execute("list_members", om.createObjectNode(), 3, TEST_PROJECT_ID));
+            assertEquals("permission_changed", removedMember.getCode());
+        } finally {
+            deletePoolItem(ownId);
+            poolItems.deleteById(foreign.getId());
+        }
     }
 
     /** AGENT-10:证据无法在原文核对 → invalid_evidence,且事务回滚不落任何建议 */
@@ -336,7 +407,7 @@ class AgentContractTest extends ContractTestSupport {
         // 上游恢复后重试:同一条 run 重新排队,attempt=2
         String okTitle = uniq("Agent重试成功");
         fixture.prepare(Scenario.HAPPY, okTitle);
-        ApiResponse retry = post("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
+        ApiResponse retry = postProject("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
         assertEquals(200, retry.status(), retry.body());
         assertEquals(runId, retry.json().path("id").asText(), retry.body());
         assertEquals(2, retry.json().path("attempt").asInt(), retry.body());
@@ -360,7 +431,7 @@ class AgentContractTest extends ContractTestSupport {
         String runId = startRun(mid);
         assertEquals("failed", awaitTerminal(runId).path("status").asText());
 
-        ApiResponse retry = post("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
+        ApiResponse retry = postProject("/api/agent-runs/" + runId + "/retry", token(USER_ADMIN), null);
         assertEquals(200, retry.status(), retry.body());
         JsonNode again = awaitTerminal(runId);
         assertEquals("failed", again.path("status").asText(), again.toString());
@@ -374,8 +445,8 @@ class AgentContractTest extends ContractTestSupport {
     // ------------------------------------------------------------------
 
     private String createMeeting(String title) {
-        ApiResponse r = post("/api/meetings", token(USER_ADMIN),
-                json(map("title", title, "transcript", TRANSCRIPT)));
+        ApiResponse r = postProject("/api/meetings", token(USER_ADMIN),
+                json(map("project_id", TEST_PROJECT_ID, "title", title, "transcript", TRANSCRIPT)));
         assertEquals(201, r.status(), r.body());
         String id = r.json().path("id").asText();
         assertFalse(id.isEmpty(), r.body());
@@ -383,7 +454,7 @@ class AgentContractTest extends ContractTestSupport {
     }
 
     private String startRun(String meetingId) {
-        ApiResponse r = post("/api/meetings/" + meetingId + "/runs", token(USER_ADMIN), null);
+        ApiResponse r = postProject("/api/meetings/" + meetingId + "/runs", token(USER_ADMIN), null);
         assertEquals(200, r.status(), r.body());
         String runId = r.json().path("id").asText();
         assertFalse(runId.isEmpty(), r.body());
@@ -396,7 +467,7 @@ class AgentContractTest extends ContractTestSupport {
         long deadline = System.currentTimeMillis() + 90_000L;
         JsonNode last = null;
         while (System.currentTimeMillis() < deadline) {
-            ApiResponse r = get("/api/agent-runs/" + runId, token(USER_ADMIN));
+            ApiResponse r = getProject("/api/agent-runs/" + runId, token(USER_ADMIN));
             assertEquals(200, r.status(), r.body());
             last = r.json();
             String status = last.path("status").asText();
@@ -423,7 +494,7 @@ class AgentContractTest extends ContractTestSupport {
     }
 
     private JsonNode suggestionByTitle(String meetingId, String title) {
-        ApiResponse r = get("/api/suggestions?meetingId=" + meetingId, token(USER_ADMIN));
+        ApiResponse r = getProject("/api/suggestions?meetingId=" + meetingId, token(USER_ADMIN));
         assertEquals(200, r.status(), r.body());
         for (JsonNode s : r.json()) {
             if (title.equals(s.path("changes").path("title").asText())) {
@@ -434,7 +505,7 @@ class AgentContractTest extends ContractTestSupport {
     }
 
     private int poolSize() {
-        ApiResponse r = get("/api/pool", token(USER_ADMIN));
+        ApiResponse r = getProject("/api/pool", token(USER_ADMIN));
         assertEquals(200, r.status(), r.body());
         return r.json().size();
     }

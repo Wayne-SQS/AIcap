@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.sql.init.data-locations=classpath:db/reset_test_data.sql"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class ProfileAgentDocGapContractTest extends ContractTestSupport {
+class ProfileAgentDocGapContractTest extends ProfileProjectContractSupport {
 
     private static final int MEMBER_ID = 3; // 孙秋实
 
@@ -54,20 +54,20 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
                 "detail", "契约测试:test 类型活动",
                 "module", "认证",
                 "happened_at", "2026-09-05 10:00:00");
-        ApiResponse ok = post("/api/profile-agent/activities", token(USER_MEMBER), json(body));
+        ApiResponse ok = postProject("/api/profile-agent/activities", token(USER_MEMBER), json(body));
         assertStatus(ok, 200);
         // 非法类型仍被拒(校验未被破坏)
         Map<String, Object> bad = map("user_id", MEMBER_ID,
                 "activity_type", "hack",
                 "title", "x", "module", "认证", "happened_at", "2026-09-05 10:00:00");
-        assertStatus(post("/api/profile-agent/activities", token(USER_MEMBER), json(bad)), 422);
+        assertStatus(postProject("/api/profile-agent/activities", token(USER_MEMBER), json(bad)), 422);
     }
 
     // ---------- 4.3/4.4/4.6:成员 objective 新字段 ----------
 
     @Test
     void memberObjective_hasDocGapFields() {
-        ApiResponse r = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode members = r.json().path("members");
         assertTrue(members.isArray() && members.size() > 0, r.body());
@@ -84,7 +84,7 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
 
     @Test
     void memberProfile_hasNewFields_snapshotKeepsEvidence() {
-        ApiResponse r = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode members = r.json().path("members");
         JsonNode dp = members.get(0).path("dynamic_profile");
@@ -96,7 +96,7 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
 
         // 正式分析落快照后,快照 payload 应含完整证据(objective/evidence_refs),且画像字段提升顶层(兼容旧读取)
         // 用 owner 触发(admin 的 run 被 M4 限流测试占用,避免并发限流窗口冲突)
-        ApiResponse run = post("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", token(USER_OWNER), null);
+        ApiResponse run = postProject("/api/profile-agent/analysis/run?start=2026-08-25&end=2026-09-15", token(USER_OWNER), null);
         assertStatus(run, 200);
         ApiResponse snaps = get("/api/profile-agent/snapshots?user_id=" + MEMBER_ID, token(USER_ADMIN));
         assertStatus(snaps, 200);
@@ -113,7 +113,7 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
 
     @Test
     void teamRisks_includeMissingTest() {
-        ApiResponse r = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode risks = r.json().path("team_risks");
         assertTrue(risks.isArray(), r.body());
@@ -134,7 +134,7 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
     void difficulty_assessmentKeepsStructure() {
         // 清掉种子/历史评估,强制预览分支用当前规则引擎重算,验证"被后续任务依赖"因子
         difficultyMapper.delete(new QueryWrapper<DifficultyAssessment>().ne("assessed_by", "manual"));
-        ApiResponse r = get("/api/profile-agent/difficulty", token(USER_MEMBER));
+        ApiResponse r = getProject("/api/profile-agent/difficulty", token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode arr = r.json();   // difficulty 接口直接返回数组
         assertTrue(arr.isArray() && arr.size() > 0, r.body());
@@ -157,14 +157,14 @@ class ProfileAgentDocGapContractTest extends ContractTestSupport {
     @Test
     void compareStats_includeTestCount() {
         // Give this comparison its own activity so it does not depend on JUnit method order.
-        ApiResponse activity = post("/api/profile-agent/activities", token(USER_MEMBER), json(map(
+        ApiResponse activity = postProject("/api/profile-agent/activities", token(USER_MEMBER), json(map(
                 "user_id", MEMBER_ID,
                 "activity_type", "test",
                 "title", "对比周期测试活动",
                 "module", "契约测试",
                 "happened_at", "2025-01-06 10:00:00")));
         assertStatus(activity, 200);
-        ApiResponse r = get("/api/profile-agent/analysis/compare?prevStart=2025-01-01&prevEnd=2025-01-05&start=2025-01-06&end=2025-01-10",
+        ApiResponse r = getProject("/api/profile-agent/analysis/compare?prevStart=2025-01-01&prevEnd=2025-01-05&start=2025-01-06&end=2025-01-10",
                 token(USER_MEMBER));
         assertStatus(r, 200);
         JsonNode list = r.json().path("comparisons");

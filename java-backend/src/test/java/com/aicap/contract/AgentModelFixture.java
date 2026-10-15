@@ -157,8 +157,8 @@ final class AgentModelFixture {
     /** 第一次非最终轮:要求同时调用 search_stories 与 search_pool(runner 强制的两个查询工具) */
     private ObjectNode searchToolCalls() {
         ArrayNode callsNode = MAPPER.createArrayNode();
-        callsNode.add(toolCall("call_search_stories", "search_stories", "{\"keyword\":\"导入\"}"));
-        callsNode.add(toolCall("call_search_pool", "search_pool", "{\"keyword\":\"导入\"}"));
+        callsNode.add(toolCall("call_search_stories", "search_stories", "{\"keyword\":\"导入\",\"project_id\":\"P002\"}"));
+        callsNode.add(toolCall("call_search_pool", "search_pool", "{\"keyword\":\"导入\",\"project_id\":\"P002\"}"));
         ObjectNode message = MAPPER.createObjectNode();
         message.put("role", "assistant");
         message.putNull("content");

@@ -276,7 +276,10 @@ CREATE TABLE IF NOT EXISTS `meeting_audio` (
 -- task_id 可空:未关联任务的活动本身就是文档 4.6 中的「提交异常模式」证据
 CREATE TABLE IF NOT EXISTS `activity_records` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) DEFAULT NULL,
   `user_id` int NOT NULL,
+  `task_internal_id` bigint DEFAULT NULL,
+  `task_code_snapshot` varchar(20) DEFAULT NULL,
   `task_id` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务(Txx),可空=未关联',
   `activity_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'commit/pr/review/bugfix/task_done/note/test',
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '活动标题,如「修复登录接口 401」',
