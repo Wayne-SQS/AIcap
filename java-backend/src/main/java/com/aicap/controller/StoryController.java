@@ -166,6 +166,8 @@ public class StoryController {
             throw ApiException.notFound("故事不存在");
         }
         Integer oldStatus = story.getStatus();
+        Integer oldOwner = story.getOwnerId();
+        Integer oldSprint = story.getSprint();
         boolean changed = false;
         if (body.ownerId() != null && !body.ownerId().equals(story.getOwnerId())) {
             checkOwner(scopedProjectId, body.ownerId());
@@ -198,6 +200,26 @@ public class StoryController {
         }
         if (!changed) {
             return StoryDtos.toOut(story);
+        }
+        boolean cascadeOwner = Boolean.TRUE.equals(body.cascadeOwner())
+                && body.ownerId() != null && !body.ownerId().equals(oldOwner);
+        boolean cascadeSprint = Boolean.TRUE.equals(body.cascadeSprint())
+                && body.sprint() != null && !body.sprint().equals(oldSprint);
+        if (cascadeOwner || cascadeSprint) {
+            int shift = cascadeSprint ? (body.sprint() - oldSprint) * 2 : 0;
+            for (Task task : taskMapper.selectList(new QueryWrapper<Task>()
+                    .eq("project_id", scopedProjectId).eq("kanban_card_id", storyId)
+                    .eq("task_type", "feature"))) {
+                if (task.getStatus() != null && (task.getStatus() == 2 || task.getStatus() == 3)) continue;
+                if (cascadeOwner) task.setOwnerId(body.ownerId());
+                if (cascadeSprint) {
+                    int start = Math.min(6, Math.max(1, task.getWeekStart() + shift));
+                    int end = Math.min(6, Math.max(start, task.getWeekEnd() + shift));
+                    task.setWeekStart(start);
+                    task.setWeekEnd(end);
+                }
+                taskMapper.updateById(task);
+            }
         }
         storyMapper.updateById(story);
         if (body.epicId() != null && body.epicId().isNull()) {

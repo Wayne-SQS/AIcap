@@ -250,8 +250,11 @@ public class TaskPoolController {
         boolean hasKanban = body.has("kanban_card_id");
 
         // ---- 2) 业务校验 ----
-        if (ownerId.present() && userMapper.selectById(ownerId.value()) == null) {
-            throw ApiException.badRequest("负责人不存在");
+        if (ownerId.present()) {
+            if (userMapper.selectById(ownerId.value()) == null) {
+                throw ApiException.badRequest("负责人不存在");
+            }
+            projectAccess.requireProjectMember(scopedProjectId, ownerId.value());
         }
 
         String kanban = null;

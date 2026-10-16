@@ -2,8 +2,10 @@ package com.aicap.contract;
 
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
+import com.aicap.entity.User;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
+import com.aicap.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
@@ -49,6 +51,7 @@ class TaskContractTest extends ContractTestSupport {
 
     @Autowired private StoryMapper stories;
     @Autowired private TaskMapper tasks;
+    @Autowired private UserMapper users;
 
     private static final List<String> FIXTURE_STORIES = List.of("US01", "US02", "US07", "US24", "US25", "US37");
     private final List<Long> fixtureTaskIds = new ArrayList<>();
@@ -135,6 +138,76 @@ class TaskContractTest extends ContractTestSupport {
 
     private static String strField(JsonNode node, String field) {
         return node.path(field).asText();
+    }
+
+    @Test
+    void patchTask_combinedFieldsCannotAssignNonProjectUser() {
+        User outsider = new User();
+        outsider.setUsername("qa-outside-" + java.util.UUID.randomUUID());
+        outsider.setDisplayName("项目外测试成员");
+        outsider.setRole("member");
+        outsider.setPasswordHash("not-used-for-login");
+        outsider.setColor("#000000");
+        outsider.setCapacityHours(60);
+        users.insert(outsider);
+        JsonNode before = taskFromListOrFail("T01");
+        try {
+            ApiResponse denied = patchProject("/api/tasks/T01", token(USER_ADMIN),
+                    json(map("name", "越权任务名称", "owner_id", outsider.getId())));
+            assertEquals(400, denied.status(), denied.body());
+            JsonNode after = taskFromListOrFail("T01");
+            assertEquals(before.path("name"), after.path("name"));
+            assertEquals(before.path("owner_id"), after.path("owner_id"));
+        } finally {
+            users.deleteById(outsider.getId());
+        }
+    }
+
+    @Test
+    void storyOwnerAndSprintCascade_isAtomicAndPreservesFinishedTasks() {
+        JsonNode active = taskFromListOrFail("T06");
+        JsonNode finished = taskFromListOrFail("T05");
+        JsonNode cancelled = taskFromListOrFail("T07");
+        JsonNode story = getProject("/api/stories", token(USER_ADMIN)).json();
+        JsonNode originalStory = null;
+        for (JsonNode row : story) if ("US25".equals(row.path("id").asText())) originalStory = row;
+        assertNotNull(originalStory);
+        try {
+            assertEquals(200, patchProject("/api/tasks/T05", token(USER_ADMIN),
+                    json(map("kanban_card_id", "US25", "status", 2))).status());
+            assertEquals(200, patchProject("/api/tasks/T07", token(USER_ADMIN),
+                    json(map("kanban_card_id", "US25", "status", 3))).status());
+
+            ApiResponse changed = patchProject("/api/stories/US25", token(USER_ADMIN),
+                    json(map("owner_id", 2, "sprint", 2, "cascade_owner", true, "cascade_sprint", true)));
+            assertEquals(200, changed.status(), changed.body());
+            assertEquals(2, changed.json().path("owner_id").asInt());
+            assertEquals(2, changed.json().path("sprint").asInt());
+            JsonNode moved = taskFromListOrFail("T06");
+            assertEquals(2, moved.path("owner_id").asInt());
+            assertEquals(active.path("week_start").asInt() + 2, moved.path("week_start").asInt());
+            assertEquals(active.path("week_end").asInt() + 2, moved.path("week_end").asInt());
+            for (String code : List.of("T05", "T07")) {
+                JsonNode after = taskFromListOrFail(code);
+                JsonNode before = "T05".equals(code) ? finished : cancelled;
+                assertEquals(before.path("owner_id").asInt(), after.path("owner_id").asInt());
+                assertEquals(before.path("week_start").asInt(), after.path("week_start").asInt());
+                assertEquals(before.path("week_end").asInt(), after.path("week_end").asInt());
+            }
+        } finally {
+            patchProject("/api/stories/US25", token(USER_ADMIN), json(map(
+                    "owner_id", originalStory.path("owner_id").asInt(),
+                    "sprint", originalStory.path("sprint").asInt())));
+            for (JsonNode before : List.of(active, finished, cancelled)) {
+                patchProject("/api/tasks/" + before.path("id").asText(), token(USER_ADMIN), json(map(
+                        "owner_id", before.path("owner_id").asInt(),
+                        "week_start", before.path("week_start").asInt(),
+                        "week_end", before.path("week_end").asInt(),
+                        "status", before.path("status").asInt(),
+                        "progress", before.path("progress").asInt(),
+                        "kanban_card_id", before.path("kanban_card_id").isNull() ? null : before.path("kanban_card_id").asText())));
+            }
+        }
     }
 
     /** 恢复 status+progress(两个一起给,避免单给一个触发联动推导) */

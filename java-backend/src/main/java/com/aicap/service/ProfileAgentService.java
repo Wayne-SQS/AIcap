@@ -189,13 +189,12 @@ public class ProfileAgentService {
     /** 贡献活动热力图(文档 4.10):按日聚合活动类型计数,前端画绿格子 */
     public List<Map<String, Object>> heatmap(String projectId, Integer userId, LocalDate start, LocalDate end) {
         validateRange(start, end);   // M2: 时间范围上限与顺序校验
-        Set<String> taskIds = projectTaskIds(projectId);
         List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
+                .eq("project_id", ProjectAccessService.normalize(projectId))
                 .eq(userId != null, "user_id", userId)
                 .ge("happened_at", start.atStartOfDay())
                 .le("happened_at", end.atTime(23, 59, 59))
-                .orderByAsc("happened_at")).stream()
-                .filter(a -> a.getProjectId() == null || ProjectAccessService.normalize(projectId).equals(a.getProjectId())).toList();
+                .orderByAsc("happened_at"));
         // 连续按天铺满区间,无活动日为 0
         Map<LocalDate, Map<String, Integer>> byDay = new LinkedHashMap<>();
         for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {

@@ -6,7 +6,6 @@ import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
-import { tasksApi } from '@/api/tasks'
 import { statuses, DEFAULT_ACTIVITIES } from '@/constants'
 import { memberUserId } from '@/data/memberIdentity'
 import UndoneChoiceDialog from './UndoneChoiceDialog.vue'
@@ -90,13 +89,10 @@ async function submit() {
       if (subs.length) {
         const ok = confirm(`该卡 Sprint 由 S${old.sprint} 变更为 S${payload.sprint}。\n默认仅挪动 ${undone.length} 条未完成子任务到新时间轴,${kept.length} 条已完成/已取消子任务将保留原记录。确认?`)
         if (ok) {
-          const shift = project.sprintShiftOf(old.sprint, payload.sprint)
-          for (const t of undone) {
-            t.w = project.shiftWeek(t.w, shift)
-            if (session.apiMode) {
-              try { await tasksApi.patch(t.id, { week_start: t.w[0], week_end: t.w[1] }, projects.currentProjectId) }
-              catch (err) { notify('子任务 ' + t.id + ' 挪动失败:' + err.message) }
-            }
+          if (session.apiMode) payload.cascade_sprint = true
+          else {
+            const shift = project.sprintShiftOf(old.sprint, payload.sprint)
+            for (const t of undone) t.w = project.shiftWeek(t.w, shift)
           }
         }
       }
@@ -120,13 +116,8 @@ async function submit() {
           `选择「取消」则仅修改故事本身，子任务负责人保持不变。确认同步？`
         )
         if (ok) {
-          for (const t of undone) {
-            t.owner = newOwner
-            if (session.apiMode) {
-              try { await tasksApi.patch(t.id, { owner_id: memberUserId(newOwner) }, projects.currentProjectId) }
-              catch (err) { notify('子任务 ' + t.id + ' 负责人同步失败:' + err.message) }
-            }
-          }
+          if (session.apiMode) payload.cascade_owner = true
+          else for (const t of undone) t.owner = newOwner
         }
       }
     }

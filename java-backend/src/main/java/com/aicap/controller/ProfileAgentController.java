@@ -5,6 +5,7 @@ import com.aicap.entity.User;
 import com.aicap.profile.GitHubActivitySyncService;
 import com.aicap.security.Roles;
 import com.aicap.service.ProfileAgentService;
+import com.aicap.service.ProjectAccessService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -34,12 +35,15 @@ public class ProfileAgentController {
 
     private final ProfileAgentService service;
     private final GitHubActivitySyncService githubSync;
+    private final ProjectAccessService projectAccess;
 
     /** 录入一条活动事实(commit/pr/review/bugfix/task_done/note) */
     @PostMapping("/activities")
     public ProfileAgentDtos.ActivityOut addActivity(@RequestParam String projectId,
                                                     @Valid @RequestBody ProfileAgentDtos.ActivityIn in) {
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
+        projectAccess.requireProjectMember(projectId, in.userId());
         return service.addActivity(projectId, in, actor);
     }
 
@@ -49,6 +53,8 @@ public class ProfileAgentController {
             @RequestParam String projectId,
             @Valid @RequestBody List<ProfileAgentDtos.ActivityIn> items) {
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
+        items.forEach(item -> projectAccess.requireProjectMember(projectId, item.userId()));
         return service.importActivities(projectId, items, actor);
     }
 
@@ -60,6 +66,7 @@ public class ProfileAgentController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.heatmap(projectId, userId, start, end);
     }
 
@@ -71,6 +78,7 @@ public class ProfileAgentController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.listActivities(projectId, userId, start, end);
     }
 

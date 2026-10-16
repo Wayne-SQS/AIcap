@@ -1,6 +1,7 @@
 package com.aicap.contract;
 
 import com.aicap.entity.DifficultyAssessment;
+import com.aicap.mapper.ActivityRecordMapper;
 import com.aicap.mapper.DifficultyAssessmentMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +42,47 @@ class ProfileAgentFixContractTest extends ProfileProjectContractSupport {
 
     @Autowired
     private DifficultyAssessmentMapper difficultyMapper;
+    @Autowired
+    private ActivityRecordMapper activityMapper;
+
+    @Test
+    void heatmap_usesProjectMembershipAndRealDatedActivity() {
+        String admin = token(USER_ADMIN);
+        String viewer = token(USER_VIEWER);
+        String range = "start=2026-10-13&end=2026-10-14&userId=5";
+        ApiResponse before = getProject("/api/profile-agent/heatmap?" + range, viewer);
+        assertStatus(before, 200);
+        assertEquals(2, before.json().size(), before.body());
+        int initial = before.json().get(1).path("total").asInt();
+        Integer activityId = null;
+        try {
+            ApiResponse recorded = postProject("/api/profile-agent/activities", admin, json(map(
+                    "user_id", 5, "activity_type", "note", "title", "Sprint 2 热力图验收活动",
+                    "detail", "独立测试库中的日期与项目范围核对", "module", "Sprint 2",
+                    "happened_at", "2026-10-14 10:00:00")));
+            assertStatus(recorded, 200);
+            activityId = recorded.json().path("activity_id").asInt();
+
+            ApiResponse heatmap = getProject("/api/profile-agent/heatmap?" + range, viewer);
+            assertStatus(heatmap, 200);
+            assertEquals("2026-10-13", heatmap.json().get(0).path("date").asText());
+            assertEquals("2026-10-14", heatmap.json().get(1).path("date").asText());
+            assertEquals(initial + 1, heatmap.json().get(1).path("total").asInt());
+            assertEquals(0, heatmap.json().get(0).path("total").asInt(),
+                    "没有活动的日期仍应返回 0，不得遗漏日期");
+            ApiResponse activities = getProject("/api/profile-agent/activities?start=2026-10-14&end=2026-10-14&userId=5", viewer);
+            assertStatus(activities, 200);
+            assertTrue(activities.json().toString().contains("Sprint 2 热力图验收活动"));
+            assertTrue(activities.json().toString().contains("manual"));
+
+            assertStatus(postProject("/api/profile-agent/activities", viewer, json(activityBody(5))), 403);
+            assertStatus(get("/api/profile-agent/heatmap?projectId=P099&" + range, admin), 404);
+            assertStatus(get("/api/profile-agent/activities?projectId=P099", admin), 404);
+            assertStatus(post("/api/profile-agent/activities?projectId=P099", admin, json(activityBody(5))), 404);
+        } finally {
+            if (activityId != null) activityMapper.deleteById(activityId);
+        }
+    }
 
     // ---------- H1:越权录入 ----------
 

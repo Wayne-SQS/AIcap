@@ -57,7 +57,9 @@ public final class StoryDtos {
                              @Min(1) @Max(4) Integer sprint,
                              @Min(1) @Max(5) Integer activity,
                              @Min(0) @Max(2) Integer status,
-                             @JsonProperty("owner_id") Integer ownerId) {
+                             @JsonProperty("owner_id") Integer ownerId,
+                             @JsonProperty("cascade_owner") Boolean cascadeOwner,
+                             @JsonProperty("cascade_sprint") Boolean cascadeSprint) {
     }
 
     /** 故事输出(StoryOut) */
