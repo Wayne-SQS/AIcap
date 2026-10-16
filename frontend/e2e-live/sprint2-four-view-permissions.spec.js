@@ -3,8 +3,13 @@ import { test, expect } from '@playwright/test'
 const projectId = 'P002'
 const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
 
-async function enterProject(browser, username) {
+async function enterProject(browser, username, tasksFixture = null) {
   const context = await browser.newContext()
+  if (tasksFixture) {
+    await context.route('**/api/tasks?projectId=P002', route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(tasksFixture)
+    }))
+  }
   const page = await context.newPage()
   await page.goto('/#/projects')
   await page.locator('#login-user').fill(username)
@@ -85,5 +90,36 @@ test('Sprint 2 four views respect the selected project role for viewer and write
   } finally {
     const removed = await request.delete(`${javaBase}/api/stories/${storyId}?projectId=${projectId}&undone=keep`, { headers: adminHeaders })
     expect(removed.status()).toBe(200)
+  }
+})
+
+test('Sprint 2 task controls follow roles when a task is present in the UI data', async ({ browser }) => {
+  // P002 currently has no persisted tasks. Supply a read-only API fixture to exercise its task controls.
+  const fixture = [{ id: 'T999', name: '权限联调任务', owner_id: 1, hours: 4,
+    week_start: 3, week_end: 4, story_ref: '', kanban_card_id: null,
+    estimated_hours: 4, task_type: 'management', depends_on: '', priority: 'Should',
+    status: 0, progress: 0, blocked: false, sprints: [2], story_refs: [] }]
+  for (const { username, writable } of [
+    { username: '成员5', writable: false },
+    { username: '孙秋实', writable: true }
+  ]) {
+    const { context, page } = await enterProject(browser, username, fixture)
+    try {
+      await page.goto(`/#/projects/${projectId}/gantt`)
+      const bar = page.locator('[data-gantt-task="task:T999"]')
+      await expect(bar).toBeVisible()
+      await expect(bar).toHaveClass(writable ? /is-draggable/ : /gbar/)
+      if (!writable) await expect(bar).not.toHaveClass(/is-draggable/)
+      await bar.click()
+      await expect(page.locator('#gantt-detail').getByRole('button', { name: '编辑任务' }))
+        .toHaveJSProperty('disabled', !writable)
+      await expect(page.locator('#gantt-detail').getByRole('button', { name: '✓ 标记已完成' }))
+        .toHaveJSProperty('disabled', !writable)
+
+      await page.goto(`/#/projects/${projectId}/members`)
+      const card = page.locator('.member-task-card').filter({ hasText: 'T999' })
+      await expect(card).toBeVisible()
+      await expect(card).toHaveAttribute('draggable', String(writable))
+    } finally { await context.close() }
   }
 })
