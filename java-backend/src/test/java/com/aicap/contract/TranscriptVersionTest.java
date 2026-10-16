@@ -37,14 +37,14 @@ class TranscriptVersionTest {
         context=new AnnotationConfigApplicationContext(Config.class);
         jdbc=context.getBean(JdbcTemplate.class); mapper=context.getBean(ObjectMapper.class); service=context.getBean(TranscriptVersionService.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,title varchar(200),transcript text,created_by int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE meetings(project_id varchar(20),id varchar(36) primary key,title varchar(200),transcript text,created_by int,created_at timestamp)");
         jdbc.execute("CREATE TABLE meeting_audio(id varchar(36) primary key,meeting_id varchar(36),sha256 varchar(64))");
         try(var in=getClass().getResourceAsStream("/db/transcript-versions.sql")) {
             var sql=new String(in.readAllBytes(),StandardCharsets.UTF_8).replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci","");
             jdbc.execute(sql); jdbc.execute(sql);
         }
         jdbc.update("INSERT INTO users VALUES (1),(2)");
-        jdbc.update("INSERT INTO meetings(id,title,transcript) VALUES ('m1','来源会议','原始文本'),('m2','另一会议','另一原文')");
+        jdbc.update("INSERT INTO meetings(project_id,id,title,transcript) VALUES ('P002','m1','来源会议','原始文本'),('P099','m2','另一会议','另一原文')");
         jdbc.update("INSERT INTO meeting_audio VALUES ('a1','m1',?)","a".repeat(64));
         mvc=MockMvcBuilders.standaloneSetup(new TranscriptVersionController(service)).setControllerAdvice(new GlobalExceptionHandler()).build(); role("member");
     }
@@ -144,6 +144,8 @@ class TranscriptVersionTest {
         var target=confirmed.path("confirmation").path("analysis_meeting_id").asText();
         assertEquals("修正后的文本",jdbc.queryForObject("SELECT transcript FROM meetings WHERE id=?",String.class,target));
         assertEquals("原始文本",jdbc.queryForObject("SELECT transcript FROM meetings WHERE id='m1'",String.class));
+        assertEquals("P002",jdbc.queryForObject("SELECT project_id FROM meetings WHERE id=?",String.class,target));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM meetings WHERE project_id='P002' AND id=?",Integer.class,target));
         assertEquals(3,jdbc.queryForObject("SELECT COUNT(*) FROM meetings",Integer.class));
         input.put("text","不同修订"); assertEquals(409,assertThrows(ApiException.class,()->service.confirm("m1",id,input,1)).getStatus());
         assertEquals(409,assertThrows(ApiException.class,()->service.confirm("m1",id,confirmation(),2)).getStatus());

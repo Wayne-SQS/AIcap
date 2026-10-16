@@ -33,8 +33,13 @@ public class TranscriptVersionService {
         result.set("confirmation",row.get("confirmation_json")==null ? null : json(row.get("confirmation_json")));
         return result;
     }
-    private void meeting(String id) {
-        if(jdbc.queryForList("SELECT id FROM meetings WHERE id=? FOR UPDATE",id).isEmpty()) throw ApiException.notFound("会议不存在");
+    private String meeting(String id) {
+        var rows=jdbc.queryForList("SELECT project_id FROM meetings WHERE id=? FOR UPDATE",id);
+        if(rows.isEmpty()) throw ApiException.notFound("会议不存在");
+        Object projectId=rows.getFirst().get("project_id");
+        if(projectId==null || projectId.toString().isBlank())
+            throw ApiException.conflict("来源会议缺少项目归属，无法保存转写或创建分析会议");
+        return projectId.toString();
     }
     private void validate(JsonNode body) {
         fields(body,"client_request_id","draft");
@@ -200,7 +205,7 @@ public class TranscriptVersionService {
         body.fieldNames().forEachRemaining(key->require(Set.of("title","text","acknowledged","speaker_alignment").contains(key)));
         text(body.path("title"),200); text(body.path("text"),16000);
         require(body.path("acknowledged").isBoolean() && body.path("acknowledged").asBoolean());
-        meeting(meetingId);
+        String projectId=meeting(meetingId);
         var rows=jdbc.queryForList("SELECT * FROM meeting_transcript_versions WHERE meeting_id=? AND id=? FOR UPDATE",meetingId,id);
         if(rows.isEmpty()) throw ApiException.notFound("转写版本不存在");
         var row=rows.getFirst();
@@ -211,7 +216,7 @@ public class TranscriptVersionService {
             return out(row);
         }
         String target=UUID.randomUUID().toString(); var now=LocalDateTime.now();
-        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?)",target,body.path("title").asText(),body.path("text").asText(),actor,now);
+        jdbc.update("INSERT INTO meetings(project_id,id,title,transcript,created_by,created_at) VALUES(?,?,?,?,?,?)",projectId,target,body.path("title").asText(),body.path("text").asText(),actor,now);
         var confirmation=mapper.createObjectNode(); confirmation.set("input",body.deepCopy());
         confirmation.put("confirmed_by",actor).put("confirmed_at",now.toString()).put("analysis_meeting_id",target);
         jdbc.update("UPDATE meeting_transcript_versions SET confirmation_json=?,analysis_meeting_id=? WHERE id=?",confirmation.toString(),target,id);
