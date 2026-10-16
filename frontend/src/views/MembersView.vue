@@ -310,8 +310,10 @@ async function loadContribs() {
     const planned = new Map(members.map(m => [m.frontId, plannedWeeklyData(m.frontId)]))
     const nextContribs = await Promise.all(members.map(async m => {
       let rows = []
+      let realUnavailable = false
       if (online.value) {
-        try { rows = await profileAgentApi.heatmap(start, end, m.id, projectId) } catch { rows = [] }
+        try { rows = await profileAgentApi.heatmap(start, end, m.id, projectId) }
+        catch { realUnavailable = true }
       }
       const dayMap = new Map(rows.map(r => [r.date, r]))
       const grid = Array.from({ length: 7 }, () => Array(6).fill(0))
@@ -331,7 +333,7 @@ async function loadContribs() {
       // 数字口径:真实活动总数/活跃天数取 heatmap 原始值;grid 仅用于格子颜色分级(单日 >4 统一最深色)
       const realTotal = rows.reduce((a, r) => a + r.total, 0)
       const realActive = rows.filter(r => r.total > 0).length
-      if (realTotal > 0) return { m, rows: grid, meta, total: realTotal, activeDays: realActive, mode: 'real' }
+      if (realTotal > 0) return { m, rows: grid, meta, total: realTotal, activeDays: realActive, mode: 'real', realUnavailable: false }
       const expected = planned.get(m.frontId) || { weekly: Array(6).fill(0), weeks: [] }
       const plannedView = plannedGrid(m.frontId, expected, projectId)
       return {
@@ -341,7 +343,8 @@ async function loadContribs() {
         plannedWeeks: expected.weeks,
         total: expected.weekly.reduce((sum, hours) => sum + hours, 0),
         activeDays: expected.weekly.filter(hours => hours > 0).length,
-        mode: expected.weekly.some(hours => hours > 0) ? 'planned' : 'empty'
+        mode: expected.weekly.some(hours => hours > 0) ? 'planned' : 'empty',
+        realUnavailable
       }
     }))
     if (loadVersion === contribLoadVersion.value && projectId === projects.currentProjectId) {
@@ -510,8 +513,9 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
           <span class="avatar" :class="'a' + c.m.frontId">{{ memberLabel(c.m.frontId) }}</span>{{ c.m.name }}
           <span class="small mono" style="margin-left:auto" v-if="c.mode === 'real'">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
           <span class="small mono" style="margin-left:auto" v-else-if="c.mode === 'planned'">预计工时 {{ c.total }}h · 计划周数 {{ c.activeDays }}</span>
-          <span class="small mono" style="margin-left:auto" v-else>暂无真实活动或任务规划</span>
+          <span class="small mono" style="margin-left:auto" v-else>{{ c.realUnavailable ? '真实活动暂不可用，且暂无任务规划' : '暂无真实活动或任务规划' }}</span>
         </div>
+        <p v-if="c.realUnavailable" class="small" role="status">真实活动读取失败；{{ c.mode === 'planned' ? '以下仅显示任务规划的预计强度' : '当前没有可展示的任务规划' }}。</p>
         <div class="contrib-role small">{{ project.memberRoleText(c.m.frontId) }}</div>
         <div v-if="c.mode === 'real' || c.mode === 'planned'" class="contrib-grid">
           <span class="grid-corner"></span>

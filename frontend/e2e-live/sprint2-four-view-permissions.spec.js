@@ -3,11 +3,17 @@ import { test, expect } from '@playwright/test'
 const projectId = 'P002'
 const javaBase = process.env.AICAP_LIVE_JAVA_BASE || 'http://127.0.0.1:18180'
 
-async function enterProject(browser, username, tasksFixture = null) {
+async function enterProject(browser, username, tasksFixture = null, heatmapStatus = null) {
   const context = await browser.newContext()
   if (tasksFixture) {
     await context.route('**/api/tasks?projectId=P002', route => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(tasksFixture)
+    }))
+  }
+  if (heatmapStatus != null) {
+    await context.route('**/api/profile-agent/heatmap?*', route => route.fulfill({
+      status: heatmapStatus, contentType: 'application/json',
+      body: heatmapStatus === 200 ? '[]' : '{"detail":"temporary test failure"}'
     }))
   }
   const page = await context.newPage()
@@ -120,6 +126,34 @@ test('Sprint 2 task controls follow roles when a task is present in the UI data'
       const card = page.locator('.member-task-card').filter({ hasText: 'T999' })
       await expect(card).toBeVisible()
       await expect(card).toHaveAttribute('draggable', String(writable))
+    } finally { await context.close() }
+  }
+})
+
+test('Sprint 2 activity view labels failed real-data reads separately from empty activity', async ({ browser }) => {
+  const fixture = [{ id: 'T999', name: '预计强度联调任务', owner_id: 1, hours: 4,
+    week_start: 3, week_end: 4, story_ref: '', kanban_card_id: null,
+    estimated_hours: 4, task_type: 'management', depends_on: '', priority: 'Should',
+    status: 0, progress: 0, blocked: false, sprints: [2], story_refs: [] }]
+  for (const { heatmapStatus, unavailable } of [
+    { heatmapStatus: 503, unavailable: true },
+    { heatmapStatus: 200, unavailable: false }
+  ]) {
+    const { context, page } = await enterProject(browser, '李锐铭', fixture, heatmapStatus)
+    try {
+      await page.goto(`/#/projects/${projectId}/members`)
+      const first = page.locator('#contrib .contrib').first()
+      await expect(first).toContainText('预计工时 4h')
+      const warning = first.getByRole('status')
+      if (unavailable) {
+        await expect(warning).toContainText('真实活动读取失败；以下仅显示任务规划的预计强度')
+        await expect(page.locator('#contrib .contrib').nth(1))
+          .toContainText('真实活动暂不可用，且暂无任务规划')
+      } else {
+        await expect(warning).toHaveCount(0)
+        await expect(page.locator('#contrib .contrib').nth(1))
+          .toContainText('暂无真实活动或任务规划')
+      }
     } finally { await context.close() }
   }
 })
