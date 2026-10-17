@@ -896,13 +896,15 @@ public class ProfileAgentService {
     }
 
     private int loadPercent(User u, List<Task> myTasks) {
-        int capacity = u.getCapacityHours() == null || u.getCapacityHours() <= 0 ? 60 : u.getCapacityHours();
+        if (u.getCapacityHours() == null) return 0;
+        int capacity = Math.max(0, u.getCapacityHours()) * 6;
         int openHours = 0;
         for (Task t : myTasks) {
             if (t.getStatus() != null && (t.getStatus() == 0 || t.getStatus() == 1) && t.getHours() != null) {
                 openHours += t.getHours();
             }
         }
+        if (capacity == 0) return openHours > 0 ? 100 : 0;
         return Math.min(100, Math.round(openHours * 100.0f / capacity));
     }
 
@@ -961,7 +963,7 @@ public class ProfileAgentService {
                         "user_id", e.getKey(),
                         "member", nameOf.get(e.getKey()),
                         "evidence", "未完成任务工时 " + e.getValue() + "h / 容量 " +
-                                (u.getCapacityHours() == null ? 60 : u.getCapacityHours()) + "h",
+                                (u.getCapacityHours() == null ? "未配置" : (u.getCapacityHours() * 6) + "h（六周）"),
                         "inference", "负载约 " + pct + "%,长期过载风险,建议重新分配部分任务",
                         "suggested_action", "将低优先级任务拆分给负载较低的成员,或安排他人参与 Review"));
             }

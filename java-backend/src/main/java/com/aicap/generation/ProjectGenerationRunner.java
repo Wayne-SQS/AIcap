@@ -91,6 +91,6 @@ public class ProjectGenerationRunner {
         }
     }
 
-    private String membersJson() { try { return mapper.writeValueAsString(users.selectList(null).stream().map(u -> java.util.Map.of("id",u.getId(),"name",u.getDisplayName(),"role",u.getRole(),"capacity_hours",u.getCapacityHours())).toList()); } catch (Exception e) { return "[]"; } }
+    private String membersJson() { try { return mapper.writeValueAsString(users.selectList(null).stream().map(u -> { java.util.Map<String,Object> item = new java.util.LinkedHashMap<>(); item.put("id",u.getId()); item.put("name",u.getDisplayName()); item.put("role",u.getRole()); item.put("capacity_hours",u.getCapacityHours()); return item; }).toList()); } catch (Exception e) { return "[]"; } }
     private ObjectNode parse(String text) throws AgentError { try { JsonNode n=mapper.readTree(text); if(n instanceof ObjectNode o)return o; } catch(Exception ignored) { } throw new AgentError("invalid_response","模型没有返回合法项目规划 JSON"); }
 }

@@ -93,13 +93,13 @@ export const TASKS = TASK_ROWS.map(t => ({
 }))
 
 /* 5 名真实成员(与后端 users 表一致):4 名项目成员 + 1 名只读查看者
-   role=展示用职责描述;roleKey=后端角色(admin/owner/member/viewer);capacity=6 周可用容量(h) */
+   role=展示用职责描述;roleKey=后端角色(admin/owner/member/viewer);capacity=每周可用人时 */
 export const MEMBERS = [
-  { id: 0, name: '李锐铭', role: '产品与范围 · 总协调', roleKey: 'admin', tag: '权限 / 公共服务 / 风险闭环', capacity: 60, accent: 'green' },
-  { id: 1, name: '高思晗', role: '需求与 AI 协调', roleKey: 'owner', tag: '故事管理 / 会议智能体 / AI 审核', capacity: 48, accent: 'orange' },
-  { id: 2, name: '孙秋实', role: '技术与进度管理', roleKey: 'member', tag: '数据接口 / WBS / 甘特 / 智能排期', capacity: 60, accent: 'blue' },
-  { id: 3, name: '罗子涵', role: '质量与风险', roleKey: 'member', tag: 'UML / 质量分析 / 方案评审', capacity: 54, accent: 'pink' },
-  { id: 4, name: '成员5', role: '只读查看者', roleKey: 'viewer', tag: '基础报表 / 只读视图', capacity: 60, accent: 'gray' }
+  { id: 0, name: '李锐铭', role: '产品与范围 · 总协调', roleKey: 'admin', tag: '权限 / 公共服务 / 风险闭环', capacity: 10, accent: 'green' },
+  { id: 1, name: '高思晗', role: '需求与 AI 协调', roleKey: 'owner', tag: '故事管理 / 会议智能体 / AI 审核', capacity: 8, accent: 'orange' },
+  { id: 2, name: '孙秋实', role: '技术与进度管理', roleKey: 'member', tag: '数据接口 / WBS / 甘特 / 智能排期', capacity: 10, accent: 'blue' },
+  { id: 3, name: '罗子涵', role: '质量与风险', roleKey: 'member', tag: 'UML / 质量分析 / 方案评审', capacity: 9, accent: 'pink' },
+  { id: 4, name: '成员5', role: '只读查看者', roleKey: 'viewer', tag: '基础报表 / 只读视图', capacity: 10, accent: 'gray' }
 ]
 
 export const ROLE_TXT = { admin: '管理员', owner: '负责人', member: '成员', viewer: '查看者' }

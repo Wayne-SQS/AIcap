@@ -1,11 +1,16 @@
 <script setup>
 import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useSessionStore } from '@/stores/session'
 // 侧栏结构逐字对齐旧版 index.html L407-433(选择器保留:.navitem[data-view]/.navtitle/.teamdots)
 const router = useRouter()
+const session = useSessionStore()
+const selectedName = computed(() => session.accessibleProjects.find(p => Number(p.id) === session.currentProjectId)?.name || '爱管理 · 开发小队')
 const navGroups = [
   {
     title: '项目空间',
     items: [
+      { view: 'projects', icon: '▣', label: '项目与成员' },
       { view: 'overview', icon: '◈', label: '项目总览' },
       { view: 'pool', icon: '◆', label: '需求池' },
       { view: 'board', icon: '▦', label: '用户故事看板' },
@@ -30,6 +35,11 @@ const navGroups = [
   }
 ]
 function go(v) { router.push({ name: v }) }
+function itemsFor(group) {
+  return session.online && session.currentProjectId !== 1
+    ? group.items.filter(item => ['projects', 'overview', 'pool', 'board', 'gantt', 'members'].includes(item.view))
+    : group.items
+}
 </script>
 
 <template>
@@ -38,12 +48,12 @@ function go(v) { router.push({ name: v }) }
       <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
       <span>爱管理<small>TEAM WORKSPACE</small></span>
     </div>
-    <div class="project"><span class="small">当前项目 / PROJECT</span><br>爱管理 · 开发小队</div>
+    <div class="project"><span class="small">当前项目 / PROJECT</span><br>{{ selectedName }}</div>
     <nav aria-label="功能导航">
       <template v-for="group in navGroups" :key="group.title">
         <div class="navtitle" :style="group.topGap ? 'margin-top:24px' : ''">{{ group.title }}</div>
         <div
-          v-for="item in group.items"
+          v-for="item in itemsFor(group)"
           :key="item.view"
           class="navitem"
           :class="{ active: $route.name === item.view }"
@@ -62,7 +72,7 @@ function go(v) { router.push({ name: v }) }
       <div class="teamdots">
         <span class="avatar">P1</span><span class="avatar a1">P2</span><span class="avatar a2">P3</span><span class="avatar a3">P4</span>
       </div>
-      <p class="small">四人小队，共同推进。</p>
+      <p class="small">{{ session.online && session.currentProjectId !== 1 ? '项目成员，共同推进。' : '四人小队，共同推进。' }}</p>
       <p class="small" style="margin-top:-6px">像素风可交互原型 · 本机自动保存</p>
     </div>
   </aside>

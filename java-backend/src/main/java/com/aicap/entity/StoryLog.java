@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class StoryLog {
     @TableId(type = IdType.AUTO)
     private Integer id;
+    private Long projectId;
     private String storyId;
     private String logType;       // create/edit/move/del
     private String detail;

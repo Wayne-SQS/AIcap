@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class PoolItem {
     @TableId(type = IdType.INPUT)
     private String id;            // R01..
+    private Long projectId;
     private String title;
     private String description;
     private String source;

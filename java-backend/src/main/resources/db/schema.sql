@@ -16,15 +16,56 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `color` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `capacity_hours` int NOT NULL DEFAULT '60' COMMENT '六周可用容量(小时),成员负载视图分母',
+  `capacity_hours` int DEFAULT NULL COMMENT '每周可用容量(人时);NULL 表示未配置',
   PRIMARY KEY (`id`),
   UNIQUE KEY `ix_users_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `projects` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(200) NOT NULL,
+  `description` varchar(1000) NOT NULL DEFAULT '',
+  `created_by` int DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `project_members` (
+  `project_id` bigint NOT NULL,
+  `user_id` int NOT NULL,
+  `member_role` varchar(20) NOT NULL DEFAULT 'member',
+  PRIMARY KEY (`project_id`,`user_id`),
+  KEY `ix_project_members_user` (`user_id`),
+  CONSTRAINT `fk_project_members_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_project_members_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `roles` (
+  `name` varchar(50) NOT NULL,
+  `can_write` tinyint(1) NOT NULL DEFAULT 0,
+  `can_manage` tinyint(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `epics` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` bigint NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `description` varchar(500) NOT NULL DEFAULT '',
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ux_epics_project_name` (`project_id`,`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `stories` (
   `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` bigint NOT NULL DEFAULT 1,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `story_role` varchar(200) NOT NULL DEFAULT '',
+  `story_goal` varchar(500) NOT NULL DEFAULT '',
+  `story_value` varchar(500) NOT NULL DEFAULT '',
+  `epic_id` bigint DEFAULT NULL,
   `acceptance` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `priority` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `sprint` int NOT NULL,
@@ -39,6 +80,7 @@ CREATE TABLE IF NOT EXISTS `stories` (
 
 CREATE TABLE IF NOT EXISTS `tasks` (
   `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` bigint NOT NULL DEFAULT 1,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `owner_id` int NOT NULL,
   `hours` int NOT NULL,
@@ -57,8 +99,21 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   CONSTRAINT `fk_task_kanban_card` FOREIGN KEY (`kanban_card_id`) REFERENCES `stories` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `task_logs` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` bigint NOT NULL DEFAULT 1,
+  `task_id` varchar(10) NOT NULL,
+  `old_status` int DEFAULT NULL,
+  `new_status` int NOT NULL,
+  `user_id` int NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_task_logs_task` (`task_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `pool_items` (
   `id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` bigint NOT NULL DEFAULT 1,
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `source` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -159,6 +214,7 @@ CREATE TABLE IF NOT EXISTS `meeting_agent_events` (
 
 CREATE TABLE IF NOT EXISTS `story_logs` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `project_id` bigint NOT NULL DEFAULT 1,
   `story_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `log_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
   `detail` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -306,6 +362,7 @@ CREATE TABLE IF NOT EXISTS planning_agent_runs (
 
 CREATE TABLE IF NOT EXISTS `milestones` (
   `id` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `project_id` bigint NOT NULL DEFAULT 1,
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `week` int NOT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',

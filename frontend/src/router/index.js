@@ -5,6 +5,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   { path: '/', redirect: { name: 'overview' } },
   { path: '/overview', name: 'overview', component: () => import('@/views/OverviewView.vue') },
+  { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
   { path: '/pool', name: 'pool', component: () => import('@/views/PoolView.vue') },
   { path: '/board', name: 'board', component: () => import('@/views/BoardView.vue') },
   { path: '/gantt', name: 'gantt', component: () => import('@/views/GanttView.vue') },
@@ -24,6 +25,15 @@ const routes = [
 const router = createRouter({
   history: createWebHashHistory(),
   routes
+})
+
+router.beforeEach(async to => {
+  const { useSessionStore } = await import('@/stores/session')
+  const session = useSessionStore()
+  if (!session.online || to.name === 'projects') return
+  if (!session.accessibleProjects.length) return { name: 'projects' }
+  if (session.currentProjectId !== 1 && !['overview', 'pool', 'board', 'gantt', 'members'].includes(to.name))
+    return { name: 'projects' }
 })
 
 // 对应旧版 go() 的 window.scrollTo({top:0})

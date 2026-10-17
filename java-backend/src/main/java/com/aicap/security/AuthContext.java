@@ -9,6 +9,8 @@ import com.aicap.entity.User;
 public final class AuthContext {
 
     private static final ThreadLocal<User> HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<RolePolicy.Permissions> PERMISSIONS = new ThreadLocal<>();
+    private static final ThreadLocal<Long> PROJECT = new ThreadLocal<>();
 
     private AuthContext() {
     }
@@ -16,6 +18,16 @@ public final class AuthContext {
     public static void set(User user) {
         HOLDER.set(user);
     }
+
+    public static void setPermissions(RolePolicy.Permissions permissions) { PERMISSIONS.set(permissions); }
+    public static void setProjectId(long projectId) { PROJECT.set(projectId); }
+    public static long projectId() { return PROJECT.get() == null ? 1L : PROJECT.get(); }
+
+    public static boolean canWrite() { return PERMISSIONS.get() != null && PERMISSIONS.get().canWrite(); }
+
+    public static boolean canManage() { return PERMISSIONS.get() != null && PERMISSIONS.get().canManage(); }
+
+    public static boolean hasPermissions() { return PERMISSIONS.get() != null; }
 
     public static User currentUser() {
         return HOLDER.get();
@@ -28,6 +40,8 @@ public final class AuthContext {
 
     public static void clear() {
         HOLDER.remove();
+        PERMISSIONS.remove();
+        PROJECT.remove();
     }
 
     /** 是否具备任一角色;viewer 无写权限故不在此列。 */

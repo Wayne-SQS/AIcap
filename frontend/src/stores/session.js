@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { authApi } from '@/api/auth'
-import { health, setAuthToken, getAuthToken } from '@/api/client'
+import { health, setAuthToken, getAuthToken, getProjectId, setProjectId } from '@/api/client'
+import { projectsApi } from '@/api/projects'
 import { useToast } from '@/composables/useToast'
 
 /* 会话与在线/离线模式:对齐旧版 index.html L1262-1341 的
@@ -10,26 +11,40 @@ export const useSessionStore = defineStore('session', {
     apiMode: false,
     authToken: getAuthToken(),
     currentUser: null,
+    accessibleProjects: [],
+    currentProjectId: getProjectId(),
     loginOpen: false,
-    booting: false
+    booting: false,
+    sessionEpoch: 0
   }),
   getters: {
-    isViewer: s => s.apiMode && s.currentUser && s.currentUser.role === 'viewer',
+    isViewer: s => s.apiMode && s.currentUser && (s.currentUser.can_write === false || s.currentUser.role === 'viewer'),
     /** 在线且角色为 admin/owner —— 与后端 `Roles.reviewer()` 同口径(删除故事/会议等入口的后端要求);
      *  离线演示模式下后端不可达,不参与判定,写入口不受限 */
-    canReview: s => s.apiMode && !!s.currentUser && ['admin', 'owner'].includes(s.currentUser.role),
+    canReview: s => s.apiMode && !!s.currentUser && (s.currentUser.can_manage === true || ['admin', 'owner'].includes(s.currentUser.role)),
     online: s => s.apiMode && !!s.currentUser
   },
   actions: {
     roleName(r) {
       return ({ admin: '管理员', owner: '负责人', member: '成员', viewer: '查看者' })[r] || r
     },
+    async selectProject(id) {
+      const selected = this.accessibleProjects.find(p => Number(p.id) === Number(id))
+      if (!selected) throw new Error('你不是此项目的成员')
+      this.currentProjectId = Number(id)
+      setProjectId(id)
+      await useProjectStoreSafe()?.loadAll()
+      const { default: router } = await import('@/router')
+      await router.push({ name: 'overview' })
+    },
     openLogin() { this.loginOpen = true },
     handleUnauthorized() {
       // 对齐旧版 401 分支:清会话转离线 + toast + 弹登录
+      this.sessionEpoch++
       this.apiMode = false
       this.authToken = null
       this.currentUser = null
+      this.accessibleProjects = []
       setAuthToken(null)
       useProjectStoreSafe()?.clearServerData()
       const { notify } = useToast()
@@ -45,10 +60,21 @@ export const useSessionStore = defineStore('session', {
           if (this.authToken) {
             try {
               this.currentUser = await authApi.me()
+              this.accessibleProjects = await projectsApi.list()
               const project = useProjectStoreSafe()
-              if (project) await project.loadAll()
+              const selected = this.accessibleProjects.find(p => Number(p.id) === getProjectId())
+                || this.accessibleProjects.find(p => Number(p.id) === 1) || this.accessibleProjects[0]
+              if (selected) {
+                this.currentProjectId = Number(selected.id)
+                setProjectId(selected.id)
+                if (project) await project.loadAll()
+              } else {
+                project?.clearServerData()
+                await goProjects()
+              }
             } catch (e) {
               this.authToken = null
+              this.accessibleProjects = []
               setAuthToken(null)
               useProjectStoreSafe()?.clearServerData()
               this.openLogin()
@@ -70,19 +96,37 @@ export const useSessionStore = defineStore('session', {
     },
     async login(username, password) {
       const data = await authApi.login(username, password)
-      this.authToken = data.access_token
-      this.currentUser = data.user
+      const token = data.access_token
+      const user = data.user
+      const epoch = ++this.sessionEpoch
+      this.authToken = token
+      this.currentUser = user
       setAuthToken(this.authToken)
       this.apiMode = true
       this.loginOpen = false
+      const projects = await projectsApi.list()
+      if (this.sessionEpoch !== epoch || !this.apiMode) return
+      this.accessibleProjects = projects
       const project = useProjectStoreSafe()
-      if (project) await project.loadAll()
+      const selected = this.accessibleProjects.find(p => Number(p.id) === getProjectId())
+        || this.accessibleProjects.find(p => Number(p.id) === 1) || this.accessibleProjects[0]
+      if (selected) {
+        this.currentProjectId = Number(selected.id)
+        setProjectId(selected.id)
+        if (project) await project.loadAll()
+      } else {
+        project?.clearServerData()
+        await goProjects()
+      }
+      if (this.sessionEpoch !== epoch || !this.apiMode) return
       const { notify } = useToast()
-      notify('欢迎，' + this.currentUser.display_name)
+      notify('欢迎，' + user.display_name)
     },
     async logout() {
+      this.sessionEpoch++
       this.authToken = null
       this.currentUser = null
+      this.accessibleProjects = []
       setAuthToken(null)
       this.apiMode = false
       useProjectStoreSafe()?.restoreLocal()
@@ -91,10 +135,12 @@ export const useSessionStore = defineStore('session', {
     },
     async goOffline() {
       // 登录弹窗的「离线演示模式」按钮
+      this.sessionEpoch++
       this.loginOpen = false
       this.apiMode = false
       this.authToken = null
       this.currentUser = null
+      this.accessibleProjects = []
       setAuthToken(null)
       useProjectStoreSafe()?.restoreLocal()
       const { notify } = useToast()
@@ -114,4 +160,9 @@ export const useSessionStore = defineStore('session', {
 import { useProjectStore } from '@/stores/project'
 function useProjectStoreSafe() {
   try { return useProjectStore() } catch (e) { return null }
+}
+
+async function goProjects() {
+  const { default: router } = await import('@/router')
+  await router.push({ name: 'projects' })
 }

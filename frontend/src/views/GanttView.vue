@@ -14,6 +14,7 @@ import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
+import { criticalPath } from '@/utils/criticalPath'
 
 /* 甘特图任务视图:
    - 每个任务占一行，Story 血缘保留在任务元数据与详情面板中
@@ -62,6 +63,8 @@ const selectedTask = computed(() => (selectedTaskId.value ? project.taskById(sel
 const selectedStory = computed(() => (selectedStoryId.value ? project.stories.find(s => s.id === selectedStoryId.value) : null))
 const predecessors = computed(() => (selectedTaskId.value ? project.predecessorsOf(selectedTaskId.value) : []))
 const dependents = computed(() => (selectedTaskId.value ? project.dependentsOf(selectedTaskId.value) : []))
+const deliveryPath = computed(() => criticalPath(project.tasks))
+const pathIds = computed(() => new Set(deliveryPath.value.ids))
 const relationOf = id => {
   if (!selectedTaskId.value || id === selectedTaskId.value) return ''
   if (predecessors.value.includes(id)) return 'predecessor'
@@ -90,6 +93,7 @@ function barOf(t, key) {
   if (t.type === 'management') cls.push('mgmt')
   else if (t.status === 2 || t.progress >= 100) cls.push('task-done')
   if (relation) cls.push(relation)
+  if (pathIds.value.has(t.id)) cls.push('critical-path')
   return {
     left: ((start - 1) / 6 * 100).toFixed(2),
     width: (span / 6 * 100).toFixed(2),
@@ -175,10 +179,11 @@ function scheduleWarnings(task, start, end) {
   if (project.storiesForTask(task).some(story => !sprints.has(story.sprint))) warnings.push('新排期与关联 Story Sprint 不完全一致')
   const other = project.tasks.filter(t => t.owner === task.owner && t.id !== task.id)
   const proposed = hoursByWeek(task, start, end)
-  const weeklyCapacity = project.capacityHours(task.owner) / 6
+  const weeklyCapacity = project.capacityHours(task.owner)
+  if (weeklyCapacity == null) warnings.push('负责人周容量未配置，无法判断是否超载')
   for (let week = 1; week <= 6; week++) {
     const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
-    if (weeklyCapacity && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
+    if (weeklyCapacity != null && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
   }
   return [...new Set(warnings)]
 }
@@ -246,6 +251,7 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
         <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
         <h1>甘特图</h1>
         <p>任务按计划周展示，保留 Story 血缘、负责人、优先级与管理任务语义；点击任务条可查看依赖并编辑排期。</p>
+        <button type="button" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.openNew()">新增任务</button>
       </div>
       <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
     </div>
@@ -306,7 +312,13 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
       <span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span>
       <span class="chip note">任务条 = 计划起止范围（不按工时比例）</span>
       <span class="chip note">点击任务条查看前置 / 后续任务</span>
+      <span class="chip note">红色边框 = 依赖最长链（按任务计划持续周数）</span>
     </div>
+    <div class="gantt-path" id="gantt-critical-path" v-if="deliveryPath.cycle">任务依赖存在循环，无法计算关键路径。</div>
+    <div class="gantt-path" id="gantt-critical-path" v-else-if="deliveryPath.ids.length">
+      <b>依赖关键路径</b> {{ deliveryPath.ids.join(' → ') }} · 链上工期累计 {{ deliveryPath.weeks }} 周（非日历跨度）
+    </div>
+    <div class="gantt-path" id="gantt-critical-path" v-else>暂无任务，无法计算关键路径。</div>
 
     <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;从任务详情可继续查看 Story -->
     <div class="gantt-detail" :class="{ empty: !selection }" id="gantt-detail">
@@ -351,6 +363,7 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
           <h3>{{ selectedStory.title }}</h3>
           <div class="actions">
             <button type="button" class="primary" :disabled="session.isViewer" :title="viewerTitle" @click="storyEditorRef?.open(selectedStory.id)">编辑故事</button>
+            <button type="button" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.openNew(selectedStory.id)">拆分为任务</button>
           </div>
         </div>
         <div class="detail-grid">

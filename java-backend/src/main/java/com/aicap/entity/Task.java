@@ -13,6 +13,7 @@ import lombok.Data;
 public class Task {
     @TableId(type = IdType.INPUT)
     private String id;            // T01..T16
+    private Long projectId;
     private String name;
     private Integer ownerId;
     private Integer hours;

@@ -15,6 +15,7 @@ import StoryCard from '@/components/board/StoryCard.vue'
 import StoryMapGrid from '@/components/board/StoryMapGrid.vue'
 import ChangeLogPanel from '@/components/board/ChangeLogPanel.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
+import EpicManagerDialog from '@/components/board/EpicManagerDialog.vue'
 import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 
 /* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
@@ -30,6 +31,7 @@ const search = ref('')
 const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
+const epicsRef = ref(null)
 const riskDialogRef = ref(null)
 const pendingStoryMove = ref(null)
 
@@ -100,15 +102,28 @@ function onCardDragEnd() {
 }
 
 async function onMapMove({ storyId, sprint: nextSprint, activity }) {
-  const analysis = await analyzeStorySprint(storyId, nextSprint)
-  pendingStoryMove.value = { storyId, sprint: nextSprint, activity }
-  riskDialogRef.value?.open({ taskId: storyId, title: `移动 ${storyId} 到 Sprint ${nextSprint} 的影响分析`, groups: analysis.groups, total: analysis.warnings.length })
+  const plan = project.storyMovePlan(storyId, { sprint: nextSprint, activity })
+  if (!plan) return
+  try {
+    const analysis = await analyzeStorySprint(storyId, nextSprint)
+    const items = []
+    if (plan.activityChanged) items.push(`骨干活动 A${plan.from.activity} → A${activity}；横轴是用户流程顺序，不代表优先级。`)
+    if (plan.sprintChanged) {
+      items.push(`迭代 S${plan.from.sprint} → S${nextSprint}`)
+      items.push(`级联挪动 ${plan.undone.length} 条未完成子任务${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周；已完成/已取消子任务保留原记录。`)
+    }
+    pendingStoryMove.value = { storyId, sprint: nextSprint, activity }
+    riskDialogRef.value?.open({ taskId: storyId, title: `移动 ${storyId} 的影响分析`,
+      groups: [{ type: 'placement', title: '落位变化', items }, ...analysis.groups],
+      total: items.length + analysis.warnings.length })
+  } catch (error) { notify(error.message) }
 }
 async function applyStoryMove({ storyId, sprint: nextSprint, activity }) {
   const result = await updateStoryPlacement(storyId, { sprint: nextSprint, activity })
   if (!result.ok || result.unchanged) return
   const conflicts = project.tasks.filter(t => taskRefs(t.story).includes(storyId) && !project.taskSprintList(t).includes(nextSprint))
-  if (conflicts.length) notify(`已更新；${conflicts.map(t => t.id).join('、')} 的执行 Sprint 与故事不同，请在甘特图复核`)
+  if (conflicts.length) notify(`${storyId} → A${activity} × Sprint ${nextSprint} · ${session.apiMode ? '已同步到服务器' : '离线演示数据'}；` +
+    `${conflicts.map(t => t.id).join('、')} 的执行 Sprint 与故事不同，请在甘特图复核`)
 }
 async function confirmStoryMove() {
   const pending = pendingStoryMove.value
@@ -163,7 +178,7 @@ async function resetDemo() {
         <h1>用户故事看板</h1>
         <p>把每一个想法，推进到完成。</p>
       </div>
-      <button class="primary" id="new" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor()">＋ 新建故事</button>
+      <div class="hero-actions"><button id="manage-epics" :disabled="session.apiMode && !session.canReview" @click="epicsRef?.open()">管理史诗</button><button class="primary" id="new" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="openEditor()">＋ 新建故事</button></div>
     </div>
 
     <BoardSummary :data="data" :total-stories="project.stories.length" />
@@ -210,7 +225,7 @@ async function resetDemo() {
     <div class="footer">
       <span>■ Must 必须做　■ Should 应该做　■ Could 可以做</span>
       <span id="savehint">{{ project.savehint }}</span>
-      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事（US01–US37 基线）</span>
+      <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事{{ !session.online || session.currentProjectId === 1 ? '（US01–US37 基线）' : '' }}</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="expjson" @click="exportJson">导出 JSON</button>
         <button id="expcsv" @click="exportCsv">导出 CSV</button>
@@ -220,6 +235,7 @@ async function resetDemo() {
 
     <ChangeLogPanel />
     <StoryEditorDialog ref="editorRef" :in-scope="inScope" />
+    <EpicManagerDialog ref="epicsRef" />
     <RiskConfirmDialog ref="riskDialogRef" @cancel="cancelStoryMove" @confirm="confirmStoryMove" />
   </section>
 </template>

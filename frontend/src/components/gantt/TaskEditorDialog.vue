@@ -19,6 +19,8 @@ const { guard } = usePermissionGuard()
 
 const dialogEl = ref(null)
 const editingId = ref(null)
+const creating = ref(false)
+const cardId = ref(null)
 const task = computed(() => project.tasks.find(t => t.id === editingId.value) || null)
 const form = reactive({ name: '', owner: '0', hours: 0, weekStart: '1', weekEnd: '1', storyRef: '', dependsOn: '' })
 
@@ -26,6 +28,8 @@ function open(id) {
   if (guard('编辑任务')) return false
   const t = project.tasks.find(x => x.id === id)
   if (!t) return false
+  creating.value = false
+  cardId.value = t.card
   editingId.value = id
   form.name = t.name
   form.owner = String(t.owner)
@@ -37,12 +41,28 @@ function open(id) {
   nextTick(() => { dialogEl.value?.showModal() })
   return true
 }
+function openNew(storyId = null) {
+  if (guard('新增任务')) return false
+  const story = project.stories.find(s => s.id === storyId)
+  creating.value = true
+  editingId.value = null
+  cardId.value = story?.id || null
+  form.name = ''
+  form.owner = String(story?.owner ?? project.members[0]?.id ?? 0)
+  form.hours = 0
+  form.weekStart = String(Math.min(6, Math.max(1, (story?.sprint || 1) * 2 - 1)))
+  form.weekEnd = form.weekStart
+  form.storyRef = story?.id || ''
+  form.dependsOn = ''
+  nextTick(() => { dialogEl.value?.showModal() })
+  return true
+}
 function close() { dialogEl.value?.close() }
 
 /** 引用串规范化:{US|M} 或 T 编号,去重并校验格式 */
 function normalizeRefs(value, kind) {
   const refs = taskRefs(value).map(id => id.toUpperCase())
-  const pattern = kind === 'US' ? /^US\d+$|^M\d+$/ : /^T\d+$/
+  const pattern = kind === 'US' ? /^US\d+$/ : /^T\d+$/
   if (refs.length !== new Set(refs).size || refs.some(id => !pattern.test(id))) {
     throw new Error(`请使用 ${kind === 'US' ? 'US' : 'T'} 编号并以逗号分隔`)
   }
@@ -50,7 +70,6 @@ function normalizeRefs(value, kind) {
 }
 
 async function submit() {
-  if (!editingId.value) return
   if (guard('保存任务')) return
   try {
     const weekStart = +form.weekStart, weekEnd = +form.weekEnd
@@ -58,7 +77,7 @@ async function submit() {
     if (!form.name.trim()) throw new Error('请填写任务名称')
     const storyRef = normalizeRefs(form.storyRef, 'US')
     const dependsOn = normalizeRefs(form.dependsOn, 'T')
-    if (taskRefs(dependsOn).includes(editingId.value)) throw new Error('任务不能依赖自身')
+    if (!creating.value && taskRefs(dependsOn).includes(editingId.value)) throw new Error('任务不能依赖自身')
     const missingStories = taskRefs(storyRef).filter(id => !project.stories.some(s => s.id === id))
     const missingTasks = taskRefs(dependsOn).filter(id => !project.tasks.some(t => t.id === id))
     if (missingStories.length) throw new Error('关联故事不存在：' + missingStories.join('、'))
@@ -73,41 +92,54 @@ async function submit() {
       story_ref: storyRef,
       depends_on: dependsOn
     }
+    if (creating.value) {
+      payload.task_type = cardId.value ? 'feature' : 'management'
+      if (cardId.value) payload.kanban_card_id = cardId.value
+    }
     if (session.apiMode) {
-      await tasksApi.patch(editingId.value, payload)
+      if (creating.value) await tasksApi.create(payload)
+      else await tasksApi.patch(editingId.value, payload)
       await project.loadAll()
     } else {
-      const t = project.tasks.find(x => x.id === editingId.value)
-      const keepEh = t.eh == null || t.eh === t.h
-      Object.assign(t, {
-        name: payload.name, owner: memberIndex(payload.owner_id), h: payload.hours,
-        w: [weekStart, weekEnd], story: storyRef, dependsOn,
-        sprints: derivedTaskSprints(weekStart, weekEnd)
-      })
-      if (keepEh) t.eh = payload.hours
-      project.addlog('edit', t.id, t.name + ' · 排期 W' + weekStart + '–W' + weekEnd)
+      if (creating.value) {
+        const next = Math.max(0, ...project.tasks.map(t => Number(/^T(\d+)$/.exec(t.id)?.[1] || 0))) + 1
+        const id = 'T' + String(next).padStart(2, '0')
+        project.tasks.push(project.mapTask({ ...payload, id, estimated_hours: payload.hours,
+          task_type: cardId.value ? 'feature' : 'management', status: 0, progress: 0 }))
+        project.addlog('create', id, payload.name)
+      } else {
+        const t = project.tasks.find(x => x.id === editingId.value)
+        const keepEh = t.eh == null || t.eh === t.h
+        Object.assign(t, {
+          name: payload.name, owner: memberIndex(payload.owner_id), h: payload.hours,
+          w: [weekStart, weekEnd], story: storyRef, dependsOn,
+          sprints: derivedTaskSprints(weekStart, weekEnd)
+        })
+        if (keepEh) t.eh = payload.hours
+        project.addlog('edit', t.id, t.name + ' · 排期 W' + weekStart + '–W' + weekEnd)
+      }
       project.persistTasks()
       project.checkConsistency()
     }
     close()
-    notify('任务已更新' + (session.apiMode ? ' · 已同步到服务器' : ' · 离线演示数据'))
+    notify((creating.value ? '任务已新增' : '任务已更新') + (session.apiMode ? ' · 已同步到服务器' : ' · 离线演示数据'))
   } catch (err) {
     notify(err.message)
   }
 }
 
-defineExpose({ open })
+defineExpose({ open, openNew })
 </script>
 
 <template>
   <dialog id="task-editor" ref="dialogEl" aria-labelledby="task-editheading">
     <form id="task-form" @submit.prevent="submit">
       <header>
-        <h2 id="task-editheading">任务详情</h2>
+        <h2 id="task-editheading">{{ creating ? '新增任务' : '任务详情' }}</h2>
         <button type="button" id="task-close" aria-label="关闭" @click="close">×</button>
       </header>
       <div class="formbody">
-        <div class="small" id="task-editid">{{ task ? `${task.id} · 任务排期属于执行层，关联 Story：${task.story || '未设置'}` : '' }}</div>
+        <div class="small" id="task-editid">{{ creating ? `关联 Story：${cardId || '未设置'}` : task ? `${task.id} · 任务排期属于执行层，关联 Story：${task.story || '未设置'}` : '' }}</div>
         <label class="field">任务名称<input name="name" v-model="form.name" required maxlength="200"></label>
         <div class="formrow">
           <label class="field">负责人<select name="owner" v-model="form.owner"><option v-for="m in project.members" :key="m.id" :value="String(m.id)">{{ m.name }}</option></select></label>
@@ -122,7 +154,7 @@ defineExpose({ open })
         <p class="small" style="margin:0">Story 属于需求层；任务日期和负责人属于执行层。调整任务排期不会自动改写 Story Sprint。</p>
         <div class="actions">
           <button type="button" id="task-cancel" @click="close">取消</button>
-          <button type="submit" class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">保存任务</button>
+          <button type="submit" class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">{{ creating ? '新增任务' : '保存任务' }}</button>
         </div>
       </div>
     </form>

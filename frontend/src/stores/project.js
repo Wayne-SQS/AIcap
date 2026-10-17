@@ -5,7 +5,9 @@ import { tasksApi } from '@/api/tasks'
 import { poolApi } from '@/api/pool'
 import { authApi } from '@/api/auth'
 import { milestonesApi } from '@/api/milestones'
-import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
+import { dashboardApi } from '@/api/dashboard'
+import { epicsApi } from '@/api/epics'
+import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY, EPICS_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
 import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
 
@@ -37,7 +39,33 @@ function loadStories() {
       else stories = saved
     }
   } catch { ok = false }
+  stories = stories.map(story => ({
+    ...story,
+    epicId: Object.hasOwn(story, 'epicId') ? story.epicId : baselineEpicId(story.id)
+  }))
   return { stories, storageOK: ok }
+}
+
+const BASELINE_EPICS = [
+  { id: 1, code: 'E1', name: '用户管理与权限', description: '' },
+  { id: 2, code: 'E2', name: '任务与协作', description: '' },
+  { id: 3, code: 'E3', name: '数据与分析', description: '' },
+  { id: 4, code: 'E4', name: 'AI 智能体与人机协作', description: '' }
+]
+function baselineEpicId(id) {
+  if (!/^US(0[1-9]|[12][0-9]|3[0-7])$/.test(id)) return null
+  const n = Number(id.slice(2))
+  if ([1, 2, 8, 16].includes(n)) return 1
+  if ([7, 15, 19, 20, 22, 23, 25, 28, 34, 36].includes(n)) return 3
+  if ([29, 30, 31, 32, 33, 35, 37].includes(n)) return 4
+  return 2
+}
+function loadEpics() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(EPICS_KEY))
+    if (Array.isArray(rows)) return rows
+  } catch { /* ignore */ }
+  return structuredClone(BASELINE_EPICS)
 }
 
 function loadPool() {
@@ -89,6 +117,7 @@ export const useProjectStore = defineStore('project', {
     const init = loadStories()
     return {
       stories: init.stories,
+      epics: loadEpics(),
       storageOK: init.storageOK,
       tasks: loadTasks(),
       pool: loadPool(),
@@ -96,6 +125,7 @@ export const useProjectStore = defineStore('project', {
       members: structuredClone(MEMBERS),
       milestones: structuredClone(MILESTONES),
       serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
+      serverLastUpdated: null,
       savehint: '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     }
   },
@@ -147,14 +177,21 @@ export const useProjectStore = defineStore('project', {
       return tail && tail !== m.role ? `${ROLE_TXT[m.roleKey] || m.roleKey} · ${tail}` : m.role
     },
     memberTasks: s => id => s.tasks.filter(t => t.owner === id),
-    capacityHours: s => id => Math.max(0, Number((s.members.find(x => x.id === id) || {}).capacity) || 0),
+    capacityHours: s => id => {
+      const capacity = s.members.find(x => x.id === id)?.capacity
+      return capacity == null ? null : Math.max(0, Number(capacity) || 0)
+    },
     allocatedHours: s => id => s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0),
     utilization: s => id => {
-      const cap = Number((s.members.find(x => x.id === id) || {}).capacity) || 0
-      return cap ? s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      const capacity = s.members.find(x => x.id === id)?.capacity
+      if (capacity == null) return null
+      const cap = Math.max(0, Number(capacity) || 0) * 6
+      const allocated = s.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0)
+      return cap ? allocated / cap : (allocated > 0 ? Infinity : 0)
     },
     /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
     capacityStatus: () => utilization => {
+      if (utilization == null) return { key: 'unset', label: '未配置' }
       if (utilization > 1) return { key: 'over', label: '超载' }
       if (utilization >= .8) return { key: 'busy', label: '偏忙' }
       if (utilization >= .6) return { key: 'normal', label: '正常' }
@@ -232,7 +269,9 @@ export const useProjectStore = defineStore('project', {
        (偏移= id-1 是位置对齐,全部集中在那一处,并带连续性告警) */
     mapStory(s) {
       return {
-        id: s.id, title: s.title, description: s.description, acceptance: s.acceptance,
+        id: s.id, title: s.title, description: s.description, role: s.role || '',
+        goal: s.goal || '', value: s.value || '', acceptance: s.acceptance,
+        epicId: s.epic_id ?? null,
         priority: s.priority, sprint: s.sprint, activity: s.activity, status: s.status,
         owner: memberIndex(s.owner_id)
       }
@@ -268,7 +307,7 @@ export const useProjectStore = defineStore('project', {
           ...m,
           name: u.display_name || u.username,
           roleKey: u.role || m.roleKey,
-          capacity: u.capacity_hours || m.capacity
+          capacity: Object.hasOwn(u, 'capacity_hours') ? u.capacity_hours : m.capacity
         }
       })
       // 后端用户多于本地种子时补齐,避免真实成员在视图里缺失
@@ -277,7 +316,7 @@ export const useProjectStore = defineStore('project', {
         if (!this.members.some(m => m.id === idx)) {
           this.members.push({
             id: idx, name: u.display_name || u.username, role: ROLE_TXT[u.role] || u.role,
-            roleKey: u.role, tag: '', capacity: u.capacity_hours || 60,
+            roleKey: u.role, tag: '', capacity: Object.hasOwn(u, 'capacity_hours') ? u.capacity_hours : null,
             accent: MEMBER_COLORS[idx] || 'gray'
           })
         }
@@ -294,15 +333,24 @@ export const useProjectStore = defineStore('project', {
       this.checkConsistency()
     },
     async loadAll() {
-      const [st, tk, pl, lg, users] = await Promise.all([
-        storiesApi.list(), tasksApi.list(), poolApi.list(), storiesApi.logs(), authApi.users()
+      const session = useSessionStore()
+      const token = session.authToken
+      const [st, tk, pl, lg, users, dashboard] = await Promise.all([
+        storiesApi.list(), tasksApi.list(), poolApi.list(), storiesApi.logs(), authApi.users(), dashboardApi.get()
       ])
       let milestoneRows = []
       try { milestoneRows = await milestonesApi.list() } catch { milestoneRows = [] }
+      let epicRows = []
+      try { epicRows = await epicsApi.list() } catch { epicRows = [] }
+      if (!session.online || session.authToken !== token) return
       this.stories = st.map(this.mapStory)
+      this.epics = epicRows
       this.tasks = tk.map(this.mapTask)
       this.mergeMembers(users)
-      this.pool = pl.map(p => ({ id: p.id, title: p.title, desc: p.description, source: p.source, created: '—', priority: p.priority }))
+      this.pool = pl.map(p => ({
+        id: p.id, title: p.title, desc: p.description, source: p.source,
+        created: p.created_at ? String(p.created_at).slice(5, 10) : '—', priority: p.priority
+      }))
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
          与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
       this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
@@ -310,6 +358,7 @@ export const useProjectStore = defineStore('project', {
         id: m.id, week: m.week, name: m.name, desc: m.description || '',
         status: m.status || 'planned', related: m.related_task_ids ?? m.relatedTaskIds ?? ''
       }))
+      this.serverLastUpdated = dashboard.last_updated_at || null
       this.serverSync = true
       this.savehint = '已连接后端 · 数据实时同步到服务器'
       this.checkConsistency()
@@ -347,8 +396,10 @@ export const useProjectStore = defineStore('project', {
         (plan.undone.length ? ` · 级联挪动 ${plan.undone.length} 条未完成子任务 ${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周` : ''))
     },
     clearServerData() {
+      this.serverLastUpdated = null
       // 后端在线但尚未完成认证时，禁止本地演示缓存进入正式项目集合。
       this.stories = []
+      this.epics = []
       this.tasks = []
       this.pool = []
       this.log = []
@@ -357,8 +408,10 @@ export const useProjectStore = defineStore('project', {
       this.savehint = '已连接后端 · 登录后加载正式项目数据'
     },
     restoreLocal() {
+      this.serverLastUpdated = null
       const init = loadStories()
       this.stories = init.stories
+      this.epics = loadEpics()
       this.pool = loadPool()
       this.tasks = loadTasks()
       this.members = structuredClone(MEMBERS)
@@ -370,6 +423,7 @@ export const useProjectStore = defineStore('project', {
     persist() {
       try {
         localStorage.setItem(STORIES_KEY, JSON.stringify(this.stories))
+        localStorage.setItem(EPICS_KEY, JSON.stringify(this.epics))
         this.storageOK = true
       } catch { this.storageOK = false }
     },
@@ -430,7 +484,7 @@ export const useProjectStore = defineStore('project', {
       if (memberIds.some((id, i) => id !== i)) {
         errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
       }
-      this.members.forEach(m => { if ((Number(m.capacity) || 0) <= 0) errors.push(`成员 ${m.name} 容量无效`) })
+      this.members.forEach(m => { if (!Number.isFinite(Number(m.capacity)) || Number(m.capacity) < 0) errors.push(`成员 ${m.name} 容量无效`) })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)
       const result = { warnings, errors }

@@ -42,9 +42,9 @@ class ProjectGenerationValidatorTest {
         member.setId(1);
         member.setDisplayName("测试成员");
         member.setRole("member");
-        member.setCapacityHours(60);
-        when(stories.selectList(nullable(Wrapper.class))).thenReturn(List.of());
-        when(tasks.selectList(nullable(Wrapper.class))).thenReturn(List.of());
+        member.setCapacityHours(10);
+        lenient().when(stories.selectList(nullable(Wrapper.class))).thenReturn(List.of());
+        lenient().when(tasks.selectList(nullable(Wrapper.class))).thenReturn(List.of());
         when(users.selectList(any(Wrapper.class))).thenReturn(List.of(member));
         lenient().when(users.selectById(1)).thenReturn(member);
         validator = new ProjectGenerationValidator(stories, tasks, users, mapper);
@@ -136,6 +136,14 @@ class ProjectGenerationValidatorTest {
                 () -> validator.revalidateEditedDraft(normalized, "merge"));
 
         assertTrue(error.getMessage().contains("优先级不合法"));
+    }
+
+    @Test
+    void generatedScheduleUsesWeeklyCapacity() {
+        ObjectNode raw = baseDraft();
+        task(raw, "A", "高负载任务", 1).put("hours", 11);
+        ObjectNode normalized = validator.normalize(raw, "replace");
+        assertTrue(normalized.path("risks").toString().contains("周容量 10.0h"), normalized.toString());
     }
 
     private ObjectNode baseDraft() {

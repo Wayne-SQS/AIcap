@@ -17,7 +17,7 @@ const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
 const showForm = ref(false)
-const form = reactive({ title: '', desc: '', pri: 'Could' })
+const form = reactive({ id: '', title: '', desc: '', source: '', pri: 'Could' })
 /* 只读账号(viewer)的新增/移入/移除入口保持可见但禁用,title 说明原因 */
 const viewerTitle = computed(() => (session.isViewer ? READONLY_TITLE : ''))
 
@@ -29,30 +29,58 @@ const promoting = ref(false)
 
 function startAdd() {
   if (guard('新增需求')) return
+  form.id = ''
+  form.title = ''
+  form.desc = ''
+  form.source = ''
+  form.pri = 'Could'
   showForm.value = true
+}
+function startEdit(item) {
+  if (guard('细化需求')) return
+  form.id = item.id
+  form.title = item.title
+  form.desc = item.desc || ''
+  form.source = item.source || ''
+  form.pri = item.priority
+  showForm.value = true
+  nextTick(() => document.getElementById('pool-title')?.focus())
 }
 function cancelForm() {
   showForm.value = false
+  form.id = ''
   form.title = ''
   form.desc = ''
+  form.source = ''
 }
 
 async function save() {
   if (guard('保存需求')) return
-  const title = form.title.trim(), desc = form.desc.trim()
+  const title = form.title.trim(), desc = form.desc.trim(), source = form.source.trim() || '手动新增'
   if (!title) { notify('请填写需求标题'); return }
   if (session.apiMode) {
     try {
-      await poolApi.create({ title, description: desc || '（待补充描述）', source: '手动新增', priority: form.pri })
+      const editing = Boolean(form.id)
+      const payload = { title, description: desc || '（待补充描述）', source, priority: form.pri }
+      if (editing) await poolApi.update(form.id, payload)
+      else await poolApi.create(payload)
       cancelForm()
       await project.loadAll()
-      notify('已保存到需求池（服务器）')
+      notify(editing ? '需求池条目已更新（服务器）' : '已保存到需求池（服务器）')
     } catch (err) { notify(err.message) }
   } else {
+    if (form.id) {
+      const item = project.pool.find(p => p.id === form.id)
+      if (item) Object.assign(item, { title, desc: desc || '（待补充描述）', source, priority: form.pri })
+      project.persistPool()
+      cancelForm()
+      notify('需求池条目已保存')
+      return
+    }
     const d = new Date()
     project.pool.unshift({
       id: 'R' + String(Math.max(4, ...project.pool.map(x => +x.id.slice(1) || 0)) + 1).padStart(2, '0'),
-      title, desc: desc || '（待补充描述）', source: '手动新增 · ' + (session.currentUser?.display_name || '离线'),
+      title, desc: desc || '（待补充描述）', source,
       created: String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
       priority: form.pri
     })
@@ -145,10 +173,11 @@ async function submitPromote() {
     <p class="pool-note">需求池条目允许 Sprint / 负责人为空；细化后可「移入看板」成为正式用户故事，并保留来源与历史。需求池不计入已承诺 Sprint 完成率。</p>
     <div class="pool-form" id="pool-form" v-show="showForm">
       <input id="pool-title" v-model="form.title" placeholder="需求标题（如：支持第三方账号登录）">
-      <textarea id="pool-desc" v-model="form.desc" placeholder="描述 / 来源（如：会议 2026-09-06 · 成员2 提出）"></textarea>
+      <textarea id="pool-desc" v-model="form.desc" placeholder="需求描述（可后续细化）"></textarea>
+      <input id="pool-source" v-model="form.source" placeholder="来源（如：计划会 2026-09-06；留空为手动新增）">
       <div class="row">
         <select id="pool-pri" v-model="form.pri"><option>Must</option><option>Should</option><option>Could</option></select>
-        <button class="primary" id="pool-save" :disabled="session.isViewer" :title="viewerTitle" @click="save">保存到需求池</button>
+        <button class="primary" id="pool-save" :disabled="session.isViewer" :title="viewerTitle" @click="save">{{ form.id ? '保存修改' : '保存到需求池' }}</button>
         <button id="pool-cancel" @click="cancelForm">取消</button>
       </div>
     </div>
@@ -163,6 +192,7 @@ async function submitPromote() {
           <div class="pmeta"><span>来源 · {{ p.source }}</span><span>创建 · {{ p.created }}</span></div>
         </div>
         <div class="pacts">
+          <button :data-edit="p.id" :disabled="session.isViewer" :title="viewerTitle" @click="startEdit(p)">细化</button>
           <button class="primary" :data-promote="p.id" :disabled="session.isViewer" :title="viewerTitle" @click="openPromote(p.id)">移入看板</button>
           <button class="danger" :data-drop="p.id" :disabled="session.isViewer" :title="viewerTitle" @click="dropPool(p.id)">移除</button>
         </div>

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -71,12 +72,16 @@ public class ImpactAnalysisService {
                 if (owner != null) {
                     int[] before = beforeLoads.getOrDefault(newOwner, new int[6]);
                     int[] after = afterLoads.getOrDefault(newOwner, new int[6]);
-                    int weeklyCapacity = Math.max(1, owner.getCapacityHours() / 6);
+                    if (owner.getCapacityHours() == null) {
+                        addRisk(load, "info", taskId, owner.getDisplayName() + " 周容量未配置，无法判断是否超载");
+                        continue;
+                    }
+                    double weeklyCapacity = Math.max(0, owner.getCapacityHours());
                     for (int week = 0; week < 6; week++) {
                         if (after[week] > weeklyCapacity) {
                             addRisk(load, "high", taskId, owner.getDisplayName() + " W" + (week + 1)
                                     + "：修改前 " + before[week] + "h，修改后 " + after[week]
-                                    + "h，周容量 " + weeklyCapacity + "h");
+                                    + "h，周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
                         }
                     }
                     if (sum(before) != sum(after)) {

@@ -7,10 +7,17 @@ import com.aicap.mapper.UserMapper;
 import com.aicap.security.JwtUtil;
 import com.aicap.security.PasswordUtil;
 import com.aicap.security.Roles;
+import com.aicap.security.RolePolicy;
+import com.aicap.security.AuthContext;
+import com.aicap.security.ProjectAccess;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -41,6 +48,8 @@ public class AuthController {
     private final UserMapper userMapper;
     private final JwtUtil jwtUtil;
     private final PasswordUtil passwordUtil;
+    private final RolePolicy rolePolicy;
+    private final ProjectAccess projectAccess;
 
     @PostMapping("/login")
     public AuthDtos.TokenOut login(@RequestBody AuthDtos.LoginIn body) {
@@ -55,18 +64,50 @@ public class AuthController {
             throw ApiException.unauthorized("用户名或密码错误");
         }
         return new AuthDtos.TokenOut(jwtUtil.createToken(user.getId()), "bearer",
-                AuthDtos.toUserOut(user));
+                AuthDtos.toUserOut(user, rolePolicy.forRole(user.getRole())));
     }
 
     @GetMapping("/me")
     public AuthDtos.UserOut me() {
-        return AuthDtos.toUserOut(Roles.any());
+        User user = Roles.any();
+        return AuthDtos.toUserOut(user, rolePolicy.forRole(user.getRole()));
     }
 
     @GetMapping("/users")
     public List<AuthDtos.UserOut> users() {
         Roles.any();
         return userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"))
-                .stream().map(AuthDtos::toUserOut).toList();
+                .stream().filter(u -> projectAccess.isMember(AuthContext.projectId(), u.getId()))
+                .map(u -> AuthDtos.toUserOut(u, rolePolicy.forRole(u.getRole()))).toList();
+    }
+
+    @PatchMapping("/users/{userId}")
+    public AuthDtos.UserOut patchUser(@PathVariable Integer userId, @RequestBody JsonNode body) {
+        Roles.reviewer();
+        if (AuthContext.projectId() != 1) throw ApiException.notImplemented("项目成员容量配置尚未启用");
+        User user = userMapper.selectById(userId);
+        if (user == null) throw ApiException.notFound("成员不存在");
+        if (!body.has("capacity_hours") && !body.has("role"))
+            throw ApiException.unprocessable("capacity_hours 或 role 至少提供一项");
+        UpdateWrapper<User> update = new UpdateWrapper<User>().eq("id", userId);
+        if (body.has("capacity_hours")) {
+            JsonNode value = body.get("capacity_hours");
+            if (value.isNull()) update.set("capacity_hours", null);
+            else {
+                if (!value.isIntegralNumber()) throw ApiException.unprocessable("capacity_hours 必须为整数或 null");
+                int capacity = value.asInt();
+                if (capacity < 0 || capacity > 10000)
+                    throw ApiException.unprocessable("capacity_hours 必须在 0..10000 之间");
+                update.set("capacity_hours", capacity);
+            }
+        }
+        if (body.has("role")) {
+            if (!body.get("role").isTextual() || !rolePolicy.exists(body.get("role").asText()))
+                throw ApiException.unprocessable("角色不存在");
+            update.set("role", body.get("role").asText());
+        }
+        userMapper.update(null, update);
+        User updated = userMapper.selectById(userId);
+        return AuthDtos.toUserOut(updated, rolePolicy.forRole(updated.getRole()));
     }
 }

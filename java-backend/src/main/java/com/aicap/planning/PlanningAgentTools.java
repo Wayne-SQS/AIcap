@@ -37,7 +37,7 @@ public class PlanningAgentTools {
                         params(Map.of("sprint", "integer", "activity", "integer", "owner_id", "integer"))),
                 fn("get_tasks", "读取真实任务，可按 owner_id/week/sprint 筛选",
                         params(Map.of("owner_id", "integer", "week", "integer", "sprint", "integer"))),
-                fn("get_members", "读取真实成员、角色和容量", empty()),
+                fn("get_members", "读取真实成员、角色与每周容量 capacity_hours（null 表示未配置）", empty()),
                 fn("get_sprints", "读取当前项目有效迭代与周范围", empty()),
                 fn("get_task_by_id", "读取指定真实任务", param("task_id", "string")),
                 fn("get_story_by_id", "读取指定真实用户故事", param("story_id", "string")),
@@ -47,7 +47,7 @@ public class PlanningAgentTools {
                 fn("get_task_priority", "读取任务当前优先级", param("task_id", "string")),
                 fn("get_milestones", "读取真实项目里程碑", empty()),
                 fn("get_milestone_by_id", "读取指定里程碑", param("milestone_id", "string")),
-                fn("get_member_load", "读取指定成员六周负载", param("owner_id", "integer"))
+                fn("get_member_load", "读取指定成员六周负载和每周容量 weekly_capacity_hours", param("owner_id", "integer"))
         );
     }
 
@@ -236,6 +236,8 @@ public class PlanningAgentTools {
             node.put("name", user.getDisplayName());
             node.put("role", user.getRole());
             node.put("capacity_hours", user.getCapacityHours());
+            if (user.getCapacityHours() == null) node.putNull("weekly_capacity_hours");
+            else node.put("weekly_capacity_hours", user.getCapacityHours().doubleValue());
             items.add(node);
         });
         ObjectNode result = mapper.createObjectNode();
@@ -275,6 +277,8 @@ public class PlanningAgentTools {
         ObjectNode result = mapper.createObjectNode();
         result.put("owner_id", ownerId);
         result.put("capacity_hours", user.getCapacityHours());
+        if (user.getCapacityHours() == null) result.putNull("weekly_capacity_hours");
+        else result.put("weekly_capacity_hours", user.getCapacityHours().doubleValue());
         result.set("weekly_hours", values);
         return result;
     }

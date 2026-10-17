@@ -20,6 +20,8 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final UserMapper userMapper;
+    private final RolePolicy rolePolicy;
+    private final ProjectAccess projectAccess;
 
     /** 无需登录的路径(前缀匹配) */
     private static final String[] PUBLIC_PREFIXES = {
@@ -52,7 +54,27 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (user == null) {
             throw ApiException.unauthorized("未登录或登录已过期");
         }
+        // All legacy workspace tables belong to project 1. Check membership before every
+        // workspace route so alternative controllers and AI endpoints cannot bypass it.
+        long projectId = 1;
+        if (!path.startsWith("/api/projects") && !path.equals("/api/auth/me")) {
+            String selected = request.getHeader("X-Project-Id");
+            if (selected != null && !selected.isBlank()) {
+                try {
+                    projectId = Long.parseLong(selected);
+                } catch (NumberFormatException e) {
+                    throw ApiException.badRequest("X-Project-Id 无效");
+                }
+            }
+            projectAccess.requireMember(projectId, user.getId());
+            if (projectId != 1 && !(path.startsWith("/api/stories") || path.startsWith("/api/epics") || path.startsWith("/api/tasks")
+                    || path.startsWith("/api/pool") || path.startsWith("/api/milestones")
+                    || path.equals("/api/dashboard") || path.equals("/api/auth/users")))
+                throw ApiException.notImplemented("此项目的功能尚未启用");
+        }
         AuthContext.set(user);
+        AuthContext.setPermissions(rolePolicy.forRole(user.getRole()));
+        AuthContext.setProjectId(projectId);
         return true;
     }
 

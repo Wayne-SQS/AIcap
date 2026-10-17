@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /** 规划结果的确定性校验与影响分析，模型不能绕过这些规则。 */
@@ -206,8 +207,14 @@ public class PlanningAnalysisValidator {
         int count = Math.max(1, end - start + 1); int base = task.getHours() / count; int remainder = task.getHours() % count;
         for (int week = start; week <= end; week++) {
             int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
-            if (after > target.getCapacityHours()) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
-                    + " 调整后 " + after + "h / 周容量 " + target.getCapacityHours() + "h");
+            if (target.getCapacityHours() == null) {
+                warnings.add("成员负载：" + target.getDisplayName() + " 周容量未配置，无法判断是否超载");
+                break;
+            }
+            double weeklyCapacity = Math.max(0, target.getCapacityHours());
+            if (after > weeklyCapacity) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
+                    + " 调整后 " + after + "h / 周容量 "
+                    + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
         }
     }
 

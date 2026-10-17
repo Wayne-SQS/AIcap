@@ -16,7 +16,7 @@ public final class Roles {
     public static User writer() {
         User u = AuthContext.currentUser();
         if (u == null) throw ApiException.unauthorized("未登录或登录已过期");
-        if (AuthContext.hasAnyRole("admin", "owner", "member")) return u;
+        if (AuthContext.hasPermissions() ? AuthContext.canWrite() : AuthContext.hasAnyRole("admin", "owner", "member")) return u;
         throw ApiException.forbidden("无权限执行此操作");
     }
 
@@ -24,7 +24,7 @@ public final class Roles {
     public static User reviewer() {
         User u = AuthContext.currentUser();
         if (u == null) throw ApiException.unauthorized("未登录或登录已过期");
-        if (AuthContext.hasAnyRole("admin", "owner")) return u;
+        if (AuthContext.hasPermissions() ? AuthContext.canManage() : AuthContext.hasAnyRole("admin", "owner")) return u;
         throw ApiException.forbidden("无权限执行此操作");
     }
 

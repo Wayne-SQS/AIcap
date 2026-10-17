@@ -3,6 +3,7 @@ package com.aicap.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,8 +14,16 @@ import java.time.LocalDateTime;
 public class Story {
     @TableId(type = IdType.INPUT)
     private String id;            // US01..US37(新建走 US 命名空间) 
+    private Long projectId;
     private String title;
     private String description;
+    @TableField("story_role")
+    private String role;
+    @TableField("story_goal")
+    private String goal;
+    @TableField("story_value")
+    private String value;
+    private Long epicId;
     private String acceptance;
     private String priority;      // Must/Should/Could
     private Integer sprint;       // 1..4

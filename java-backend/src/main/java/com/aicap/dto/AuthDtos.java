@@ -2,6 +2,7 @@ package com.aicap.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.aicap.security.RolePolicy;
 
 /** 认证域 DTO(输出字段名对齐 FastAPI schemas:snake_case) */
 public final class AuthDtos {
@@ -18,7 +19,9 @@ public final class AuthDtos {
     public record UserOut(Integer id, String username,
                           @JsonProperty("display_name") String displayName,
                           String role, String color,
-                          @JsonProperty("capacity_hours") Integer capacityHours) {
+                          @JsonProperty("capacity_hours") Integer capacityHours,
+                          @JsonProperty("can_write") Boolean canWrite,
+                          @JsonProperty("can_manage") Boolean canManage) {
     }
 
     /** 登录响应(对齐 TokenOut) */
@@ -28,7 +31,14 @@ public final class AuthDtos {
     }
 
     public static UserOut toUserOut(com.aicap.entity.User u) {
+        boolean manage = "admin".equals(u.getRole()) || "owner".equals(u.getRole());
+        boolean write = manage || "member".equals(u.getRole());
+        return toUserOut(u, new RolePolicy.Permissions(write, manage));
+    }
+
+    public static UserOut toUserOut(com.aicap.entity.User u, RolePolicy.Permissions permissions) {
         return new UserOut(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole(), u.getColor(),
-                u.getCapacityHours() == null ? 60 : u.getCapacityHours());
+                u.getCapacityHours(),
+                permissions.canWrite(), permissions.canManage());
     }
 }
