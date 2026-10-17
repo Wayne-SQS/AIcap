@@ -35,7 +35,7 @@ class AuthContractTest extends ContractTestSupport {
     /** 新基线用户顺序与容量(李锐铭 60 / 高思晗 48 / 孙秋实 60 / 罗子涵 54 / 成员5 60) */
     private static final List<String> SEEDED_USERS = List.of(
             USER_ADMIN, USER_OWNER, USER_MEMBER, USER_MEMBER2, USER_VIEWER);
-    private static final List<Integer> SEEDED_CAPACITY = List.of(10, 8, 10, 9, 10);
+    private static final List<Integer> SEEDED_CAPACITY = List.of(60, 48, 60, 54, 60);
     private static final List<String> SEEDED_ROLES = List.of("admin", "owner", "member", "member", "viewer");
 
     /** 第 5 个用户(成员5 / viewer)的展示名:登录时也应能作为别名使用(FE-D02) */
@@ -62,8 +62,8 @@ class AuthContractTest extends ContractTestSupport {
         assertTrue(!r.json().path("access_token").asText().isEmpty(), "缺少 access_token: " + r.body());
         assertEquals("admin", r.json().path("user").path("role").asText());
         assertEquals(USER_ADMIN, r.json().path("user").path("username").asText());
-        assertEquals(10, r.json().path("user").path("capacity_hours").asInt(-1),
-                "登录响应的 user 必须带每周容量 capacity_hours=10: " + r.body());
+        assertEquals(60, r.json().path("user").path("capacity_hours").asInt(-1),
+                "登录响应的 user 必须带 capacity_hours=60: " + r.body());
     }
 
     @Test
@@ -96,7 +96,7 @@ class AuthContractTest extends ContractTestSupport {
         ApiResponse me = get("/api/auth/me", t);
         assertEquals(200, me.status(), me.body());
         assertEquals(USER_ADMIN, me.json().path("username").asText(), "别名 token 应解析为 " + USER_ADMIN);
-        assertEquals(10, me.json().path("capacity_hours").asInt(-1),
+        assertEquals(60, me.json().path("capacity_hours").asInt(-1),
                 "/api/auth/me 必须带 capacity_hours: " + me.body());
     }
 

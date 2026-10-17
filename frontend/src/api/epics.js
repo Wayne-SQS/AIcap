@@ -1,8 +1,9 @@
 import { api } from './client'
+function withProject(path, projectId) { return projectId ? path + (path.includes('?') ? '&' : '?') + 'projectId=' + encodeURIComponent(projectId) : path }
 
 export const epicsApi = {
-  list: () => api('/api/epics'),
-  create: payload => api('/api/epics', { method: 'POST', body: JSON.stringify(payload) }),
-  patch: (id, payload) => api('/api/epics/' + id, { method: 'PATCH', body: JSON.stringify(payload) }),
-  remove: id => api('/api/epics/' + id, { method: 'DELETE' })
+  list: projectId => api(withProject('/api/epics', projectId)),
+  create: (payload, projectId) => api(withProject('/api/epics', projectId), { method: 'POST', body: JSON.stringify(payload) }),
+  patch: (id, payload, projectId) => api(withProject('/api/epics/' + id, projectId), { method: 'PATCH', body: JSON.stringify(payload) }),
+  remove: (id, projectId) => api(withProject('/api/epics/' + id, projectId), { method: 'DELETE' })
 }

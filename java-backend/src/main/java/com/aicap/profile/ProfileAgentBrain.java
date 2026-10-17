@@ -116,7 +116,7 @@ public class ProfileAgentBrain {
             """;
 
     /** LLM 难度评估;不可用/失败/输出不合法 → null(降级规则引擎) */
-    public DifficultyConclusion assessDifficulty(Task t, int downstreamCount) {
+    public DifficultyConclusion assessDifficulty(String projectId, Task t, int downstreamCount) {
         if (!available() || t == null) return null;
         try {
             ProfileMemoryStore.Memory mem = memoryStore.difficultyMemory(t.getId());
@@ -130,7 +130,7 @@ public class ProfileAgentBrain {
                     "week_start", t.getWeekStart() == null ? 0 : t.getWeekStart(),
                     "week_end", t.getWeekEnd() == null ? 0 : t.getWeekEnd(),
                     "blocked", t.getBlocked() != null && t.getBlocked() == 1));
-            AgentRunOutcome o = runPhase("difficulty", DIFF_SYSTEM, facts + "\n\n" + mem.text());
+            AgentRunOutcome o = runPhase(projectId, "difficulty", DIFF_SYSTEM, facts + "\n\n" + mem.text());
             JsonNode f = objectMapper.readTree(o.outcome().finalJson());
             String level = f.path("level").asText("");
             if (!List.of("low", "medium", "high", "extreme").contains(level)) return null;
@@ -168,14 +168,14 @@ public class ProfileAgentBrain {
             """;
 
     /** LLM 成员分析;不可用/失败/输出不合法 → null(降级规则引擎) */
-    public Map<String, Object> memberAnalysis(Integer userId, Map<String, Object> objectiveFacts) {
+    public Map<String, Object> memberAnalysis(String projectId, Integer userId, Map<String, Object> objectiveFacts) {
         if (!available() || userId == null) return null;
         try {
             ProfileMemoryStore.Memory mem = memoryStore.memberMemory(userId);
             String facts = "## 本周期客观事实(由系统统计,可信)\n"
                     + objectMapper.writeValueAsString(objectiveFacts)
                     + "\n\n## 成员记忆\n" + mem.text();
-            AgentRunOutcome o = runPhase("member", MEMBER_SYSTEM, facts);
+            AgentRunOutcome o = runPhase(projectId, "member", MEMBER_SYSTEM, facts);
             JsonNode f = objectMapper.readTree(o.outcome().finalJson());
             if (!f.has("ai_inference") || !f.has("dynamic_profile")) return null;
 
@@ -243,11 +243,11 @@ public class ProfileAgentBrain {
             """;
 
     /** LLM 团队风险;不可用/失败/输出不合法 → null(降级规则引擎) */
-    public List<Map<String, Object>> teamRisks(Map<String, Object> teamFacts) {
+    public List<Map<String, Object>> teamRisks(String projectId, Map<String, Object> teamFacts) {
         if (!available()) return null;
         try {
             String facts = "## 团队事实摘要(由系统统计,可信)\n" + objectMapper.writeValueAsString(teamFacts);
-            AgentRunOutcome o = runPhase("team", RISK_SYSTEM, facts);
+            AgentRunOutcome o = runPhase(projectId, "team", RISK_SYSTEM, facts);
             JsonNode f = objectMapper.readTree(o.outcome().finalJson());
             List<Map<String, Object>> risks = objectMapper.convertValue(f.path("risks"),
                     new TypeReference<List<Map<String, Object>>>() {
@@ -271,8 +271,8 @@ public class ProfileAgentBrain {
 
     // ---------- 内部 ----------
 
-    private AgentRunOutcome runPhase(String phase, String systemPrompt, String userPrompt) {
-        ProfileAgentRuntime.AgentOutcome o = runtime.run(systemPrompt, userPrompt);
+    private AgentRunOutcome runPhase(String projectId, String phase, String systemPrompt, String userPrompt) {
+        ProfileAgentRuntime.AgentOutcome o = runtime.run(projectId, systemPrompt, userPrompt);
         AgentRunOutcome wrap = new AgentRunOutcome(phase, o);
         record(wrap);
         return wrap;

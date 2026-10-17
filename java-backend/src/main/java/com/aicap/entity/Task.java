@@ -7,38 +7,16 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** 任务(甘特条;对齐 FastAPI models.Task,含看板血缘字段) */
 @Data
 @TableName("tasks")
 public class Task {
-    @TableId(type = IdType.INPUT)
-    private String id;            // T01..T16
-    private Long projectId;
-    private String name;
-    private Integer ownerId;
-    private Integer hours;
-    private Integer weekStart;
-    private Integer weekEnd;
-    private String storyRef;
-    /**
-     * 所属看板卡(USxx);管理类任务为 NULL。
-     * updateStrategy=ALWAYS:解绑(显式 null)必须真正写库,默认 NOT_NULL 会跳过 null 字段,
-     * 导致"响应已解绑、库中仍挂卡"。
-     */
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
-    private String kanbanCardId;
-    /** 预估工时(加权进度分母) */
-    private Integer estimatedHours;
-    /** feature=开发任务挂卡 / management=管理任务 */
-    private String taskType;
-    /** 0待办 1进行中 2完成 3已取消 */
-    private Integer status;
-    /** 前置任务 ID(逗号分隔的 Txx;空串/空表示无前置) */
-    private String dependsOn;
-    /** MoSCoW 任务优先级，与 Story 使用同一枚举但独立存储 */
-    private String priority;
-    /** 完成百分比 0..100 */
-    private Integer progress;
-    /** 是否阻塞(库中 0/1,对外输出布尔) */
-    private Integer blocked;
+    @TableId(value = "internal_id", type = IdType.AUTO) private Long internalId;
+    private String projectId; private String code; private String name; private Integer ownerId; private Integer hours; private Integer weekStart; private Integer weekEnd; private Long storyInternalId; private String storyRef;
+    private String storyRefLegacy; private String dependsOnLegacy; private String kanbanCardIdLegacy;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS) private String kanbanCardId;
+    private Integer estimatedHours; private String taskType; private Integer status; private String dependsOn; private String priority; private Integer progress; private Integer blocked;
+
+    /** External/API compatibility: callers continue to use the business code as id. */
+    public String getId() { return code; }
+    public void setId(String id) { this.code = id; }
 }

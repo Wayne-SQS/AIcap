@@ -19,10 +19,6 @@ export function setAuthToken(token) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
-const PROJECT_KEY = 'aiguanli_project_id'
-export function getProjectId() { return Number(localStorage.getItem(PROJECT_KEY)) || 1 }
-export function setProjectId(id) { localStorage.setItem(PROJECT_KEY, String(id)) }
-
 /* 401 处理注入:由 main.js 绑定 session store,避免 client↔store 循环依赖 */
 let unauthorizedHandler = null
 export function setUnauthorizedHandler(fn) { unauthorizedHandler = fn }
@@ -36,7 +32,6 @@ export async function api(path, opts = {}, base = apiBase()) {
   const headers = Object.assign({}, opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, opts.headers || {})
   const token = getAuthToken()
   if (token) headers['Authorization'] = 'Bearer ' + token
-  headers['X-Project-Id'] = String(getProjectId())
   const res = await fetch(base + path, Object.assign({}, opts, { headers }))
   if (res.status === 401) {
     /* 先解析响应体拿后端真实原因(登录失败时是「用户名或密码错误」),解析不到才退回「未登录」 */

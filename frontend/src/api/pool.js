@@ -1,9 +1,10 @@
 import { api } from './client'
 
+function withProject(path, projectId) { return projectId ? path + (path.includes('?') ? '&' : '?') + 'projectId=' + encodeURIComponent(projectId) : path }
 export const poolApi = {
-  list: () => api('/api/pool'),
-  create: payload => api('/api/pool', { method: 'POST', body: JSON.stringify(payload) }),
-  update: (id, payload) => api('/api/pool/' + id, { method: 'PATCH', body: JSON.stringify(payload) }),
-  remove: id => api('/api/pool/' + id, { method: 'DELETE' }),
-  promote: (id, payload) => api('/api/pool/' + id + '/promote', { method: 'POST', body: JSON.stringify(payload) })
+  list: projectId => api(withProject('/api/pool', projectId)),
+  create: (payload, projectId) => api(withProject('/api/pool', projectId), { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id, payload, projectId) => api(withProject('/api/pool/' + id, projectId), { method: 'PATCH', body: JSON.stringify(payload) }),
+  remove: (id, projectId) => api(withProject('/api/pool/' + id, projectId), { method: 'DELETE' }),
+  promote: (id, payload, projectId) => api(withProject('/api/pool/' + id + '/promote', projectId), { method: 'POST', body: JSON.stringify(payload) })
 }

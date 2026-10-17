@@ -8,11 +8,10 @@ import com.aicap.security.JwtUtil;
 import com.aicap.security.PasswordUtil;
 import com.aicap.security.Roles;
 import com.aicap.security.RolePolicy;
-import com.aicap.security.AuthContext;
-import com.aicap.security.ProjectAccess;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import org.springframework.jdbc.core.JdbcTemplate;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,7 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final PasswordUtil passwordUtil;
     private final RolePolicy rolePolicy;
-    private final ProjectAccess projectAccess;
+    private final JdbcTemplate jdbc;
 
     @PostMapping("/login")
     public AuthDtos.TokenOut login(@RequestBody AuthDtos.LoginIn body) {
@@ -77,14 +77,13 @@ public class AuthController {
     public List<AuthDtos.UserOut> users() {
         Roles.any();
         return userMapper.selectList(new QueryWrapper<User>().orderByAsc("id"))
-                .stream().filter(u -> projectAccess.isMember(AuthContext.projectId(), u.getId()))
-                .map(u -> AuthDtos.toUserOut(u, rolePolicy.forRole(u.getRole()))).toList();
+                .stream().map(u -> AuthDtos.toUserOut(u, rolePolicy.forRole(u.getRole()))).toList();
     }
 
     @PatchMapping("/users/{userId}")
+    @Transactional
     public AuthDtos.UserOut patchUser(@PathVariable Integer userId, @RequestBody JsonNode body) {
         Roles.reviewer();
-        if (AuthContext.projectId() != 1) throw ApiException.notImplemented("项目成员容量配置尚未启用");
         User user = userMapper.selectById(userId);
         if (user == null) throw ApiException.notFound("成员不存在");
         if (!body.has("capacity_hours") && !body.has("role"))
@@ -92,19 +91,16 @@ public class AuthController {
         UpdateWrapper<User> update = new UpdateWrapper<User>().eq("id", userId);
         if (body.has("capacity_hours")) {
             JsonNode value = body.get("capacity_hours");
-            if (value.isNull()) update.set("capacity_hours", null);
-            else {
-                if (!value.isIntegralNumber()) throw ApiException.unprocessable("capacity_hours 必须为整数或 null");
-                int capacity = value.asInt();
-                if (capacity < 0 || capacity > 10000)
-                    throw ApiException.unprocessable("capacity_hours 必须在 0..10000 之间");
-                update.set("capacity_hours", capacity);
-            }
+            if (!value.isIntegralNumber() || value.asInt() < 0 || value.asInt() > 10000)
+                throw ApiException.unprocessable("capacity_hours 必须在 0..10000 之间；项目周容量请在项目成员中设置");
+            update.set("capacity_hours", value.asInt());
         }
         if (body.has("role")) {
-            if (!body.get("role").isTextual() || !rolePolicy.exists(body.get("role").asText()))
+            JsonNode value = body.get("role");
+            if (!value.isTextual() || !rolePolicy.exists(value.asText()))
                 throw ApiException.unprocessable("角色不存在");
-            update.set("role", body.get("role").asText());
+            update.set("role", value.asText());
+            jdbc.update("UPDATE project_members SET project_role=? WHERE user_id=?", value.asText(), userId);
         }
         userMapper.update(null, update);
         User updated = userMapper.selectById(userId);

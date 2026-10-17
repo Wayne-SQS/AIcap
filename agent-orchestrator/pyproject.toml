@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-orchestrator"
+version = "0.1.0"
+description = "AIcap 主管智能体编排层：跨进程编排 Java 平台，结构化地不持有数据库连接"
+requires-python = ">=3.11"
+# 契约《主管智能体_落地方案_v1.0.md》§5.1 定的是 fastapi/httpx/pydantic/uvicorn；
+# python-dotenv 是一处增补（backend/ 已在用，且契约自己就要求 .env.example）。
+# test_no_db 会读这份依赖清单，任何数据库驱动出现在这里都会让测试变红。
+dependencies = [
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "uvicorn[standard]>=0.29",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

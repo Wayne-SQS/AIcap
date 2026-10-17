@@ -5,6 +5,7 @@ import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.mapper.ActivityRecordMapper;
 import com.aicap.mapper.TaskMapper;
+import com.aicap.service.ProjectScopedResolver;
 import com.aicap.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -61,7 +62,8 @@ public class GitHubActivitySyncService {
     private final GitHubProperties props;
     private final ActivityRecordMapper activityMapper;
     private final UserMapper userMapper;
-    private final TaskMapper taskMapper;
+    private final ProjectScopedResolver projectScopedResolver;
+    private final ProjectRepositoryResolver repositoryResolver;
     private final ObjectMapper objectMapper;
 
     private final HttpClient http = HttpClient.newBuilder()
@@ -116,10 +118,14 @@ public class GitHubActivitySyncService {
         List<String> errors = castList(out.get("errors"));
         Map<String, Object> pulled = castMap(out.get("pulled"));
         Map<String, Integer> members = loadMembers();   // username/displayName/邮箱本地部分 → id
+        String projectId = repositoryResolver.resolveProjectId(props.getRepo()).orElse(null);
+        if (projectId == null) {
+            warnings.add("仓库未配置项目映射，GitHub 活动保留但任务关联保持未匹配");
+        }
 
         // 1) commits
         try {
-            FetchOutcome c = fetchCommits(from, to, warnings, errors);
+            FetchOutcome c = fetchCommits(from, to, warnings, errors, projectId);
             pulled.put("commits", c.pulled());
             persistAll(c.records(), out);
             bumpSkipped(out, c.unmapped());
@@ -128,7 +134,7 @@ public class GitHubActivitySyncService {
         }
         // 2) PR(合并事件)
         try {
-            FetchOutcome p = fetchMergedPullRequests(from, to, warnings, errors);
+            FetchOutcome p = fetchMergedPullRequests(from, to, warnings, errors, projectId);
             pulled.put("prs", p.pulled());
             persistAll(p.records(), out);
             bumpSkipped(out, p.unmapped());
@@ -137,7 +143,7 @@ public class GitHubActivitySyncService {
         }
         // 3) PR Reviews
         try {
-            FetchOutcome r = fetchReviews(from, to, warnings, errors);
+            FetchOutcome r = fetchReviews(from, to, warnings, errors, projectId);
             pulled.put("reviews", r.pulled());
             persistAll(r.records(), out);
             bumpSkipped(out, r.unmapped());
@@ -146,7 +152,7 @@ public class GitHubActivitySyncService {
         }
         // 4) Issues(创建)
         try {
-            FetchOutcome i = fetchIssues(from, to, warnings, errors);
+            FetchOutcome i = fetchIssues(from, to, warnings, errors, projectId);
             pulled.put("issues", i.pulled());
             persistAll(i.records(), out);
             bumpSkipped(out, i.unmapped());
@@ -163,7 +169,7 @@ public class GitHubActivitySyncService {
     private record FetchOutcome(List<ActivityRecord> records, int pulled, int unmapped) {}
 
     private FetchOutcome fetchCommits(LocalDate from, LocalDate to,
-                                      List<String> warnings, List<String> errors) throws Exception {
+                                      List<String> warnings, List<String> errors, String projectId) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         int pulled = 0;
@@ -190,7 +196,7 @@ public class GitHubActivitySyncService {
                     + (name.isBlank() ? login : name) + " · " + firstLine(message), 1000));
             r.setModule(scopeOf(message));
             r.setGithubEventId(sha);
-            r.setTaskId(resolveTask(title + " " + message));
+            r.setTaskId(resolveTask(projectId, title + " " + message));
             if (r.getUserId() == null) {
                 unmapped++;
                 warnings.add("commit " + truncate(sha, 7) + " 作者无法映射到系统成员(" + login + "/" + email + "),已跳过");
@@ -202,7 +208,7 @@ public class GitHubActivitySyncService {
     }
 
     private FetchOutcome fetchMergedPullRequests(LocalDate from, LocalDate to,
-                                                 List<String> warnings, List<String> errors) throws Exception {
+                                                 List<String> warnings, List<String> errors, String projectId) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         int pulled = 0;
@@ -225,7 +231,7 @@ public class GitHubActivitySyncService {
             r.setDetail(truncate("GitHub PR 已合并 · 合并人 " + p.path("merged_by").path("login").asText("")
                     + " · " + p.path("title").asText(""), 1000));
             r.setGithubEventId("pr-" + number + "-merged");
-            r.setTaskId(resolveTask(title + " " + body));
+            r.setTaskId(resolveTask(projectId, title + " " + body));
             if (r.getUserId() == null) {
                 unmapped++;
                 warnings.add("PR #" + number + " 创建者无法映射到系统成员(" + login + "),已跳过");
@@ -237,7 +243,7 @@ public class GitHubActivitySyncService {
     }
 
     private FetchOutcome fetchReviews(LocalDate from, LocalDate to,
-                                      List<String> warnings, List<String> errors) throws Exception {
+                                      List<String> warnings, List<String> errors, String projectId) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         int pulled = 0;
@@ -284,7 +290,7 @@ public class GitHubActivitySyncService {
     }
 
     private FetchOutcome fetchIssues(LocalDate from, LocalDate to,
-                                     List<String> warnings, List<String> errors) throws Exception {
+                                     List<String> warnings, List<String> errors, String projectId) throws Exception {
         Map<String, Integer> members = loadMembers();
         List<ActivityRecord> out = new ArrayList<>();
         int pulled = 0;
@@ -306,7 +312,7 @@ public class GitHubActivitySyncService {
             r.setTitle(truncate("Issue #" + number + ": " + title, 200));
             r.setDetail(truncate("GitHub issue 创建 · #" + number + " · " + firstLine(body), 1000));
             r.setGithubEventId("issue-" + number);
-            r.setTaskId(resolveTask(title + " " + body));
+            r.setTaskId(resolveTask(projectId, title + " " + body));
             if (r.getUserId() == null) {
                 unmapped++;
                 warnings.add("Issue #" + number + " 创建者无法映射到系统成员(" + login + "),已跳过");
@@ -456,11 +462,10 @@ public class GitHubActivitySyncService {
     }
 
     /** PR/Issue/commit 文本中提取 Txx 任务号;任务存在才关联 */
-    private String resolveTask(String text) {
+    private String resolveTask(String projectId, String text) {
         String id = taskIdFrom(text);
-        if (id == null) return null;
-        Task t = taskMapper.selectById(id);
-        return t != null ? id : null;
+        if (id == null || projectId == null || projectId.isBlank()) return null;
+        return projectScopedResolver.findTask(projectId, id) != null ? id : null;
     }
 
     /** 纯提取(不查库,可单测):文本中第一个 Txx */

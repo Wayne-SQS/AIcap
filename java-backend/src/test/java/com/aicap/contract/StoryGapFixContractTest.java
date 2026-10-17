@@ -149,9 +149,9 @@ class StoryGapFixContractTest extends ContractTestSupport {
             assertEquals(403, patch("/api/auth/users/1", token(USER_VIEWER), json(map("capacity_hours", 0))).status());
             assertEquals(200, patch("/api/auth/users/1", admin, json(map("capacity_hours", 0))).status());
             assertEquals(0, get("/api/auth/users", admin).json().get(0).path("capacity_hours").asInt());
-            assertEquals(0, planningAgentTools.execute("get_member_load",
+            assertEquals(0, planningAgentTools.execute("P002", "get_member_load",
                     objectMapper.createObjectNode().put("owner_id", 1)).path("capacity_hours").asInt());
-            assertEquals(0.0, planningAgentTools.execute("get_member_load",
+            assertEquals(0.0, planningAgentTools.execute("P002", "get_member_load",
                     objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").asDouble());
             JsonNode profile = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", admin).json();
             boolean checkedProfile = false;
@@ -170,7 +170,7 @@ class StoryGapFixContractTest extends ContractTestSupport {
             assertTrue(impactAnalysisService.analyze(plan).toString().contains("周容量 0.0h"));
             assertEquals(200, patch("/api/auth/users/1", admin, "{\"capacity_hours\":null}").status());
             assertTrue(get("/api/auth/users", admin).json().get(0).path("capacity_hours").isNull());
-            assertTrue(planningAgentTools.execute("get_member_load",
+            assertTrue(planningAgentTools.execute("P002", "get_member_load",
                     objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").isNull());
             assertTrue(impactAnalysisService.analyze(plan).toString().contains("周容量未配置"));
         } finally {
@@ -190,7 +190,7 @@ class StoryGapFixContractTest extends ContractTestSupport {
                 .put("task_id", otherTask).put("to_owner_id", 1);
         JsonNode validated = planningValidator.validate(plan.toString());
         assertTrue(validated.path("warnings").toString().contains("周容量 10.0h"), validated.toString());
-        assertEquals(10.0, planningAgentTools.execute("get_member_load",
+        assertEquals(10.0, planningAgentTools.execute("P002", "get_member_load",
                 objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").asDouble());
     }
 

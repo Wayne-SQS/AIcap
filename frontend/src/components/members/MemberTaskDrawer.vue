@@ -98,11 +98,11 @@ onBeforeUnmount(() => {
         <div class="member-detail-head">
           <div>
             <b>{{ project.memberRoleText(memberId) }}</b>
-            <span class="small"> · 总任务 {{ mine.length }} · 未完成 {{ unfinished }} · 周容量 {{ project.capacityHours(memberId) == null ? '未配置' : project.capacityHours(memberId) + 'h/周' }}</span>
+            <span class="small" :title="`每周 ${project.weeklyCapacityHours(memberId)}h × ${project.projectWeeks} 周 = 总容量 ${project.capacityHours(memberId)}h`"> · 总任务 {{ mine.length }} · 未完成 {{ unfinished }} · 容量 {{ project.capacityHours(memberId) }}h</span>
           </div>
         </div>
         <div class="member-summary">
-          <div><b>六周已分配/容量</b>{{ project.allocatedHours(memberId) }}h / {{ project.capacityHours(memberId) == null ? '未配置' : project.capacityHours(memberId) * 6 + 'h' }}</div>
+          <div><b>可分配工时</b>{{ project.allocatedHours(memberId) }}h / {{ project.capacityHours(memberId) }}h</div>
           <div><b>负载档位</b>{{ project.capacityStatus(project.utilization(memberId)).label }}</div>
         </div>
         <div class="member-detail-head">

@@ -1,15 +1,20 @@
 package com.aicap.config;
 
 import com.aicap.entity.MemberProfile;
-import com.aicap.entity.Epic;
 import com.aicap.entity.Story;
+import com.aicap.entity.Epic;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.mapper.MemberProfileMapper;
-import com.aicap.mapper.EpicMapper;
 import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.EpicMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.mapper.ProjectMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.service.ProjectCapacityPolicy;
+import com.aicap.entity.Project;
+import com.aicap.entity.ProjectMember;
 import com.aicap.security.PasswordUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,9 +22,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -33,7 +41,7 @@ import java.util.regex.Matcher;
 
 /**
  * 启动播种(对齐 FastAPI app/seed.py 的 seed_all):
- * - 用户:按 id 顺序比对现有 5 行并补齐展示名/颜色;已配置角色与容量不覆盖;缺行则补插
+ * - 用户:按 id 顺序比对现有 5 行并补齐展示名/角色/颜色/容量;缺行则补插
  * - 故事:基线为 US01–US37;若检测到旧的 M01–M23 演示基线,整批替换(仅此一种情况)
  * - 任务:16 条;已存在的旧签名行升级为当前值(名称/负责人/工时/排期/关联/类型/依赖/状态/进度/阻塞)
  * - 画像:5 名成员的技术栈/工作能力/开发流程领域画像(各不相同);已有画像不覆盖
@@ -51,12 +59,14 @@ public class DataSeeder implements ApplicationRunner {
 
     private final UserMapper userMapper;
     private final StoryMapper storyMapper;
+    private final EpicMapper epicMapper;
     private final TaskMapper taskMapper;
     private final MemberProfileMapper profileMapper;
-    private final EpicMapper epicMapper;
     private final PasswordUtil passwordUtil;
     private final ObjectMapper objectMapper;
-    private final JdbcTemplate jdbc;
+    private final ProjectMapper projectMapper;
+    private final ProjectMemberMapper projectMemberMapper;
+    private final DataSource dataSource;
 
     @Value("${aicap.seed-on-start:true}")
     private boolean seedOnStart;
@@ -66,11 +76,11 @@ public class DataSeeder implements ApplicationRunner {
 
     /** 真名账号;存量库沿用"成员N"用户名,登录时由 AuthController 做双向别名映射 */
     private static final List<UserRow> USERS = List.of(
-            new UserRow("李锐铭", "李锐铭", "admin", "green", 10),
-            new UserRow("高思晗", "高思晗", "owner", "orange", 8),
-            new UserRow("孙秋实", "孙秋实", "member", "blue", 10),
-            new UserRow("罗子涵", "罗子涵", "member", "pink", 9),
-            new UserRow("成员5", "只读查看者", "viewer", "gray", 10));
+            new UserRow("李锐铭", "李锐铭", "admin", "green", 60),
+            new UserRow("高思晗", "高思晗", "owner", "orange", 48),
+            new UserRow("孙秋实", "孙秋实", "member", "blue", 60),
+            new UserRow("罗子涵", "罗子涵", "member", "pink", 54),
+            new UserRow("成员5", "只读查看者", "viewer", "gray", 60));
 
     /** (id, sprint, activity, ownerIdx, priority, status, title, description, acceptance) */
     private record StoryRow(String id, int sprint, int activity, int ownerIdx, String priority,
@@ -182,11 +192,45 @@ public class DataSeeder implements ApplicationRunner {
             return;
         }
         seedUsers();
-        seedEpics();
-        boolean migrated = migrateLegacyStorySeed();
-        seedStories();
-        seedTasks(migrated);
+        seedProjects();
+        backfillLegacyStoryFields();
         seedProfiles();
+    }
+
+    private void backfillLegacyStoryFields() {
+        if (projectMapper.selectById("P001") == null) return;
+        List<Story> baseline = storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>()
+                .eq("project_id", "P001"));
+        if (baseline.stream().noneMatch(story -> story.getId() != null && story.getId().matches("US(0[1-9]|[12][0-9]|3[0-7])"))) return;
+        String[] names = { "用户管理与权限", "任务与协作", "数据与分析", "AI 智能体与人机协作" };
+        Map<Integer, Long> epicIds = new java.util.HashMap<>();
+        for (int i = 0; i < names.length; i++) {
+            Epic epic = epicMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Epic>()
+                    .eq("project_id", "P001").eq("name", names[i]).last("LIMIT 1"));
+            if (epic == null) {
+                epic = new Epic(); epic.setProjectId("P001"); epic.setName(names[i]);
+                epic.setDescription(""); epic.setCreatedAt(LocalDateTime.now()); epicMapper.insert(epic);
+            }
+            epicIds.put(i + 1, epic.getId());
+        }
+        for (Story story : baseline) {
+            boolean changed = false;
+            Matcher parts = Pattern.compile("^作为(.+?)，我希望(.+?)，以便(.+)$")
+                    .matcher(story.getDescription() == null ? "" : story.getDescription());
+            if (parts.matches()) {
+                if (story.getRole() == null || story.getRole().isBlank()) { story.setRole(parts.group(1)); changed = true; }
+                if (story.getGoal() == null || story.getGoal().isBlank()) { story.setGoal(parts.group(2)); changed = true; }
+                if (story.getValue() == null || story.getValue().isBlank()) { story.setValue(parts.group(3)); changed = true; }
+            }
+            if (story.getEpicId() == null && story.getId().matches("US(0[1-9]|[12][0-9]|3[0-7])")) {
+                int number = Integer.parseInt(story.getId().substring(2));
+                int group = Set.of(1, 2, 8, 16).contains(number) ? 1
+                        : Set.of(7, 15, 19, 20, 22, 23, 25, 28, 34, 36).contains(number) ? 3
+                        : Set.of(29, 30, 31, 32, 33, 35, 37).contains(number) ? 4 : 2;
+                story.setEpicId(epicIds.get(group)); changed = true;
+            }
+            if (changed) storyMapper.updateById(story);
+        }
     }
 
     // ---------- 用户 ----------
@@ -195,11 +239,9 @@ public class DataSeeder implements ApplicationRunner {
         List<User> existing = userMapper.selectList(null);
         existing.sort((a, b) -> Integer.compare(a.getId(), b.getId()));
 
-        if (existing.isEmpty()) {
+        if (existing.isEmpty() && isInitialLegacyDatabase()) {
             for (UserRow row : USERS) {
-                User user = newUser(row);
-                userMapper.insert(user);
-                addToLegacyProject(user);
+                userMapper.insert(newUser(row));
             }
             log.info("已播种 {} 个演示用户(密码 123456)", USERS.size());
             return;
@@ -210,10 +252,13 @@ public class DataSeeder implements ApplicationRunner {
         for (int i = 0; i < aligned; i++) {
             User user = existing.get(i);
             UserRow row = USERS.get(i);
-            if (!row.displayName().equals(user.getDisplayName())
-                    || !row.color().equals(user.getColor())) {
+            if (!row.displayName().equals(user.getDisplayName()) || !row.role().equals(user.getRole())
+                    || !row.color().equals(user.getColor())
+                    || user.getCapacityHours() == null || user.getCapacityHours() != row.capacityHours()) {
                 user.setDisplayName(row.displayName());
+                user.setRole(row.role());
                 user.setColor(row.color());
+                user.setCapacityHours(row.capacityHours());
                 userMapper.updateById(user);
                 changed = true;
             }
@@ -232,19 +277,12 @@ public class DataSeeder implements ApplicationRunner {
             missing.add(viewerRow);
         }
         for (UserRow row : missing) {
-            User user = newUser(row);
-            userMapper.insert(user);
-            addToLegacyProject(user);
+            userMapper.insert(newUser(row));
             changed = true;
         }
         if (changed) {
             log.info("演示用户已对齐当前基线(缺行补插;存量库沿用原用户名,登录别名生效)");
         }
-    }
-
-    private void addToLegacyProject(User user) {
-        jdbc.update("INSERT INTO project_members(project_id,user_id,member_role) VALUES (1,?,?)",
-                user.getId(), "admin".equals(user.getRole()) || "owner".equals(user.getRole()) ? "owner" : "member");
     }
 
     private User newUser(UserRow row) {
@@ -258,57 +296,41 @@ public class DataSeeder implements ApplicationRunner {
         return user;
     }
 
-    // ---------- 故事 ----------
-
-    private final Map<Integer, Long> baselineEpicIds = new java.util.HashMap<>();
-
-    private void seedEpics() {
-        List<Epic> existing = epicMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Epic>()
-                .eq("project_id", 1).orderByAsc("id"));
-        if (existing.isEmpty()) {
-            String[] names = {"用户管理与权限", "任务与协作", "数据与分析", "AI 智能体与人机协作"};
-            for (int i = 0; i < names.length; i++) {
-                Epic epic = new Epic();
-                epic.setProjectId(1L);
-                epic.setName(names[i]);
-                epic.setDescription("");
-                epic.setCreatedAt(LocalDateTime.now());
-                epicMapper.insert(epic);
-                baselineEpicIds.put(i + 1, epic.getId());
-            }
-            // 存量库首次升级时保留故事原字段，只补充规划文档定义的史诗归属。
-            for (Story story : storyMapper.selectList(null)) {
-                Long epicId = baselineEpicId(story.getId());
-                if (story.getEpicId() == null && epicId != null) {
-                    story.setEpicId(epicId);
-                    storyMapper.updateById(story);
-                }
-            }
-        } else {
-            String[] names = {"用户管理与权限", "任务与协作", "数据与分析", "AI 智能体与人机协作"};
-            for (int i = 0; i < names.length; i++) {
-                final String wanted = names[i];
-                final int group = i + 1;
-                existing.stream().filter(epic -> wanted.equals(epic.getName())).findFirst()
-                        .ifPresent(epic -> baselineEpicIds.put(group, epic.getId()));
+    private void seedProjects() {
+        if (projectMapper.selectById("P002") == null) {
+            Project p = new Project(); p.setId("P002"); p.setName("爱管理"); p.setDescription("正式规划数据待导入"); p.setStatus("ACTIVE"); p.setTotalSprints(0); p.setCreatedAt(LocalDateTime.now()); p.setUpdatedAt(LocalDateTime.now()); projectMapper.insert(p);
+        }
+        for (User user : userMapper.selectList(null)) {
+            for (String projectId : List.of("P002")) {
+                if (!List.of("admin", "owner").contains(user.getRole())) continue;
+                if (projectMemberMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ProjectMember>().eq("project_id", projectId).eq("user_id", user.getId())) > 0) continue;
+                ProjectMember member = new ProjectMember(); member.setProjectId(projectId); member.setUserId(user.getId()); member.setProjectRole("viewer".equals(user.getRole()) ? "viewer" : user.getRole()); member.setCapacityHours(user.getCapacityHours() == null ? 60 : user.getCapacityHours()); member.setWeeklyCapacityHours(ProjectCapacityPolicy.defaultWeeklyCapacity(user.getId())); member.setJoinedAt(LocalDateTime.now()); projectMemberMapper.insert(member);
             }
         }
     }
 
-    private Long baselineEpicId(String storyId) {
-        if (storyId == null || !storyId.matches("US(0[1-9]|[12][0-9]|3[0-7])")) return null;
-        int number = Integer.parseInt(storyId.substring(2));
-        int group;
-        if (Set.of(1, 2, 8, 16).contains(number)) group = 1;
-        else if (Set.of(7, 15, 19, 20, 22, 23, 25, 28, 34, 36).contains(number)) group = 3;
-        else if (Set.of(29, 30, 31, 32, 33, 35, 37).contains(number)) group = 4;
-        else group = 2;
-        return baselineEpicIds.get(group);
+    private boolean isInitialLegacyDatabase() {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM app_migrations WHERE name='P001_BASELINE_SEEDED'")) {
+            return rs.next() && rs.getInt(1) == 0;
+        } catch (Exception e) {
+            log.warn("无法判断是否为首次数据库初始化，跳过演示数据播种", e);
+            return false;
+        }
     }
+
+    private void markBaselineSeeded() {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT IGNORE INTO app_migrations(name, applied_at) VALUES ('P001_BASELINE_SEEDED', NOW())");
+        } catch (Exception e) {
+            throw new IllegalStateException("无法记录 P001 初始数据迁移标记", e);
+        }
+    }
+
+    // ---------- 故事 ----------
 
     /** 是否为旧的 M01–M23 演示基线(20..23 行且全部是 M1..M23) */
     private boolean isLegacyStorySeed() {
-        List<Story> stories = storyMapper.selectList(null);
+        List<Story> stories = storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001"));
         if (stories.size() < 20 || stories.size() > 23) {
             return false;
         }
@@ -331,10 +353,10 @@ public class DataSeeder implements ApplicationRunner {
             return false;
         }
         Set<String> legacyIds = new HashSet<>();
-        for (Story story : storyMapper.selectList(null)) {
+        for (Story story : storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001"))) {
             legacyIds.add(story.getId());
         }
-        for (Task task : taskMapper.selectList(null)) {
+        for (Task task : taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>().eq("project_id", "P001"))) {
             boolean touched = false;
             if (task.getKanbanCardId() != null && legacyIds.contains(task.getKanbanCardId())) {
                 task.setKanbanCardId(null);
@@ -354,7 +376,7 @@ public class DataSeeder implements ApplicationRunner {
             }
         }
         for (String id : legacyIds) {
-            storyMapper.deleteById(id);
+            storyMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001").eq("code", id));
         }
         insertStories();
         log.info("检测到旧故事基线 M01–M23({} 条),已替换为 US01–US37", legacyIds.size());
@@ -362,10 +384,7 @@ public class DataSeeder implements ApplicationRunner {
     }
 
     private void seedStories() {
-        if (storyMapper.selectCount(null) > 0) {
-            for (Story story : storyMapper.selectList(null)) {
-                if (fillStoryParts(story)) storyMapper.updateById(story);
-            }
+        if (storyMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>().eq("project_id", "P001")) > 0 || !isInitialLegacyDatabase()) {
             return;
         }
         insertStories();
@@ -376,12 +395,11 @@ public class DataSeeder implements ApplicationRunner {
         LocalDateTime now = LocalDateTime.now();
         for (StoryRow row : STORIES) {
             Story story = new Story();
+            story.setProjectId("P001");
             story.setId(row.id());
             story.setTitle(row.title());
             story.setDescription(row.description());
-            fillStoryParts(story);
             story.setAcceptance(row.acceptance());
-            story.setEpicId(baselineEpicId(row.id()));
             story.setPriority(row.priority());
             story.setSprint(row.sprint());
             story.setActivity(row.activity());
@@ -392,27 +410,17 @@ public class DataSeeder implements ApplicationRunner {
         }
     }
 
-    private boolean fillStoryParts(Story story) {
-        if (story.getDescription() == null) return false;
-        Matcher parts = Pattern.compile("^作为(.+?)，我希望(.+?)，以便(.+)$").matcher(story.getDescription());
-        if (!parts.matches()) return false;
-        boolean changed = false;
-        if (story.getRole() == null || story.getRole().isBlank()) { story.setRole(parts.group(1)); changed = true; }
-        if (story.getGoal() == null || story.getGoal().isBlank()) { story.setGoal(parts.group(2)); changed = true; }
-        if (story.getValue() == null || story.getValue().isBlank()) { story.setValue(parts.group(3)); changed = true; }
-        return changed;
-    }
-
     // ---------- 任务 ----------
 
     private void seedTasks(boolean migrated) {
         Map<String, Task> existing = new LinkedHashMap<>();
-        for (Task task : taskMapper.selectList(null)) {
+        for (Task task : taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>().eq("project_id", "P001"))) {
             existing.put(task.getId(), task);
         }
-        if (existing.isEmpty()) {
+        if (existing.isEmpty() && isInitialLegacyDatabase()) {
             for (TaskRow row : TASKS) {
                 Task task = new Task();
+                task.setProjectId("P001");
                 task.setId(row.id());
                 applyTaskValues(task, row);
                 taskMapper.insert(task);
@@ -420,6 +428,7 @@ public class DataSeeder implements ApplicationRunner {
             log.info("已播种 {} 条任务(T01–T16,含依赖/进度/阻塞)", TASKS.size());
             return;
         }
+        if (existing.isEmpty()) return;
 
         boolean upgraded = false;
         for (TaskRow row : TASKS) {
@@ -432,6 +441,7 @@ public class DataSeeder implements ApplicationRunner {
                     continue;
                 }
                 Task created = new Task();
+                created.setProjectId("P001");
                 created.setId(row.id());
                 applyTaskValues(created, row);
                 taskMapper.insert(created);
@@ -466,9 +476,7 @@ public class DataSeeder implements ApplicationRunner {
         task.setWeekStart(row.weekStart());
         task.setWeekEnd(row.weekEnd());
         task.setStoryRef(row.storyRef());
-        String seedCardId = TASK_CARD_LINKS.get(task.getId());
-        // 开发库可能已用 Project Generator 替换故事基线。演示任务不能再挂到不存在的卡上。
-        task.setKanbanCardId(seedCardId != null && storyMapper.selectById(seedCardId) != null ? seedCardId : null);
+        task.setKanbanCardId(TASK_CARD_LINKS.get(task.getId()));
         task.setEstimatedHours(row.hours());
         task.setTaskType(MANAGEMENT_TASKS.contains(task.getId()) ? "management" : "feature");
         task.setDependsOn(row.dependsOn());

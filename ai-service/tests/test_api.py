@@ -199,7 +199,7 @@ class ApiTests(unittest.TestCase):
         self.model_error = None
         self.result = {"secret": "invalid model output"}
         response = self.post()
-        self.assertEqual(502, response.status_code)
+        self.assertEqual(422, response.status_code)
         self.assertEqual({"detail": "invalid_model_proposal"}, response.json())
 
     def test_success_returns_record_id_and_exact_validated_payload(self):

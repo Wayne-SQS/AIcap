@@ -2,10 +2,12 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { agentApi } from '@/api/agent'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 
 const project = useProjectStore()
+const projects = useProjectsStore()
 const { notify } = useToast()
 const session = useSessionStore()
 const request = ref('')
@@ -36,7 +38,7 @@ const impactGroups = computed(() => {
 })
 async function refresh(id = run.value?.id) {
   if (!id) return
-  run.value = await agentApi.planning.get(id)
+  run.value = await agentApi.planning.get(id, projects.currentProjectId)
   clearTimeout(timer)
   if (['queued', 'running'].includes(run.value.status)) timer = setTimeout(() => refresh(id), 1500)
 }
@@ -44,21 +46,21 @@ async function submit() {
   const text = request.value.trim()
   if (!text || busy.value) return
   busy.value = true
-  try { run.value = await agentApi.planning.create(text); request.value = ''; await refresh(run.value.id) }
+  try { run.value = await agentApi.planning.create(text, projects.currentProjectId); request.value = ''; await refresh(run.value.id) }
   catch (e) { notify('画图分析失败：' + e.message) }
   finally { busy.value = false }
 }
 async function confirm() {
   if (!run.value || busy.value) return
   busy.value = true
-  try { run.value = await agentApi.planning.confirm(run.value.id); await project.loadAll(); notify('画图方案已执行，四视图数据已刷新') }
+  try { run.value = await agentApi.planning.confirm(run.value.id, projects.currentProjectId); await project.loadAll(projects.currentProjectId); notify('画图方案已执行，四视图数据已刷新') }
   catch (e) { await refresh(run.value.id); notify('执行失败：' + e.message) }
   finally { busy.value = false }
 }
 async function cancel() {
   if (!run.value || busy.value) return
   busy.value = true
-  try { run.value = await agentApi.planning.cancel(run.value.id); notify('已取消规划，未修改项目数据') }
+  try { run.value = await agentApi.planning.cancel(run.value.id, projects.currentProjectId); notify('已取消规划，未修改项目数据') }
   catch (e) { await refresh(run.value.id); notify(e.message) }
   finally { busy.value = false }
 }
@@ -84,7 +86,7 @@ onUnmounted(() => clearTimeout(timer))
         <div class="planning-plan">
           <div class="planning-plan-title"><b>{{ result.summary }}</b><span class="small">{{ actionCount }} 项修改</span></div>
           <p v-if="result.answer">{{ result.answer }}</p>
-          <div v-for="(a, index) in result.actions" :key="a.task_id || a.story_id || a.milestone_id || index" class="planning-action">
+          <div v-for="(a, index) in result.actions" :key="`${a.type}-${a.task_id || a.story_id || a.milestone_id || 'unknown'}-${index}`" class="planning-action">
             <b>{{ a.task_id || a.story_id || a.milestone_id }}</b>
             <template v-if="a.type === 'UPDATE_TASK_OWNER'"> · 负责人 {{ a.from_owner_name || a.from_owner_id }} → {{ a.to_owner_name || a.to_owner_id }}</template>
             <template v-else-if="a.type === 'UPDATE_TASK_SCHEDULE'"> · 排期 W{{ a.start_week }}-W{{ a.end_week }}</template>

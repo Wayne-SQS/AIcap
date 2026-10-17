@@ -16,6 +16,8 @@ public class AgentProperties {
     public static final int MAX_SECONDS = 180;
     public static final int LEASE_SECONDS = 300;
     public static final int MAX_TOKENS = 6000;
+    public static final int PROJECT_GENERATION_MAX_TOKENS = 8192;
+    public static final int PROJECT_GENERATION_TIMEOUT_SECONDS = 120;
     public static final int TIMEOUT_SECONDS = 45;
 
     private String apiKey = "";

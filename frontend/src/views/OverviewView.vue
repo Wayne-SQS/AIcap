@@ -4,16 +4,13 @@ import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
-import { MAP_SPRINTS, MILESTONES } from '@/data/seed'
+import { MAP_SPRINTS } from '@/data/seed'
 
 /* 对齐旧版 renderOverview(L893-907) + renderRealtime(L1181-1186) + 视图结构 L447-485 */
 const router = useRouter()
 const project = useProjectStore()
 const session = useSessionStore()
-const go = v => router.push({ name: v })
-const isDefaultWorkspace = computed(() => !session.online || session.currentProjectId === 1)
-const currentProjectName = computed(() => session.accessibleProjects.find(p => Number(p.id) === session.currentProjectId)?.name || '爱管理')
-const shownMilestones = computed(() => isDefaultWorkspace.value ? MILESTONES : project.milestones)
+const go = v => router.push({ name: project.currentProjectId ? `project-${v}` : v, params: project.currentProjectId ? { projectId: project.currentProjectId } : {} })
 
 const ovTotal = computed(() => String(project.stories.length).padStart(2, '0'))
 const ovTasks = computed(() => project.tasks.length)
@@ -22,14 +19,9 @@ const doneCount = computed(() => project.stories.filter(s => s.status === 2).len
 const doingCount = computed(() => project.stories.filter(s => s.status === 1).length)
 /** 完成比例:纯计数口径(与后端 /api/dashboard.percent 同口径) */
 const realtimePct = computed(() => project.stories.length ? Math.round(doneCount.value / project.stories.length * 100) : 0)
-const activeTasks = computed(() => project.tasks.filter(t => t.status !== 3))
-const doneTasks = computed(() => activeTasks.value.filter(t => t.status === 2).length)
-const taskPct = computed(() => activeTasks.value.length ? Math.round(doneTasks.value / activeTasks.value.length * 100) : 0)
 /** 待关注/阻塞:取真实 blocked 标记数(此前是写死的 03,与库里的 0 不符) */
 const blockedCount = computed(() => project.tasks.filter(t => t.blocked).length)
-const lastUpdate = computed(() => session.online
-  ? (project.serverLastUpdated ? String(project.serverLastUpdated).replace('T', ' ').slice(0, 19) : '暂无更新')
-  : (project.log.length ? project.log[project.log.length - 1].t : '暂无更新'))
+const lastUpdate = computed(() => project.log.length ? project.log[project.log.length - 1].t : '—')
 
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
@@ -48,8 +40,8 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     <div class="hero">
       <div>
         <div class="eyebrow">PROJECT OVERVIEW / 项目总览</div>
-        <h1>{{ currentProjectName }}</h1>
-        <p>{{ isDefaultWorkspace ? '四人小队 · 六周迭代 · 从需求到交付的一体化协作平台。' : '项目故事、任务与成员协作空间。' }}</p>
+        <h1>{{ project.currentProject?.name || '我的项目' }}</h1>
+        <p>{{ project.currentProject?.description || '当前项目的需求、排期与协作数据。' }}</p>
       </div>
       <button class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="go('board')">＋ 新建用户故事</button>
     </div>
@@ -57,21 +49,19 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     <div class="stats">
       <div class="stat"><label>故事总数</label><strong id="ov-total">{{ ovTotal }}</strong><span class="small">个用户故事</span></div>
       <div class="stat"><label>规划任务</label><strong id="ov-tasks">{{ ovTasks }}</strong><span class="small">个开发任务</span></div>
-      <div class="stat"><label>团队成员</label><strong>{{ String(project.members.length).padStart(2, '0') }}</strong><span class="small">{{ isDefaultWorkspace ? '人 · 含只读查看者' : '人 · 当前项目成员' }}</span></div>
+      <div class="stat"><label>团队成员</label><strong>{{ String(project.members.length).padStart(2, '0') }}</strong><span class="small">人 · 含只读查看者</span></div>
       <div class="stat"><label>迭代周期</label><strong>06</strong><span class="small">周 · 3 个 Sprint + 后续路线</span></div>
     </div>
 
     <div class="h-sec">实时进度 · 看板</div>
     <div id="realtime">
       <div class="stats">
-        <div class="stat"><label>故事完成比例</label><strong>{{ realtimePct }}%</strong><span class="small">{{ doneCount }} / {{ project.stories.length }} 故事</span></div>
+        <div class="stat"><label>完成比例</label><strong>{{ realtimePct }}%</strong><span class="small">{{ doneCount }} / {{ project.stories.length }} 故事</span></div>
         <div class="stat"><label>进行中</label><strong>{{ String(doingCount).padStart(2, '0') }}</strong><span class="small">个故事</span></div>
         <div class="stat"><label>待关注 / 阻塞</label><strong>{{ String(blockedCount).padStart(2, '0') }}</strong><span class="small">个任务需确认</span></div>
-        <div class="stat"><label>最近更新</label><strong class="mono" style="font-size:20px">{{ lastUpdate }}</strong><span class="small">{{ session.online ? '服务器记录时间' : '本机变更时间' }}</span></div>
+        <div class="stat"><label>最近更新</label><strong class="mono" style="font-size:20px">{{ lastUpdate }}</strong><span class="small">本机变更时间</span></div>
       </div>
     </div>
-    <p class="small" id="progress-definition">任务完成比例：<strong id="task-percent">{{ taskPct }}%</strong>（{{ doneTasks }} / {{ activeTasks.length }}，已取消任务不计入）；故事完成比例按已完成故事数 / 故事总数计算。需求池条目不计入两项比例；无数据时显示 0%。</p>
-    <p v-if="!project.stories.length" class="small" role="status">暂无故事数据，可先创建用户故事。</p>
 
     <div class="h-sec">Sprint 进度 · 4 个发布切片</div>
     <div class="sprint-grid" id="sprint-grid">
@@ -84,25 +74,24 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     </div>
 
     <div class="h-sec">里程碑 · 关键交付节点</div>
-    <p v-if="!shownMilestones.length" class="small">暂无里程碑。</p>
     <div class="mile" id="mile-grid">
-      <div v-for="m in shownMilestones" :key="m.id" class="milecard" :class="{ done: m.week <= 2 }">
+      <div v-if="!project.milestones.length" class="empty-state">暂无项目里程碑</div>
+      <div v-for="m in project.milestones" :key="m.id" class="milecard" :class="{ done: m.week <= 2 }">
         <span class="wk">W{{ m.week }}</span><span class="mid">{{ m.id }}</span><h4>{{ m.name }}</h4><p>{{ m.desc }}</p>
       </div>
     </div>
 
     <div class="h-sec">总体完成度</div>
     <div class="stat" style="margin-bottom:14px">
-      <div class="inline"><label style="margin:0">需求故事任务工时进度</label><b class="mono" id="ov-percent">{{ overallPct }}%</b></div>
+      <div class="inline"><label style="margin:0">需求故事完成进度</label><b class="mono" id="ov-percent">{{ overallPct }}%</b></div>
       <div class="track" role="progressbar" aria-label="总体完成度" aria-valuemin="0" aria-valuemax="100"><i id="ov-fill" :style="{ width: overallPct + '%' }"></i></div>
-      <span class="small">按故事关联任务的工时计算；没有任务的故事按状态估算。</span>
     </div>
 
     <div class="h-sec">快速进入</div>
     <div class="quick">
       <button class="quickcard" @click="go('board')"><span class="ic">▦</span><b>故事看板</b><span>拖拽更新状态、编辑与导出</span></button>
       <button class="quickcard" @click="go('gantt')"><span class="ic">▤</span><b>甘特图</b><span>6 周排期与里程碑</span></button>
-      <button v-if="isDefaultWorkspace" class="quickcard" @click="go('ai')"><span class="ic">✦</span><b>AI 工作台</b><span>浏览智能能力与最近工作</span></button>
+      <button class="quickcard" @click="go('ai')"><span class="ic">✦</span><b>AI 工作台</b><span>浏览智能能力与最近工作</span></button>
     </div>
   </section>
 </template>

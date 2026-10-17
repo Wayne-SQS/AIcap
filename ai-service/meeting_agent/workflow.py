@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 from pydantic import ValidationError
 
-from .contracts import DailyScrumInput, DailyScrumOutput, TranscriptSegment, validate_daily_result
+from .contracts import DailyScrumInput, DailyScrumOutput, ResultContractError, TranscriptSegment, validate_daily_result
 from .daily_skill import DailyScrumSkill
 from .story_tool import StoryReadTool
 
@@ -72,6 +72,11 @@ class DailyScrumWorkflow:
         def validate(state: MeetingState):
             try:
                 result = validate_daily_result(DailyScrumInput.model_validate(state["context"]), state["candidate"])
+            except ResultContractError as exc:
+                # Contract diagnostics carry a precise code (quote_mismatch,
+                # snapshot_mismatch, ...); propagate it instead of collapsing
+                # every contract failure into invalid_model_proposal.
+                raise WorkflowError(exc.code) from exc
             except (ValueError, ValidationError):
                 raise WorkflowError("invalid_model_proposal") from None
             return {"result": result.model_dump()}

@@ -197,7 +197,7 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   await expect(grid.locator('.c-cell')).toHaveCount(42)
   await expect(grid.locator('.week-label')).toHaveCount(6)
   await expect(grid.locator('.day-label')).toHaveCount(7)
-  await expect(page.locator('#contrib .contrib-note')).toContainText('样例数据')
+  await expect(page.locator('#contrib .contrib-note')).toContainText('真实数据')
 
   // 画像板块回归(本次未改,仍需可用)
   await expect(page.locator('#member-profiles .pcard')).toHaveCount(5)

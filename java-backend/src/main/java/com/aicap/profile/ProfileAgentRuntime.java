@@ -80,7 +80,7 @@ public class ProfileAgentRuntime {
      * @param systemPrompt 角色与任务说明(由调用方按场景拼装:难度评估/成员画像/团队风险)
      * @param userPrompt   本次的输入事实(感知内容,已含数据与记忆)
      */
-    public AgentOutcome run(String systemPrompt, String userPrompt) {
+    public AgentOutcome run(String projectId, String systemPrompt, String userPrompt) {
         List<ProfileLlmClient.Msg> messages = new ArrayList<>();
         messages.add(ProfileLlmClient.Msg.system(systemPrompt
                 + "\n\n## 可用工具\n" + toolSchemasText()
@@ -118,7 +118,7 @@ public class ProfileAgentRuntime {
             // 情形二:模型要求调用工具 → 执行并回填 observation
             String toolName = node.path("action").path("tool").asText("");
             String argsJson = node.path("action").path("args").toString();
-            ProfileToolRegistry.ToolCall call = tools.invoke(toolName, argsJson);
+            ProfileToolRegistry.ToolCall call = tools.invoke(toolName, argsJson, projectId);
             messages.add(ProfileLlmClient.Msg.assistant(r.content()));
             messages.add(ProfileLlmClient.Msg.user("工具 " + toolName + " 返回(ok=" + call.ok() + "): "
                     + truncate(call.resultJson())));

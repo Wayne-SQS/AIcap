@@ -1,16 +1,23 @@
 package com.aicap.controller;
 
-import com.aicap.common.ApiException;
-import com.aicap.security.ProjectAccess;
 import com.aicap.security.Roles;
+import com.aicap.security.RolePolicy;
+import com.aicap.common.ApiException;
+import com.aicap.entity.Project;
+import com.aicap.entity.ProjectMember;
+import com.aicap.mapper.ProjectMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.mapper.UserMapper;
+import com.aicap.mapper.TaskMapper;
+import com.aicap.entity.Task;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.aicap.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 
@@ -18,90 +25,84 @@ import java.util.Map;
 @RequestMapping("/api/projects")
 @RequiredArgsConstructor
 public class ProjectController {
-    private final JdbcTemplate jdbc;
-    private final ProjectAccess access;
+    private final ProjectAccessService projects;
+    private final ProjectMapper projectMapper;
+    private final ProjectMemberMapper memberMapper;
+    private final UserMapper userMapper;
+    private final TaskMapper taskMapper;
+    private final RolePolicy rolePolicy;
 
-    @GetMapping
-    public List<Map<String, Object>> list() {
-        int userId = Roles.any().getId();
-        return jdbc.queryForList("SELECT p.id,p.name,p.description,p.created_at,m.member_role FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.user_id=? ORDER BY p.id", userId);
-    }
+    @GetMapping public List<Map<String,Object>> list(){ Roles.any(); return projects.listAccessible(); }
+    @GetMapping("/{projectId}") public Map<String,Object> get(@PathVariable String projectId){ Roles.any(); return projects.detail(projectId); }
+    @GetMapping("/{projectId}/members") public List<Map<String,Object>> members(@PathVariable String projectId){ Roles.any(); return projects.projectMembers(projectId); }
+    @PostMapping public Map<String,Object> create(@RequestBody Map<String,Object> body){ Roles.writer(); return projects.create(body); }
 
-    @PostMapping
+    @PatchMapping("/{projectId}")
     @Transactional
-    public Map<String, Object> create(@RequestBody JsonNode body) {
-        int userId = Roles.any().getId();
-        if (!"admin".equals(Roles.any().getRole())) throw ApiException.forbidden("仅管理员可创建项目");
-        String name = body.path("name").asText("").trim();
-        String description = body.path("description").asText("").trim();
-        if (name.isEmpty() || name.length() > 200 || description.length() > 1000)
-            throw ApiException.unprocessable("项目名称或描述长度不合法");
-        org.springframework.jdbc.support.GeneratedKeyHolder keys = new org.springframework.jdbc.support.GeneratedKeyHolder();
-        jdbc.update(connection -> {
-            PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO projects(name,description,created_by,created_at) VALUES (?,?,?,NOW())",
-                    Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1, name);
-            statement.setString(2, description);
-            statement.setInt(3, userId);
-            return statement;
-        }, keys);
-        long id = keys.getKey().longValue();
-        jdbc.update("INSERT INTO project_members(project_id,user_id,member_role) VALUES (?,?,'owner')", id, userId);
-        return get(id);
-    }
-
-    @GetMapping("/{id}")
-    public Map<String, Object> get(@PathVariable long id) {
-        access.requireMember(id, Roles.any().getId());
-        return jdbc.queryForMap("SELECT p.id,p.name,p.description,p.created_at,m.member_role FROM projects p JOIN project_members m ON m.project_id=p.id WHERE p.id=? AND m.user_id=?", id, Roles.any().getId());
-    }
-
-    @PatchMapping("/{id}")
-    @Transactional
-    public Map<String, Object> update(@PathVariable long id, @RequestBody JsonNode body) {
-        access.requireManager(id, Roles.any().getId());
+    public Map<String,Object> update(@PathVariable String projectId, @RequestBody JsonNode body) {
+        projects.requireOwner(projectId);
         if (!body.has("name") && !body.has("description"))
             throw ApiException.unprocessable("至少提供项目名称或描述");
-        Map<String, Object> current = get(id);
-        String name = (String) current.get("name");
-        String description = (String) current.get("description");
+        Project project = projectMapper.selectById(ProjectAccessService.normalize(projectId));
         if (body.has("name")) {
             if (!body.get("name").isTextual()) throw ApiException.unprocessable("项目名称必须为字符串");
-            name = body.get("name").asText().trim();
+            project.setName(body.get("name").asText().trim());
         }
         if (body.has("description")) {
             if (!body.get("description").isTextual()) throw ApiException.unprocessable("项目描述必须为字符串");
-            description = body.get("description").asText().trim();
+            String original = project.getDescription() == null ? "" : project.getDescription();
+            java.util.regex.Matcher metadata = java.util.regex.Pattern
+                    .compile("(\\n?\\[AICAP_ACTIVITIES:[A-Za-z0-9_-]+])$").matcher(original);
+            String suffix = metadata.find() ? metadata.group(1) : "";
+            project.setDescription(body.get("description").asText().trim() + suffix);
         }
-        if (name.isEmpty() || name.length() > 200 || description.length() > 1000)
+        if (project.getName().isBlank() || project.getName().length() > 200 || project.getDescription() == null || project.getDescription().length() > 1000)
             throw ApiException.unprocessable("项目名称或描述长度不合法");
-        jdbc.update("UPDATE projects SET name=?,description=? WHERE id=?", name, description, id);
-        return get(id);
+        project.setUpdatedAt(java.time.LocalDateTime.now());
+        projectMapper.updateById(project);
+        return projects.detail(projectId);
     }
 
-    @GetMapping("/{id}/members")
-    public List<Map<String, Object>> members(@PathVariable long id) {
-        access.requireMember(id, Roles.any().getId());
-        return jdbc.queryForList("SELECT u.id,u.username,u.display_name,m.member_role FROM project_members m JOIN users u ON u.id=m.user_id WHERE m.project_id=? ORDER BY u.id", id);
+    @PutMapping("/{projectId}/members/{userId}")
+    @Transactional
+    public Map<String,Object> putMember(@PathVariable String projectId, @PathVariable Integer userId, @RequestBody JsonNode body) {
+        projects.requireOwner(projectId);
+        if (userMapper.selectById(userId) == null) throw ApiException.notFound("用户不存在");
+        String scoped = ProjectAccessService.normalize(projectId);
+        ProjectMember member = memberMapper.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", scoped).eq("user_id", userId).last("LIMIT 1"));
+        String role = body.has("member_role") ? body.path("member_role").asText()
+                : member == null ? "member" : member.getProjectRole();
+        if (!rolePolicy.exists(role)) throw ApiException.unprocessable("角色不存在");
+        if (member == null) {
+            member = new ProjectMember(); member.setProjectId(scoped); member.setUserId(userId);
+            member.setJoinedAt(java.time.LocalDateTime.now()); member.setCapacityHours(60);
+            member.setWeeklyCapacityHours(com.aicap.service.ProjectCapacityPolicy.defaultWeeklyCapacity(userId));
+        }
+        member.setProjectRole(role);
+        if (body.has("weekly_capacity_hours")) {
+            JsonNode capacity = body.get("weekly_capacity_hours");
+            if (!capacity.isNull() && (!capacity.isIntegralNumber() || capacity.asInt() < 0 || capacity.asInt() > 168))
+                throw ApiException.unprocessable("weekly_capacity_hours 必须在 0..168 之间或为 null");
+            member.setWeeklyCapacityHours(capacity.isNull() ? null : capacity.asInt());
+        }
+        if (member.getId() == null) memberMapper.insert(member); else memberMapper.updateById(member);
+        if (body.has("weekly_capacity_hours") && body.get("weekly_capacity_hours").isNull())
+            memberMapper.update(null, new UpdateWrapper<ProjectMember>()
+                    .set("weekly_capacity_hours", null).eq("project_id", scoped).eq("user_id", userId));
+        return projects.projectMembers(scoped).stream().filter(row -> userId.equals(row.get("user_id")))
+                .findFirst().orElseThrow();
     }
 
-    @PutMapping("/{id}/members/{userId}")
-    public Map<String, Object> putMember(@PathVariable long id, @PathVariable int userId, @RequestBody JsonNode body) {
-        access.requireManager(id, Roles.any().getId());
-        String role = body.path("member_role").asText("member");
-        if (!role.equals("member") && !role.equals("owner")) throw ApiException.unprocessable("member_role 必须是 member 或 owner");
-        if (jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id=?", Integer.class, userId) == 0)
-            throw ApiException.notFound("用户不存在");
-        jdbc.update("INSERT INTO project_members(project_id,user_id,member_role) VALUES (?,?,?) ON DUPLICATE KEY UPDATE member_role=VALUES(member_role)", id, userId, role);
-        return jdbc.queryForMap("SELECT u.id,u.username,u.display_name,m.member_role FROM project_members m JOIN users u ON u.id=m.user_id WHERE m.project_id=? AND u.id=?", id, userId);
-    }
-
-    @DeleteMapping("/{id}/members/{userId}")
-    public Map<String, Object> removeMember(@PathVariable long id, @PathVariable int userId) {
-        access.requireManager(id, Roles.any().getId());
-        if (Roles.any().getId() == userId) throw ApiException.conflict("不能移除当前负责人");
-        int removed = jdbc.update("DELETE FROM project_members WHERE project_id=? AND user_id=?", id, userId);
+    @DeleteMapping("/{projectId}/members/{userId}")
+    @Transactional
+    public Map<String,Boolean> removeMember(@PathVariable String projectId, @PathVariable Integer userId) {
+        projects.requireOwner(projectId);
+        if (Roles.any().getId().equals(userId)) throw ApiException.conflict("不能移除当前负责人");
+        String scoped = ProjectAccessService.normalize(projectId);
+        if (taskMapper.selectCount(new QueryWrapper<Task>().eq("project_id", scoped).eq("owner_id", userId)) > 0)
+            throw ApiException.conflict("该成员仍有项目任务");
+        int removed = memberMapper.delete(new QueryWrapper<ProjectMember>().eq("project_id", scoped).eq("user_id", userId));
         if (removed == 0) throw ApiException.notFound("项目成员不存在");
         return Map.of("removed", true);
     }

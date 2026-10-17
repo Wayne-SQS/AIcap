@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -12,6 +13,7 @@ import { memberUserId, memberIndex } from '@/data/memberIdentity'
 /* 需求池:结构对齐旧版 L634-654,逻辑对齐 pool 保存(L1441-1455)/dropPool(L1456-1460)/
    promotePool 工作流弹窗(meeting-improvements.js L43-67):在线走 API、离线改本地 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -29,58 +31,45 @@ const promoting = ref(false)
 
 function startAdd() {
   if (guard('新增需求')) return
-  form.id = ''
-  form.title = ''
-  form.desc = ''
-  form.source = ''
-  form.pri = 'Could'
+  form.id = ''; form.title = ''; form.desc = ''; form.source = ''; form.pri = 'Could'
   showForm.value = true
 }
 function startEdit(item) {
   if (guard('细化需求')) return
-  form.id = item.id
-  form.title = item.title
-  form.desc = item.desc || ''
-  form.source = item.source || ''
-  form.pri = item.priority
+  form.id = item.id; form.title = item.title; form.desc = item.desc || ''
+  form.source = item.source || ''; form.pri = item.priority
   showForm.value = true
   nextTick(() => document.getElementById('pool-title')?.focus())
 }
 function cancelForm() {
   showForm.value = false
-  form.id = ''
-  form.title = ''
-  form.desc = ''
-  form.source = ''
+  form.id = ''; form.title = ''; form.desc = ''; form.source = ''
 }
 
 async function save() {
   if (guard('保存需求')) return
-  const title = form.title.trim(), desc = form.desc.trim(), source = form.source.trim() || '手动新增'
+  const title = form.title.trim(), desc = form.desc.trim()
   if (!title) { notify('请填写需求标题'); return }
+  const editing = Boolean(form.id)
+  const payload = { title, description: desc || '（待补充描述）', source: form.source.trim() || '手动新增', priority: form.pri }
   if (session.apiMode) {
     try {
-      const editing = Boolean(form.id)
-      const payload = { title, description: desc || '（待补充描述）', source, priority: form.pri }
-      if (editing) await poolApi.update(form.id, payload)
-      else await poolApi.create(payload)
+      if (editing) await poolApi.update(form.id, payload, projects.currentProjectId)
+      else await poolApi.create(payload, projects.currentProjectId)
       cancelForm()
-      await project.loadAll()
-      notify(editing ? '需求池条目已更新（服务器）' : '已保存到需求池（服务器）')
+      await project.loadAll(projects.currentProjectId)
+      notify(editing ? '需求已更新' : '已保存到需求池（服务器）')
     } catch (err) { notify(err.message) }
   } else {
-    if (form.id) {
+    if (editing) {
       const item = project.pool.find(p => p.id === form.id)
-      if (item) Object.assign(item, { title, desc: desc || '（待补充描述）', source, priority: form.pri })
-      project.persistPool()
-      cancelForm()
-      notify('需求池条目已保存')
-      return
+      if (item) Object.assign(item, { title, desc: payload.description, source: payload.source, priority: form.pri })
+      project.persistPool(); cancelForm(); notify('需求已更新'); return
     }
     const d = new Date()
     project.pool.unshift({
       id: 'R' + String(Math.max(4, ...project.pool.map(x => +x.id.slice(1) || 0)) + 1).padStart(2, '0'),
-      title, desc: desc || '（待补充描述）', source,
+      title, desc: desc || '（待补充描述）', source: '手动新增 · ' + (session.currentUser?.display_name || '离线'),
       created: String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
       priority: form.pri
     })
@@ -93,7 +82,7 @@ async function save() {
 async function dropPool(id) {
   if (guard('移除需求')) return
   if (session.apiMode) {
-    try { await poolApi.remove(id); await project.loadAll(); notify(id + ' 已从需求池移除') }
+    try { await poolApi.remove(id, projects.currentProjectId); await project.loadAll(projects.currentProjectId); notify(id + ' 已从需求池移除') }
     catch (err) { notify(err.message) }
     return
   }
@@ -136,8 +125,8 @@ async function submitPromote() {
   promoting.value = true
   try {
     if (session.apiMode) {
-      await poolApi.promote(promoteForm.id, body)
-      try { await project.loadAll() } catch (err) { notify('已移入看板，刷新失败：' + err.message) }
+      await poolApi.promote(promoteForm.id, body, projects.currentProjectId)
+      try { await project.loadAll(projects.currentProjectId) } catch (err) { notify('已移入看板，刷新失败：' + err.message) }
     } else {
       /* 编号由 store 统一分配:与后端 StoryController.nextStoryId 同为 US%02d 口径。
          修复:此处原为 'M' + (基于 slice(1) 取数) —— 故事基线从 M01 迁到 US01 后,
@@ -173,8 +162,8 @@ async function submitPromote() {
     <p class="pool-note">需求池条目允许 Sprint / 负责人为空；细化后可「移入看板」成为正式用户故事，并保留来源与历史。需求池不计入已承诺 Sprint 完成率。</p>
     <div class="pool-form" id="pool-form" v-show="showForm">
       <input id="pool-title" v-model="form.title" placeholder="需求标题（如：支持第三方账号登录）">
-      <textarea id="pool-desc" v-model="form.desc" placeholder="需求描述（可后续细化）"></textarea>
-      <input id="pool-source" v-model="form.source" placeholder="来源（如：计划会 2026-09-06；留空为手动新增）">
+      <textarea id="pool-desc" v-model="form.desc" placeholder="描述 / 来源（如：会议 2026-09-06 · 成员2 提出）"></textarea>
+      <input id="pool-source" v-model="form.source" placeholder="需求来源">
       <div class="row">
         <select id="pool-pri" v-model="form.pri"><option>Must</option><option>Should</option><option>Could</option></select>
         <button class="primary" id="pool-save" :disabled="session.isViewer" :title="viewerTitle" @click="save">{{ form.id ? '保存修改' : '保存到需求池' }}</button>

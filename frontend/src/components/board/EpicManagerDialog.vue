@@ -1,11 +1,13 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { epicsApi } from '@/api/epics'
 
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const dialog = ref(null)
@@ -29,9 +31,9 @@ async function save() {
   if (!body.name) { notify('请填写史诗名称'); return }
   try {
     if (session.apiMode) {
-      if (editingId.value) await epicsApi.patch(editingId.value, body)
-      else await epicsApi.create(body)
-      await project.loadAll()
+      if (editingId.value) await epicsApi.patch(editingId.value, body, projects.currentProjectId)
+      else await epicsApi.create(body, projects.currentProjectId)
+      await project.loadAll(projects.currentProjectId)
     } else if (editingId.value) {
       Object.assign(project.epics.find(e => e.id === editingId.value), body)
       project.persist()
@@ -51,8 +53,8 @@ async function remove(epic) {
   if (!confirm(`删除 ${epic.code} · ${epic.name}？`)) return
   try {
     if (session.apiMode) {
-      await epicsApi.remove(epic.id)
-      await project.loadAll()
+      await epicsApi.remove(epic.id, projects.currentProjectId)
+      await project.loadAll(projects.currentProjectId)
     } else {
       project.epics = project.epics.filter(e => e.id !== epic.id)
       project.persist()

@@ -97,7 +97,16 @@ class RefinementWorkflowTests(unittest.TestCase):
             if mutation == 'missing': del changes['priority']
             if mutation == 'blank': changes['acceptance'] = ' '
             with self.subTest(mutation=mutation), self.assertRaises(WorkflowError) as caught: self.run_flow()
-            self.assertEqual('invalid_model_proposal', caught.exception.code)
+            # Only unknown segment/quote is a contract check; every other mutation
+            # breaks the NewStoryProposal/Changes schema (extra=forbid, strict types).
+            codes = {'meeting': 'meeting_mismatch', 'quote': 'quote_mismatch',
+                     'segment': 'unknown_segment', 'id': 'invalid_model_proposal',
+                     'owner': 'invalid_model_proposal', 'status': 'invalid_model_proposal',
+                     'estimate': 'invalid_model_proposal', 'approved': 'invalid_model_proposal',
+                     'action': 'invalid_model_proposal', 'bool': 'invalid_model_proposal',
+                     'range': 'invalid_model_proposal', 'missing': 'invalid_model_proposal',
+                     'blank': 'invalid_model_proposal'}
+            self.assertEqual(codes[mutation], caught.exception.code)
 
     def test_duplicate_existing_title_candidate_title_and_ids_rejected(self):
         original = copy.deepcopy(self.payload)

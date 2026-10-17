@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { useToast } from '@/composables/useToast'
@@ -7,6 +8,7 @@ import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
 import { agentApi } from '@/api/agent'
 import { derivedTaskSprints } from '@/data/seed'
+import { memberUserId } from '@/data/memberIdentity'
 
 const saving = reactive(new Set())
 
@@ -69,6 +71,7 @@ function analysisFromReport(report, impacts = []) {
 
 export function useProjectActions() {
   const project = useProjectStore()
+  const projects = useProjectsStore()
   const session = useSessionStore()
   const { guard } = usePermissionGuard()
   const { notify } = useToast()
@@ -95,11 +98,10 @@ export function useProjectActions() {
     const other = project.tasks.filter(item => item.owner === task.owner && item.id !== task.id)
     const proposed = weeklyHours({ ...task, w: [start, end] })
     const beforeLoad = project.memberWeeklyLoad(task.owner)
-    const capacity = project.capacityHours(task.owner)
-    if (capacity == null) addImpact(report, 'loadRisk', '成员周容量未配置，无法判断排期调整是否超载', task.id)
+    const capacity = project.weeklyCapacityHours(task.owner)
     for (let week = 1; week <= 6; week++) {
       const load = other.reduce((sum, item) => sum + weeklyHours(item)[week - 1], 0) + proposed[week - 1]
-      if (capacity != null && load > capacity) addImpact(report, 'loadRisk', `W${week}：修改前 ${beforeLoad[week - 1] || 0}h，修改后 ${load}h，超过周容量 ${capacity.toFixed(1)}h`, task.id)
+      if (capacity && load > capacity) addImpact(report, 'loadRisk', `W${week}：修改前 ${beforeLoad[week - 1] || 0}h，修改后 ${load}h，超过周容量 ${capacity.toFixed(1)}h`, task.id)
     }
     const before = weeklyHours(task)
     const changedWeeks = before.map((hours, index) => hours !== proposed[index] ? `W${index + 1}` : null).filter(Boolean)
@@ -107,7 +109,7 @@ export function useProjectActions() {
     if (end > task.w[1]) addImpact(report, 'delayRisk', `${task.id} 预计延期 ${end - task.w[1]} 周：W${task.w[0]}-W${task.w[1]} → W${start}-W${end}`, task.id)
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_SCHEDULE', task_id: taskId, start_week: start, end_week: end }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_SCHEDULE', task_id: taskId, start_week: start, end_week: end }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function analyzeTaskOwner(taskId, ownerId) {
@@ -118,16 +120,15 @@ export function useProjectActions() {
     const before = project.memberWeeklyLoad(target.id)
     const after = before.slice()
     weeklyHours(task).forEach((hours, index) => { after[index] += hours })
-    const capacity = project.capacityHours(target.id)
+    const capacity = project.weeklyCapacityHours(target.id)
     const report = emptyImpactReport()
-    if (capacity == null) addImpact(report, 'loadRisk', `成员 ${target.name} 周容量未配置，无法判断调配后是否超载`, task.id)
     after.forEach((hours, index) => {
-      if (capacity != null && hours > capacity) addImpact(report, 'loadRisk', `成员 ${target.name} W${index + 1}：修改前 ${before[index] || 0}h，修改后 ${hours}h，周容量 ${capacity.toFixed(1)}h`, task.id)
+      if (hours > capacity) addImpact(report, 'loadRisk', `成员 ${target.name} W${index + 1}：修改前 ${before[index] || 0}h，修改后 ${hours}h，周容量 ${capacity.toFixed(1)}h`, task.id)
     })
     const impacts = [{ entity: task.id, kind: 'task_owner', before: beforeOwner?.name || '未分配', after: target.name, detail: `目标成员 ${target.name} 的六周负载将重新计算` }]
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_OWNER', task_id: taskId, to_owner_id: target.id + 1 }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_TASK_OWNER', task_id: taskId, to_owner_id: memberUserId(target.id) }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function analyzeStorySprint(storyId, sprint) {
@@ -140,7 +141,7 @@ export function useProjectActions() {
     const impacts = [{ entity: story.id, kind: 'story_sprint', before: story.sprint, after: Number(sprint), detail: '关联任务排期保持不变' }]
     const fallback = finalizeAnalysis(report, impacts)
     if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_STORY_SPRINT', story_id: storyId, sprint: Number(sprint) }]), impacts) } catch { return fallback }
+    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_STORY_SPRINT', story_id: storyId, sprint: Number(sprint) }], projects.currentProjectId), impacts) } catch { return fallback }
   }
 
   async function run(key, action, optimistic, rollback, save) {
@@ -150,7 +151,7 @@ export function useProjectActions() {
     optimistic()
     try {
       await save(session.apiMode)
-      if (session.apiMode) await project.loadAll()
+      if (session.apiMode) await project.loadAll(projects.currentProjectId)
       else project.checkConsistency()
       notify('已更新')
       return { ok: true }
@@ -164,46 +165,18 @@ export function useProjectActions() {
   }
 
   async function updateStoryPlacement(storyId, { sprint, activity }) {
-    const plan = project.storyMovePlan(storyId, { sprint: Number(sprint), activity: Number(activity) })
-    if (!plan) return { ok: false, reason: '故事不存在' }
-    if (!plan.sprintChanged && !plan.activityChanged) return { ok: true, unchanged: true }
-    if (guard('调整故事位置')) return { ok: false, reason: 'readonly' }
-    const key = `story:${storyId}`
-    if (saving.has(key)) return { ok: false, reason: 'saving' }
-    saving.add(key)
-    const changedTasks = []
-    try {
-      if (session.apiMode) {
-        if (plan.sprintChanged) {
-          for (const task of plan.undone) {
-            const nextWeeks = project.shiftWeek(task.w, plan.shift)
-            await tasksApi.patch(task.id, { week_start: nextWeeks[0], week_end: nextWeeks[1] })
-            changedTasks.push(task)
-          }
-        }
-        await storiesApi.patch(storyId, plan.to)
-        await project.loadAll()
-      } else {
-        project.applyStoryMoveLocal(plan)
-        project.persistTasks()
-        project.checkConsistency()
+    const story = project.stories.find(item => item.id === storyId)
+    if (!story) return { ok: false, reason: '故事不存在' }
+    const next = { sprint: Number(sprint), activity: Number(activity) }
+    if (story.sprint === next.sprint && story.activity === next.activity) return { ok: true, unchanged: true }
+    const before = { sprint: story.sprint, activity: story.activity }
+    return run(`story:${storyId}`, '调整故事位置', () => Object.assign(story, next), () => Object.assign(story, before), async online => {
+      if (online) await storiesApi.patch(storyId, next, projects.currentProjectId)
+      else {
+        project.addlog('move', storyId, `移动到 Sprint ${next.sprint} / A${next.activity}`)
+        project.persist()
       }
-      notify(`${storyId} → A${plan.to.activity} × Sprint ${plan.to.sprint}` +
-        (session.apiMode ? ' · 已同步到服务器' : ' · 离线演示数据'))
-      return { ok: true }
-    } catch (error) {
-      if (session.apiMode) {
-        for (const task of changedTasks.reverse()) {
-          try { await tasksApi.patch(task.id, { week_start: task.w[0], week_end: task.w[1] }) }
-          catch { /* loadAll below exposes any remaining server state */ }
-        }
-        try { await project.loadAll() } catch { /* keep original error */ }
-      }
-      notify(`更新失败：${error.message}`)
-      return { ok: false, reason: error.message }
-    } finally {
-      saving.delete(key)
-    }
+    })
   }
 
   async function updateTaskSchedule(taskId, { weekStart, weekEnd }) {
@@ -218,7 +191,7 @@ export function useProjectActions() {
     const before = { w: [...task.w], sprints: [...task.sprints] }
     const nextSprints = derivedTaskSprints(start, end)
     return run(`task:${taskId}`, '调整任务排期', () => { task.w = [start, end]; task.sprints = nextSprints }, () => { task.w = before.w; task.sprints = before.sprints }, async online => {
-      if (online) await tasksApi.patch(taskId, { week_start: start, week_end: end })
+      if (online) await tasksApi.patch(taskId, { week_start: start, week_end: end }, projects.currentProjectId)
       else {
         project.addlog('edit', taskId, `排期 W${start}-W${end}`)
         project.persistTasks()
@@ -233,7 +206,7 @@ export function useProjectActions() {
     if (task.owner === owner.id) return { ok: true, unchanged: true }
     const before = task.owner
     return run(`task:${taskId}`, '调整任务负责人', () => { task.owner = owner.id }, () => { task.owner = before }, async online => {
-      if (online) await tasksApi.patch(taskId, { owner_id: owner.id + 1 })
+      if (online) await tasksApi.patch(taskId, { owner_id: memberUserId(owner.id) }, projects.currentProjectId)
       else {
         project.addlog('edit', taskId, `负责人改为 ${owner.name}`)
         project.persistTasks()

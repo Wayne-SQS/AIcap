@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useMeetingStore } from '@/stores/meeting'
 import { useSessionStore } from '@/stores/session'
+import { useProjectsStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import { AGENT_UPDATED_EVENT } from '@/composables/useAgentRefresh'
@@ -16,6 +17,7 @@ import { profileAgentApi } from '@/api/profileAgent'
 
 const meeting = useMeetingStore()
 const session = useSessionStore()
+const projects = useProjectsStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
 
@@ -115,7 +117,7 @@ async function loadAnalysis() {
   loading.value = true
   errorMsg.value = ''
   try {
-    result.value = await profileAgentApi.analysis(rangeStart.value, rangeEnd.value)
+    result.value = await profileAgentApi.analysis(rangeStart.value, rangeEnd.value, projects.currentProjectId)
     loadHeatmap()
   } catch (e) {
     errorMsg.value = e.message || '分析请求失败'
@@ -129,7 +131,7 @@ async function runAnalysis() {
   if (guard('触发画像分析')) return
   running.value = true
   try {
-    result.value = await profileAgentApi.run(rangeStart.value, rangeEnd.value)
+    result.value = await profileAgentApi.run(rangeStart.value, rangeEnd.value, null, projects.currentProjectId)
     notify('分析完成,运行记录已留痕')
   } catch (e) {
     errorMsg.value = e.message || '分析失败(运行记录已留痕,可重试)'
@@ -142,7 +144,7 @@ async function submitRisks() {
   if (guard('提交风险建议')) return
   if (!risks.value.length) { notify('当前时间范围内没有团队风险'); return }
   try {
-    const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value)
+    const ids = await profileAgentApi.submitRiskSuggestions(rangeStart.value, rangeEnd.value, '画像智能体', projects.currentProjectId)
     notify(`已提交 ${ids.length} 条风险建议至「提案审核中心」`)
   } catch (e) {
     notify(e.message || '提交失败')
@@ -152,7 +154,7 @@ async function submitRisks() {
 async function loadDifficulty() {
   difficultyTab.value = !difficultyTab.value
   if (difficultyTab.value && !difficulties.value.length) {
-    try { difficulties.value = await profileAgentApi.difficulty() } catch { /* 空态 */ }
+    try { difficulties.value = await profileAgentApi.difficulty(projects.currentProjectId) } catch { /* 空态 */ }
   }
 }
 
@@ -160,7 +162,7 @@ const heatmapError = ref('')
 async function loadHeatmap() {
   heatmapError.value = ''
   try {
-    heatmapRows.value = await profileAgentApi.heatmap(rangeStart.value, rangeEnd.value)
+    heatmapRows.value = await profileAgentApi.heatmap(rangeStart.value, rangeEnd.value, null, projects.currentProjectId)
   } catch (e) {
     /* 原先用 catch {} 静默吞异常:接口挂了和「该区间没活动」在界面上一模一样,
        都是空热力图。这里如实把失败原因暴露出来 */
@@ -178,7 +180,7 @@ async function pickDay(date) {
     return
   }
   try {
-    selectedDayActs.value = await profileAgentApi.activities({ start: date, end: date })
+    selectedDayActs.value = await profileAgentApi.activities({ start: date, end: date }, projects.currentProjectId)
   } catch {
     selectedDayActs.value = []
   }
@@ -202,7 +204,7 @@ async function loadCompare() {
   if (!prevStart.value || !prevEnd.value) { notify('请先选择对比周期'); return }
   compareLoading.value = true
   try {
-    compareResult.value = await profileAgentApi.compare(prevStart.value, prevEnd.value, rangeStart.value, rangeEnd.value)
+    compareResult.value = await profileAgentApi.compare(prevStart.value, prevEnd.value, rangeStart.value, rangeEnd.value, projects.currentProjectId)
   } catch (e) {
     notify(e.message || '对比分析失败')
   } finally {
@@ -259,6 +261,18 @@ watch(() => session.online, v => {
   loadAnalysis()
   checkGithub()
 }, { immediate: true })
+
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous) return
+  result.value = null
+  difficulties.value = []
+  heatmapRows.value = []
+  selectedDay.value = null
+  selectedDayActs.value = []
+  errorMsg.value = ''
+  heatmapError.value = ''
+  if (next && session.online) loadAnalysis()
+})
 
 /* 成员把任务标记完成 → useAgentRefresh 触发智能体读仓库并评估 → 广播本事件。
    面板已挂载时立即重新拉取,避免"智能体更新了但页面还是旧的" */

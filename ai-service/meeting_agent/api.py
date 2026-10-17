@@ -123,7 +123,20 @@ def create_app(*, backend_origin: str | None = None,
 
     @app.exception_handler(WorkflowError)
     async def workflow_error(request, exc):
-        return error_response(exc.code, 422 if exc.code == "invalid_meeting_input" else 502)
+        # Contract failures (bad input, model output violating the contract) are
+        # the caller's/model's problem: they must surface as 422 with the precise
+        # code. They must never default to 502 (Bad Gateway), which would disguise
+        # a contract rejection as an upstream/gateway outage and misdirect
+        # operators to investigate Java or the network. Infrastructure codes
+        # (invalid_*_context raised from internal graph state) keep 502.
+        contract_status_422 = frozenset({
+            "invalid_meeting_input", "invalid_model_proposal",
+            "meeting_mismatch", "duplicate_proposal_id", "duplicate_story",
+            "unknown_story", "snapshot_mismatch", "unknown_segment",
+            "quote_mismatch", "duplicate_story_title", "unknown_owner",
+            "unresolved_owner", "deadline_not_quoted", "duplicate_action_item",
+        })
+        return error_response(exc.code, 422 if exc.code in contract_status_422 else 502)
 
     def current_token(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> str:
         if (credentials is None or not credentials.credentials

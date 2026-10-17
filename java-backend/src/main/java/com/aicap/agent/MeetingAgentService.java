@@ -8,6 +8,7 @@ import com.aicap.entity.User;
 import com.aicap.mapper.MeetingAgentEventMapper;
 import com.aicap.mapper.MeetingAgentRunMapper;
 import com.aicap.mapper.MeetingMapper;
+import com.aicap.service.MeetingService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +34,7 @@ public class MeetingAgentService {
     private final AgentJobs jobs;
     private final AgentProperties props;
     private final ObjectMapper objectMapper;
+    private final MeetingService meetingService;
 
     // ---------- 配置 ----------
 
@@ -49,9 +51,8 @@ public class MeetingAgentService {
     // ---------- runs ----------
 
     /** POST /meetings/{id}/runs:已存在则直接返回既有 run(不重复排队) */
-    public Map<String, Object> createRun(String meetingId, User requester) {
-        Meeting meeting = meetingMapper.selectById(meetingId);
-        if (meeting == null) throw ApiException.notFound("会议不存在");
+    public Map<String, Object> createRun(String projectId, String meetingId, User requester) {
+        Meeting meeting = meetingService.requireMeeting(projectId, meetingId);
         jobs.expireRuns();
         MeetingAgentRun existing = runMapper.selectOne(new QueryWrapper<MeetingAgentRun>()
                 .eq("meeting_id", meetingId));
@@ -63,8 +64,8 @@ public class MeetingAgentService {
     }
 
     /** GET /meetings/{id}/runs */
-    public List<Map<String, Object>> listRuns(String meetingId) {
-        if (meetingMapper.selectById(meetingId) == null) throw ApiException.notFound("会议不存在");
+    public List<Map<String, Object>> listRuns(String projectId, String meetingId) {
+        meetingService.requireMeeting(projectId, meetingId);
         jobs.expireRuns();
         List<MeetingAgentRun> runs = runMapper.selectList(new QueryWrapper<MeetingAgentRun>()
                 .eq("meeting_id", meetingId).orderByAsc("created_at").orderByAsc("id"));
@@ -74,10 +75,12 @@ public class MeetingAgentService {
     }
 
     /** GET /agent-runs/{runId}:含事件明细 */
-    public Map<String, Object> getRun(String runId) {
+    public Map<String, Object> getRun(String projectId, String runId) {
         jobs.expireRuns();
         MeetingAgentRun run = runMapper.selectById(runId);
+        if (run != null) meetingService.requireMeeting(projectId, run.getMeetingId());
         if (run == null) throw ApiException.notFound("分析记录不存在");
+        meetingService.requireMeeting(projectId, run.getMeetingId());
         Map<String, Object> out = runOut(run);
         List<MeetingAgentEvent> events = eventMapper.selectList(new QueryWrapper<MeetingAgentEvent>()
                 .eq("run_id", runId).orderByAsc("id"));
@@ -88,10 +91,12 @@ public class MeetingAgentService {
     }
 
     /** POST /agent-runs/{runId}/retry:仅 failed 可重试,原子认领 */
-    public Map<String, Object> retryRun(String runId, User requester) {
+    public Map<String, Object> retryRun(String projectId, String runId, User requester) {
         jobs.expireRuns();
         MeetingAgentRun run = runMapper.selectById(runId);
+        if (run != null) meetingService.requireMeeting(projectId, run.getMeetingId());
         if (run == null) throw ApiException.notFound("分析记录不存在");
+        meetingService.requireMeeting(projectId, run.getMeetingId());
         if (!"failed".equals(run.getStatus())) {
             throw ApiException.conflict("只能重试失败的分析；已生成的建议不会再次生成");
         }

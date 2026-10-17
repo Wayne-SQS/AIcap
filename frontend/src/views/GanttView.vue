@@ -4,7 +4,6 @@ import { useProjectStore, taskRefs } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useAgentRefresh, completingTaskId } from '@/composables/useAgentRefresh'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
-import { MILESTONES } from '@/data/seed'
 import { memberLabel } from '@/data/memberIdentity'
 import { useProjectActions } from '@/composables/useProjectActions'
 import { useToast } from '@/composables/useToast'
@@ -179,8 +178,7 @@ function scheduleWarnings(task, start, end) {
   if (project.storiesForTask(task).some(story => !sprints.has(story.sprint))) warnings.push('新排期与关联 Story Sprint 不完全一致')
   const other = project.tasks.filter(t => t.owner === task.owner && t.id !== task.id)
   const proposed = hoursByWeek(task, start, end)
-  const weeklyCapacity = project.capacityHours(task.owner)
-  if (weeklyCapacity == null) warnings.push('负责人周容量未配置，无法判断是否超载')
+  const weeklyCapacity = project.weeklyCapacityHours(task.owner)
   for (let week = 1; week <= 6; week++) {
     const load = other.reduce((sum, item) => sum + hoursByWeek(item, item.w[0], item.w[1])[week - 1], 0) + proposed[week - 1]
     if (weeklyCapacity != null && load > weeklyCapacity) warnings.push(`W${week} 预计 ${load}h，超过周容量 ${weeklyCapacity.toFixed(1)}h`)
@@ -250,8 +248,8 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
       <div>
         <div class="eyebrow">GANTT CHART / 6 周排期 · 强制血缘</div>
         <h1>甘特图</h1>
-        <p>任务按计划周展示，保留 Story 血缘、负责人、优先级与管理任务语义；点击任务条可查看依赖并编辑排期。</p>
         <button type="button" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.openNew()">新增任务</button>
+        <p>任务按计划周展示，保留 Story 血缘、负责人、优先级与管理任务语义；点击任务条可查看依赖并编辑排期。</p>
       </div>
       <span class="demo">Sprint 1 = W1–W2 · Sprint 2 = W3–W4 · Sprint 3 = W5–W6</span>
     </div>
@@ -311,16 +309,16 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
       <span class="chip"><span class="diamond-key"></span>菱形 = 里程碑</span>
       <span class="chip note">W1–W6 = 周次 · S1–S3 = Sprint</span>
       <span class="chip note">任务条 = 计划起止范围（不按工时比例）</span>
+      <span class="chip note">红色边框 = 依赖最长链</span>
       <span class="chip note">点击任务条查看前置 / 后续任务</span>
-      <span class="chip note">红色边框 = 依赖最长链（按任务计划持续周数）</span>
     </div>
-    <div class="gantt-path" id="gantt-critical-path" v-if="deliveryPath.cycle">任务依赖存在循环，无法计算关键路径。</div>
-    <div class="gantt-path" id="gantt-critical-path" v-else-if="deliveryPath.ids.length">
-      <b>依赖关键路径</b> {{ deliveryPath.ids.join(' → ') }} · 链上工期累计 {{ deliveryPath.weeks }} 周（非日历跨度）
-    </div>
-    <div class="gantt-path" id="gantt-critical-path" v-else>暂无任务，无法计算关键路径。</div>
 
     <!-- 详情面板:选中任务 → 任务详情 + 编辑任务;从任务详情可继续查看 Story -->
+    <div class="gantt-path" id="gantt-critical-path" v-if="deliveryPath.cycle">任务依赖存在循环，无法计算关键路径。</div>
+    <div class="gantt-path" id="gantt-critical-path" v-else-if="deliveryPath.ids.length">
+      <b>依赖关键路径</b> {{ deliveryPath.ids.join(' → ') }} · 链上工期累计 {{ deliveryPath.weeks }} 周
+    </div>
+    <div class="gantt-path" id="gantt-critical-path" v-else>暂无任务，无法计算关键路径。</div>
     <div class="gantt-detail" :class="{ empty: !selection }" id="gantt-detail">
       <template v-if="!selection">
         点击任务条可查看关联故事、前置任务与后续任务。任务条表示计划起止时间范围，不按工时比例绘制。
@@ -361,9 +359,9 @@ async function onScheduleChange({ key, mode, deltaWeeks }) {
         <div class="detail-head">
           <span class="id">{{ selectedStory.id }}</span>
           <h3>{{ selectedStory.title }}</h3>
+          <button type="button" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.openNew(selectedStory.id)">拆分为任务</button>
           <div class="actions">
             <button type="button" class="primary" :disabled="session.isViewer" :title="viewerTitle" @click="storyEditorRef?.open(selectedStory.id)">编辑故事</button>
-            <button type="button" :disabled="session.isViewer" :title="viewerTitle" @click="taskEditorRef?.openNew(selectedStory.id)">拆分为任务</button>
           </div>
         </div>
         <div class="detail-grid">

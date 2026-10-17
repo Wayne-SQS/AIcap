@@ -9,6 +9,10 @@ import com.aicap.mapper.MilestoneMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.entity.ProjectMember;
+import com.aicap.service.ProjectScopedResolver;
+import com.aicap.service.ProjectCapacityPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,8 +31,10 @@ public class PlanningAgentTools {
     private final TaskMapper tasks;
     private final StoryMapper stories;
     private final UserMapper users;
+    private final ProjectMemberMapper projectMembers;
     private final MilestoneMapper milestones;
     private final ObjectMapper mapper;
+    private final ProjectScopedResolver resolver;
 
     public List<JsonNode> definitions() {
         return List.of(
@@ -52,50 +58,52 @@ public class PlanningAgentTools {
     }
 
     /** 入队时记录的最小上下文快照，用于审计，不替代模型运行期间的工具查询。 */
-    public ObjectNode contextSnapshot() {
+    public ObjectNode contextSnapshot() { throw new IllegalStateException("projectId 必填"); }
+
+    public ObjectNode contextSnapshot(String projectId) {
         ObjectNode snapshot = mapper.createObjectNode();
-        snapshot.set("overview", overview());
-        snapshot.set("sprints", sprints().path("items"));
-        snapshot.set("members", members().path("items"));
+        snapshot.set("overview", overview(projectId));
+        snapshot.set("sprints", sprints(projectId).path("items"));
+        snapshot.set("members", members(projectId).path("items"));
         return snapshot;
     }
 
-    public JsonNode execute(String name, JsonNode args) throws AgentError {
+    public JsonNode execute(String projectId, String name, JsonNode args) throws AgentError {
         if (!(args instanceof ObjectNode object)) {
             throw new AgentError("invalid_tool_arguments", "参数必须是对象");
         }
         return switch (name) {
-            case "get_project_overview" -> overview();
-            case "get_stories" -> storyList(object);
-            case "get_tasks" -> taskList(object);
-            case "get_members" -> members();
-            case "get_sprints" -> sprints();
-            case "get_task_by_id" -> task(object);
-            case "get_story_by_id" -> story(object);
-            case "get_member_tasks" -> memberTasks(object.path("owner_id").asInt());
-            case "get_task_schedule" -> schedule(object);
-            case "get_task_dependencies" -> dependencies(object);
-            case "get_task_priority" -> priority(object);
-            case "get_milestones" -> milestoneList();
-            case "get_milestone_by_id" -> milestone(object);
-            case "get_member_load" -> load(object.path("owner_id").asInt());
+            case "get_project_overview" -> overview(projectId);
+            case "get_stories" -> storyList(projectId, object);
+            case "get_tasks" -> taskList(projectId, object);
+            case "get_members" -> members(projectId);
+            case "get_sprints" -> sprints(projectId);
+            case "get_task_by_id" -> task(projectId, object);
+            case "get_story_by_id" -> story(projectId, object);
+            case "get_member_tasks" -> memberTasks(projectId, object.path("owner_id").asInt());
+            case "get_task_schedule" -> schedule(projectId, object);
+            case "get_task_dependencies" -> dependencies(projectId, object);
+            case "get_task_priority" -> priority(projectId, object);
+            case "get_milestones" -> milestoneList(projectId);
+            case "get_milestone_by_id" -> milestone(projectId, object);
+            case "get_member_load" -> load(projectId, object.path("owner_id").asInt());
             default -> throw new AgentError("tool_not_allowed", "未授权工具");
         };
     }
 
-    private ObjectNode overview() {
+    private ObjectNode overview(String projectId) {
         ObjectNode node = mapper.createObjectNode();
-        node.put("task_count", tasks.selectCount(null));
-        node.put("story_count", stories.selectCount(null));
-        node.put("member_count", users.selectCount(null));
+        node.put("task_count", tasks.selectCount(new QueryWrapper<Task>().eq("project_id", projectId)));
+        node.put("story_count", stories.selectCount(new QueryWrapper<Story>().eq("project_id", projectId)));
+        node.put("member_count", members(projectId).path("items").size());
         node.put("sprint_count", 4);
         node.put("week_count", 6);
         node.put("data_source", "database");
         return node;
     }
 
-    private ObjectNode storyList(ObjectNode args) {
-        QueryWrapper<Story> query = new QueryWrapper<Story>().orderByAsc("id");
+    private ObjectNode storyList(String projectId, ObjectNode args) {
+        QueryWrapper<Story> query = new QueryWrapper<Story>().eq("project_id", projectId).orderByAsc("code");
         if (args.has("sprint")) query.eq("sprint", args.path("sprint").asInt());
         if (args.has("activity")) query.eq("activity", args.path("activity").asInt());
         if (args.has("owner_id")) query.eq("owner_id", args.path("owner_id").asInt());
@@ -106,8 +114,8 @@ public class PlanningAgentTools {
         return result;
     }
 
-    private ObjectNode taskList(ObjectNode args) {
-        QueryWrapper<Task> query = new QueryWrapper<Task>().orderByAsc("id");
+    private ObjectNode taskList(String projectId, ObjectNode args) {
+        QueryWrapper<Task> query = new QueryWrapper<Task>().eq("project_id", projectId).orderByAsc("code");
         if (args.has("owner_id")) query.eq("owner_id", args.path("owner_id").asInt());
         if (args.has("week")) {
             int week = args.path("week").asInt();
@@ -126,26 +134,26 @@ public class PlanningAgentTools {
         return result;
     }
 
-    private ObjectNode task(ObjectNode args) {
+    private ObjectNode task(String projectId, ObjectNode args) {
         String id = args.path("task_id").asText().trim().toUpperCase();
-        Task task = tasks.selectById(id);
+        Task task = resolver.findTask(projectId, id);
         return task == null ? missing("task", id) : taskJson(task);
     }
 
-    private ObjectNode story(ObjectNode args) {
+    private ObjectNode story(String projectId, ObjectNode args) {
         String id = args.path("story_id").asText().trim().toUpperCase();
-        Story story = stories.selectById(id);
+        Story story = resolver.findStory(projectId, id);
         return story == null ? missing("story", id) : storyJson(story);
     }
 
-    private ObjectNode memberTasks(int ownerId) {
+    private ObjectNode memberTasks(String projectId, int ownerId) {
         if (users.selectById(ownerId) == null) return missing("member", String.valueOf(ownerId));
-        return taskList(mapper.createObjectNode().put("owner_id", ownerId));
+        return taskList(projectId, mapper.createObjectNode().put("owner_id", ownerId));
     }
 
-    private ObjectNode schedule(ObjectNode args) {
+    private ObjectNode schedule(String projectId, ObjectNode args) {
         String id = args.path("task_id").asText().trim().toUpperCase();
-        Task task = tasks.selectById(id);
+        Task task = resolver.findTask(projectId, id);
         if (task == null) return missing("task", id);
         ObjectNode result = taskJson(task);
         result.remove(List.of("name", "owner_id", "hours", "story_ref", "status", "depends_on"));
@@ -154,17 +162,17 @@ public class PlanningAgentTools {
         return result;
     }
 
-    private ObjectNode dependencies(ObjectNode args) {
+    private ObjectNode dependencies(String projectId, ObjectNode args) {
         String id = args.path("task_id").asText().trim().toUpperCase();
-        Task task = tasks.selectById(id);
+        Task task = resolver.findTask(projectId, id);
         if (task == null) return missing("task", id);
         ArrayNode predecessors = mapper.createArrayNode();
         for (String ref : String.valueOf(task.getDependsOn() == null ? "" : task.getDependsOn()).split(",")) {
             String dep = ref.trim().toUpperCase();
-            if (!dep.isBlank()) { Task row = tasks.selectById(dep); if (row != null) predecessors.add(taskJson(row)); }
+            if (!dep.isBlank()) { Task row = resolver.findTask(projectId, dep); if (row != null) predecessors.add(taskJson(row)); }
         }
         ArrayNode dependents = mapper.createArrayNode();
-        for (Task row : tasks.selectList(null)) {
+        for (Task row : tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId))) {
             for (String ref : String.valueOf(row.getDependsOn() == null ? "" : row.getDependsOn()).split(",")) {
                 if (id.equals(ref.trim().toUpperCase())) { dependents.add(taskJson(row)); break; }
             }
@@ -176,23 +184,23 @@ public class PlanningAgentTools {
         return result;
     }
 
-    private ObjectNode priority(ObjectNode args) {
+    private ObjectNode priority(String projectId, ObjectNode args) {
         String id = args.path("task_id").asText().trim().toUpperCase();
-        Task task = tasks.selectById(id);
+        Task task = resolver.findTask(projectId, id);
         if (task == null) return missing("task", id);
         ObjectNode result = mapper.createObjectNode(); result.put("task_id", id);
         result.put("priority", task.getPriority() == null ? "Should" : task.getPriority()); return result;
     }
 
-    private ObjectNode milestoneList() {
+    private ObjectNode milestoneList(String projectId) {
         ArrayNode items = mapper.createArrayNode();
-        milestones.selectList(new QueryWrapper<Milestone>().orderByAsc("week").orderByAsc("id")).forEach(m -> items.add(milestoneJson(m)));
+        milestones.selectList(new QueryWrapper<Milestone>().eq("project_id", projectId).orderByAsc("week").orderByAsc("code")).forEach(m -> items.add(milestoneJson(m)));
         ObjectNode result = mapper.createObjectNode(); result.set("items", items); return result;
     }
 
-    private ObjectNode milestone(ObjectNode args) {
+    private ObjectNode milestone(String projectId, ObjectNode args) {
         String id = args.path("milestone_id").asText().trim().toUpperCase();
-        Milestone row = milestones.selectById(id); return row == null ? missing("milestone", id) : milestoneJson(row);
+        Milestone row = resolver.findMilestone(projectId, id); return row == null ? missing("milestone", id) : milestoneJson(row);
     }
 
     private ObjectNode milestoneJson(Milestone row) {
@@ -228,24 +236,26 @@ public class PlanningAgentTools {
         return node;
     }
 
-    private ObjectNode members() {
+    private ObjectNode members(String projectId) {
         ArrayNode items = mapper.createArrayNode();
-        users.selectList(new QueryWrapper<User>().orderByAsc("id")).forEach(user -> {
+        for (ProjectMember link : projectMembers.selectList(new QueryWrapper<ProjectMember>().eq("project_id", projectId).orderByAsc("user_id"))) {
+            User user = users.selectById(link.getUserId());
+            if (user == null) continue;
             ObjectNode node = mapper.createObjectNode();
             node.put("id", user.getId());
             node.put("name", user.getDisplayName());
-            node.put("role", user.getRole());
-            node.put("capacity_hours", user.getCapacityHours());
-            if (user.getCapacityHours() == null) node.putNull("weekly_capacity_hours");
-            else node.put("weekly_capacity_hours", user.getCapacityHours().doubleValue());
+            node.put("role", link.getProjectRole());
+            node.put("capacity_hours", link.getCapacityHours());
+            node.put("weekly_capacity_hours", ProjectCapacityPolicy.weeklyCapacity(
+                    link.getWeeklyCapacityHours(), link.getCapacityHours(), user.getId()));
             items.add(node);
-        });
+        }
         ObjectNode result = mapper.createObjectNode();
         result.set("items", items);
         return result;
     }
 
-    private ObjectNode sprints() {
+    private ObjectNode sprints(String projectId) {
         ArrayNode items = mapper.createArrayNode();
         for (int sprint = 1; sprint <= 4; sprint++) {
             ObjectNode node = mapper.createObjectNode();
@@ -259,11 +269,14 @@ public class PlanningAgentTools {
         return result;
     }
 
-    private ObjectNode load(int ownerId) {
+    private ObjectNode load(String projectId, int ownerId) {
         User user = users.selectById(ownerId);
         if (user == null) return missing("member", String.valueOf(ownerId));
+        ProjectMember link = projectMembers.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", projectId).eq("user_id", ownerId).last("LIMIT 1"));
+        if (link == null) return missing("member", String.valueOf(ownerId));
         int[] weekly = new int[6];
-        for (Task task : tasks.selectList(new QueryWrapper<Task>().eq("owner_id", ownerId))) {
+        for (Task task : tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId).eq("owner_id", ownerId))) {
             int start = Math.max(1, task.getWeekStart());
             int end = Math.min(6, task.getWeekEnd());
             int count = Math.max(1, end - start + 1);
@@ -276,9 +289,9 @@ public class PlanningAgentTools {
         for (int hours : weekly) values.add(hours);
         ObjectNode result = mapper.createObjectNode();
         result.put("owner_id", ownerId);
-        result.put("capacity_hours", user.getCapacityHours());
-        if (user.getCapacityHours() == null) result.putNull("weekly_capacity_hours");
-        else result.put("weekly_capacity_hours", user.getCapacityHours().doubleValue());
+        result.put("capacity_hours", link.getCapacityHours());
+        result.put("weekly_capacity_hours", ProjectCapacityPolicy.weeklyCapacity(
+                link.getWeeklyCapacityHours(), link.getCapacityHours(), ownerId));
         result.set("weekly_hours", values);
         return result;
     }

@@ -86,7 +86,12 @@ class RetroWorkflowTests(unittest.TestCase):
             if mutation=='decision_quote': self.payload['decisions'][0]['evidence'][0]['quote']='不存在的决议'
             with self.subTest(mutation=mutation), self.assertRaises(WorkflowError) as caught:
                 self.run_flow()
-            self.assertEqual('invalid_model_proposal',caught.exception.code)
+            codes = {'meeting': 'meeting_mismatch', 'owner': 'unknown_owner',
+                     'bool': 'invalid_model_proposal', 'deadline': 'deadline_not_quoted',
+                     'duplicate': 'duplicate_proposal_id', 'content': 'duplicate_action_item',
+                     'action': 'invalid_model_proposal', 'approved': 'invalid_model_proposal',
+                     'decision_quote': 'quote_mismatch'}
+            self.assertEqual(codes[mutation],caught.exception.code)
 
     def test_named_owner_requires_unambiguous_name_in_evidence(self):
         self.members.get_member_profiles.return_value.append(SimpleNamespace(user_id=8,display_name='张敏'))

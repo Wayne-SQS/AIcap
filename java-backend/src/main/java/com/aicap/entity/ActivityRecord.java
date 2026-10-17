@@ -16,7 +16,10 @@ import java.time.LocalDateTime;
 public class ActivityRecord {
     @TableId(type = IdType.AUTO)
     private Integer id;
+    private String projectId;
     private Integer userId;
+    private Long taskInternalId;
+    private String taskCodeSnapshot;
     /** 关联任务(Txx);null=未关联任务 */
     private String taskId;
     /** commit/pr/review/bugfix/task_done/note */

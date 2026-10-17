@@ -47,12 +47,36 @@ public class ModelClient {
         this.modelOverride.remove();
     }
 
+    public String effectiveModelName() {
+        String selected = modelOverride.get();
+        return selected != null ? selected : props.getModel();
+    }
+
     /** 一次助手回复:message 为可直接回填 messages 的 assistant 消息节点 */
-    public record Completion(JsonNode message, Map<String, Integer> usage) {
+    public record Completion(JsonNode message, Map<String, Integer> usage, String finishReason, int responseLength) {
+        public Completion(JsonNode message, Map<String, Integer> usage) {
+            this(message, usage, "stop", message == null ? 0 : message.path("content").asText("").length());
+        }
+
+        public boolean incomplete() {
+            return !"stop".equals(finishReason) && !"tool_calls".equals(finishReason);
+        }
     }
 
     /** 对齐 model_client.complete():非 final 时携带 tools + tool_choice=auto;final 时强制 json_object */
     public Completion complete(List<JsonNode> messages, List<JsonNode> tools, boolean finalRound) throws AgentError {
+        return complete(messages, tools, finalRound, AgentProperties.MAX_TOKENS, false, props.getTimeoutSeconds());
+    }
+
+    /** Allows the project generator to inspect a truncated response and retry only that stage. */
+    public Completion completeAllowIncomplete(List<JsonNode> messages, List<JsonNode> tools,
+                                              boolean finalRound, int maxTokens) throws AgentError {
+        return complete(messages, tools, finalRound, maxTokens, true,
+                Math.max(props.getTimeoutSeconds(), AgentProperties.PROJECT_GENERATION_TIMEOUT_SECONDS));
+    }
+
+    private Completion complete(List<JsonNode> messages, List<JsonNode> tools, boolean finalRound,
+                                int maxTokens, boolean allowIncomplete, int requestTimeoutSeconds) throws AgentError {
         if (!props.settingsReady()) {
             throw new AgentError("not_configured", "服务端尚未配置模型密钥/模型名称");
         }
@@ -62,7 +86,7 @@ public class ModelClient {
         body.put("model", selectedModel != null ? selectedModel : props.getModel());
         body.set("messages", mapper.valueToTree(messages));
         body.put("stream", false);
-        body.put("max_tokens", AgentProperties.MAX_TOKENS);
+        body.put("max_tokens", Math.max(1, maxTokens));
         if ("api.deepseek.com".equals(base.getHost())) {
             // DeepSeek 当前默认思考模式;本循环需要非思考响应
             ObjectNode thinking = mapper.createObjectNode();
@@ -81,7 +105,7 @@ public class ModelClient {
         HttpRequest request;
         try {
             request = HttpRequest.newBuilder(URI.create(props.getBaseUrl().replaceAll("/+$", "") + "/chat/completions"))
-                    .timeout(Duration.ofSeconds(props.getTimeoutSeconds()))
+                    .timeout(Duration.ofSeconds(requestTimeoutSeconds))
                     .header("Authorization", "Bearer " + props.getApiKey())
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body)))
@@ -123,7 +147,7 @@ public class ModelClient {
                 throw new AgentError("invalid_response", "模型服务返回了无法解析的响应");
             }
             String finish = choice.path("finish_reason").asText(null);
-            if (!"stop".equals(finish) && !"tool_calls".equals(finish)) {
+            if (!allowIncomplete && !"stop".equals(finish) && !"tool_calls".equals(finish)) {
                 throw new AgentError("incomplete_response", "模型输出被截断或中断，未生成任何建议");
             }
             JsonNode messageNode = choice.path("message");
@@ -163,7 +187,7 @@ public class ModelClient {
             if (!calls.isMissingNode() && !calls.isNull() && calls.size() > 0) {
                 assistant.set("tool_calls", calls.deepCopy());
             }
-            return new Completion(assistant, usage);
+            return new Completion(assistant, usage, finish, content.isTextual() ? content.asText().length() : 0);
         } catch (AgentError e) {
             throw e;
         } catch (RuntimeException e) {

@@ -1,12 +1,13 @@
 <script setup>
 import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { storiesApi } from '@/api/stories'
 import { tasksApi } from '@/api/tasks'
-import { statuses } from '@/constants'
+import { statuses, DEFAULT_ACTIVITIES } from '@/constants'
 import { memberUserId } from '@/data/memberIdentity'
 import UndoneChoiceDialog from './UndoneChoiceDialog.vue'
 
@@ -16,6 +17,7 @@ const props = defineProps({
   inScope: { type: Function, required: true }  // 离线保存后的「当前筛选范围外」提示
 })
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -24,6 +26,7 @@ const undoneRef = ref(null)
 
 const editing = ref(null)
 const form = reactive({ title: '', description: '', role: '', goal: '', value: '', epicId: '', acceptance: '', priority: 'Must', status: '0', owner: '', sprint: '1', activity: '2' })
+const activityNames = computed(() => projects.currentProject?.activities?.length ? projects.currentProject.activities : DEFAULT_ACTIVITIES)
 
 /* 删除故事的后端口径是 admin/owner(StoryController.delete → Roles.reviewer);
    原先只判 viewer,导致 member 看到可点的「删除故事」、点击必然 403。
@@ -44,14 +47,14 @@ function open(id = null, status = 0, filters = {}) {
   const s = id
     ? project.stories.find(x => x.id === id)
     : {
-        title: '', description: '', role: '', goal: '', value: '', epicId: project.epics.find(e => e.name === '任务与协作')?.id ?? '', acceptance: '', priority: 'Must', status,
+        title: '', description: '', role: '', goal: '', value: '', epicId: '', acceptance: '', priority: 'Must', status,
         owner: filters.owner === 'all' ? null : +filters.owner,
         sprint: allOrFuture ? 1 : +filters.sprint,
         activity: 2
       }
   if (!s) return
   for (const k of ['title', 'description', 'role', 'goal', 'value', 'epicId', 'acceptance', 'priority', 'status', 'owner', 'sprint', 'activity']) {
-    form[k] = k === 'epicId' ? (s[k] == null ? '' : String(s[k])) : (s[k] ?? '')
+    form[k] = s[k] ?? ''
   }
   nextTick(() => { dialogEl.value?.showModal() })
 }
@@ -67,9 +70,9 @@ function onDialogClick(e) {
 async function submit() {
   if (guard('保存故事')) return
   const payload = {
-    title: form.title.trim(), description: form.description.trim(), role: form.role.trim(),
-    goal: form.goal.trim(), value: form.value.trim(), acceptance: form.acceptance.trim(),
-    epic_id: form.epicId === '' ? null : Number(form.epicId),
+    title: form.title.trim(), description: form.description.trim(),
+    role: form.role.trim(), goal: form.goal.trim(), value: form.value.trim(),
+    epic_id: form.epicId === '' ? null : Number(form.epicId), acceptance: form.acceptance.trim(),
     priority: form.priority, status: +form.status,
     owner_id: memberUserId(form.owner === '' ? null : +form.owner),
     sprint: +form.sprint, activity: +form.activity
@@ -91,7 +94,7 @@ async function submit() {
           for (const t of undone) {
             t.w = project.shiftWeek(t.w, shift)
             if (session.apiMode) {
-              try { await tasksApi.patch(t.id, { week_start: t.w[0], week_end: t.w[1] }) }
+              try { await tasksApi.patch(t.id, { week_start: t.w[0], week_end: t.w[1] }, projects.currentProjectId) }
               catch (err) { notify('子任务 ' + t.id + ' 挪动失败:' + err.message) }
             }
           }
@@ -120,7 +123,7 @@ async function submit() {
           for (const t of undone) {
             t.owner = newOwner
             if (session.apiMode) {
-              try { await tasksApi.patch(t.id, { owner_id: memberUserId(newOwner) }) }
+              try { await tasksApi.patch(t.id, { owner_id: memberUserId(newOwner) }, projects.currentProjectId) }
               catch (err) { notify('子任务 ' + t.id + ' 负责人同步失败:' + err.message) }
             }
           }
@@ -130,10 +133,10 @@ async function submit() {
   }
   if (session.apiMode) {
     try {
-      if (editing.value) await storiesApi.patch(editing.value, payload)
-      else await storiesApi.create(payload)
+      if (editing.value) await storiesApi.patch(editing.value, payload, projects.currentProjectId)
+      else await storiesApi.create(payload, projects.currentProjectId)
       close()
-      await project.loadAll()
+      await project.loadAll(projects.currentProjectId)
       notify((editing.value ? '已更新' : '已创建') + ' · 已同步到服务器')
     } catch (err) { notify(err.message) }
   } else {
@@ -176,9 +179,9 @@ async function onDelete() {
   }
   if (session.apiMode) {
     try {
-      await storiesApi.remove(editing.value, strategy)
+      await storiesApi.remove(editing.value, strategy, projects.currentProjectId)
       close()
-      await project.loadAll()
+      await project.loadAll(projects.currentProjectId)
       notify(editing.value + ' 已删除 · 子任务级联:' + ({ cancel: '标记已取消', keep: '保留跟踪', detach: '转独立任务' })[strategy])
     } catch (err) { notify(err.message) }
   } else {
@@ -211,11 +214,13 @@ defineExpose({ open })
         <label class="field">故事标题<input name="title" v-model="form.title" required maxlength="100"></label>
         <label class="field">用户故事<textarea name="description" v-model="form.description" required placeholder="作为…，我希望…，以便…"></textarea></label>
         <div class="formrow">
-          <label class="field">角色<input name="role" v-model="form.role" maxlength="200" placeholder="谁需要这项能力"></label>
-          <label class="field">目标<input name="goal" v-model="form.goal" maxlength="500" placeholder="希望完成什么"></label>
+          <label class="field">用户角色<input name="role" v-model="form.role" maxlength="200"></label>
+          <label class="field">所属史诗<select name="epic_id" v-model="form.epicId"><option value="">未归属</option><option v-for="epic in project.epics" :key="epic.id" :value="epic.id">{{ epic.code }} · {{ epic.name }}</option></select></label>
         </div>
-        <label class="field">价值<input name="value" v-model="form.value" maxlength="500" placeholder="带来什么价值"></label>
-        <label class="field">所属史诗<select name="epic_id" v-model="form.epicId"><option value="">未归属</option><option v-for="epic in project.epics" :key="epic.id" :value="String(epic.id)">{{ epic.code }} · {{ epic.name }}</option></select></label>
+        <div class="formrow">
+          <label class="field">期望目标<input name="goal" v-model="form.goal" maxlength="500"></label>
+          <label class="field">业务价值<input name="value" v-model="form.value" maxlength="500"></label>
+        </div>
         <div class="formrow">
           <label class="field">状态<select name="status" v-model="form.status"><option value="0">待办</option><option value="1">进行中</option><option value="2">已完成</option></select></label>
           <label class="field">MoSCoW 优先级<select name="priority" v-model="form.priority"><option>Must</option><option>Should</option><option>Could</option></select></label>
@@ -225,11 +230,7 @@ defineExpose({ open })
           <label class="field">迭代<select name="sprint" v-model="form.sprint"><option value="1">Sprint 1</option><option value="2">Sprint 2</option><option value="3">Sprint 3</option><option value="4">Sprint 4+ · 后续路线</option></select></label>
         </div>
         <label class="field">骨干活动<select name="activity" v-model="form.activity">
-          <option value="1">A1 进入与组织项目</option>
-          <option value="2">A2 梳理需求</option>
-          <option value="3">A3 安排与执行</option>
-          <option value="4">A4 观察与协同</option>
-          <option value="5">A5 复盘改进</option>
+          <option v-for="(name, index) in activityNames" :key="name" :value="String(index + 1)">A{{ index + 1 }} {{ name }}</option>
         </select></label>
         <label class="field">验收条件<textarea name="acceptance" v-model="form.acceptance" required></textarea></label>
         <div class="actions">

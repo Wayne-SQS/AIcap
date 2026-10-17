@@ -68,7 +68,8 @@ public class RoleController {
     public Map<String, Boolean> delete(@PathVariable String name) {
         Roles.reviewer();
         if (!exists(name)) throw ApiException.notFound("角色不存在或为内置角色");
-        if (jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE role=?", Integer.class, name) > 0)
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE role=?", Integer.class, name) > 0
+                || jdbc.queryForObject("SELECT COUNT(*) FROM project_members WHERE project_role=?", Integer.class, name) > 0)
             throw ApiException.conflict("仍有成员使用该角色");
         jdbc.update("DELETE FROM roles WHERE name=?", name);
         return Map.of("ok", true);

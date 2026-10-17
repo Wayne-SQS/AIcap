@@ -74,7 +74,7 @@ class PlanningWorkflowTests(unittest.TestCase):
         self.payload['proposed_actions'][0]['expected']['sprint'] = 1
         with self.assertRaises(WorkflowError) as caught:
             self.run_flow()
-        self.assertEqual('invalid_model_proposal', str(caught.exception))
+        self.assertEqual('snapshot_mismatch', str(caught.exception))
         self.assertEqual(1, len(self.requests))
 
     def test_provider_errors_propagate_without_retry(self):

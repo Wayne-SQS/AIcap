@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, nextTick, computed } from 'vue'
 import { useProjectStore, taskRefs } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard, READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -13,6 +14,7 @@ import { memberUserId, memberIndex } from '@/data/memberIdentity'
    离线:直接改本地任务并重算 sprints
    校验前后端同口径:周序、US/T 编号合法性、关联故事与前置任务存在性、不能依赖自身 */
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const { notify } = useToast()
 const { guard } = usePermissionGuard()
@@ -70,6 +72,7 @@ function normalizeRefs(value, kind) {
 }
 
 async function submit() {
+  if (!creating.value && !editingId.value) return
   if (guard('保存任务')) return
   try {
     const weekStart = +form.weekStart, weekEnd = +form.weekEnd
@@ -97,15 +100,15 @@ async function submit() {
       if (cardId.value) payload.kanban_card_id = cardId.value
     }
     if (session.apiMode) {
-      if (creating.value) await tasksApi.create(payload)
-      else await tasksApi.patch(editingId.value, payload)
-      await project.loadAll()
+      if (creating.value) await tasksApi.create(payload, projects.currentProjectId)
+      else await tasksApi.patch(editingId.value, payload, projects.currentProjectId)
+      await project.loadAll(projects.currentProjectId)
     } else {
       if (creating.value) {
         const next = Math.max(0, ...project.tasks.map(t => Number(/^T(\d+)$/.exec(t.id)?.[1] || 0))) + 1
         const id = 'T' + String(next).padStart(2, '0')
         project.tasks.push(project.mapTask({ ...payload, id, estimated_hours: payload.hours,
-          task_type: cardId.value ? 'feature' : 'management', status: 0, progress: 0 }))
+          task_type: payload.task_type, status: 0, progress: 0 }))
         project.addlog('create', id, payload.name)
       } else {
         const t = project.tasks.find(x => x.id === editingId.value)

@@ -14,26 +14,28 @@ test('故事的角色、目标、价值和验收条件分别保存并在刷新�
     { id: 4, code: 'E4', name: 'AI 智能体与人机协作', description: '' }
   ]
   const json = body => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'test-token'))
-  await page.route('**/api/health', route => route.fulfill(json({})))
-  await page.route('**/api/auth/me', route => route.fulfill(json({ id: 1, display_name: '测试负责人', role: 'admin', can_write: true })))
-  await page.route('**/api/projects', route => route.fulfill(json([{ id: 1, name: '需求基线项目', member_role: 'owner' }])))
-  await page.route('**/api/auth/users', route => route.fulfill(json([{ id: 1, display_name: '测试负责人', role: 'admin', capacity_hours: 10 }])))
-  await page.route('**/api/stories/logs', route => route.fulfill(json([])))
-  await page.route('**/api/stories/US03', async route => {
+  await page.route('http://127.0.0.1:8080/api/**', route => route.fulfill(json([])))
+  await page.addInitScript(() => { localStorage.setItem('aiguanli_token', 'test-token'); localStorage.setItem('aiguanli-current-project', 'P003') })
+  await page.route('http://127.0.0.1:8080/api/health', route => route.fulfill(json({})))
+  await page.route('http://127.0.0.1:8080/api/auth/me', route => route.fulfill(json({ id: 1, display_name: '测试负责人', role: 'admin', can_write: true })))
+  await page.route('http://127.0.0.1:8080/api/projects', route => route.fulfill(json([{ id: 'P003', name: '需求基线项目', project_role: 'owner', can_write: true, can_manage: true }])))
+  await page.route('http://127.0.0.1:8080/api/auth/users', route => route.fulfill(json([{ id: 1, display_name: '测试负责人', role: 'admin', capacity_hours: 10 }])))
+  await page.route('http://127.0.0.1:8080/api/projects/P003/members', route => route.fulfill(json([{ user_id: 1, project_role: 'owner', capacity_hours: 60, weekly_capacity_hours: 10 }])))
+  await page.route('http://127.0.0.1:8080/api/stories/logs*', route => route.fulfill(json([])))
+  await page.route('http://127.0.0.1:8080/api/stories/US03*', async route => {
     expect(route.request().method()).toBe('PATCH')
     story = { ...story, ...route.request().postDataJSON() }
     await route.fulfill(json(story))
   })
-  await page.route('**/api/stories', route => route.fulfill(json([story])))
-  await page.route('**/api/epics/*', async route => {
-    const id = Number(route.request().url().split('/').pop())
+  await page.route('http://127.0.0.1:8080/api/stories*', route => route.fulfill(json([story])))
+  await page.route('http://127.0.0.1:8080/api/epics/**', async route => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop())
     if (route.request().method() === 'PATCH') {
       epics = epics.map(epic => epic.id === id ? { ...epic, ...route.request().postDataJSON() } : epic)
       await route.fulfill(json(epics.find(epic => epic.id === id)))
     } else await route.fulfill(json({ ok: true }))
   })
-  await page.route('**/api/epics', async route => {
+  await page.route('http://127.0.0.1:8080/api/epics*', async route => {
     if (route.request().method() === 'POST') {
       const id = Math.max(...epics.map(epic => epic.id)) + 1
       const epic = { id, code: 'E' + id, ...route.request().postDataJSON() }
@@ -42,10 +44,10 @@ test('故事的角色、目标、价值和验收条件分别保存并在刷新�
     } else await route.fulfill(json(epics))
   })
   for (const path of ['tasks', 'pool', 'milestones'])
-    await page.route(`**/api/${path}`, route => route.fulfill(json([])))
-  await page.route('**/api/dashboard', route => route.fulfill(json({ total: 1, done: 0, doing: 0, todo: 1, percent: 0, by_sprint: [] })))
+    await page.route(`http://127.0.0.1:8080/api/${path}`, route => route.fulfill(json([])))
+  await page.route('http://127.0.0.1:8080/api/dashboard*', route => route.fulfill(json({ total: 1, done: 0, doing: 0, todo: 1, percent: 0, by_sprint: [] })))
 
-  await page.goto('/#/board')
+  await page.goto('/#/projects/P003/board')
   await page.locator('#manage-epics').click()
   const manager = page.locator('#epic-manager')
   await expect(manager).toBeVisible()

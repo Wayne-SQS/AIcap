@@ -2,7 +2,7 @@
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from .contracts import TranscriptSegment
+from .contracts import ResultContractError, TranscriptSegment
 from .refinement_contracts import BacklogRefinementInput, BacklogRefinementOutput, validate_refinement_result
 from .refinement_skill import BacklogRefinementSkill
 from .story_tool import StoryReadTool
@@ -44,6 +44,8 @@ class BacklogRefinementWorkflow:
         def validate(state: MeetingState):
             try:
                 result = validate_refinement_result(BacklogRefinementInput.model_validate(state['context']), state['candidate'])
+            except ResultContractError as exc:
+                raise WorkflowError(exc.code) from exc
             except ValueError:
                 raise WorkflowError('invalid_model_proposal') from None
             return {'result': result.model_dump()}

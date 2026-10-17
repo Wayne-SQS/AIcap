@@ -93,7 +93,10 @@ class WorkflowTests(unittest.TestCase):
                 self.requests.clear()
                 with self.assertRaises(WorkflowError) as caught:
                     self.run_flow()
-                self.assertEqual('invalid_model_proposal', caught.exception.code)
+                # None deletes a required field -> ValidationError; a wrong id
+                # passes structure and fails the snapshot check instead.
+                expected = 'invalid_model_proposal' if meeting_id is None else 'meeting_mismatch'
+                self.assertEqual(expected, caught.exception.code)
                 self.assertEqual(['GET', 'POST'], [request[0] for request in self.requests])
 
     def test_invalid_input_stops_before_io(self):
@@ -112,6 +115,11 @@ class WorkflowTests(unittest.TestCase):
 
     def test_invalid_proposals_fail_without_retry_or_write(self):
         original = copy.deepcopy(self.output)
+        # Each mutation now surfaces its precise contract code instead of the
+        # collapsed invalid_model_proposal; only true schema violations keep it.
+        codes = {"story_id": "unknown_story", "expected": "snapshot_mismatch",
+                 "changes": "invalid_model_proposal", "action": "invalid_model_proposal",
+                 "evidence": "quote_mismatch"}
         for key, value in (("story_id", "US99"), ("expected", {"status": 0}),
                            ("changes", {"status": 3}), ("action", "delete_story"),
                            ("evidence", [{"segment_id": "S1", "quote": "伪造证据"}])):
@@ -119,7 +127,7 @@ class WorkflowTests(unittest.TestCase):
             self.output["proposed_actions"][0][key] = value
             with self.subTest(key=key), self.assertRaises(WorkflowError) as caught:
                 self.run_flow()
-            self.assertEqual("invalid_model_proposal", caught.exception.code)
+            self.assertEqual(codes[key], caught.exception.code)
         self.assertEqual(10, len(self.requests))
 
     def test_multiline_constraints_and_injection_remain_data_with_empty_proposals(self):

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 public class Epic {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long projectId;
+    private String projectId;
     private String name;
     private String description;
     private LocalDateTime createdAt;

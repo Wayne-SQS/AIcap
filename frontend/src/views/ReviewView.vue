@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useReviewStore } from '@/stores/review'
 import { useMeetingStore } from '@/stores/meeting'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
 import { usePermissionGuard } from '@/composables/usePermissionGuard'
 import ReviewEditDialog from '@/components/review/ReviewEditDialog.vue'
@@ -15,6 +16,7 @@ import { loadReviewQueue, loadReviewQueuePage, matchesQueueStatus } from '@/api/
 const review = useReviewStore()
 const meeting = useMeetingStore()
 const project = useProjectStore()
+const projects = useProjectsStore()
 const router = useRouter()
 const route = useRoute()
 const { notify } = useToast()
@@ -77,10 +79,19 @@ watch(online, v => {
   if (v) refresh().catch(() => { /* 可手动刷新 */ })
 }, { immediate: true })
 
+watch(() => projects.currentProjectId, (next, previous) => {
+  if (next === previous || !meeting.online) return
+  meeting.meetings = []
+  meeting.suggestions = []
+  meeting.selected = ''
+  meeting.agentRun = null
+  meeting.loadAll().catch(() => { /* 可手动刷新 */ })
+})
+
 async function refresh() {
   queueLoading.value = true
   try {
-    await meeting.loadAll(); await project.loadAll()
+    await meeting.loadAll(); await project.loadAll(projects.currentProjectId)
     await loadFirstPage()
   }
   catch (err) { notify('刷新失败：' + err.message) }
@@ -138,9 +149,11 @@ watch([queueFilter, queueSource, queueSearch, queueFrom, queueTo], () => {
 })
 
 function openSource(row) {
+  const routeName = projects.currentProjectId ? 'project-meetings' : 'meetings'
+  const params = projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined
   if (row.source === 'general') {
     meeting.select(row.meetingId)
-    router.push({ name: 'meetings', query: {
+    router.push({ name: routeName, params, query: {
       meetingId: row.meetingId, fromReview: '1', sourceType: 'general', suggestionId: row.proposalId,
       status: queueFilter.value, source: queueSource.value, search: queueSearch.value,
       fromDate: queueFrom.value, toDate: queueTo.value
@@ -148,7 +161,7 @@ function openSource(row) {
     return
   }
   meeting.select(row.meetingId)
-  router.push({ name: 'meetings', query: {
+  router.push({ name: routeName, params, query: {
     meetingId: row.meetingId, type: row.source, analysisId: row.analysisId,
     proposalId: row.proposalId, fromReview: '1',
     status: queueFilter.value, source: queueSource.value, search: queueSearch.value,
@@ -185,7 +198,7 @@ async function serverDecide(id, decision) {
   try {
     const result = await meeting.review(id, decision, reason)
     notify(result.status === 'approved' ? '已采纳并创建需求 ' + result.pool_item_id : '已拒绝，未改变业务数据')
-    try { await meeting.loadAll(); await project.loadAll(); await refreshQueue() } catch (err) { notify('审核已保存，但刷新失败：' + err.message) }
+    try { await meeting.loadAll(); await project.loadAll(projects.currentProjectId); await refreshQueue() } catch (err) { notify('审核已保存，但刷新失败：' + err.message) }
   } catch (err) { notify('审核未确认，请刷新核对后重试：' + err.message) }
   finally {
     meeting.busy = meeting.busy.filter(x => x !== id)
@@ -204,7 +217,7 @@ async function serverEdit(id) {
   try {
     await meeting.review(id, null, values.reason, values.changes)
     notify('修改已采纳，原始建议已保留；创建需求 ' + '（见需求池）')
-    try { await meeting.loadAll(); await project.loadAll(); await refreshQueue() } catch (err) { notify('审核已保存，刷新失败：' + err.message) }
+    try { await meeting.loadAll(); await project.loadAll(projects.currentProjectId); await refreshQueue() } catch (err) { notify('审核已保存，刷新失败：' + err.message) }
   } catch (err) { notify('审核未确认，请刷新核对后重试：' + err.message) }
   finally {
     meeting.busy = meeting.busy.filter(x => x !== id)

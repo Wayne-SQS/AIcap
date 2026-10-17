@@ -111,7 +111,7 @@ class PoolContractTest extends ContractTestSupport {
     @Test
     void patchMissingPool_404() {
         // PATCH 已支持；不存在的需求池条目应返回 404。
-        ApiResponse r = patch("/api/pool/R99", token(USER_ADMIN),
+        ApiResponse r = patch("/api/pool/R99?projectId=P002", token(USER_ADMIN),
                 json(map("title", "改标题")));
         assertEquals(404, r.status(), r.body());
         assertTrue(r.json().has("detail"));

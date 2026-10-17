@@ -4,6 +4,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
+from .contracts import ResultContractError
 from .planning_context import PlanningContextReader, SprintPlanningInput
 from .planning_contracts import SprintPlanningOutput, validate_planning_result
 from .planning_skill import SprintPlanningSkill
@@ -46,6 +47,8 @@ class SprintPlanningWorkflow:
             try:
                 result = validate_planning_result(
                     SprintPlanningInput.model_validate(state['context']), state['candidate'])
+            except ResultContractError as exc:
+                raise WorkflowError(exc.code) from exc
             except ValueError:
                 raise WorkflowError('invalid_model_proposal') from None
             return {'result': result.model_dump()}
