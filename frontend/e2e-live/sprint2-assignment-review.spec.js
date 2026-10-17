@@ -36,11 +36,17 @@ test('Sprint 2 Assignment explains task conflicts and executes only after separa
     return (await response.json()).find(row => row.id === storyId)
   }
   try {
+    const completedTask = await request.patch(`${javaBase}/api/tasks/T998?projectId=${projectId}`, {
+      headers, data: { kanban_card_id: storyId, story_ref: storyId, status: 2 }
+    })
+    expect(completedTask.status()).toBe(200)
     const context = await request.post(`${aiPath}/context?projectId=${projectId}`, {
       headers, data: { story_ids: [storyId], target_sprint: 2 }
     })
     expect(context.status()).toBe(200)
     const facts = await context.json()
+    expect(facts.meeting_evidence.some(segment => segment.text.includes(storyId))).toBe(true)
+    expect(facts.completed_task_ids).toContain('T998')
     expect(facts.tasks.some(row => row.id === 'T997')).toBe(true)
     const gapCodes = new Set(facts.gaps.map(row => row.code))
     for (const code of ['task_blocked', 'task_dependency_pending', 'sprint_capacity_overloaded', 'story_estimates_unavailable']) {
@@ -68,6 +74,8 @@ test('Sprint 2 Assignment explains task conflicts and executes only after separa
     }
     const first = await save()
     expect(first.review).toBeNull()
+    expect(first.result.context.completed_task_ids).toContain('T998')
+    expect(first.result.context.meeting_evidence.some(segment => segment.text.includes(storyId))).toBe(true)
     expect((await request.post(`${javaPath}/${first.id}/execute`, { headers, data: {} })).status()).toBe(409)
     expect((await readStory()).owner_id).toBe(1)
     const approved = await request.post(`${javaPath}/${first.id}/review`, {
@@ -106,6 +114,10 @@ test('Sprint 2 Assignment explains task conflicts and executes only after separa
     expect(retried.status()).toBe(200)
     expect((await readStory()).owner_id).toBe(1)
   } finally {
+    const taskRestored = await request.patch(`${javaBase}/api/tasks/T998?projectId=${projectId}`, {
+      headers, data: { kanban_card_id: null, story_ref: '', status: 0, progress: 0 }
+    })
+    expect(taskRestored.status()).toBe(200)
     const removed = await request.delete(`${javaBase}/api/stories/${storyId}?projectId=${projectId}&undone=keep`, { headers })
     expect(removed.status()).toBe(200)
   }

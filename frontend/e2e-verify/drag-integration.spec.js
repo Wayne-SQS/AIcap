@@ -17,30 +17,33 @@ async function pointerDrag(page, source, target) {
   await page.mouse.up()
 }
 
-test('故事地图拖动会持久化，失败时回滚', async ({ page }) => {
+test('故事地图拖动会持久化，取消确认不修改数据', async ({ page }) => {
   await openApp(page)
   const story = page.locator('#map .card[data-id="US09"]')
   await pointerDrag(page, story, page.locator('[data-map-drop="3-3"]'))
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然保存' }).click()
   await expect(page.locator('[data-map-drop="3-3"] .card[data-id="US09"]')).toBeVisible()
   await page.reload()
   await expect(page.locator('[data-map-drop="3-3"] .card[data-id="US09"]')).toBeVisible()
-  await page.evaluate(() => {
-    const story = window.stories.find(item => item.id === 'US09')
-    story.sprint = 4
-    story.activity = 3
-    localStorage.setItem('aiguanli-pixel-stories-v1', JSON.stringify(window.stories))
-  })
+  await pointerDrag(page, page.locator('#map .card[data-id="US09"]'), page.locator('[data-map-drop="2-3"]'))
+  await page.locator('.risk-dialog').getByRole('button', { name: '取消调整' }).last().click()
+  await expect(page.locator('[data-map-drop="3-3"] .card[data-id="US09"]')).toBeVisible()
   await page.reload()
-  await expect(page.locator('[data-map-drop="4-3"] .card[data-id="US09"]')).toBeVisible()
+  await expect(page.locator('[data-map-drop="3-3"] .card[data-id="US09"]')).toBeVisible()
+})
 
-  await page.evaluate(() => {
-    window.sessionStore.apiMode = true
-    window.sessionStore.currentUser = { id: 1, role: 'admin', display_name: '测试管理员' }
-  })
-  await page.route('**/api/stories/US09', route => route.fulfill({ status: 500, body: JSON.stringify({ detail: 'mock failure' }), contentType: 'application/json' }))
-  await pointerDrag(page, page.locator('#map .card[data-id="US09"]'), page.locator('[data-map-drop="3-3"]'))
-  await expect(page.locator('[data-map-drop="4-3"] .card[data-id="US09"]')).toBeVisible()
-  await expect(page.locator('#toast')).toContainText('更新失败')
+test('故事地图跨 Sprint 移动同步未完成子任务排期', async ({ page }) => {
+  await openApp(page)
+  expect(await page.evaluate(() => window.tasks.find(task => task.id === 'T06').w)).toEqual([2, 2])
+  await pointerDrag(page, page.locator('#map .card[data-id="US25"]'), page.locator('[data-map-drop="2-5"]'))
+  await expect(page.locator('.risk-dialog')).toContainText('未完成子任务随动')
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然保存' }).click()
+  await expect(page.locator('[data-map-drop="2-5"] .card[data-id="US25"]')).toBeVisible()
+  expect(await page.evaluate(() => window.tasks.find(task => task.id === 'T06').w)).toEqual([4, 4])
+  expect(await page.evaluate(() => window.tasks.find(task => task.id === 'T06').sprints)).toEqual([2])
+  await page.reload()
+  expect(await page.evaluate(() => window.tasks.find(task => task.id === 'T06').w)).toEqual([4, 4])
+  expect(await page.evaluate(() => window.tasks.find(task => task.id === 'T06').sprints)).toEqual([2])
 })
 
 test('甘特任务平移后周负载同步并可还原', async ({ page }) => {
@@ -53,6 +56,7 @@ test('甘特任务平移后周负载同步并可还原', async ({ page }) => {
   await page.mouse.down()
   await page.mouse.move(before.rect.x + before.rect.width * 1.5, before.rect.y + before.rect.height / 2, { steps: 8 })
   await page.mouse.up()
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然保存' }).click()
   await expect(bar).toHaveAttribute('style', /left: 33\.33%/)
   await page.reload()
   await expect(bar).toHaveAttribute('style', /left: 33\.33%/)
@@ -70,18 +74,21 @@ test('甘特任务平移后周负载同步并可还原', async ({ page }) => {
   await page.mouse.down()
   await page.mouse.move(moved.x - moved.width / 2, moved.y + moved.height / 2, { steps: 8 })
   await page.mouse.up()
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然保存' }).click()
   await expect(bar).toHaveAttribute('style', /left: 16\.67%/)
 })
 
 test('成员任务转派会更新 owner、统计和甘特颜色', async ({ page }) => {
   await openApp(page, '/#/members')
-  await page.locator('.mcard.clickable[data-member="3"]').click()
-  await page.locator('.task-item', { hasText: 'T05' }).dragTo(page.locator('[data-owner-drop="4"]'))
+  await page.locator('.mcard.clickable[data-member="3"] h3').click()
+  await page.locator('.task-item', { hasText: 'T05' }).dragTo(page.locator('.owner-drop-zone[data-owner-drop="2"]'))
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然分配' }).click()
   await expect(page.locator('.task-item', { hasText: 'T05' })).toHaveCount(0)
   await page.locator('.drawer-close').click()
-  await page.locator('.mcard.clickable[data-member="4"]').click()
+  await page.locator('.mcard.clickable[data-member="2"] h3').click()
   await expect(page.locator('.task-item', { hasText: 'T05' })).toBeVisible()
-  await page.locator('.task-item', { hasText: 'T05' }).dragTo(page.locator('[data-owner-drop="3"]'))
+  await page.locator('.task-item', { hasText: 'T05' }).dragTo(page.locator('.owner-drop-zone[data-owner-drop="3"]'))
+  await page.locator('.risk-dialog').getByRole('button', { name: '仍然分配' }).click()
   await expect(page.locator('.task-item', { hasText: 'T05' })).toHaveCount(0)
   await page.locator('.drawer-close').click()
   await page.goto('/#/gantt')
@@ -97,21 +104,22 @@ test('UML 拖动只保存布局，不修改业务数据', async ({ page }) => {
   await page.mouse.down()
   await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2 + 15, { steps: 5 })
   await page.mouse.up()
-  const layout = await page.evaluate(() => localStorage.getItem('aiguanli-uml-layout-v1'))
+  const layoutKey = await page.evaluate(() => Object.keys(localStorage).find(key => key.startsWith('aiguanli-uml-layout-v3-')))
+  const layout = await page.evaluate(key => localStorage.getItem(key), layoutKey)
   expect(layout).toContain('usecases')
   expect(await page.locator('.uc-detail').count()).toBe(beforeStories)
 
   const participant = page.locator('.participant-hit').nth(1).locator('.participant')
   await participant.scrollIntoViewIfNeeded()
   const participantBox = await participant.evaluate(el => el.getBoundingClientRect().toJSON())
-  const beforeParticipantX = JSON.parse(await page.evaluate(() => localStorage.getItem('aiguanli-uml-layout-v1')))
+  const beforeParticipantX = JSON.parse(await page.evaluate(key => localStorage.getItem(key), layoutKey))
     .participants.find(item => item.id === 'frontend').x
   // The participant header is the drag handle; the lifeline below it is intentionally passive.
   await page.mouse.move(participantBox.x + participantBox.width / 2, participantBox.y + 20)
   await page.mouse.down()
   await page.mouse.move(participantBox.x + participantBox.width / 2 + 20, participantBox.y + 20, { steps: 5 })
   await page.mouse.up()
-  const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('aiguanli-uml-layout-v1')))
+  const saved = JSON.parse(await page.evaluate(key => localStorage.getItem(key), layoutKey))
   expect(saved.participants.find(item => item.id === 'frontend').x).toBeGreaterThan(beforeParticipantX)
 })
 

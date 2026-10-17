@@ -424,12 +424,17 @@ export const useProjectStore = defineStore('project', {
       }
     },
     /** 离线/本机落位:改故事 + 挪子任务 + 写变更记录(在线由调用方走 API 后 loadAll) */
+    shiftTaskWeeks(task, shift) {
+      task.w = this.shiftWeek(task.w, shift)
+      task.sprints = derivedTaskSprints(task.w[0], task.w[1])
+    },
     applyStoryMoveLocal(plan) {
       const { story, to } = plan
       if (plan.activityChanged) story.activity = to.activity
       if (plan.sprintChanged) story.sprint = to.sprint
-      for (const t of plan.undone) t.w = this.shiftWeek(t.w, plan.shift)
+      for (const t of plan.undone) this.shiftTaskWeeks(t, plan.shift)
       this.persist()
+      if (plan.undone.length) this.persistTasks()
       this.addlog('move', plan.id,
         `A${plan.from.activity}×S${plan.from.sprint} → A${to.activity}×S${to.sprint}` +
         (plan.undone.length ? ` · 级联挪动 ${plan.undone.length} 条未完成子任务 ${plan.shift > 0 ? '后移' : '前移'} ${Math.abs(plan.shift)} 周` : ''))

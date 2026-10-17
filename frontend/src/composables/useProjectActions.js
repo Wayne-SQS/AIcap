@@ -135,13 +135,19 @@ export function useProjectActions() {
     const story = project.stories.find(item => item.id === storyId)
     if (!story) return { warnings: [], groups: [], impacts: [] }
     const report = emptyImpactReport()
-    project.subTasksOf(story.id)
-      .filter(task => !project.taskSprintList(task).includes(Number(sprint)))
-      .forEach(task => addImpact(report, 'sprintRisk', `Sprint 冲突：${task.id} 的执行周与 ${story.id} 的 Sprint ${sprint} 不一致`, task.id))
-    const impacts = [{ entity: story.id, kind: 'story_sprint', before: story.sprint, after: Number(sprint), detail: '关联任务排期保持不变' }]
-    const fallback = finalizeAnalysis(report, impacts)
-    if (!session.apiMode) return fallback
-    try { return analysisFromReport(await agentApi.planning.impact([{ type: 'UPDATE_STORY_SPRINT', story_id: storyId, sprint: Number(sprint) }], projects.currentProjectId), impacts) } catch { return fallback }
+    const plan = project.storyMovePlan(storyId, { sprint: Number(sprint) })
+    const impacts = [{ entity: story.id, kind: 'story_sprint', before: story.sprint, after: Number(sprint), detail: `将同步调整 ${plan.undone.length} 条未完成子任务；已完成/已取消任务保留历史排期` }]
+    if (plan.sprintChanged) {
+      for (const task of plan.undone) {
+        const next = project.shiftWeek(task.w, plan.shift)
+        impacts.push({ entity: task.id, kind: 'task_schedule', before: `W${task.w[0]}-W${task.w[1]}`, after: `W${next[0]}-W${next[1]}`, detail: '随故事 Sprint 同步' })
+        if (next[0] === next[1] && task.w[0] !== task.w[1]) addImpact(report, 'loadRisk', `${task.id} 的排期被六周边界压缩为 W${next[0]}，请复核成员容量`, task.id)
+      }
+      for (const task of plan.kept) {
+        if (!project.taskSprintList(task).includes(Number(sprint))) addImpact(report, 'sprintRisk', `${task.id} 已完成或已取消，历史排期不随故事移动`, task.id)
+      }
+    }
+    return finalizeAnalysis(report, impacts)
   }
 
   async function run(key, action, optimistic, rollback, save) {
@@ -170,11 +176,20 @@ export function useProjectActions() {
     const next = { sprint: Number(sprint), activity: Number(activity) }
     if (story.sprint === next.sprint && story.activity === next.activity) return { ok: true, unchanged: true }
     const before = { sprint: story.sprint, activity: story.activity }
-    return run(`story:${storyId}`, '调整故事位置', () => Object.assign(story, next), () => Object.assign(story, before), async online => {
-      if (online) await storiesApi.patch(storyId, next, projects.currentProjectId)
+    const plan = project.storyMovePlan(storyId, next)
+    const taskWeeks = plan.undone.map(task => ({ task, before: [...task.w], sprints: Array.isArray(task.sprints) ? [...task.sprints] : null }))
+    return run(`story:${storyId}`, '调整故事位置', () => Object.assign(story, next), () => {
+      Object.assign(story, before)
+      taskWeeks.forEach(({ task, before: weeks, sprints }) => {
+        task.w = weeks
+        if (sprints) task.sprints = sprints
+        else delete task.sprints
+      })
+      if (!session.apiMode) { project.persist(); project.persistTasks() }
+    }, async online => {
+      if (online) await storiesApi.patch(storyId, { ...next, cascade_sprint: plan.sprintChanged }, projects.currentProjectId)
       else {
-        project.addlog('move', storyId, `移动到 Sprint ${next.sprint} / A${next.activity}`)
-        project.persist()
+        project.applyStoryMoveLocal(plan)
       }
     })
   }

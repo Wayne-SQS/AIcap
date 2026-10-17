@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -52,6 +53,7 @@ class TaskContractTest extends ContractTestSupport {
     @Autowired private StoryMapper stories;
     @Autowired private TaskMapper tasks;
     @Autowired private UserMapper users;
+    @Autowired private JdbcTemplate jdbc;
 
     private static final List<String> FIXTURE_STORIES = List.of("US01", "US02", "US07", "US24", "US25", "US37");
     private final List<Long> fixtureTaskIds = new ArrayList<>();
@@ -164,7 +166,7 @@ class TaskContractTest extends ContractTestSupport {
     }
 
     @Test
-    void storyOwnerAndSprintCascade_isAtomicAndPreservesFinishedTasks() {
+    void storyOwnerAndSprintCascade_preservesFinishedTasks() {
         JsonNode active = taskFromListOrFail("T06");
         JsonNode finished = taskFromListOrFail("T05");
         JsonNode cancelled = taskFromListOrFail("T07");
@@ -207,6 +209,36 @@ class TaskContractTest extends ContractTestSupport {
                         "progress", before.path("progress").asInt(),
                         "kanban_card_id", before.path("kanban_card_id").isNull() ? null : before.path("kanban_card_id").asText())));
             }
+        }
+    }
+
+    @Test
+    void storyCascadeRollsBackWhenAuditLogFails() {
+        JsonNode beforeTask = taskFromListOrFail("T06");
+        JsonNode beforeStory = getProject("/api/stories", token(USER_ADMIN)).json();
+        JsonNode original = null;
+        for (JsonNode row : beforeStory) if ("US25".equals(row.path("id").asText())) original = row;
+        assertNotNull(original);
+        jdbc.execute("ALTER TABLE story_logs ADD CONSTRAINT dod_cascade_rollback "
+                + "CHECK (detail <> 'DOD_ROLLBACK_MARKER')");
+        try {
+            ApiResponse failed = patchProject("/api/stories/US25", token(USER_ADMIN), json(map(
+                    "title", "DOD_ROLLBACK_MARKER", "owner_id", 2, "sprint", 2,
+                    "cascade_owner", true, "cascade_sprint", true)));
+            assertTrue(failed.status() >= 500, failed.body());
+            JsonNode afterTask = taskFromListOrFail("T06");
+            assertEquals(beforeTask.path("owner_id"), afterTask.path("owner_id"));
+            assertEquals(beforeTask.path("week_start"), afterTask.path("week_start"));
+            assertEquals(beforeTask.path("week_end"), afterTask.path("week_end"));
+            JsonNode afterStories = getProject("/api/stories", token(USER_ADMIN)).json();
+            JsonNode afterStory = null;
+            for (JsonNode row : afterStories) if ("US25".equals(row.path("id").asText())) afterStory = row;
+            assertNotNull(afterStory);
+            assertEquals(original.path("title"), afterStory.path("title"));
+            assertEquals(original.path("owner_id"), afterStory.path("owner_id"));
+            assertEquals(original.path("sprint"), afterStory.path("sprint"));
+        } finally {
+            jdbc.execute("ALTER TABLE story_logs DROP CHECK dod_cascade_rollback");
         }
     }
 

@@ -1,7 +1,7 @@
 """Assignment preparation: authenticated facts and gaps, without a ranking formula."""
 from typing import Annotated, Literal
 from pydantic import Field, model_validator
-from .contracts import Contract, Identifier, StoryId
+from .contracts import Contract, Identifier, StoryId, TranscriptSegment
 from .member_tool import MemberProfileSnapshot
 from .story_tool import PlanningStorySnapshot
 from .task_tool import TaskSnapshot
@@ -42,12 +42,15 @@ class AssignmentGap(Contract):
 
 class AssignmentContextReport(Contract):
     meeting_id: Identifier
+    meeting_evidence: list[TranscriptSegment] = Field(default_factory=list)
     target_sprint: Annotated[int, Field(ge=1, le=4)] | None
     status: Literal['not_ready'] = 'not_ready'
     selected_stories: list[PlanningStorySnapshot]
     story_estimates: None = None
     members: list[MemberWorkload]
     tasks: list[TaskSnapshot]
+    # Completed tasks linked to the requested stories are review candidates, not write actions.
+    completed_task_ids: list[Identifier] = Field(default_factory=list)
     gaps: list[AssignmentGap]
     snapshot_consistency: Literal['sequential_reads'] = 'sequential_reads'
     scope: Literal['read_only_preparation'] = 'read_only_preparation'
@@ -117,7 +120,13 @@ def prepare_assignment(context: SprintPlanningInput, request: AssignmentContextR
             task_by_id = {item.id: item for item in context.tasks}
             if any(task_by_id.get(code) is None or task_by_id[code].status != 2 for code in predecessors):
                 gaps.append(AssignmentGap(code='task_dependency_pending', task_ids=[task.id]))
+    # A completed task is only a human closure/archival reminder; no task is changed here.
+    selected = set(request.story_ids)
+    completed = [task.id for task in context.tasks if task.status == 2 and (
+        task.kanban_card_id in selected or selected.intersection(
+            code.strip() for code in (task.story_ref or '').split(',') if code.strip()))]
     # IDs are associations, not suitability rankings. Keep original input ordering.
-    return AssignmentContextReport(meeting_id=context.meeting_id, target_sprint=target,
+    return AssignmentContextReport(meeting_id=context.meeting_id,
+        meeting_evidence=context.transcript_segments, target_sprint=target,
         selected_stories=[stories[s] for s in request.story_ids], members=workloads,
-        tasks=context.tasks, gaps=gaps)
+        tasks=context.tasks, completed_task_ids=completed, gaps=gaps)

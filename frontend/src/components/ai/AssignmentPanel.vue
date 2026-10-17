@@ -107,8 +107,10 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
       <h4>{{ statuses[result.status] }}</h4>
       <p>故事 {{ result.context.selected_stories[0].id }} · {{ result.context.selected_stories[0].title }}；目标Sprint：{{ result.context.target_sprint ?? '未知' }}</p>
       <p><strong>候选仍须人工核对，不能据此直接分配。</strong> Sprint 剩余工时由项目周容量、任务估时、进度和排期按周均摊估算；故事自身估时缺失时不能验证新增分工是否可行。故事、成员和任务为分次读取。</p>
+      <details v-if="result.context.meeting_evidence?.length"><summary>会议原文证据（{{ result.context.meeting_evidence.length }} 段）</summary><p>原文仅供审核人核对分工背景，不代表技能匹配依据。</p><ol><li v-for="segment in result.context.meeting_evidence" :key="segment.segment_id">{{ segment.segment_id }}：{{ segment.text }}</li></ol></details>
       <h4>数据缺口</h4>
       <ul><li v-for="(gap, index) in result.context.gaps" :key="index">{{ gapNames[gap.code] || '存在未识别的数据缺口，请核对' }}<span v-if="gap.member_ids?.length"> · 成员 #{{ gap.member_ids.join('、#') }}</span><span v-if="gap.story_ids?.length"> · {{ gap.story_ids.join('、') }}</span><span v-if="gap.task_ids?.length"> · {{ gap.task_ids.join('、') }}</span></li></ul>
+      <p v-if="result.context.completed_task_ids?.length">已完成任务可由负责人复核关闭或归档：{{ result.context.completed_task_ids.join('、') }}。这里只提示，不自动修改任务。</p>
       <article v-for="candidate in result.candidates" :key="candidate.member_id" class="candidate">
         <h4>第 {{ candidate.rank }} 名 · {{ candidate.display_name }}（#{{ candidate.member_id }}）</h4>
         <p>满足 {{ candidate.matched_requirements }}/{{ candidate.total_requirements }} 项要求 · 新故事容量校验未知 · 待人工核对</p>

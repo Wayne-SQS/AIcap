@@ -27,6 +27,7 @@ class AssignmentContextTests(unittest.TestCase):
 
     def test_raw_units_preserved_without_remaining_capacity_or_ranking(self):
         result = self.report()
+        self.assertEqual([('S1', '讨论分工')], [(s.segment_id, s.text) for s in result.meeting_evidence])
         self.assertEqual('not_ready', result.status)
         self.assertEqual(60, result.members[0].profile.six_week_capacity_hours)
         self.assertIsNone(result.members[0].sprint_remaining_hours)
@@ -36,10 +37,12 @@ class AssignmentContextTests(unittest.TestCase):
         self.assertIn('sprint_capacity_unavailable', [g.code for g in result.gaps])
 
     def test_completed_cancelled_excluded_from_active_but_retained_as_facts(self):
-        context = self.context(tasks=[task_row(id=f'T0{i}',status=i) for i in range(4)])
+        context = self.context(tasks=[task_row(id=f'T0{i}',status=i) for i in range(4)]
+            + [task_row(id='T99', status=2, kanban_card_id='US99', story_ref='US99')])
         result = self.report(context)
         self.assertEqual(['T00','T01'], result.members[0].active_task_ids)
-        self.assertEqual(4,len(result.tasks))
+        self.assertEqual(5,len(result.tasks))
+        self.assertEqual(['T02'], result.completed_task_ids)
 
     def test_unknown_scope_and_sprint_four_are_not_empty_availability(self):
         for sprint in (None,4):

@@ -92,7 +92,7 @@ async function submit() {
           if (session.apiMode) payload.cascade_sprint = true
           else {
             const shift = project.sprintShiftOf(old.sprint, payload.sprint)
-            for (const t of undone) t.w = project.shiftWeek(t.w, shift)
+            for (const t of undone) project.shiftTaskWeeks(t, shift)
           }
         }
       }
@@ -145,6 +145,7 @@ async function submit() {
       project.addlog('create', s.id, s.title)
     }
     project.persist()
+    project.persistTasks()
     close()
     notify(`${s.id} 已${editing.value ? '更新' : '创建'}${props.inScope(s.id) ? '' : '（当前筛选范围外）'}`)
   }

@@ -130,13 +130,13 @@ function onCardDragEnd() {
 async function onMapMove({ storyId, sprint: nextSprint, activity }) {
   const analysis = await analyzeStorySprint(storyId, nextSprint)
   pendingStoryMove.value = { storyId, sprint: nextSprint, activity }
-  riskDialogRef.value?.open({ taskId: storyId, title: `移动 ${storyId} 到 Sprint ${nextSprint} 的影响分析`, groups: analysis.groups, total: analysis.warnings.length })
+  riskDialogRef.value?.open({ taskId: storyId, title: `移动 ${storyId} 到 Sprint ${nextSprint} 的影响分析（未完成子任务随动）`, groups: analysis.groups, total: analysis.warnings.length })
 }
 async function applyStoryMove({ storyId, sprint: nextSprint, activity }) {
   const result = await updateStoryPlacement(storyId, { sprint: nextSprint, activity })
   if (!result.ok || result.unchanged) return
   const conflicts = project.tasks.filter(t => taskRefs(t.story).includes(storyId) && !project.taskSprintList(t).includes(nextSprint))
-  if (conflicts.length) notify(`已更新；${conflicts.map(t => t.id).join('、')} 的执行 Sprint 与故事不同，请在甘特图复核`)
+  if (conflicts.length) notify(`已更新；${conflicts.map(t => t.id).join('、')} 仍与故事 Sprint 不同，请在甘特图复核`)
 }
 async function confirmStoryMove() {
   const pending = pendingStoryMove.value
