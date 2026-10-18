@@ -7,6 +7,8 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 
+defineProps({ embedded: Boolean })
+
 const project = useProjectStore()
 const projects = useProjectsStore()
 const route = useRoute()
@@ -169,8 +171,8 @@ onUnmounted(() => { clearTimeout(timer); storyDialog.value?.close() })
 </script>
 
 <template>
-  <section class="view project-generator-view" id="view-project-generator">
-    <div class="hero">
+  <section class="view project-generator-view" :class="{ 'embedded-agent-view': embedded }" id="view-project-generator">
+    <div v-if="!embedded" class="hero">
       <div><div class="eyebrow">PROJECT GENERATOR / 智能协作</div><h1>智能生成项目图</h1><p>从自然语言或表格生成可审阅草案，确认后写入统一数据源并刷新四类视图。</p></div>
       <span class="planning-agent-badge">草案审阅 · 人工确认</span>
     </div>

@@ -10,6 +10,7 @@ import { agentApi } from '@/api/agent'
 export const useMeetingStore = defineStore('meeting', {
   state: () => ({
     meetings: [],
+    loadedProjectId: null,
     suggestions: [],
     selected: '',
     busy: [],           // 审核中的建议 id(旧版 Set,数组便于响应式)
@@ -40,9 +41,14 @@ export const useMeetingStore = defineStore('meeting', {
       if (!this.online) return
       const projectId = useProjectsStore().currentProjectId
       if (!projectId) { this.meetings = []; this.suggestions = []; this.selected = ''; this.agentRun = null; return }
+      if (this.loadedProjectId !== projectId) {
+        this.meetings = []; this.suggestions = []; this.selected = ''; this.agentRun = null; this.agentError = ''
+        this.loadedProjectId = projectId
+      }
       const [meetings, suggestions, config] = await Promise.all([
         meetingsApi.list(projectId), suggestionsApi.list(projectId), agentApi.config().catch(() => null)
       ])
+      if (!this.online || projectId !== useProjectsStore().currentProjectId) return
       this.meetings = meetings
       this.suggestions = suggestions
       if (config) this.agentConfig = config

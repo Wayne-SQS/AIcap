@@ -10,6 +10,7 @@ const workspaceViews = [
   { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
   { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
   { name: 'ai', label: 'AI 工作台', component: () => import('@/views/AiView.vue') },
+  { name: 'agents', label: '智能体调用中心', component: () => import('@/views/AgentsView.vue') },
   { name: 'meetings', label: '会议工作区', component: () => import('@/views/MeetingView.vue') },
   { name: 'submit-agent', label: '任务提交分析', component: () => import('@/views/SubmitAgentView.vue') },
   { name: 'profile-agent', label: '成员画像分析', component: () => import('@/views/ProfileAgentView.vue') },
