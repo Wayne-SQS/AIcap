@@ -28,18 +28,22 @@ class ApiTests(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 fixture.calls.append((self.path, self.headers.get("Authorization")))
+                # 多项目改造后 /api/stories、/api/tasks 必带 ?projectId=,派发只按路径;
+                # 记录的仍是完整路径,好让用例断言"项目确实带上了"。
+                route = self.path.split("?", 1)[0]
                 data = {
                     "/api/auth/me": {"id": 1, "role": fixture.role, "username": "fixture-user"},
-                    "/api/meetings/m1": {"id": "m1", "transcript": fixture.transcript, "created_by": 2},
+                    "/api/meetings/m1": {"id": "m1", "transcript": fixture.transcript,
+                                         "created_by": 2, "project_id": "P001"},
                     "/api/stories": [{"id": "US13", "title": "登录", "status": 1, "sprint": 2, "owner_id": None}],
                 }
-                if any('/' + resource + '/by-request/' in self.path for resource in
+                if any('/' + resource + '/by-request/' in route for resource in
                        ('status-analyses', 'planning-analyses', 'review-analyses', 'retro-analyses', 'refinement-analyses', 'assignment-suggestions')):
-                    key = self.path.rsplit("/", 1)[1]
+                    key = route.rsplit("/", 1)[1]
                     default = (200, fixture.records[key]) if key in fixture.records else (404, {})
                 else:
-                    default = (200, data.get(self.path))
-                status, body = fixture.overrides.get(self.path, default)
+                    default = (200, data.get(route))
+                status, body = fixture.overrides.get(route, default)
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 if status == 302:
@@ -109,7 +113,7 @@ class ApiTests(unittest.TestCase):
             response = self.post()
             self.assertEqual(200, response.status_code, response.text)
             self.assertEqual([], response.json()["proposed_actions"])
-            self.assertEqual(["/api/auth/me", "/api/meetings/m1", "/api/meetings/m1/status-analyses/by-request/request-1", "/api/stories", "/api/meetings/m1/status-analyses"], [x[0] for x in self.calls])
+            self.assertEqual(["/api/auth/me", "/api/meetings/m1", "/api/meetings/m1/status-analyses/by-request/request-1", "/api/stories?projectId=P001", "/api/meetings/m1/status-analyses"], [x[0] for x in self.calls])
             self.assertTrue(all(x[1] == "Bearer fixture-token" for x in self.calls))
             context = json.loads(self.model_calls[-1][1]["content"])
             self.assertEqual("US13 基本完成但未验收。", context["transcript_segments"][0]["text"])
@@ -167,8 +171,11 @@ class ApiTests(unittest.TestCase):
     def test_java_response_contract_and_identity_mismatch_fail_closed(self):
         for path, body in (("/api/auth/me", {"id": True, "role": "member"}),
                            ("/api/auth/me", {"id": 1}),
-                           ("/api/meetings/m1", {"id": "m2", "transcript": "原文"}),
-                           ("/api/meetings/m1", {"id": "m1"}),
+                           ("/api/meetings/m1", {"id": "m2", "transcript": "原文", "project_id": "P001"}),
+                           ("/api/meetings/m1", {"id": "m1", "project_id": "P001"}),
+                           # 缺 project_id:多项目下 /api/stories、/api/tasks 都读不了,
+                           # 不能默认一个项目继续跑,必须 fail closed
+                           ("/api/meetings/m1", {"id": "m1", "transcript": "原文"}),
                            ("/api/meetings/m1", [])):
             self.overrides = {path: (200, body)}
             self.assertEqual(502, self.post().status_code)

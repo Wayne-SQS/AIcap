@@ -7,8 +7,7 @@ import httpx
 from pydantic import Field
 
 from .contracts import Contract, Identifier, NonBlank
-from .shared_http import shared_client
-from .story_tool import StoryReadTool
+from .shared_http import shared_client, validate_backend_origin
 
 
 class AccessError(Exception):
@@ -18,14 +17,20 @@ class AccessError(Exception):
 
 
 class SavedMeeting(Contract):
+    """The read-back meeting: transcript plus the project every scoped read needs.
+
+    ``project_id`` is Java's authoritative value (multi-project: it is required on
+    ``/api/stories`` and ``/api/tasks``, which carry no meeting id). Missing it is a
+    deployment/contract error and must fail closed instead of defaulting a project.
+    """
     id: Identifier
+    project_id: Identifier
     transcript: Annotated[NonBlank, Field(max_length=16000)]
 
 
 class JavaMeetingAccess:
     def __init__(self, backend_origin: str):
-        StoryReadTool(backend_origin)  # Share existing trusted-origin validation.
-        self._origin = backend_origin.rstrip("/")
+        self._origin = validate_backend_origin(backend_origin)
 
     def _get(self, path: str, token: str) -> dict:
         try:
@@ -66,7 +71,8 @@ class JavaMeetingAccess:
             raise AccessError("analysis_forbidden", 403)
         data = self._get("/api/meetings/" + quote(meeting_id, safe=""), token)
         try:
-            meeting = SavedMeeting.model_validate({"id": data["id"], "transcript": data["transcript"]})
+            meeting = SavedMeeting.model_validate({"id": data["id"], "transcript": data["transcript"],
+                                                  "project_id": data["project_id"]})
             if meeting.id != meeting_id:
                 raise ValueError("meeting mismatch")
         except (ValueError, KeyError):

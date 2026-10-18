@@ -201,6 +201,58 @@ class MeetingAudioContractTest extends ContractTestSupport {
         assertEquals(404, fetchBytes(id, token(USER_ADMIN)).getStatusCode().value());
     }
 
+    /**
+     * projectId 缺省时,meeting-id 类端点按会议反解所属项目。
+     *
+     * <p>这条契约是为会议 Agent(ai-service)定的:它手里只有 meetingId,project_id 是读这条会议
+     * 时才第一次见到的,而改造后的必填口径让整条分析链死在第一个 GET 上。
+     * 反解<b>不得放松权限</b> —— 会议在 P002(只有 admin/owner 是成员)时,member 不带 projectId
+     * 仍应 403;显式给了不符的 projectId 仍是 404(老口径逐字不变)。
+     */
+    @Test
+    void missingProjectId_resolvesFromMeeting_butStillEnforcesMembership() {
+        String meetingId = createMeeting(uniq("音频契约会议-反解"));
+        ApiResponse up = upload(meetingId, token(USER_ADMIN), "a.mp3", tinyMp3(), "upload", null);
+        assertStatus(up, 200);
+        String audioId = up.json().path("id").asText();
+
+        // 1) 不带 projectId:会议本体、音频列表、音频回放都能读(P001 全员是成员)
+        ApiResponse meeting = requestWithoutProject(HttpMethod.GET, "/api/meetings/" + meetingId,
+                token(USER_MEMBER), null);
+        assertStatus(meeting, 200);
+        assertEquals(meetingId, meeting.json().path("id").asText(), meeting.body());
+
+        ApiResponse audioList = requestWithoutProject(HttpMethod.GET,
+                "/api/meetings/" + meetingId + "/audio", token(USER_MEMBER), null);
+        assertStatus(audioList, 200);
+        assertEquals(1, audioList.json().size(), audioList.body());
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token(USER_MEMBER));
+        ResponseEntity<byte[]> play = rest.exchange("/api/audio/" + audioId, HttpMethod.GET,
+                new HttpEntity<>(headers), byte[].class);
+        assertEquals(200, play.getStatusCode().value());
+        assertArrayEquals(tinyMp3(), play.getBody(), "缺 projectId 时回放字节仍需一致");
+
+        // 2) 会议不存在仍是 404(不因为"能反解"就变成 500)
+        assertStatus(requestWithoutProject(HttpMethod.GET,
+                "/api/meetings/00000000-0000-0000-0000-000000000000", token(USER_ADMIN), null), 404);
+
+        // 3) 反解不越权:会议建在 P002(种子只把 admin/owner 加为 P002 成员),member 不带 projectId → 403
+        ApiResponse created = post("/api/meetings", token(USER_ADMIN),
+                json(map("title", uniq("音频契约会议-跨项目"), "transcript", "跨项目反解用例。",
+                        "project_id", "P002")));
+        assertStatus(created, 201);
+        String otherMeeting = created.json().path("id").asText();
+        assertStatus(requestWithoutProject(HttpMethod.GET, "/api/meetings/" + otherMeeting,
+                token(USER_MEMBER), null), 403);
+        // 4) 显式给了不符的 projectId → 仍是 404
+        assertEquals(404, requestWithoutProject(HttpMethod.GET,
+                        "/api/meetings/" + otherMeeting + "?projectId=" + PROJECT_ID, token(USER_ADMIN), null).status(),
+                "显式 projectId 与会议所属项目不符时,老口径(404)必须保持不变");
+        assertStatus(delete("/api/meetings/" + otherMeeting + "?projectId=P002", token(USER_ADMIN)), 200);
+    }
+
     @Test
     void audioEndpoints_requireAuth_401() {
         String meetingId = createMeeting(uniq("音频契约会议-鉴权"));

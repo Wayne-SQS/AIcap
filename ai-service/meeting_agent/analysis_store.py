@@ -8,8 +8,7 @@ import httpx
 from pydantic import Field
 
 from .contracts import Contract, DailyScrumOutput, Identifier, StorySnapshot
-from .shared_http import shared_client
-from .story_tool import StoryReadTool
+from .shared_http import shared_client, validate_backend_origin
 
 
 RequestId = Annotated[str, Field(pattern=r"^[a-z0-9-]{1,80}$")]
@@ -51,8 +50,7 @@ class JavaAnalysisStore:
     RESOURCE = 'status-analyses'
 
     def __init__(self, origin: str, *, transport: httpx.BaseTransport | None = None):
-        StoryReadTool(origin)
-        self._origin, self._transport = origin.rstrip("/"), transport
+        self._origin, self._transport = validate_backend_origin(origin), transport
 
     def _request(self, method, path, token, key, *, payload=None, missing_ok=False):
         try:

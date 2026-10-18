@@ -122,7 +122,7 @@ public class MeetingAudioService {
     }
 
     public List<MeetingAudioDtos.AudioOut> list(String projectId, String meetingId) {
-        meetingService.requireMeeting(projectId, meetingId);
+        meetingService.requireScopedMeeting(projectId, meetingId);
         List<MeetingAudio> rows = audioMapper.selectList(new QueryWrapper<MeetingAudio>()
                 .eq("meeting_id", meetingId).orderByDesc("created_at").orderByDesc("id"));
         List<MeetingAudioDtos.AudioOut> out = new ArrayList<>();
@@ -132,11 +132,11 @@ public class MeetingAudioService {
         return out;
     }
 
-    /** 读取音频字节(回放/下载) */
+    /** 读取音频字节(回放/下载);projectId 可选,缺省时按音频所属会议反解项目 */
     public LoadedAudio load(String projectId, String audioId) {
         MeetingAudio audio = audioMapper.selectById(audioId);
         if (audio == null) throw ApiException.notFound("音频不存在");
-        meetingService.requireMeeting(projectId, audio.getMeetingId());
+        meetingService.requireScopedMeeting(projectId, audio.getMeetingId());
         Path path = resolveInsideRoot(audio.getStoragePath());
         if (!Files.exists(path)) throw ApiException.notFound("音频文件已丢失，请重新上传");
         try {

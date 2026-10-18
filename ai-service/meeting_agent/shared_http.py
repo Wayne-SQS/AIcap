@@ -15,6 +15,7 @@ cache key, so differently configured clients are never merged.
 """
 
 import threading
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -68,3 +69,43 @@ def reset_shared_clients() -> None:
             client.close()
         except Exception:  # An already-broken client must not block the reset.
             pass
+
+
+def validate_backend_origin(backend_origin: str) -> str:
+    """Reject anything that is not a bare HTTP(S) origin; return it without a trailing slash.
+
+    Shared by every Java read adapter so no call site can invent its own, looser check.
+    """
+    try:
+        url = urlsplit(backend_origin)
+        valid = (
+            url.scheme in ("http", "https") and url.hostname
+            and url.username is None and url.password is None
+            and url.path in ("", "/") and not url.query and not url.fragment
+            and not any(c.isspace() or ord(c) < 32 for c in backend_origin)
+        )
+        # Accessing port also rejects malformed port strings.
+        port = url.port
+        valid = valid and (port is None or port > 0)
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError("backend_origin must be an HTTP(S) origin without credentials or path")
+    return backend_origin.rstrip("/")
+
+
+def scoped_url(origin: str, path: str, project_id: str) -> str:
+    """Bind exactly one Java project into a read URL.
+
+    Multi-project Java requires ``projectId`` on the project-scoped reads
+    (``/api/stories``, ``/api/tasks``), and those paths carry no meeting id, so
+    Java cannot resolve the project on its behalf. The value must come from
+    ``meetings.project_id`` as read back from Java -- never from the caller's
+    request body or the model. The shape is re-checked here so nothing with
+    whitespace or control characters can be spliced into the query string.
+    """
+    if (not isinstance(project_id, str) or not project_id or len(project_id) > 64
+            or not project_id.isascii()
+            or any(c.isspace() or ord(c) < 32 for c in project_id)):
+        raise ValueError("project_id must be a short ASCII identifier")
+    return origin + path + "?projectId=" + quote(project_id, safe="")

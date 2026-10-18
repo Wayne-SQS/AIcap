@@ -39,7 +39,7 @@ class StoryToolTests(unittest.TestCase):
         self.thread.start()
         self.addCleanup(self.stop_server)
         self.origin = f"http://127.0.0.1:{self.server.server_port}"
-        self.tool = StoryReadTool(self.origin)
+        self.tool = StoryReadTool(self.origin, project_id="P001")
 
     def stop_server(self):
         self.server.shutdown()
@@ -63,7 +63,7 @@ class StoryToolTests(unittest.TestCase):
         self.assertEqual('', result.acceptance)
         self.assertEqual(('Must', 2), (result.priority, result.activity))
         self.assertNotIn('private_data', result.model_dump())
-        self.assertEqual(('GET', '/api/stories', 'Bearer planning-token'), self.requests[-1])
+        self.assertEqual(('GET', '/api/stories?projectId=P001', 'Bearer planning-token'), self.requests[-1])
         self.assertEqual({'id', 'title', 'status', 'sprint', 'owner_id'}, set(self.read()[0].model_dump()))
         self.rows[0].update(description=None, acceptance=None)
         result = self.tool.get_planning_stories(access_token='next-token')[0]
@@ -94,7 +94,7 @@ class StoryToolTests(unittest.TestCase):
         story = self.tool.get_review_stories(access_token='review-token')[0]
         self.assertEqual('已验收', story.acceptance)
         self.assertNotIn('acceptance_results', story.model_dump())
-        self.assertEqual([('GET', '/api/stories', 'Bearer review-token')], self.requests)
+        self.assertEqual([('GET', '/api/stories?projectId=P001', 'Bearer review-token')], self.requests)
         self.rows[0].pop('acceptance')
         self.assert_error('invalid_backend_response',
                           lambda: self.tool.get_review_stories(access_token='review-token'))
@@ -106,14 +106,14 @@ class StoryToolTests(unittest.TestCase):
         self.assertEqual('', result.acceptance)
         self.assertEqual(('Must', 2), (result.priority, result.activity))
         self.assertNotIn('private_data', result.model_dump())
-        self.assertEqual([('GET', '/api/stories', 'Bearer refinement-token')], self.requests)
+        self.assertEqual([('GET', '/api/stories?projectId=P001', 'Bearer refinement-token')], self.requests)
         del self.rows[0]['acceptance']
         self.assert_error('invalid_backend_response',
                           lambda: self.tool.get_refinement_stories(access_token='refinement-token'))
 
     def test_authenticated_get_projects_java_fields_and_null_owner(self):
         stories = self.read()
-        self.assertEqual([("GET", "/api/stories", "Bearer fixture-token")], self.requests)
+        self.assertEqual([("GET", "/api/stories?projectId=P001", "Bearer fixture-token")], self.requests)
         self.assertEqual({"id": "US13", "title": "登录接口", "status": 1,
                           "sprint": 2, "owner_id": None}, stories[0].model_dump())
 
@@ -205,10 +205,19 @@ class StoryToolTests(unittest.TestCase):
                        "http://localhost/?token=secret", "http://localhost/#x", "http://localhost:bad",
                        "http://localhost\n", "", None):
             with self.subTest(origin=origin), self.assertRaises(ValueError):
-                StoryReadTool(origin)
+                StoryReadTool(origin, project_id="P001")
         for timeout in (0, -1, True, float("nan"), float("inf"), "10"):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
-                StoryReadTool(self.origin, timeout_seconds=timeout)
+                StoryReadTool(self.origin, project_id="P001", timeout_seconds=timeout)
+
+    def test_project_scope_is_required_and_validated(self):
+        # 多项目 Java 上 /api/stories 必填 projectId:形状不合的值不能拼进查询串
+        for project_id in ("", " ", "P 001", "P001\nInjected: yes", "项目一", "P" * 65, None, 7):
+            with self.subTest(project_id=project_id), self.assertRaises(ValueError):
+                StoryReadTool(self.origin, project_id=project_id)
+        # 必填关键字参数:忘了传要当场炸,不能悄悄退化成"无项目读"
+        with self.assertRaises(TypeError):
+            StoryReadTool(self.origin)
 
 
 if __name__ == "__main__":

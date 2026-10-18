@@ -25,7 +25,7 @@ class AssignmentStoreTests(unittest.TestCase):
         self.assertEqual(first.json(), self.post().json())
         self.assertEqual(1, len(self.save_calls))
         self.assertEqual([], self.model_calls)
-        self.assertFalse(any(p == '/api/stories' for p, t in self.calls))
+        self.assertFalse(any(p.startswith('/api/stories') for p, t in self.calls))
 
     def test_request_id_reuse_with_different_requirements_conflicts(self):
         saved = self.post().json()

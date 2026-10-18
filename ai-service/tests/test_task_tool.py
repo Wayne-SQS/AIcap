@@ -20,7 +20,8 @@ class TaskToolTests(unittest.TestCase):
             self.requests.append(request)
             return httpx.Response(self.status, headers={'Location': 'https://other.invalid'},
                                   content=self.raw if self.raw is not None else json.dumps(self.rows).encode())
-        self.tool = TaskReadTool('http://localhost:8080', transport=httpx.MockTransport(respond))
+        self.tool = TaskReadTool('http://localhost:8080', project_id='P001',
+                                 transport=httpx.MockTransport(respond))
 
     def read(self):
         return self.tool.get_tasks(access_token='secret')
@@ -34,7 +35,8 @@ class TaskToolTests(unittest.TestCase):
         self.rows[0]['private_data'] = 'excluded'
         self.assertEqual(task_row(), self.read()[0].model_dump())
         req = self.requests[0]
-        self.assertEqual(('GET', 'http://localhost:8080/api/tasks', b''), (req.method, str(req.url), req.content))
+        self.assertEqual(('GET', 'http://localhost:8080/api/tasks?projectId=P001', b''),
+                         (req.method, str(req.url), req.content))
         self.assertEqual('Bearer secret', req.headers['Authorization'])
         self.rows = [task_row(owner_id=None, story_ref='', depends_on=None, kanban_card_id=None,
                               hours=0, estimated_hours=0, task_type='management')]
@@ -81,13 +83,21 @@ class TaskToolTests(unittest.TestCase):
         self.assertEqual(4, len(self.requests))
         def fail(request):
             raise httpx.ReadTimeout('sensitive')
-        self.tool = TaskReadTool('http://localhost', transport=httpx.MockTransport(fail))
+        self.tool = TaskReadTool('http://localhost', project_id='P001',
+                                 transport=httpx.MockTransport(fail))
         self.assert_code('backend_unavailable')
 
     def test_invalid_origin_and_timeout(self):
         for origin in ('http://u:p@localhost', 'http://localhost/path', 'file:///tmp', 'http://localhost?x=1'):
             with self.assertRaises(ValueError):
-                TaskReadTool(origin)
+                TaskReadTool(origin, project_id='P001')
         for timeout in (True, 0, -1, float('nan'), float('inf')):
             with self.assertRaises(ValueError):
-                TaskReadTool('http://localhost', timeout_seconds=timeout)
+                TaskReadTool('http://localhost', project_id='P001', timeout_seconds=timeout)
+
+    def test_project_scope_is_required_and_validated(self):
+        for project_id in ('', ' ', 'P 001', 'P001\nX', '项目一', 'P' * 65, None, 7):
+            with self.assertRaises(ValueError):
+                TaskReadTool('http://localhost', project_id=project_id)
+        with self.assertRaises(TypeError):
+            TaskReadTool('http://localhost')

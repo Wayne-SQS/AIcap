@@ -61,10 +61,16 @@ public class MeetingController {
         return meetingService.listMeetings(projectId).stream().map(this::toOut).toList();
     }
 
+    /**
+     * GET /api/meetings/{meetingId}:{@code projectId} <b>可选</b> —— 给了按项目严格校验,
+     * 没给则由 {@link MeetingService#requireScopedMeeting} 从 {@code meetings.project_id} 反解后判成员。
+     * 前端始终带 projectId,这里是给只拿得到 meetingId 的调用方(会议 Agent)留的入口。
+     */
     @GetMapping("/meetings/{meetingId}")
-    public MeetingDtos.MeetingOut getMeeting(@PathVariable String meetingId, @RequestParam String projectId) {
+    public MeetingDtos.MeetingOut getMeeting(@PathVariable String meetingId,
+                                            @RequestParam(required = false) String projectId) {
         Roles.any();
-        return toOut(meetingService.requireMeeting(projectId, meetingId));
+        return toOut(meetingService.requireScopedMeeting(projectId, meetingId));
     }
 
     /**

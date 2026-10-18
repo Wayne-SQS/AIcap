@@ -121,8 +121,8 @@ public abstract class ContractTestSupport {
     }
 
     /**
-     * 少数用例专门验证"缺 project_id 会被拒"({@code plat19}),这时注入反而会让它通过 ——
-     * 走这个方法显式关掉注入。
+     * 少数用例专门验证"缺 project_id 会被拒"({@code plat19})、或验证"缺 project_id 时按会议反解",
+     * 这时注入反而会让它走带参分支过掉 —— 走这个方法显式关掉注入(<b>URL 与请求体都不补</b>)。
      */
     protected ApiResponse requestWithoutProject(HttpMethod method, String path, String token, String jsonBody) {
         return request(method, path, token, jsonBody, false);
@@ -150,7 +150,9 @@ public abstract class ContractTestSupport {
             entity = new HttpEntity<>(headers);
         }
         ResponseEntity<byte[]> resp;
-        String scopedPath = withProject(path);
+        // 关掉注入时必须连 URL 一起关:只关请求体、URL 上仍挂 ?projectId=P001 的话,
+        // "缺 project_id 会被拒"这类用例走的还是带参分支,断言为 200 时甚至照样绿。
+        String scopedPath = injectProject ? withProject(path) : path;
         try {
             resp = rest.exchange(scopedPath, method, entity, byte[].class);
         } catch (Exception e) {

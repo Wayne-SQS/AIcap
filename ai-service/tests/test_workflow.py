@@ -54,7 +54,7 @@ class WorkflowTests(unittest.TestCase):
         self.origin = f"http://127.0.0.1:{self.server.server_port}"
         self.settings = ModelSettings(api_key="fixture-model-key", base_url=self.origin, model="fixture-model")
         self.model = ChatModelClient(self.settings)
-        self.workflow = DailyScrumWorkflow(StoryReadTool(self.origin), self.model)
+        self.workflow = DailyScrumWorkflow(StoryReadTool(self.origin, project_id="P001"), self.model)
 
     def stop_server(self):
         self.server.shutdown()
@@ -68,7 +68,7 @@ class WorkflowTests(unittest.TestCase):
     def test_real_graph_orders_read_then_model_and_returns_valid_proposal(self):
         result = self.run_flow()
         self.assertEqual(2, result.proposed_actions[0].changes.status)
-        self.assertEqual([("GET", "/api/stories"), ("POST", "/chat/completions")],
+        self.assertEqual([("GET", "/api/stories?projectId=P001"), ("POST", "/chat/completions")],
                          [(r[0], r[1]) for r in self.requests])
         self.assertEqual("Bearer fixture-user-token", self.requests[0][2])
         self.assertEqual("Bearer fixture-model-key", self.requests[1][2])

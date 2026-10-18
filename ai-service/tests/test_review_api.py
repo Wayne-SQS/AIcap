@@ -29,7 +29,7 @@ class ReviewApiTests(unittest.TestCase):
         self.assertEqual('pending', response.json()['storage_status'])
         self.assertEqual('saved-1', response.json()['analysis_id'])
         self.assertEqual(['/api/auth/me', '/api/meetings/m1',
-            '/api/meetings/m1/review-analyses/by-request/review-1', '/api/stories',
+            '/api/meetings/m1/review-analyses/by-request/review-1', '/api/stories?projectId=P001',
             '/api/meetings/m1/review-analyses'], [path for path, _ in self.calls])
         self.assertTrue(all(token == 'Bearer fixture-token' for _, token in self.calls))
         self.assertNotIn('fixture-token', str(self.model_calls))

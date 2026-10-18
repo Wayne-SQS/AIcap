@@ -42,16 +42,18 @@ public class MeetingAudioController {
         return audioService.store(projectId, meetingId, file, source, durationMs, actor);
     }
 
+    /** 列表:projectId 可选,缺省时按会议反解项目(见 {@link com.aicap.service.MeetingService#requireScopedMeeting}) */
     @GetMapping("/meetings/{meetingId}/audio")
-    public List<MeetingAudioDtos.AudioOut> list(@PathVariable String meetingId, @RequestParam String projectId) {
+    public List<MeetingAudioDtos.AudioOut> list(@PathVariable String meetingId,
+                                                @RequestParam(required = false) String projectId) {
         Roles.any();
         return audioService.list(projectId, meetingId);
     }
 
-    /** 回放/下载:返回 mp3 字节流 */
+    /** 回放/下载:返回 mp3 字节流;projectId 可选(按音频所属会议反解) */
     @GetMapping("/audio/{audioId}")
     public ResponseEntity<byte[]> play(@PathVariable String audioId,
-                                       @RequestParam String projectId,
+                                       @RequestParam(required = false) String projectId,
                                        @RequestParam(value = "download", required = false) String download) {
         Roles.any();
         MeetingAudioService.LoadedAudio loaded = audioService.load(projectId, audioId);

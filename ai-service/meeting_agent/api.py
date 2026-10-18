@@ -63,7 +63,6 @@ def create_app(*, backend_origin: str | None = None,
                model_factory: Callable[[], CompletionModel] | None = None) -> FastAPI:
     origin = backend_origin if backend_origin is not None else os.environ.get("AICAP_JAVA_BASE_URL", "http://localhost:8080")
     access = JavaMeetingAccess(origin)
-    stories = StoryReadTool(origin)
     store = JavaAnalysisStore(origin)
     planning_store = JavaPlanningStore(origin)
     review_store = JavaReviewStore(origin)
@@ -74,8 +73,22 @@ def create_app(*, backend_origin: str | None = None,
     transcriber = LocalTranscriber()
     diarizer = LocalDiarizer()
     members = MemberReadTool(origin)
-    planning_reader = PlanningContextReader(stories, MemberReadTool(origin), TaskReadTool(origin))
     make_model = model_factory or (lambda: ChatModelClient(ModelSettings.from_env()))
+
+    def scoped_readers(project_id: str):
+        """Bind the meeting's project to the read tools.
+
+        Multi-project Java requires ``projectId`` on ``/api/stories`` and ``/api/tasks``,
+        and neither path carries a meeting id — Java cannot resolve the project for us.
+        The value comes from the meeting record read back from Java
+        (``SavedMeeting.project_id``), never from the caller's body or the model.
+        Built per request on purpose: a tool instance is bound to exactly one project,
+        and reusing one across meetings would feed project A's stories into project B's
+        analysis.
+        """
+        scoped_stories = StoryReadTool(origin, project_id=project_id)
+        scoped_tasks = TaskReadTool(origin, project_id=project_id)
+        return scoped_stories, PlanningContextReader(scoped_stories, MemberReadTool(origin), scoped_tasks)
     app = FastAPI(title="AIcap Meeting Agent", version="0.1.0")
     bearer = HTTPBearer(auto_error=False)
 
@@ -129,6 +142,10 @@ def create_app(*, backend_origin: str | None = None,
         # a contract rejection as an upstream/gateway outage and misdirect
         # operators to investigate Java or the network. Infrastructure codes
         # (invalid_*_context raised from internal graph state) keep 502.
+        # `unresolved_owner` 仍在表内,但 2026-10-15 起 **retro 链路不再抛它** ——
+        # 负责人无法唯一解析改走降级（见 retro_contracts 的注释）。留着是因为共享的
+        # evidence_checks 仍会以该码抛给将来接入负责人校验的链路；那个码语义上确实是
+        # "调用方的输入/模型输出不满足契约"，归 422 而不是 502。
         contract_status_422 = frozenset({
             "invalid_meeting_input", "invalid_model_proposal",
             "meeting_mismatch", "duplicate_proposal_id", "duplicate_story",
@@ -152,6 +169,7 @@ def create_app(*, backend_origin: str | None = None,
     def assignment_context(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
                            body: AssignmentContextRequest, token: Annotated[str, Depends(current_token)]):
         meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        _, planning_reader = scoped_readers(meeting.project_id)
         context = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
             access_token=token, target_sprint=body.target_sprint)
         try:
@@ -181,6 +199,7 @@ def create_app(*, backend_origin: str | None = None,
     def assignment_recommendations(meeting_id: Annotated[str, Path(pattern=r'^[A-Za-z0-9_-]{1,80}$')],
                                    body: AssignmentRecommendationRequest, token: Annotated[str, Depends(current_token)]):
         meeting = access.authorize_and_load(token=token, meeting_id=meeting_id)
+        _, planning_reader = scoped_readers(meeting.project_id)
         source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
             access_token=token, target_sprint=body.target_sprint)
         try:
@@ -199,6 +218,7 @@ def create_app(*, backend_origin: str | None = None,
             if existing.input != request:
                 raise StorageError('storage_conflict', 409, body.client_request_id)
             return existing
+        _, planning_reader = scoped_readers(meeting.project_id)
         source = planning_reader.load(meeting_id=meeting.id, transcript=meeting.transcript,
             access_token=token, target_sprint=body.target_sprint)
         try:
@@ -215,6 +235,7 @@ def create_app(*, backend_origin: str | None = None,
         existing = store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedResult.from_record(existing)
+        stories, _ = scoped_readers(meeting.project_id)
         workflow = DailyScrumWorkflow(stories, make_model())
         result = workflow.run(meeting_id=meeting.id, transcript=meeting.transcript,
                             access_token=token, current_sprint=body.current_sprint)
@@ -228,6 +249,7 @@ def create_app(*, backend_origin: str | None = None,
         existing = planning_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedPlanningResult.from_record(existing)
+        _, planning_reader = scoped_readers(meeting.project_id)
         result = SprintPlanningWorkflow(planning_reader, make_model()).run(
             meeting_id=meeting.id, transcript=meeting.transcript, access_token=token,
             current_sprint=body.current_sprint, target_sprint=body.target_sprint)
@@ -241,6 +263,7 @@ def create_app(*, backend_origin: str | None = None,
         existing = review_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedReviewResult.from_record(existing)
+        stories, _ = scoped_readers(meeting.project_id)
         result = SprintReviewWorkflow(stories, make_model()).run(meeting_id=meeting.id,
             transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
         saved = review_store.save(token=token, request_id=body.client_request_id, result=result)
@@ -265,6 +288,7 @@ def create_app(*, backend_origin: str | None = None,
         existing = refinement_store.find(token=token, meeting_id=meeting.id, request_id=body.client_request_id)
         if existing is not None:
             return PersistedRefinementResult.from_record(existing)
+        stories, _ = scoped_readers(meeting.project_id)
         result = BacklogRefinementWorkflow(stories, make_model()).run(meeting_id=meeting.id,
             transcript=meeting.transcript, access_token=token, current_sprint=body.current_sprint)
         saved = refinement_store.save(token=token, request_id=body.client_request_id, result=result)

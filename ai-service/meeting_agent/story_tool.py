@@ -4,7 +4,6 @@ import json
 import math
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from pydantic import ValidationError
@@ -12,6 +11,7 @@ from pydantic import Field
 from typing import Annotated, Literal, TypeVar
 
 from .contracts import DailyScrumInput, StorySnapshot, TranscriptSegment
+from .shared_http import scoped_url, validate_backend_origin
 
 
 class ReviewStorySnapshot(StorySnapshot):
@@ -58,35 +58,23 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class StoryReadTool:
-    """One fixed GET endpoint. Origin is trusted service config, token is per call.
+    """One fixed GET endpoint, scoped to one project. Origin is trusted service config, token is per call.
 
     Java remains the authority for authentication and read permissions. The Tool
     does not grant permission to start analysis or approve any project changes.
+    ``project_id`` is required: multi-project Java rejects ``/api/stories`` without
+    it, and the value must come from the meeting record read back from Java.
     """
 
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
     MAX_STORIES = 1000
 
-    def __init__(self, backend_origin: str, *, timeout_seconds: float = 10.0):
-        try:
-            url = urlsplit(backend_origin)
-            valid = (
-                url.scheme in ("http", "https") and url.hostname
-                and url.username is None and url.password is None
-                and url.path in ("", "/") and not url.query and not url.fragment
-                and not any(c.isspace() or ord(c) < 32 for c in backend_origin)
-            )
-            # Accessing port also rejects malformed port strings.
-            port = url.port
-            valid = valid and (port is None or port > 0)
-        except (TypeError, ValueError):
-            valid = False
-        if not valid:
-            raise ValueError("backend_origin must be an HTTP(S) origin without credentials or path")
+    def __init__(self, backend_origin: str, *, project_id: str, timeout_seconds: float = 10.0):
+        origin = validate_backend_origin(backend_origin)
         if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
                 or not math.isfinite(timeout_seconds) or timeout_seconds <= 0):
             raise ValueError("timeout_seconds must be finite and positive")
-        self._url = backend_origin.rstrip("/") + "/api/stories"
+        self._url = scoped_url(origin, "/api/stories", project_id)
         self._timeout = timeout_seconds
         # Never forward a caller's Bearer token via redirects or environment proxies.
         self._opener = build_opener(ProxyHandler({}), _NoRedirect())

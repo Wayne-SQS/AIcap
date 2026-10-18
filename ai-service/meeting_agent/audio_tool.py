@@ -6,8 +6,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import Field
 from .contracts import Contract, Identifier
-from .shared_http import shared_client
-from .story_tool import StoryReadTool
+from .shared_http import shared_client, validate_backend_origin
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
@@ -36,8 +35,7 @@ class AudioReadError(Exception):
 
 class AudioReadTool:
     def __init__(self, origin, *, transport=None):
-        StoryReadTool(origin)
-        self.origin, self.transport = origin.rstrip('/'), transport
+        self.origin, self.transport = validate_backend_origin(origin), transport
 
     def _get(self, path, token, limit, *, binary=False):
         try:

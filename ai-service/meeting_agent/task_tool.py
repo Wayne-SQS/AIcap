@@ -1,13 +1,12 @@
 import json
 import math
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
 
 import httpx
 from pydantic import Field, model_validator
 
 from .contracts import Contract, Identifier, NonBlank
-from .shared_http import shared_client
+from .shared_http import scoped_url, shared_client, validate_backend_origin
 
 
 class TaskSnapshot(Contract):
@@ -62,23 +61,13 @@ class TaskReadTool:
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
     MAX_TASKS = 1000
 
-    def __init__(self, backend_origin: str, *, timeout_seconds: float = 10.0,
+    def __init__(self, backend_origin: str, *, project_id: str, timeout_seconds: float = 10.0,
                  transport: httpx.BaseTransport | None = None):
-        try:
-            url = urlsplit(backend_origin)
-            valid = (url.scheme in ('http', 'https') and url.hostname
-                     and url.username is None and url.password is None
-                     and url.path in ('', '/') and not url.query and not url.fragment
-                     and not any(c.isspace() or ord(c) < 32 for c in backend_origin)
-                     and (url.port is None or url.port > 0))
-        except (TypeError, ValueError):
-            valid = False
-        if not valid:
-            raise ValueError('backend_origin must be an HTTP(S) origin without credentials or path')
+        origin = validate_backend_origin(backend_origin)
         if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
                 or not math.isfinite(timeout_seconds) or timeout_seconds <= 0):
             raise ValueError('timeout_seconds must be finite and positive')
-        self._url = backend_origin.rstrip('/') + '/api/tasks'
+        self._url = scoped_url(origin, '/api/tasks', project_id)
         self._timeout = timeout_seconds
         self._transport = transport
 

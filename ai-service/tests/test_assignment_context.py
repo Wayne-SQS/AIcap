@@ -87,7 +87,8 @@ class AssignmentContextApiTests(unittest.TestCase):
         response=self.post()
         self.assertEqual(200,response.status_code,response.text)
         self.assertEqual('read_only_preparation',response.json()['scope'])
-        self.assertEqual(['/api/auth/me','/api/meetings/m1','/api/stories','/api/members/profiles','/api/tasks'],[p for p,t in self.calls])
+        self.assertEqual(['/api/auth/me','/api/meetings/m1','/api/stories?projectId=P001',
+            '/api/members/profiles','/api/tasks?projectId=P001'],[p for p,t in self.calls])
         self.assertTrue(all(t=='Bearer fixture-token' for p,t in self.calls))
         self.assertNotIn('fixture-token',response.text)
         self.assertEqual([],self.model_calls)

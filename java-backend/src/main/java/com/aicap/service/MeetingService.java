@@ -105,6 +105,26 @@ public class MeetingService {
     }
 
     /**
+     * meeting-id 类端点的宽容入口:调用方带了 {@code projectId} 就沿用严格口径
+     * ({@link #requireMeeting(String, String)}:项目不匹配 → 404);没带就从
+     * {@code meetings.project_id} 反解,再判成员。
+     *
+     * <p><b>反解不放松权限</b>:判的还是同一张成员表、同一个 {@code requireMember},
+     * 变的只是「调用方必须自己先知道 project_id」这条协议约束 —— 会议 Agent(ai-service)
+     * 手里只有 meetingId(project_id 是它读这条会议时才第一次见到的),旧的必填口径会让
+     * 整条分析链死在第一步。会议不存在仍是 404;调用方给了 projectId 却指向别的项目,
+     * 行为与改造前<b>逐字一致</b>(不会因为"反正能反解"而放行跨项目读)。
+     */
+    public Meeting requireScopedMeeting(String projectId, String meetingId) {
+        if (projectId != null && !projectId.isBlank()) {
+            return requireMeeting(projectId, meetingId);
+        }
+        Meeting m = getMeeting(meetingId);
+        projectAccess.requireMember(ProjectAccessService.normalize(m.getProjectId()));
+        return m;
+    }
+
+    /**
      * 无五类会议分析时删除会议并清理旧从属数据(FE-D03)。已有分析时先返回409，
      * 保持既有外键保护的原文、审核与执行记录，不清理录音或独立业务成果。
      * <p>schema 里这些外键都没有 ON DELETE CASCADE,因此必须手工按依赖反序清理,否则直接删会议会报外键错误:
