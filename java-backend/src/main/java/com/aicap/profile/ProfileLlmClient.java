@@ -60,6 +60,15 @@ public class ProfileLlmClient {
      * @param jsonMode      true 时强制模型输出 JSON(deepseek-chat 支持 response_format)
      */
     public ChatResult chat(List<Msg> messages, boolean jsonMode) {
+        return chat(messages, jsonMode, props.getMaxTokens());
+    }
+
+    /**
+     * 指定输出预算的 chat 调用。
+     * 批量/直调场景一次要装下多条结论(如 8 个任务的难度、十几条团队风险),
+     * 沿用默认 max_tokens 会让 JSON 在半截被截断 —— 这是"LLM 静默降级"最常见的真因。
+     */
+    public ChatResult chat(List<Msg> messages, boolean jsonMode, int maxTokens) {
         if (!available()) {
             throw new ProfileLlmException("PROFILE_LLM_API_KEY 未配置,画像智能体 LLM 内核不可用");
         }
@@ -67,7 +76,7 @@ public class ProfileLlmClient {
             var body = objectMapper.createObjectNode();
             body.put("model", props.getModel());
             body.put("temperature", props.getTemperature());
-            body.put("max_tokens", props.getMaxTokens());
+            body.put("max_tokens", maxTokens > 0 ? maxTokens : props.getMaxTokens());
             var arr = body.putArray("messages");
             for (Msg m : messages) {
                 arr.addObject().put("role", m.role()).put("content", m.content());

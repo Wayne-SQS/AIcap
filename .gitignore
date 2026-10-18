@@ -70,3 +70,9 @@ ai-service/.planning-quality/
 
 # Temporary AI collaboration messages; durable decisions belong in docs/
 .agent-collab/
+
+# IDE 配置(个人工作区,不进仓库)
+.idea/
+
+# 本地回归测试临时产物(备份/响应快照)
+.tmptest/

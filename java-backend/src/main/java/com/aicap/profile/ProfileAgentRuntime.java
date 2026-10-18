@@ -2,6 +2,7 @@ package com.aicap.profile;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.List;
  *
  * 与会议智能体的 AgentRunner 完全独立:自己的循环、自己的步进协议、自己的留痕结构。
  */
+@Slf4j
 @Component
 public class ProfileAgentRuntime {
 
@@ -133,6 +135,41 @@ public class ProfileAgentRuntime {
         steps.add(new Step(maxSteps + 1, "forced_convergence", null, null, truncate(last.content()),
                 true, last.promptTokens(), last.completionTokens(), last.model()));
         return new AgentOutcome(finalJson, steps, totalTokens, false, "max_steps_reached");
+    }
+
+    /**
+     * 单次直调:不注入工具与步进协议,一轮就要最终 JSON。
+     *
+     * <p>为什么需要它:规划循环(ReAct)在 deepseek-chat 上经常在 maxSteps 内不收敛 ——
+     * 步数耗尽后 {@code extractFinalOrRaw} 只能拿到残缺输出,解析失败被上层 catch 吞掉,
+     * 表现为"明明配了 LLM,结果却是规则引擎的结论"(静默降级)。
+     * 事实已在 prompt 里给全的场景(难度评估、团队风险)根本不需要工具循环,
+     * 直调既快又不会被步数限制卡住。
+     *
+     * @return 模型输出正文;正文为空(如推理模型把预算吃在 reasoning 上)视为失败,返回 null
+     */
+    public String singleShot(String systemPrompt, String userPrompt) {
+        return singleShot(systemPrompt, userPrompt, props.getSingleShotMaxTokens());
+    }
+
+    public String singleShot(String systemPrompt, String userPrompt, int maxTokens) {
+        if (!available()) return null;
+        try {
+            List<ProfileLlmClient.Msg> messages = List.of(
+                    ProfileLlmClient.Msg.system(systemPrompt),
+                    ProfileLlmClient.Msg.user(userPrompt));
+            ProfileLlmClient.ChatResult r = llm.chat(messages, true, maxTokens);
+            String content = r.content();
+            if (content == null || content.isBlank()) {
+                log.warn("[profile-agent] 直调返回空正文(model={}, tokens={}/{}) —— 判为失败,交由上层降级",
+                        r.model(), r.promptTokens(), r.completionTokens());
+                return null;
+            }
+            return content;
+        } catch (Exception e) {
+            log.warn("[profile-agent] 直调失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String toolSchemasText() {
