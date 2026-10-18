@@ -34,6 +34,14 @@ const rangeEnd = ref(iso(today))
 /* ---------- GitHub 同步(状态 + 手动触发) ---------- */
 const githubStatus = ref(null)
 const githubSyncing = ref(false)
+/* 配置齐全 ≠ 可用:后端 status() 会带 token.state(ok/invalid/no_access/forbidden/unreachable)。
+   此前 token 过期时页面照样显示"已启用",用户要等同步失败才发现。 */
+const tokenBroken = computed(() => !!githubStatus.value?.enabled
+  && !!githubStatus.value?.token && githubStatus.value.token.state !== 'ok')
+const syncDot = computed(() => {
+  if (!githubStatus.value?.enabled) return 'off'
+  return tokenBroken.value ? 'warn' : 'ok'
+})
 async function checkGithub() {
   try {
     githubStatus.value = await profileAgentApi.githubStatus()
@@ -359,11 +367,13 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
     <!-- GitHub 同步区(状态 + 手动触发,与画像智能体共用后端服务) -->
     <div class="sa-sync" :class="{ on: githubStatus?.enabled }">
       <div class="sa-sync-info">
-        <span class="sa-sync-dot" :class="githubStatus?.enabled ? 'ok' : 'off'"></span>
+        <span class="sa-sync-dot" :class="syncDot"></span>
         <b>GitHub 数据同步</b>
         <span class="small">
           <template v-if="githubStatus?.enabled">
             已启用 · 仓库 {{ githubStatus.configured_repo }}<span v-if="githubStatus.auto_sync_hours > 0"> · 每 {{ githubStatus.auto_sync_hours }}h 自动同步</span>
+            <!-- 配置齐全不等于能用:token 过期时后端返回 token.state=invalid,这里必须显式告警 -->
+            <span v-if="tokenBroken" style="color:#e05555"> · ⚠ {{ githubStatus.token.message }}</span>
           </template>
           <template v-else>{{ githubStatus?.error || '未配置' }}</template>
         </span>
@@ -541,6 +551,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
 .sa-sync-info { display: flex; align-items: center; gap: 8px; }
 .sa-sync-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .sa-sync-dot.ok { background: #2e7d32; }
+.sa-sync-dot.warn { background: #e05555; }
 .sa-sync-dot.off { background: #b8860b; }
 .sa-sync-ops { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
 .sum-card h4 .warn { color: #b8860b; }

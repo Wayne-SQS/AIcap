@@ -71,13 +71,71 @@ public class GitHubActivitySyncService {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    /** 令牌探测结果缓存(秒级 TTL):status 是页面加载就调的接口,不能每次都打 GitHub */
+    private volatile Map<String, Object> tokenProbe;
+    private volatile long tokenProbeAt;
+    private static final long TOKEN_PROBE_TTL_MS = 5 * 60_000L;
+
     /** 同步结果(Controller 原样返回给前端) */
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("enabled", props.isEnabled() && !props.getToken().isBlank() && !props.getRepo().isBlank());
+        boolean configured = props.isEnabled() && !props.getToken().isBlank() && !props.getRepo().isBlank();
+        m.put("enabled", configured);
         m.put("configured_repo", props.getRepo());
         m.put("auto_sync_hours", props.getAutoSyncHours());
+        // 配置齐全 ≠ 能用:此前 token 过期时这里照样返回 enabled=true,用户要等到同步失败
+        // 才知道令牌已失效。这里做一次轻量探测(带缓存),把真实可用性暴露出来。
+        if (configured) m.put("token", probeToken());
         return m;
+    }
+
+    /**
+     * 探测 token 是否仍可用。只请求 /repos/{repo}(最轻的一个端点):
+     * 200=有效;401=令牌无效/过期;404=令牌看不到该仓库(仓库名错或未授权);
+     * 403/429=权限不足或限流。异常一律归为 unreachable,不抛给前端。
+     */
+    private Map<String, Object> probeToken() {
+        long now = System.currentTimeMillis();
+        Map<String, Object> cached = tokenProbe;
+        if (cached != null && now - tokenProbeAt < TOKEN_PROBE_TTL_MS) return cached;
+
+        Map<String, Object> r = new LinkedHashMap<>();
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(props.getApiBase() + "/repos/" + props.getRepo()))
+                    .header("Authorization", "Bearer " + props.getToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .timeout(Duration.ofSeconds(8))
+                    .GET().build();
+            int code = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
+            switch (code) {
+                case 200 -> {
+                    r.put("state", "ok");
+                    r.put("message", "令牌有效");
+                }
+                case 401 -> {
+                    r.put("state", "invalid");
+                    r.put("message", "令牌无效或已过期(401):请重新生成 PAT 并更新 GITHUB_TOKEN");
+                }
+                case 404 -> {
+                    r.put("state", "no_access");
+                    r.put("message", "令牌看不到该仓库(404):检查 GITHUB_REPO,或在令牌的 Repository access 里勾选该仓库");
+                }
+                case 403, 429 -> {
+                    r.put("state", "forbidden");
+                    r.put("message", "权限不足或触发限流(" + code + "):需 Contents/Pull requests/Issues 只读权限");
+                }
+                default -> {
+                    r.put("state", "error");
+                    r.put("message", "探测返回 HTTP " + code);
+                }
+            }
+        } catch (Exception e) {
+            r.put("state", "unreachable");
+            r.put("message", "无法连接 GitHub: " + brief(e));
+        }
+        tokenProbe = r;
+        tokenProbeAt = now;
+        return r;
     }
 
     /** 定时自动同步:每小时检查一次;enabled 且 auto_sync_hours>0 时,回溯同步最近 N 小时的活动 */
