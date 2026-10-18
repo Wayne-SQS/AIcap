@@ -7,7 +7,8 @@ import { authApi } from '@/api/auth'
 import { projectsApi } from '@/api/projects'
 import { useProjectsStore } from '@/stores/projects'
 import { milestonesApi } from '@/api/milestones'
-import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY } from '@/constants'
+import { epicsApi } from '@/api/epics'
+import { STORIES_KEY, TASKS_KEY, LOG_KEY, POOL_KEY, EPICS_KEY } from '@/constants'
 import { SEED, TASKS, POOL_SEED, MEMBERS, MILESTONES, MEMBER_COLORS, ROLE_TXT, derivedTaskSprints } from '@/data/seed'
 import { memberIndex, memberUserId, memberLabel, isContiguousUserIds } from '@/data/memberIdentity'
 import { capacityBreakdown, projectWeeks as resolveProjectWeeks } from '@/utils/projectCapacity'
@@ -45,6 +46,19 @@ function loadStories(projectId) {
     }
   } catch { ok = false }
   return { stories, storageOK: ok }
+}
+
+function loadEpics(projectId) {
+  try {
+    const rows = JSON.parse(localStorage.getItem(scopedKey(EPICS_KEY, projectId)))
+    if (Array.isArray(rows)) return rows
+  } catch { /* ignore */ }
+  return [
+    { id: 1, code: 'E1', name: '用户管理与权限', description: '' },
+    { id: 2, code: 'E2', name: '任务与协作', description: '' },
+    { id: 3, code: 'E3', name: '数据与分析', description: '' },
+    { id: 4, code: 'E4', name: 'AI 智能体与人机协作', description: '' }
+  ]
 }
 
 function loadPool(projectId) {
@@ -97,6 +111,7 @@ export const useProjectStore = defineStore('project', {
     const init = loadStories(projectId)
     return {
       stories: init.stories,
+      epics: loadEpics(projectId),
       storageOK: init.storageOK,
       tasks: loadTasks(projectId),
       pool: loadPool(projectId),
@@ -169,7 +184,8 @@ export const useProjectStore = defineStore('project', {
     utilization() {
       return id => {
       const cap = this.capacityHours(id)
-      return cap ? this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0) / cap : 0
+      const allocated = this.tasks.filter(t => t.owner === id).reduce((sum, t) => sum + Math.max(0, Number(t.h) || 0), 0)
+      return cap ? allocated / cap : allocated > 0 ? Infinity : 0
       }
     },
     /** 利用率 → 负载档位(超载 / 偏忙 / 正常 / 充足),成员页与热力图例共用 */
@@ -258,6 +274,7 @@ export const useProjectStore = defineStore('project', {
     mapStory(s) {
       return {
         id: s.id, title: s.title, description: s.description, acceptance: s.acceptance,
+        role: s.role || '', goal: s.goal || '', value: s.value || '', epicId: s.epic_id ?? null,
         priority: s.priority, sprint: s.sprint, activity: s.activity, status: s.status,
         owner: memberIndex(s.owner_id)
       }
@@ -334,12 +351,13 @@ export const useProjectStore = defineStore('project', {
       if (!activeProjectId) throw new Error('请先选择项目')
       projects.currentProjectId = activeProjectId
       projects.persistSelection()
-      const [st, tk, pl, lg, projectMembers, users] = await Promise.all([
-        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId), storiesApi.logs(activeProjectId), projectsApi.members(activeProjectId), authApi.users()
+      const [st, tk, pl, lg, projectMembers, users, epics] = await Promise.all([
+        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId), storiesApi.logs(activeProjectId), projectsApi.members(activeProjectId), authApi.users(), epicsApi.list(activeProjectId)
       ])
       let milestoneRows = []
       try { milestoneRows = await milestonesApi.list(activeProjectId) } catch { milestoneRows = [] }
       this.stories = st.map(this.mapStory)
+      this.epics = epics
       this.tasks = tk.map(this.mapTask)
       const memberLinks = Array.isArray(projectMembers) ? projectMembers : []
       const memberIds = new Set(memberLinks.map(member => Number(member.user_id)).filter(Number.isInteger))
@@ -400,6 +418,7 @@ export const useProjectStore = defineStore('project', {
     clearServerData() {
       // 后端在线但尚未完成认证时，禁止本地演示缓存进入正式项目集合。
       this.stories = []
+      this.epics = []
       this.tasks = []
       this.pool = []
       this.log = []
@@ -411,6 +430,7 @@ export const useProjectStore = defineStore('project', {
       const projectId = useProjectsStore().currentProjectId
       const init = loadStories(projectId)
       this.stories = init.stories
+      this.epics = loadEpics(projectId)
       this.pool = loadPool(projectId)
       this.tasks = loadTasks(projectId)
       this.members = structuredClone(MEMBERS)
@@ -422,6 +442,7 @@ export const useProjectStore = defineStore('project', {
     persist() {
       try {
         localStorage.setItem(scopedKey(STORIES_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.stories))
+        localStorage.setItem(scopedKey(EPICS_KEY, useProjectsStore().currentProjectId), JSON.stringify(this.epics))
         this.storageOK = true
       } catch { this.storageOK = false }
     },

@@ -9,6 +9,7 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.MilestoneMapper;
 import com.aicap.service.ProjectScopedResolver;
+import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -35,6 +37,7 @@ public class ImpactAnalysisService {
     private final MilestoneMapper milestones;
     private final ObjectMapper mapper;
     private final ProjectScopedResolver resolver;
+    private final ProjectAccessService projectAccess;
 
     public ObjectNode analyze(ObjectNode plan) { throw new IllegalArgumentException("projectId 必填"); }
 
@@ -75,12 +78,12 @@ public class ImpactAnalysisService {
                 if (owner != null) {
                     int[] before = beforeLoads.getOrDefault(newOwner, new int[6]);
                     int[] after = afterLoads.getOrDefault(newOwner, new int[6]);
-                    int weeklyCapacity = Math.max(1, owner.getCapacityHours() / 6);
+                    double weeklyCapacity = projectAccess.weeklyCapacity(projectId, newOwner);
                     for (int week = 0; week < 6; week++) {
                         if (after[week] > weeklyCapacity) {
                             addRisk(load, "high", taskId, owner.getDisplayName() + " W" + (week + 1)
                                     + "：修改前 " + before[week] + "h，修改后 " + after[week]
-                                    + "h，周容量 " + weeklyCapacity + "h");
+                                    + "h，周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
                         }
                     }
                     if (sum(before) != sum(after)) {

@@ -2,10 +2,12 @@ package com.aicap.config;
 
 import com.aicap.entity.MemberProfile;
 import com.aicap.entity.Story;
+import com.aicap.entity.Epic;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.mapper.MemberProfileMapper;
 import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.EpicMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.ProjectMapper;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 /**
  * 启动播种(对齐 FastAPI app/seed.py 的 seed_all):
@@ -56,6 +59,7 @@ public class DataSeeder implements ApplicationRunner {
 
     private final UserMapper userMapper;
     private final StoryMapper storyMapper;
+    private final EpicMapper epicMapper;
     private final TaskMapper taskMapper;
     private final MemberProfileMapper profileMapper;
     private final PasswordUtil passwordUtil;
@@ -196,7 +200,46 @@ public class DataSeeder implements ApplicationRunner {
         boolean migrated = migrateLegacyStorySeed();
         seedStories();
         seedTasks(migrated);
+        // 队友变更:US 基线入库后回填 role/goal/value,并按编号补新看板的 epic 分组。
+        // 必须排在 seedStories 之后 —— 它扫的是已入库的 US01–US37(库里没有 US 故事时自行 return)。
+        backfillLegacyStoryFields();
         seedProfiles();
+    }
+
+    private void backfillLegacyStoryFields() {
+        if (projectMapper.selectById("P001") == null) return;
+        List<Story> baseline = storyMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>()
+                .eq("project_id", "P001"));
+        if (baseline.stream().noneMatch(story -> story.getId() != null && story.getId().matches("US(0[1-9]|[12][0-9]|3[0-7])"))) return;
+        String[] names = { "用户管理与权限", "任务与协作", "数据与分析", "AI 智能体与人机协作" };
+        Map<Integer, Long> epicIds = new java.util.HashMap<>();
+        for (int i = 0; i < names.length; i++) {
+            Epic epic = epicMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Epic>()
+                    .eq("project_id", "P001").eq("name", names[i]).last("LIMIT 1"));
+            if (epic == null) {
+                epic = new Epic(); epic.setProjectId("P001"); epic.setName(names[i]);
+                epic.setDescription(""); epic.setCreatedAt(LocalDateTime.now()); epicMapper.insert(epic);
+            }
+            epicIds.put(i + 1, epic.getId());
+        }
+        for (Story story : baseline) {
+            boolean changed = false;
+            Matcher parts = Pattern.compile("^作为(.+?)，我希望(.+?)，以便(.+)$")
+                    .matcher(story.getDescription() == null ? "" : story.getDescription());
+            if (parts.matches()) {
+                if (story.getRole() == null || story.getRole().isBlank()) { story.setRole(parts.group(1)); changed = true; }
+                if (story.getGoal() == null || story.getGoal().isBlank()) { story.setGoal(parts.group(2)); changed = true; }
+                if (story.getValue() == null || story.getValue().isBlank()) { story.setValue(parts.group(3)); changed = true; }
+            }
+            if (story.getEpicId() == null && story.getId().matches("US(0[1-9]|[12][0-9]|3[0-7])")) {
+                int number = Integer.parseInt(story.getId().substring(2));
+                int group = Set.of(1, 2, 8, 16).contains(number) ? 1
+                        : Set.of(7, 15, 19, 20, 22, 23, 25, 28, 34, 36).contains(number) ? 3
+                        : Set.of(29, 30, 31, 32, 33, 35, 37).contains(number) ? 4 : 2;
+                story.setEpicId(epicIds.get(group)); changed = true;
+            }
+            if (changed) storyMapper.updateById(story);
+        }
     }
 
     // ---------- 用户 ----------

@@ -409,7 +409,7 @@ class TaskContractTest extends ContractTestSupport {
 
     @Test
     void patchTask_sprints_derivedFromWeeks() {
-        JsonNode original = taskFromListOrFail(TASK_T05);
+        JsonNode original = taskFromListOrFail(TASK_T16);
         int owStart = original.path("week_start").asInt();
         int owEnd = original.path("week_end").asInt();
         List<Integer> oSprints = sprintsOf(original);
@@ -419,23 +419,23 @@ class TaskContractTest extends ContractTestSupport {
             assertEquals(List.of(3), patchWeeks(5, 6), "week 5..6 应派生 [3]");
             assertEquals(List.of(1, 2, 3), patchWeeks(2, 5), "week 2..5 应派生 [1,2,3]");
         } finally {
-            ApiResponse restore = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+            ApiResponse restore = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                     json(map("week_start", owStart, "week_end", owEnd)));
             assertEquals(200, restore.status(), restore.body());
-            assertEquals(oSprints, sprintsOf(taskFromListOrFail(TASK_T05)),
+            assertEquals(oSprints, sprintsOf(taskFromListOrFail(TASK_T16)),
                     "还原排期后 sprints 应回到派生原值");
         }
     }
 
     /** PATCH 排期并返回复读(不是响应体)得到的派生 sprints */
     private List<Integer> patchWeeks(int weekStart, int weekEnd) {
-        ApiResponse r = patch("/api/tasks/" + TASK_T05, token(USER_ADMIN),
+        ApiResponse r = patch("/api/tasks/" + TASK_T16, token(USER_ADMIN),
                 json(map("week_start", weekStart, "week_end", weekEnd)));
         assertEquals(200, r.status(), r.body());
         assertEquals(weekStart, r.json().path("week_start").asInt(), r.body());
         assertEquals(weekEnd, r.json().path("week_end").asInt(), r.body());
         List<Integer> fromResponse = sprintsOf(r.json());
-        List<Integer> fromStore = sprintsOf(taskFromListOrFail(TASK_T05));
+        List<Integer> fromStore = sprintsOf(taskFromListOrFail(TASK_T16));
         assertEquals(fromResponse, fromStore,
                 "sprints 是派生字段:响应与复读必须一致(" + weekStart + ".." + weekEnd + ")");
         return fromStore;

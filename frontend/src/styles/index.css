@@ -376,6 +376,7 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .gbar.selected{outline:3px solid var(--ink);outline-offset:2px;z-index:3}
 .gbar.predecessor{box-shadow:0 0 0 3px rgba(54,112,74,.42)}
 .gbar.dependent{box-shadow:0 0 0 3px rgba(184,115,31,.42)}
+.gbar.critical-path{border-color:#ba3a36;box-shadow:0 0 0 2px rgba(186,58,54,.35)}
 .gbar.o0{background:var(--green)}.gbar.o1{background:var(--orange)}.gbar.o2{background:var(--blue)}.gbar.o3{background:var(--pink)}.gbar.o4{background:var(--gray)}
 /* 甘特图父子血缘层级(看板与甘特强制对应,保留 v2 口径) */
 .grow.parent{background:var(--paper-2);min-height:46px;margin-top:4px}
@@ -424,6 +425,7 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .legend .sw{width:14px;height:14px;border:2px solid var(--ink);flex:0 0 auto}
 .legend .diamond-key{width:11px;height:11px;transform:rotate(45deg);background:var(--yellow);border:2px solid var(--ink);display:inline-block}
 .legend .note{color:var(--muted);font-family:var(--mono)}
+.gantt-path{margin-top:10px;padding:9px 12px;border:1px solid var(--line);background:var(--paper);font-family:var(--mono);font-size:12px}
 
 /* ============ 成员任务 ============ */
 .member-view-section{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:14px 16px;box-sizing:border-box}
@@ -519,6 +521,7 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .task-week-grid div.active{background:var(--green);border-color:var(--ink);color:var(--ink);font-weight:700}
 .loadflag{display:inline-block;font-size:11px;font-family:var(--mono);font-weight:700;border:1.5px solid var(--ink);padding:1px 8px;box-shadow:2px 2px 0 var(--ink)}
 .loadflag.low{background:#e7efdf}.loadflag.normal{background:var(--green)}.loadflag.busy{background:var(--orange)}.loadflag.over{background:var(--red);color:#fff}
+.loadflag.unset{background:#eee;color:var(--muted)}
 .load-note{margin:0 0 8px;color:var(--muted);font-size:12px}
 .member-section-header .load-note{margin:4px 0 0}
 .load-legend{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 8px;font:11px var(--mono);color:var(--muted)}
@@ -535,6 +538,7 @@ input:focus,select:focus,textarea:focus{background:#fff}
 .heat-cell{border-right:1px solid var(--line);padding:8px;text-align:center;font-family:var(--mono);font-size:12px;cursor:help}
 .heat-cell .hrs{display:inline-block;min-width:40px;padding:3px 6px;border:1.5px solid var(--ink);font-weight:700;box-shadow:1.5px 1.5px 0 var(--ink)}
 .hl0{background:#e7efdf}.hl1{background:var(--green)}.hl2{background:var(--orange)}.hl3{background:#efb0a4}
+.hl4{background:#eee;color:var(--muted)}
 .heat-head{display:grid;grid-template-columns:150px repeat(6,1fr);border-bottom:2px solid var(--ink);background:var(--paper-2);font-family:var(--mono);font-weight:700;font-size:12px}
 .heat-head div{padding:9px;border-right:1px solid var(--line);text-align:center}
 
@@ -575,6 +579,8 @@ dialog::backdrop{background:rgba(34,52,44,.45)}
 dialog header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:2px solid var(--ink);background:var(--paper-2)}
 dialog header h2{margin:0;font-size:17px}
 dialog header button{border:none;box-shadow:none;background:none;font-size:22px;padding:0 6px}
+.hero-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.epic-tag{font:700 11px var(--mono);color:var(--muted)}
 .formbody{padding:16px;display:flex;flex-direction:column;gap:12px}
 .field{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:bold}
 .field input,.field select,.field textarea{font-weight:normal}

@@ -95,6 +95,13 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"capacity_hours", "`capacity_hours` int NOT NULL DEFAULT '60'"},
     };
 
+    private static final String[][] STORY_COLUMNS = {
+            {"role", "`role` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"goal", "`goal` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"value", "`value` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            {"epic_id", "`epic_id` bigint DEFAULT NULL"},
+    };
+
     private static final String[][] PROJECT_MEMBER_COLUMNS = {
             {"weekly_capacity_hours", "`weekly_capacity_hours` int DEFAULT NULL"},
     };
@@ -138,6 +145,13 @@ public class SchemaUpgrader implements ApplicationRunner {
             added.addAll(migrateInternalKeys(conn));
             // 数据引用的项目必须在 projects 表里存在,否则接口一律 404「项目不存在或已归档」
             added.addAll(ensureReferencedProjectsExist(conn));
+            // 队友变更:自定义角色与史诗两张表只对全新库由 schema.sql 建,老库不会重跑它,靠这里补建
+            execute(conn, "CREATE TABLE IF NOT EXISTS roles (name varchar(50) NOT NULL, can_write tinyint(1) NOT NULL DEFAULT 0, can_manage tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY(name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            execute(conn, "CREATE TABLE IF NOT EXISTS epics (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, name varchar(100) NOT NULL, description varchar(500) NOT NULL DEFAULT '', created_at datetime NOT NULL, PRIMARY KEY(id), KEY ix_epics_project(project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            // 队友变更:stories 补 role/goal/value/epic_id 四列(与 DataSeeder.backfillLegacyStoryFields 配套)
+            if (tableExists(conn, "stories")) {
+                added.addAll(addMissing(conn, "stories", STORY_COLUMNS));
+            }
             if (tableExists(conn, "project_members")) {
                 added.addAll(addMissing(conn, "project_members", PROJECT_MEMBER_COLUMNS));
             }

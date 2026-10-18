@@ -206,6 +206,57 @@ public class TaskPoolController {
                 .toList();
     }
 
+    @PostMapping("/tasks")
+    @Transactional
+    public TaskDtos.TaskOut createTask(@RequestBody JsonNode body, @RequestParam String projectId) {
+        Roles.writer();
+        projectAccess.requireWriter(projectId);
+        String scoped = ProjectAccessService.normalize(projectId);
+        NullableField<String> name = textField(body, "name", 200, true);
+        NullableField<Integer> owner = intField(body, "owner_id", 1, Integer.MAX_VALUE);
+        NullableField<Integer> hours = intField(body, "hours", 0, 999);
+        NullableField<Integer> start = intField(body, "week_start", 1, 6);
+        NullableField<Integer> end = intField(body, "week_end", 1, 6);
+        if (!name.present() || !owner.present() || !hours.present() || !start.present() || !end.present())
+            throw ApiException.unprocessable("name、owner_id、hours、week_start、week_end 为必填字段");
+        if (start.value() > end.value()) throw ApiException.badRequest("开始周不能晚于结束周");
+        if (userMapper.selectById(owner.value()) == null) throw ApiException.badRequest("负责人不存在");
+        projectAccess.requireProjectMember(scoped, owner.value());
+        String type = textField(body, "task_type", 20, true).value();
+        if (type == null) type = "feature";
+        if (!Set.of("feature", "management").contains(type)) throw ApiException.unprocessable("task_type 仅支持 feature/management");
+        String priority = textField(body, "priority", 10, true).value();
+        if (priority == null) priority = "Should";
+        if (!Set.of("Must", "Should", "Could").contains(priority)) throw ApiException.unprocessable("priority 仅支持 Must/Should/Could");
+        String cardId = textField(body, "kanban_card_id", 20, true).value();
+        if (cardId != null && storyMapper.selectOne(new QueryWrapper<Story>().eq("project_id", scoped).eq("code", cardId)) == null)
+            throw ApiException.badRequest("所属看板卡不存在");
+        String storyRef = textField(body, "story_ref", 100, false).value();
+        List<String> refs = parseRefs(storyRef, "US");
+        for (String ref : refs)
+            if (storyMapper.selectOne(new QueryWrapper<Story>().eq("project_id", scoped).eq("code", ref)) == null)
+                throw ApiException.badRequest("关联故事不存在: " + ref);
+        String dependsOn = textField(body, "depends_on", 100, false).value();
+        List<String> deps = parseRefs(dependsOn, "T");
+        for (String dep : deps)
+            if (taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scoped).eq("code", dep)) == null)
+                throw ApiException.badRequest("前置任务不存在: " + dep);
+        int next = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scoped)).stream()
+                .map(Task::getId).filter(id -> id.matches("T\\d+"))
+                .mapToInt(id -> Integer.parseInt(id.substring(1))).max().orElse(0) + 1;
+        Task task = new Task();
+        task.setProjectId(scoped);
+        task.setId(String.format("T%02d", next));
+        task.setName(name.value()); task.setOwnerId(owner.value()); task.setHours(hours.value());
+        task.setEstimatedHours(hours.value()); task.setWeekStart(start.value()); task.setWeekEnd(end.value());
+        task.setStoryRef(String.join(",", refs)); task.setDependsOn(String.join(",", deps));
+        task.setKanbanCardId(cardId); task.setTaskType(type); task.setPriority(priority);
+        task.setStatus(0); task.setProgress(0); task.setBlocked(0);
+        taskMapper.insert(task);
+        taskStoryRelations.replaceRelations(scoped, task, task.getStoryRef());
+        return TaskDtos.toOut(task, refs);
+    }
+
     /**
      * PATCH /api/tasks/{id}:看板/甘特/成员/需求四视图共用的任务记录更新
      * (对齐 FastAPI routers/tasks.py patch_task)。
@@ -386,6 +437,20 @@ public class TaskPoolController {
     public List<PoolDtos.PoolOut> listPool(@RequestParam String projectId) {
         projectAccess.requireMember(projectId);
         return PoolDtos.toOutList(poolItemMapper.selectList(new QueryWrapper<PoolItem>().eq("project_id", ProjectAccessService.normalize(projectId)).orderByAsc("id")));
+    }
+
+    @PatchMapping("/pool/{poolId}")
+    public PoolDtos.PoolOut updatePool(@PathVariable String poolId,
+                                       @Valid @RequestBody PoolDtos.PoolIn body,
+                                       @RequestParam String projectId) {
+        projectAccess.requireWriter(projectId);
+        String scoped = ProjectAccessService.normalize(projectId);
+        PoolItem item = poolItemMapper.selectOne(new QueryWrapper<PoolItem>().eq("project_id", scoped).eq("id", poolId));
+        if (item == null) throw ApiException.notFound("需求池条目不存在");
+        item.setTitle(body.title()); item.setDescription(body.description());
+        item.setSource(body.source()); item.setPriority(body.priority());
+        poolItemMapper.updateById(item);
+        return PoolDtos.toOut(item);
     }
 
     @PostMapping("/pool")

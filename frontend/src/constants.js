@@ -4,6 +4,7 @@ export const STORIES_KEY = 'aiguanli-pixel-stories-v1'
 export const TASKS_KEY = 'aiguanli-pixel-tasks-v1'
 export const LOG_KEY = 'aiguanli-pixel-log-v1'
 export const POOL_KEY = 'aiguanli-pixel-pool-v1'
+export const EPICS_KEY = 'aiguanli-pixel-epics-v1'
 export const SUG_KEY = 'aiguanli-pixel-sug-v1'
 export const DEC_KEY = 'aiguanli-pixel-dec-v1'
 /* 主管对话的 session_id:跨刷新/断线保持同一会话 —— 关掉页面回来还能看到完整过程 */
@@ -13,6 +14,7 @@ export const statuses = ['待办', '进行中', '已完成']
 export const DEFAULT_ACTIVITIES = ['进入与组织项目', '梳理需求', '安排与执行', '观察与协同', '复盘改进']
 export const activities = DEFAULT_ACTIVITIES
 export const VIEW_NAMES = {
+  projects: '项目与成员',
   overview: '项目总览',
   pool: '需求池',
   board: '用户故事看板',

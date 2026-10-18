@@ -46,6 +46,7 @@ class ProjectCapacityPolicyTest {
     @Test
     void explicitWeeklyCapacityWinsAndLegacyIsOnlyNoIdentityFallback() {
         assertEquals(18, ProjectCapacityPolicy.weeklyCapacity(18, 60, 1));
+        assertEquals(0, ProjectCapacityPolicy.weeklyCapacity(0, 60, 1));
         assertEquals(10, ProjectCapacityPolicy.weeklyCapacity(null, 60, null));
     }
 

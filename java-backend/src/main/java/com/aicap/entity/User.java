@@ -16,6 +16,6 @@ public class User {
     private String role;
     private String passwordHash;
     private String color;
-    /** 六周可用容量(小时);成员负载视图的分母 */
+    /** 每周可用容量(人时);null 表示尚未配置,0 表示明确无可用时间 */
     private Integer capacityHours;
 }

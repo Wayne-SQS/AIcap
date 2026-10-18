@@ -17,6 +17,7 @@ import StoryCard from '@/components/board/StoryCard.vue'
 import StoryMapGrid from '@/components/board/StoryMapGrid.vue'
 import ChangeLogPanel from '@/components/board/ChangeLogPanel.vue'
 import StoryEditorDialog from '@/components/board/StoryEditorDialog.vue'
+import EpicManagerDialog from '@/components/board/EpicManagerDialog.vue'
 import RiskConfirmDialog from '@/components/gantt/RiskConfirmDialog.vue'
 
 /* 看板主视图:结构对齐旧版 L490-545,逻辑对齐 selected()/render()/拖拽换状态/导出/恢复演示
@@ -33,6 +34,7 @@ const search = ref('')
 const sprint = ref('all')
 const owner = ref('all')
 const editorRef = ref(null)
+const epicManagerRef = ref(null)
 const riskDialogRef = ref(null)
 const pendingStoryMove = ref(null)
 
@@ -237,6 +239,7 @@ async function resetDemo() {
       <span id="savehint">{{ project.savehint }}</span>
       <span class="hintcard" id="hintcount">已同步 {{ project.stories.length }} 条真实故事{{ storyRange }}</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="manage-epics" @click="epicManagerRef?.open()">维护史诗</button>
         <button id="expjson" @click="exportJson">导出 JSON</button>
         <button id="expcsv" @click="exportCsv">导出 CSV</button>
         <button id="reset" class="danger" @click="resetDemo">恢复演示</button>
@@ -245,6 +248,7 @@ async function resetDemo() {
 
     <ChangeLogPanel />
     <StoryEditorDialog ref="editorRef" :in-scope="inScope" />
+    <EpicManagerDialog ref="epicManagerRef" />
     <RiskConfirmDialog ref="riskDialogRef" @cancel="cancelStoryMove" @confirm="confirmStoryMove" />
   </section>
 </template>

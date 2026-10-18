@@ -114,7 +114,7 @@ public class MemberProfileService {
     private MemberProfileDtos.ProfileOut toOut(User user, MemberProfile p) {
         return new MemberProfileDtos.ProfileOut(
                 user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.getColor(),
-                user.getCapacityHours() == null ? 60 : user.getCapacityHours(),
+                user.getCapacityHours(),
                 p == null ? "" : p.getTitle(),
                 p == null ? List.of() : read(p.getTechStack()),
                 p == null ? List.of() : read(p.getCapabilities()),

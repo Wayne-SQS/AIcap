@@ -20,6 +20,7 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final UserMapper userMapper;
+    private final RolePolicy rolePolicy;
 
     /** 无需登录的路径(前缀匹配) */
     private static final String[] PUBLIC_PREFIXES = {
@@ -53,6 +54,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             throw ApiException.unauthorized("未登录或登录已过期");
         }
         AuthContext.set(user);
+        AuthContext.setPermissions(rolePolicy.forRole(user.getRole()));
         return true;
     }
 

@@ -6,6 +6,7 @@ test('explicit weekly capacities remain individual and scale with a six-week pro
   const project = { total_sprints: 3 }
   assert.deepEqual([15, 14, 16, 13].map((weeklyCapacityHours, id) =>
     totalCapacity({ id, weekly_capacity_hours: weeklyCapacityHours }, project)), [90, 84, 96, 78])
+  assert.equal(totalCapacity({ id: 0, weekly_capacity_hours: 0 }, project), 0)
 })
 
 test('project duration follows dates before sprint count and recalculates on project switch', () => {

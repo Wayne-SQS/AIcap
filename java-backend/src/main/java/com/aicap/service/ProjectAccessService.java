@@ -10,6 +10,7 @@ import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.security.AuthContext;
+import com.aicap.security.RolePolicy;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class ProjectAccessService {
     private final TaskMapper tasks;
     private final UserMapper users;
     private final ObjectMapper mapper;
+    private final RolePolicy rolePolicy;
 
     public ProjectMember requireMember(String projectId) {
         User user = AuthContext.currentUser();
@@ -53,13 +55,13 @@ public class ProjectAccessService {
 
     public ProjectMember requireWriter(String projectId) {
         ProjectMember member = requireMember(projectId);
-        if ("viewer".equalsIgnoreCase(member.getProjectRole())) throw ApiException.forbidden("该项目中仅有查看权限");
+        if (!rolePolicy.forRole(member.getProjectRole()).canWrite()) throw ApiException.forbidden("该项目中仅有查看权限");
         return member;
     }
 
     public ProjectMember requireOwner(String projectId) {
         ProjectMember member = requireMember(projectId);
-        if (!List.of("owner", "admin").contains(member.getProjectRole().toLowerCase())) {
+        if (!rolePolicy.forRole(member.getProjectRole()).canManage()) {
             throw ApiException.forbidden("仅项目负责人可执行此操作");
         }
         return member;
@@ -70,6 +72,14 @@ public class ProjectAccessService {
         long count = members.selectCount(new QueryWrapper<ProjectMember>()
                 .eq("project_id", normalize(projectId)).eq("user_id", userId));
         if (count == 0) throw ApiException.badRequest("负责人不是当前项目成员");
+    }
+
+    public double weeklyCapacity(String projectId, Integer userId) {
+        if (userId == null) return 0;
+        ProjectMember link = members.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", normalize(projectId)).eq("user_id", userId).last("LIMIT 1"));
+        if (link == null) return 0;
+        return ProjectCapacityPolicy.weeklyCapacity(link.getWeeklyCapacityHours(), link.getCapacityHours(), userId);
     }
 
     public List<Map<String, Object>> listAccessible() {
@@ -154,7 +164,10 @@ public class ProjectAccessService {
         out.put("start_date", p.getStartDate()); out.put("end_date", p.getEndDate()); out.put("total_sprints", p.getTotalSprints());
         out.put("project_weeks", ProjectCapacityPolicy.projectWeeks(p));
         out.put("created_by", p.getCreatedBy()); out.put("created_at", p.getCreatedAt()); out.put("updated_at", p.getUpdatedAt());
-        out.put("project_role", member.getProjectRole()); out.put("story_count", stories.selectCount(new QueryWrapper<com.aicap.entity.Story>().eq("project_id", p.getId())));
+        out.put("project_role", member.getProjectRole());
+        RolePolicy.Permissions permissions = rolePolicy.forRole(member.getProjectRole());
+        out.put("can_write", permissions.canWrite()); out.put("can_manage", permissions.canManage());
+        out.put("story_count", stories.selectCount(new QueryWrapper<com.aicap.entity.Story>().eq("project_id", p.getId())));
         out.put("task_count", tasks.selectCount(new QueryWrapper<com.aicap.entity.Task>().eq("project_id", p.getId())));
         out.put("member_count", members.selectCount(new QueryWrapper<ProjectMember>().eq("project_id", p.getId())));
         return out;

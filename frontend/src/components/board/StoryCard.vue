@@ -85,6 +85,7 @@ function onDragStart(e) {
     <div class="cardtop">
       <span v-if="skin" class="sking" :title="skinText">{{ skin.glyph }}</span>
       <span class="id">{{ story.id }}</span><span class="tag" :class="story.priority">{{ story.priority }}</span>
+      <span v-if="story.epicId" class="epic-tag">{{ project.epics.find(e => e.id === story.epicId)?.code || 'E?' }}</span>
     </div>
     <h3 :title="map ? story.title : undefined">{{ story.title }}</h3>
     <p class="carddesc">{{ story.description }}</p>

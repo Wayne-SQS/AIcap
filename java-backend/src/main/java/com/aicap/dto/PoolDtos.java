@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 /** 需求池 DTO(字段名对齐 FastAPI schemas:snake_case) */
 public final class PoolDtos {
@@ -32,7 +33,8 @@ public final class PoolDtos {
     }
 
     /** 需求池条目输出(PoolOut) */
-    public record PoolOut(String id, String title, String description, String source, String priority) {
+    public record PoolOut(String id, String title, String description, String source, String priority,
+                          @JsonProperty("created_at") LocalDateTime createdAt) {
     }
 
     /** 删除响应 */
@@ -49,7 +51,7 @@ public final class PoolDtos {
     }
 
     public static PoolOut toOut(PoolItem p) {
-        return new PoolOut(p.getId(), p.getTitle(), p.getDescription(), p.getSource(), p.getPriority());
+        return new PoolOut(p.getId(), p.getTitle(), p.getDescription(), p.getSource(), p.getPriority(), p.getCreatedAt());
     }
 
     public static List<PoolOut> toOutList(List<PoolItem> list) {

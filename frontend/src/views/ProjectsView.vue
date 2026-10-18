@@ -2,10 +2,20 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
+import { projectsApi } from '@/api/projects'
+import { useSessionStore } from '@/stores/session'
 
 const router = useRouter()
 const projects = useProjectsStore()
+const session = useSessionStore()
 const error = ref('')
+const managing = ref(null)
+const members = ref([])
+const editName = ref('')
+const editDescription = ref('')
+const newUserId = ref('')
+const newRole = ref('member')
+const busy = ref(false)
 
 onMounted(async () => {
   try { await projects.loadProjects() } catch (e) { error.value = e.message }
@@ -17,6 +27,50 @@ async function enter(row) {
     await projects.selectProject(row.id)
     router.push({ name: 'project-overview', params: { projectId: row.id } })
   } catch (e) { error.value = e.message }
+}
+
+async function manage(row) {
+  if (managing.value?.id === row.id) { managing.value = null; return }
+  error.value = ''
+  try {
+    managing.value = row
+    editName.value = row.name
+    editDescription.value = row.description || ''
+    members.value = await projectsApi.members(row.id)
+  } catch (e) { error.value = e.message }
+}
+async function saveProject() {
+  if (!managing.value?.can_manage) return
+  busy.value = true; error.value = ''
+  try {
+    await projectsApi.update(managing.value.id, { name: editName.value.trim(), description: editDescription.value.trim() })
+    await projects.loadProjects()
+    managing.value = projects.projects.find(p => p.id === managing.value.id)
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+async function saveMember() {
+  if (!managing.value?.can_manage) return
+  const userId = Number(newUserId.value)
+  if (!Number.isInteger(userId) || userId < 1) { error.value = '请输入有效的用户编号'; return }
+  busy.value = true; error.value = ''
+  try {
+    await projectsApi.updateMember(managing.value.id, userId, { member_role: newRole.value })
+    members.value = await projectsApi.members(managing.value.id)
+    newUserId.value = ''
+    await projects.loadProjects()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+async function removeMember(member) {
+  if (!managing.value?.can_manage || member.user_id === session.currentUser?.id) return
+  busy.value = true; error.value = ''
+  try {
+    await projectsApi.removeMember(managing.value.id, member.user_id)
+    members.value = await projectsApi.members(managing.value.id)
+    await projects.loadProjects()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
 }
 
 </script>
@@ -45,9 +99,38 @@ async function enter(row) {
             <span><b>{{ row.member_count ?? 0 }}</b><small>成员</small></span>
           </div>
           <button class="primary projects-enter" @click="enter(row)">进入项目</button>
+          <button type="button" @click="manage(row)">项目成员</button>
         </div>
       </article>
       <p v-if="!projects.loading && !projects.projects.length" class="small">当前账号没有可访问的项目。</p>
     </div>
+    <section v-if="managing" class="projects-manage">
+      <h2>{{ managing.name }} · 项目成员</h2>
+      <form v-if="managing.can_manage" @submit.prevent="saveProject">
+        <label>项目名称 <input v-model="editName" maxlength="200" required></label>
+        <label>项目描述 <input v-model="editDescription" maxlength="1000"></label>
+        <button :disabled="busy" type="submit">保存项目信息</button>
+      </form>
+      <ul>
+        <li v-for="member in members" :key="member.user_id">
+          <span>用户 #{{ member.user_id }} · {{ member.project_role }} · {{ member.weekly_capacity_hours }}h/周</span>
+          <button v-if="managing.can_manage && member.user_id !== session.currentUser?.id" :disabled="busy" @click="removeMember(member)">移除</button>
+        </li>
+      </ul>
+      <form v-if="managing.can_manage" @submit.prevent="saveMember">
+        <label>用户编号 <input v-model="newUserId" type="number" min="1" required></label>
+        <label>项目身份 <select v-model="newRole"><option value="member">成员</option><option value="owner">负责人</option><option value="viewer">查看者</option></select></label>
+        <button :disabled="busy" type="submit">添加或更新成员</button>
+      </form>
+    </section>
   </section>
 </template>
+
+<style scoped>
+.projects-manage{margin-top:18px;padding:18px;border:2px solid var(--ink);background:var(--paper)}
+.projects-manage form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:12px 0}
+.projects-manage label{display:grid;gap:4px;font-size:12px}
+.projects-manage input,.projects-manage select{min-width:150px}
+.projects-manage ul{padding:0;list-style:none}
+.projects-manage li{display:flex;gap:12px;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0}
+</style>

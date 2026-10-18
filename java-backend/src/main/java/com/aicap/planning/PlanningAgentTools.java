@@ -12,6 +12,7 @@ import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.ProjectMemberMapper;
 import com.aicap.entity.ProjectMember;
 import com.aicap.service.ProjectScopedResolver;
+import com.aicap.service.ProjectCapacityPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,7 +43,7 @@ public class PlanningAgentTools {
                         params(Map.of("sprint", "integer", "activity", "integer", "owner_id", "integer"))),
                 fn("get_tasks", "读取真实任务，可按 owner_id/week/sprint 筛选",
                         params(Map.of("owner_id", "integer", "week", "integer", "sprint", "integer"))),
-                fn("get_members", "读取真实成员、角色和容量", empty()),
+                fn("get_members", "读取真实成员、角色与每周容量 capacity_hours（null 表示未配置）", empty()),
                 fn("get_sprints", "读取当前项目有效迭代与周范围", empty()),
                 fn("get_task_by_id", "读取指定真实任务", param("task_id", "string")),
                 fn("get_story_by_id", "读取指定真实用户故事", param("story_id", "string")),
@@ -52,7 +53,7 @@ public class PlanningAgentTools {
                 fn("get_task_priority", "读取任务当前优先级", param("task_id", "string")),
                 fn("get_milestones", "读取真实项目里程碑", empty()),
                 fn("get_milestone_by_id", "读取指定里程碑", param("milestone_id", "string")),
-                fn("get_member_load", "读取指定成员六周负载", param("owner_id", "integer"))
+                fn("get_member_load", "读取指定成员六周负载和每周容量 weekly_capacity_hours", param("owner_id", "integer"))
         );
     }
 
@@ -237,15 +238,18 @@ public class PlanningAgentTools {
 
     private ObjectNode members(String projectId) {
         ArrayNode items = mapper.createArrayNode();
-        projectMembers.selectList(new QueryWrapper<ProjectMember>().eq("project_id", projectId).orderByAsc("user_id")).stream()
-                .map(link -> users.selectById(link.getUserId())).filter(java.util.Objects::nonNull).forEach(user -> {
+        for (ProjectMember link : projectMembers.selectList(new QueryWrapper<ProjectMember>().eq("project_id", projectId).orderByAsc("user_id"))) {
+            User user = users.selectById(link.getUserId());
+            if (user == null) continue;
             ObjectNode node = mapper.createObjectNode();
             node.put("id", user.getId());
             node.put("name", user.getDisplayName());
-            node.put("role", user.getRole());
-            node.put("capacity_hours", user.getCapacityHours());
+            node.put("role", link.getProjectRole());
+            node.put("capacity_hours", link.getCapacityHours());
+            node.put("weekly_capacity_hours", ProjectCapacityPolicy.weeklyCapacity(
+                    link.getWeeklyCapacityHours(), link.getCapacityHours(), user.getId()));
             items.add(node);
-        });
+        }
         ObjectNode result = mapper.createObjectNode();
         result.set("items", items);
         return result;
@@ -268,6 +272,9 @@ public class PlanningAgentTools {
     private ObjectNode load(String projectId, int ownerId) {
         User user = users.selectById(ownerId);
         if (user == null) return missing("member", String.valueOf(ownerId));
+        ProjectMember link = projectMembers.selectOne(new QueryWrapper<ProjectMember>()
+                .eq("project_id", projectId).eq("user_id", ownerId).last("LIMIT 1"));
+        if (link == null) return missing("member", String.valueOf(ownerId));
         int[] weekly = new int[6];
         for (Task task : tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId).eq("owner_id", ownerId))) {
             int start = Math.max(1, task.getWeekStart());
@@ -282,7 +289,9 @@ public class PlanningAgentTools {
         for (int hours : weekly) values.add(hours);
         ObjectNode result = mapper.createObjectNode();
         result.put("owner_id", ownerId);
-        result.put("capacity_hours", user.getCapacityHours());
+        result.put("capacity_hours", link.getCapacityHours());
+        result.put("weekly_capacity_hours", ProjectCapacityPolicy.weeklyCapacity(
+                link.getWeeklyCapacityHours(), link.getCapacityHours(), ownerId));
         result.set("weekly_hours", values);
         return result;
     }

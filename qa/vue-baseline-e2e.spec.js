@@ -223,18 +223,21 @@ async function dragToCell(page, storyId, cell) {
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }))
   }, { id: storyId, cell })
   // 落点必须给出高亮反馈(与状态看板换列同一套 --yellow 提示)
-  await expect(page.locator(`#map .mapcell[data-cell="${cell}"]`), `${cell} 应高亮为可落点`).toHaveClass(/dragover/)
+  await expect(page.locator(`#map .mapcell[data-cell="${cell}"]`), `${cell} 应高亮为可落点`).toHaveClass(/is-drop-target/)
   await page.evaluate(cell => {
     document.querySelector(`#map .mapcell[data-cell="${cell}"]`)
       .dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: window.__dragDT }))
   }, cell)
 }
 
-/** 拖拽一次并收集确认框文案(确认后返回;文案用于断言"这次拖动会改什么"被说清楚了) */
+/** 拖拽一次并收集页面风险确认框文案。 */
 async function dragAndConfirm(page, storyId, cell) {
-  let msg = ''
-  page.once('dialog', d => { msg = d.message(); d.accept() })
   await dragToCell(page, storyId, cell)
+  const dialog = page.locator('.risk-dialog')
+  await expect(dialog).toBeVisible()
+  const msg = await dialog.textContent()
+  await dialog.getByRole('button', { name: '仍然保存' }).click()
+  await expect(dialog).toBeHidden()
   return msg
 }
 
@@ -344,10 +347,21 @@ test.describe('FE-AUTH 登录与会话', () => {
   })
 
   test('[FE-AUTH-04] 退出登录回到未登录态,点击状态胶囊可重新唤起登录', async ({ page }) => {
+    let releaseEpics
+    const epicGate = new Promise(resolve => { releaseEpics = resolve })
+    let epicRequested
+    const epicStarted = new Promise(resolve => { epicRequested = resolve })
+    await page.route('**/api/epics', async route => {
+      epicRequested()
+      await epicGate
+      await route.continue()
+    })
     await loginAndOpen(page, '/#/overview', OWNER)
     await expect(page.locator('#user-chip')).toHaveText('高思晗 · 负责人')
+    await epicStarted
 
     await page.locator('#logout-btn').click()
+    releaseEpics()
 
     // 回退到未登录态:身份与退出按钮消失,连接胶囊变离线演示数据
     await expect(page.locator('#toast')).toContainText('已退出登录，回到演示数据')
@@ -443,6 +457,12 @@ test.describe('FE-OVW 项目总览', () => {
     const realtime = page.locator('#realtime .stat').filter({ hasText: '完成比例' })
     await expect(realtime.locator('strong')).toHaveText(`${dash.percent}%`)
     await expect(realtime.locator('span.small')).toHaveText(`${dash.done} / ${dash.total} 故事`)
+    const activeTasks = tasks.filter(t => t.status !== 3)
+    const taskDone = activeTasks.filter(t => t.status === 2).length
+    const expectedTaskPct = activeTasks.length ? Math.round(taskDone / activeTasks.length * 100) : 0
+    await expect(page.locator('#task-percent')).toHaveText(`${expectedTaskPct}%`)
+    await expect(page.locator('#progress-definition')).toContainText(`${taskDone} / ${activeTasks.length}`)
+    await expect(page.locator('#progress-definition')).toContainText('需求池条目不计入')
     await expect(page.locator('#realtime .stat').filter({ hasText: '进行中' }).locator('strong'))
       .toHaveText(String(dash.doing).padStart(2, '0'))
 
@@ -474,7 +494,7 @@ test.describe('FE-POOL 需求池', () => {
       const item = items.filter({ has: page.locator('h3', { hasText: p.title }) })
       await expect(item.locator('.tag')).toHaveText(p.priority)
     }
-    await expect(page.locator('#pool-list .mono').first()).toHaveText(pool[0].id)
+    if (pool.length) await expect(page.locator('#pool-list .mono').first()).toHaveText(pool[0].id)
 
     /* 空态渲染:当前开发库需求池非空(存在历史冒烟残留),因此用接口拦截至空数组来验证
        「需求池为空」分支 —— 只影响本用例的这一次页面加载,不写任何数据 */
@@ -495,6 +515,7 @@ test.describe('FE-POOL 需求池', () => {
     const before = await apiGet(request, token, '/api/pool')
     const title = uniq('QA-POOL-REMOVE')
     const desc = 'QA 回归用例创建,结束前移除'
+    const source = 'QA 计划会'
     let createdId = null
 
     try {
@@ -505,6 +526,7 @@ test.describe('FE-POOL 需求池', () => {
       await expect(page.locator('#pool-form')).toBeVisible()
       await page.locator('#pool-title').fill(title)
       await page.locator('#pool-desc').fill(desc)
+      await page.locator('#pool-source').fill(source)
       await page.locator('#pool-pri').selectOption('Should')
       await page.locator('#pool-save').click()
       await expect(page.locator('#toast')).toContainText('已保存到需求池（服务器）')
@@ -515,11 +537,23 @@ test.describe('FE-POOL 需求池', () => {
       await expect(created).toHaveCount(1)
       await expect(created.locator('.tag')).toHaveText('Should')
       await expect(created.locator('.pdesc')).toHaveText(desc)
-      await expect(created.locator('.pmeta')).toContainText('手动新增')
+      await expect(created.locator('.pmeta')).toContainText(source)
       const after = await apiGet(request, token, '/api/pool')
       const mine = after.find(p => p.title === title)
       expect(mine, '新条目应已落库').toBeTruthy()
       createdId = mine.id
+      expect(mine.source).toBe(source)
+      expect(mine.created_at).toBeTruthy()
+
+      await page.locator(`#pool-list button[data-edit="${createdId}"]`).click()
+      await expect(page.locator('#pool-source')).toHaveValue(source)
+      await page.locator('#pool-desc').fill('已细化的需求描述')
+      await page.locator('#pool-save').click()
+      await expect(page.locator('#toast')).toContainText('需求池条目已更新（服务器）')
+      await expect(created.locator('.pdesc')).toHaveText('已细化的需求描述')
+      const refined = (await apiGet(request, token, '/api/pool')).find(p => p.id === createdId)
+      expect(refined.description).toBe('已细化的需求描述')
+      expect(refined.created_at).toBe(mine.created_at)
 
       // 移除清理(界面按钮 → 接口删除)
       await page.locator(`#pool-list button[data-drop="${createdId}"]`).click()
@@ -902,7 +936,7 @@ test.describe('FE-BRD 用户故事看板', () => {
     const sunqiushi = users.find(u => u.display_name === MEMBER)
 
     /* 夹具:US10 挂着 feature 子任务 T07(见 seed.js TASK_CARD_LINKS),两者负责人一致、任务未完成。
-       后端没有 POST /api/tasks,任务无法造数,只能借用基线故事+任务对,结束时逐字段还原。 */
+       借用基线故事+任务对以验证原有关联，结束时逐字段还原。 */
     const STORY = 'US10'
     const TASK = 'T07'
     const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
@@ -1209,8 +1243,8 @@ test.describe('FE-BRD 用户故事看板', () => {
 
   test('[FE-BRD-12] 拖动卡片换切片:改 Sprint 并级联挪未完成子任务,确认框说清影响范围', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
-    /* 夹具:US10 在 A3×S1 且挂着 feature 子任务 T07(w1–w2、未完成)—— 后端没有 POST /api/tasks,
-       任务造不出来,只能借用基线这对(与 FE-BRD-07 同一对),结束逐字段还原。 */
+    /* 夹具:US10 在 A3×S1 且挂着 feature 子任务 T07(w1–w2、未完成)。
+       借用基线这对(与 FE-BRD-07 同一对),结束逐字段还原。 */
     const STORY = 'US10'
     const TASK = 'T07'
     const beforeStory = (await apiGet(request, token, '/api/stories')).find(s => s.id === STORY)
@@ -1360,40 +1394,75 @@ test.describe('FE-BRD 用户故事看板', () => {
       }
     }
   })
+
+  test('[FE-BRD-15] 史诗新增、故事归属及解除归属后删除真实往返', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const epicName = uniq('QA-EPIC')
+    let epicId = null
+    let storyId = null
+    try {
+      await loginAndOpen(page, '/#/board', ADMIN)
+      await page.locator('#manage-epics').click()
+      const manager = page.locator('#epic-manager')
+      await expect(manager).toBeVisible()
+      await manager.locator('input[name=epic_name]').fill(epicName)
+      await manager.locator('textarea[name=epic_description]').fill('故事归属回归')
+      await manager.locator('button[type=submit]').click()
+      await expect(manager).toContainText(epicName)
+      await expect(page.locator('#toast')).toContainText('史诗已创建')
+      const epic = (await apiGet(request, token, '/api/epics')).find(e => e.name === epicName)
+      expect(epic, '新史诗应保存到后端').toBeTruthy()
+      epicId = epic.id
+      await manager.getByRole('button', { name: '关闭' }).click()
+
+      const created = await apiSend(request, token, 'POST', '/api/stories', {
+        title: uniq('QA-EPIC-STORY'), description: '作为负责人，我希望归属史诗，以便追溯需求',
+        acceptance: '可读取史诗归属', epic_id: epicId
+      })
+      expect(created.status).toBe(200)
+      storyId = created.body.id
+      await page.reload()
+      await openBoardTab(page)
+      const editor = await openStoryEditor(page, storyId)
+      await expect(editor.locator('select[name=epic_id]')).toHaveValue(String(epicId))
+      await editor.locator('#cancel').click()
+      await page.locator('#manage-epics').click()
+      await expect(manager.locator('li').filter({ hasText: epicName }).getByRole('button', { name: '删除' })).toBeDisabled()
+      await manager.getByRole('button', { name: '关闭' }).click()
+
+      await openStoryEditor(page, storyId)
+      await editor.locator('select[name=epic_id]').selectOption('')
+      await editor.locator('button[type=submit]').click()
+      await expect(editor).toBeHidden()
+      expect((await apiGet(request, token, '/api/stories')).find(s => s.id === storyId).epic_id).toBeNull()
+      await page.locator('#manage-epics').click()
+      page.once('dialog', dialog => dialog.accept())
+      await manager.locator('li').filter({ hasText: epicName }).getByRole('button', { name: '删除' }).click()
+      await expect(manager).not.toContainText(epicName)
+      expect((await apiGet(request, token, '/api/epics')).some(e => e.id === epicId)).toBe(false)
+      epicId = null
+    } finally {
+      await cleanupStory(request, token, storyId)
+      if (epicId == null) epicId = (await apiGet(request, token, '/api/epics')).find(e => e.name === epicName)?.id ?? null
+      if (epicId != null) await apiSend(request, token, 'DELETE', `/api/epics/${epicId}`)
+    }
+  })
 })
 
 /* ==================================================================================
  * FE-GNT · 甘特图
  * ================================================================================== */
 test.describe('FE-GNT 甘特图', () => {
-  test('[FE-GNT-01] 父卡(故事)行与子任务行都存在且带 data-gantt-task', async ({ page, request }) => {
+  test('[FE-GNT-01] 执行任务行与任务条数量同接口一致', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const tasks = await apiGet(request, token, '/api/tasks')
-    const feature = tasks.filter(t => (t.task_type || 'feature') === 'feature' && t.kanban_card_id)
-    const mgmt = tasks.filter(t => t.task_type === 'management')
-    const cards = [...new Set(feature.map(t => t.kanban_card_id))]
-
     await loginAndOpen(page, '/#/gantt', ADMIN)
-
-    await expect(page.locator('.grow.parent')).toHaveCount(cards.length)
-    await expect(page.locator('.grow.mgmt')).toHaveCount(mgmt.length)
-    await expect(page.locator('.grow.parent + .grow.child')).toHaveCount(cards.length)
-    await expect(page.locator('[data-gantt-task^="story:"]')).toHaveCount(cards.length)
+    await expect(page.locator('.grow.task')).toHaveCount(tasks.length)
     await expect(page.locator('[data-gantt-task^="task:"]')).toHaveCount(tasks.length)
-
-    // 父条文案 = 「USxx · 加权%」,子条标签 = T 编号
-    const parentLabels = await page.locator('.gbar.parent').allTextContents()
-    expect(parentLabels.length).toBe(cards.length)
-    for (const label of parentLabels) expect(label.trim()).toMatch(/^US\d+ · \d+%$/)
-    const childLabels = await page.locator('.grow.child .gbar').allTextContents()
-    expect(childLabels.every(l => /^T\d+$/.test(l.trim())), '子任务条标签应为 T 编号').toBeTruthy()
-
-    // 父行的血缘说明文案与卡上子任务数一致
-    const parentText = await page.locator('.grow.parent .tname small').first().textContent()
-    expect(parentText).toMatch(/^父卡 · \d+ 子任务 · \d+h · 加权 \d+%$/)
-    // 管理任务行带管理标记,且不挂父卡
+    const labels = await page.locator('.grow.task .gbar').allTextContents()
+    expect(labels.map(s => s.trim()).sort()).toEqual(tasks.map(t => t.id).sort())
     await expect(page.locator('#gantt-legend')).toContainText('管理任务')
-    await expect(page.locator('#gantt-legend')).toContainText('父卡条 = 子任务周并集')
+    await expect(page.locator('#gantt-legend')).toContainText('任务条 = 计划起止范围')
   })
 
   test('[FE-GNT-02] 点击任务条出现详情面板:负责人/排期/前置后续齐全且高亮正确', async ({ page, request }) => {
@@ -1492,29 +1561,24 @@ test.describe('FE-GNT 甘特图', () => {
     }
   })
 
-  test('[FE-GNT-04] 点击父卡(story)条出现故事详情,并有编辑故事与查看父卡入口', async ({ page, request }) => {
+  test('[FE-GNT-04] 从任务条查看父卡故事详情并返回子任务', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const tasks = await apiGet(request, token, '/api/tasks')
     const subs = featureSubs(tasks, 'US01')
 
     await loginAndOpen(page, '/#/gantt', ADMIN)
 
-    // 父卡条 → 故事详情(子任务血缘 + 编辑故事)
-    await page.locator('[data-gantt-task="story:US01"]').click()
+    // 当前甘特图仅绘制执行任务条；故事详情由挂卡任务进入。
+    await page.locator('[data-gantt-task="task:T03"]').click()
     const detail = page.locator('#gantt-detail')
+    const backToParent = detail.locator('button').filter({ hasText: '查看父卡 US01' })
+    await expect(backToParent).toBeVisible()
+    await backToParent.click()
     await expect(detail).toContainText('US01')
     await expect(detail).toContainText('项目与成员范围')
     await expect(detail).toContainText('工时加权进度')
     await expect(detail.locator('.detail-sub')).toContainText(`子任务（${subs.length}）`)
     await expect(detail.locator('.task-chip')).toHaveCount(subs.length)
-    await expect(detail.locator('button').filter({ hasText: '编辑故事' })).toBeVisible()
-
-    // 子任务条 → 任务详情里的「查看父卡 US01」可切回故事详情
-    await page.locator('[data-gantt-task="task:T03"]').click()
-    const backToParent = detail.locator('button').filter({ hasText: '查看父卡 US01' })
-    await expect(backToParent).toBeVisible()
-    await backToParent.click()
-    await expect(detail).toContainText('子任务（' + subs.length + '）')
     await expect(detail.locator('button').filter({ hasText: '编辑故事' })).toBeVisible()
 
     // 编辑故事入口能打开弹窗且内容指向 US01(只读检查,取消不写入)
@@ -1551,14 +1615,8 @@ test.describe('FE-GNT 甘特图', () => {
     await expect(page.locator('.grow.selected')).toHaveCount(1)
     await expect(detail.locator('.detail-head .id')).toHaveText('T07')
 
-    // 父卡与子任务之间也互斥
-    await page.locator('[data-gantt-task="story:US01"]').click()
-    await expect(page.locator('.gbar.selected')).toHaveCount(1)
-    await expect(page.locator('[data-gantt-task="story:US01"]')).toHaveClass(/selected/)
-    await expect(page.locator('[data-gantt-task="task:T07"]')).not.toHaveClass(/selected/)
-
     // 再点同一条 = 取消选中,详情面板回到空态
-    await page.locator('[data-gantt-task="story:US01"]').click()
+    await page.locator('[data-gantt-task="task:T07"]').click()
     await expect(page.locator('.gbar.selected')).toHaveCount(0)
     await expect(page.locator('.grow.selected')).toHaveCount(0)
     await expect(detail).toContainText('点击任务条')
@@ -1579,7 +1637,9 @@ test.describe('FE-MBR 成员任务图', () => {
     const allocated = id => tasks.filter(t => t.owner_id === id).reduce((a, t) => a + Math.max(0, Number(t.hours) || 0), 0)
     const loadLabel = id => {
       const u = users.find(x => x.id === id)
-      const util = u.capacity_hours ? allocated(id) / u.capacity_hours : 0
+      if (u.capacity_hours == null) return '未配置'
+      const sixWeekCapacity = u.capacity_hours * 6
+      const util = sixWeekCapacity ? allocated(id) / sixWeekCapacity : (allocated(id) > 0 ? Infinity : 0)
       if (util > 1) return '超载'
       if (util >= 0.8) return '偏忙'
       if (util >= 0.6) return '正常'
@@ -1610,7 +1670,7 @@ test.describe('FE-MBR 成员任务图', () => {
     await expect(bw).toHaveCount(users.length)
     for (const u of users) {
       const card = bw.filter({ has: page.locator('h3', { hasText: u.display_name }) })
-      await expect(card.locator('.role')).toContainText(`容量 ${u.capacity_hours}h`)
+      await expect(card.locator('.role')).toContainText(`周容量 ${u.capacity_hours}h/周`)
       await expect(card.locator('.role')).toContainText(`已分配 ${allocated(u.id)}h`)
     }
 
@@ -1618,6 +1678,99 @@ test.describe('FE-MBR 成员任务图', () => {
     await expect(page.locator('#heat .heat-row')).toHaveCount(users.length)
     await expect(page.locator('#heat .heat-cell')).toHaveCount(users.length * 6)
     await expect(page.locator('#heat .heat-cell').first()).toHaveAttribute('title', /周容量/)
+  })
+
+  test('[FE-MBR-05] 零容量在成员卡和热力图保持为 0 且超载提示正确', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const user = (await apiGet(request, token, '/api/auth/users')).find(u => u.display_name === ADMIN)
+    const tasks = await apiGet(request, token, '/api/tasks')
+    const allocated = tasks.filter(t => t.owner_id === user.id).reduce((sum, t) => sum + Number(t.hours || 0), 0)
+    try {
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${user.id}`,
+        { capacity_hours: 0 })).status).toBe(200)
+      await loginAndOpen(page, '/#/members', ADMIN)
+      const card = page.locator(`#member-grid .mcard[data-member="${user.id - 1}"]`)
+      await expect(card.locator('.loadflag')).toHaveText(allocated > 0 ? '超载' : '充足')
+      const bandwidth = page.locator('#bandwidth .mcard').filter({ has: page.locator('h3', { hasText: user.display_name }) })
+      await expect(bandwidth.locator('.role')).toContainText('周容量 0h/周')
+      await expect(page.locator('#heat .heat-row').first().locator('.heat-cell').first())
+        .toHaveAttribute('title', /周容量：0\.0h/)
+    } finally {
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${user.id}`,
+        { capacity_hours: user.capacity_hours })).status).toBe(200)
+    }
+  })
+
+  test('[FE-MBR-07] 未配置周容量与零容量可区分并能在页面维护', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const user = (await apiGet(request, token, '/api/auth/users')).find(u => u.display_name === ADMIN)
+    try {
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${user.id}`,
+        { capacity_hours: null })).status).toBe(200)
+      await loginAndOpen(page, '/#/members', ADMIN)
+      const card = page.locator(`#member-grid .mcard[data-member="${user.id - 1}"]`)
+      const bandwidth = page.locator('#bandwidth .mcard').filter({ has: page.locator('h3', { hasText: user.display_name }) })
+      await expect(card.locator('.loadflag')).toHaveText('未配置')
+      await expect(bandwidth.locator('.role')).toContainText('周容量 未配置')
+      await bandwidth.getByRole('button', { name: '设置周容量' }).click()
+      await bandwidth.getByRole('spinbutton', { name: '人时/周' }).fill('0')
+      await bandwidth.getByRole('button', { name: '保存' }).click()
+      await expect(bandwidth.locator('.role')).toContainText('周容量 0h/周')
+      expect((await apiGet(request, token, '/api/auth/users')).find(u => u.id === user.id).capacity_hours).toBe(0)
+      await bandwidth.getByRole('button', { name: '设置周容量' }).click()
+      await bandwidth.getByRole('spinbutton', { name: '人时/周' }).fill('')
+      await bandwidth.getByRole('button', { name: '保存' }).click()
+      await expect(bandwidth.locator('.role')).toContainText('周容量 未配置')
+    } finally {
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${user.id}`,
+        { capacity_hours: user.capacity_hours })).status).toBe(200)
+    }
+  })
+
+  test('[FE-MBR-06] 调配任务先预警，确认后负责人和负载同步更新', async ({ page, request }) => {
+    const token = await apiLogin(request, ADMIN)
+    const users = await apiGet(request, token, '/api/auth/users')
+    const target = users.find(u => u.display_name === ADMIN)
+    const source = users.find(u => u.display_name === OWNER)
+    const beforeTasks = await apiGet(request, token, '/api/tasks')
+    const beforeLoad = beforeTasks.filter(t => t.owner_id === target.id)
+      .reduce((sum, t) => sum + Number(t.hours || 0), 0)
+    let taskId = null
+    try {
+      const made = await apiSend(request, token, 'POST', '/api/tasks', {
+        name: uniq('QA-REASSIGN'), owner_id: source.id, hours: 4,
+        week_start: 1, week_end: 1, kanban_card_id: 'US01', story_ref: 'US01'
+      })
+      expect(made.status).toBe(200)
+      taskId = made.body.id
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${target.id}`,
+        { capacity_hours: 0 })).status).toBe(200)
+      await loginAndOpen(page, '/#/members', ADMIN)
+      await page.evaluate(({ taskId, sourceId, targetId }) => {
+        const from = [...document.querySelectorAll(`#member-grid .mcard[data-member="${sourceId}"] .member-task-card`)]
+          .find(el => el.querySelector('.member-task-id')?.textContent?.trim() === taskId)
+        const to = document.querySelector(`#member-grid .mcard[data-member="${targetId}"]`)
+        if (!from || !to) throw new Error('找不到任务或目标成员卡')
+        const transfer = new DataTransfer()
+        from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+        to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+        to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+      }, { taskId, sourceId: source.id - 1, targetId: target.id - 1 })
+      const dialog = page.locator('.risk-dialog')
+      await expect(dialog).toBeVisible()
+      await expect(dialog).toContainText('周容量 0')
+      await dialog.getByRole('button', { name: '仍然分配' }).click()
+      await expect(dialog).toBeHidden()
+      await expect.poll(async () => (await apiGet(request, token, '/api/tasks')).find(t => t.id === taskId)?.owner_id)
+        .toBe(target.id)
+      const bandwidth = page.locator('#bandwidth .mcard').filter({ has: page.locator('h3', { hasText: target.display_name }) })
+      await expect(bandwidth.locator('.role')).toContainText(`已分配 ${beforeLoad + 4}h`)
+      await expect(bandwidth.locator('.loadflag')).toHaveText('超载')
+    } finally {
+      if (taskId) expect((await apiSend(request, token, 'DELETE', `/api/tasks/${taskId}`)).status).toBe(200)
+      expect((await apiSend(request, token, 'PATCH', `/api/auth/users/${target.id}`,
+        { capacity_hours: target.capacity_hours })).status).toBe(200)
+    }
   })
 
   test('[FE-MBR-02] 点击成员卡打开任务抽屉,任务列表与统计与后端一致', async ({ page, request }) => {
@@ -1634,16 +1787,16 @@ test.describe('FE-MBR 成员任务图', () => {
     const unfinished = mine.filter(t => taskStatusKey(t) !== 'done')
 
     await loginAndOpen(page, '/#/members', ADMIN)
-    await page.locator(`#member-grid .mcard[data-member="${target.id - 1}"]`).click()
+    await page.locator(`#member-grid .mcard[data-member="${target.id - 1}"] .head`).click()
 
     const drawer = page.locator('#member-drawer')
     await expect(drawer).toBeVisible()
     await expect(page.locator('#drawer-title')).toHaveText(`P${target.id} ${target.display_name} · 任务明细`)
     await expect(page.locator('#member-detail')).toContainText(`总任务 ${mine.length}`)
     await expect(page.locator('#member-detail')).toContainText(`未完成 ${unfinished.length}`)
-    await expect(page.locator('#member-detail')).toContainText(`容量 ${target.capacity_hours}h`)
-    await expect(page.locator('.member-summary')).toContainText(`可分配工时`)
-    await expect(page.locator('.member-summary')).toContainText(`${alloc}h / ${target.capacity_hours}h`)
+    await expect(page.locator('#member-detail')).toContainText(`周容量 ${target.capacity_hours}h/周`)
+    await expect(page.locator('.member-summary')).toContainText(`六周已分配/容量`)
+    await expect(page.locator('.member-summary')).toContainText(`${alloc}h / ${target.capacity_hours * 6}h`)
 
     const rows = drawer.locator('.task-item')
     await expect(rows).toHaveCount(mine.length)
@@ -1677,19 +1830,19 @@ test.describe('FE-MBR 成员任务图', () => {
     const drawer = page.locator('#member-drawer')
 
     // Esc
-    await page.locator('#member-grid .mcard[data-member="1"]').click()
+    await page.locator('#member-grid .mcard[data-member="1"] .head').click()
     await expect(drawer).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(drawer).toBeHidden()
 
     // 关闭按钮
-    await page.locator('#member-grid .mcard[data-member="1"]').click()
+    await page.locator('#member-grid .mcard[data-member="1"] .head').click()
     await expect(drawer).toBeVisible()
     await drawer.locator('button.drawer-close[data-drawer-close]').click()
     await expect(drawer).toBeHidden()
 
     // 遮罩:点抽屉左半屏的空白处(右半屏是 .drawer-panel)
-    await page.locator('#member-grid .mcard[data-member="1"]').click()
+    await page.locator('#member-grid .mcard[data-member="1"] .head').click()
     await expect(drawer).toBeVisible()
     await expect(drawer.locator('.drawer-backdrop[data-drawer-close]')).toBeAttached()
     await page.mouse.click(400, 300)
@@ -1766,7 +1919,7 @@ test.describe('FE-MBR 成员任务图', () => {
  * FE-UML · UML 图
  * ================================================================================== */
 test.describe('FE-UML UML 图', () => {
-  test('[FE-UML-01] 用例图 SVG 渲染 4 参与者与 15 用例节点(用例名取自真实故事标题)', async ({ page, request }) => {
+  test('[FE-UML-01] 用例图 SVG 按故事逐条生成节点并显示 4 个参与者', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const stories = await apiGet(request, token, '/api/stories')
     const us01 = stories.find(s => s.id === 'US01')
@@ -1775,10 +1928,10 @@ test.describe('FE-UML UML 图', () => {
 
     const svg = page.locator('.usecase-svg')
     await expect(svg).toBeVisible()
-    await expect(svg.locator('.uc-hit')).toHaveCount(15)
+    await expect(svg.locator('.uc-hit')).toHaveCount(stories.length)
     await expect(svg.locator('.actor-hit')).toHaveCount(4)
-    await expect(svg.locator('.association')).toHaveCount(27)          // 23 条角色关联 + 4 条图例线
-    await expect(svg.locator('.usecase')).toHaveCount(15)
+    await expect(svg.locator('.association')).toHaveCount(stories.length + 6)
+    await expect(svg.locator('.usecase')).toHaveCount(stories.length)
     await expect(svg.locator('.system-title')).toHaveText('爱管理系统')
 
     // 4 个角色名与图例
@@ -1817,11 +1970,11 @@ test.describe('FE-UML UML 图', () => {
     await detail.locator('.uc-detail-close').click()
     await expect(detail).toHaveCount(0)
 
-    // 多故事用例(US02/US08/US16)展开 3 条明细
+    // 当前布局每个故事对应一个用例节点。
     await page.locator('.usecase-svg .uc-hit').nth(2).click()
     await expect(detail).toBeVisible()
-    await expect(detail.locator('.uc-story')).toHaveCount(3)
-    await expect(detail.locator('.uc-detail-head .mono')).toContainText('US02')
+    await expect(detail.locator('.uc-story')).toHaveCount(1)
+    await expect(detail.locator('.uc-detail-head .mono')).toContainText(stories[2].id)
     await detail.locator('.uc-detail-close').click()
     await expect(detail).toHaveCount(0)
   })
@@ -1846,7 +1999,7 @@ test.describe('FE-UML UML 图', () => {
     expect(text).toContain('US01-US37 共 37 条故事基线')
   })
 
-  test('[FE-UML-04] 用例标注由故事数据派生:无幽灵编号,新增故事立即反映到「未映射」', async ({ page, request }) => {
+  test('[FE-UML-04] 用例标注由故事数据派生:新增和删除故事同步更新节点', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const stories = await apiGet(request, token, '/api/stories')
     const storyIds = new Set(stories.map(s => s.id))
@@ -1856,7 +2009,7 @@ test.describe('FE-UML UML 图', () => {
     /* ① 节点上的 US 标注必须是**派生**的:每个编号都要真实存在。
        此前 ref 是手写常量(如 'US02 / US08 / US16'),删掉故事后它会变成幽灵编号继续挂在椭圆上。 */
     const refs = await page.locator('.usecase-svg .story-ref').allTextContents()
-    expect(refs.length, '15 个用例都应带 US 标注').toBe(15)
+    expect(refs.length, '每条故事都应有一个用例标注').toBe(stories.length)
     const labelled = new Set()
     for (const raw of refs) {
       for (const part of String(raw).split('/')) {
@@ -1873,22 +2026,14 @@ test.describe('FE-UML UML 图', () => {
     expect([...labelled].filter(id => !storyIds.has(id)),
       '节点标注不得出现基线中不存在的故事编号(幽灵编号)').toEqual([])
 
-    /* ② 自洽:被标注的故事 ∪ 未映射的故事 == 全部故事(既不重复也不漏计) */
-    const readUnmapped = async () => {
-      await expect(page.locator('#uml-unmapped')).toBeVisible()
-      const t = await page.locator('#uml-unmapped').textContent()
-      return Number(/故事\s*(\d+)\s*条/.exec(t)[1])
-    }
-    const before = await readUnmapped()
-    expect(labelled.size + before, '标注数 + 未映射数 必须等于故事总数').toBe(stories.length)
+    expect(labelled.size, '节点标注必须覆盖全部故事').toBe(stories.length)
 
-    /* ③ 跟随变化:新建一个故事后,UML 视图必须立刻反映(未映射 +1 且列出该编号)。
-       这是「用例图跟随故事变化」的可验证口径 —— 布局/归属是需求设计,但「有故事没进用例图」必须可见。 */
+    /* 新建一个故事后刷新视图，节点和标题必须跟随真实接口数据。 */
     const title = uniq('QA-UML-UNMAPPED')
     const created = await apiSend(request, token, 'POST', '/api/stories', {
       title,
-      description: '作为测试工程师，我希望新建故事后 UML 视图立刻反映未映射编号，以便验证用例图跟随数据变化',
-      acceptance: '未映射计数 +1 且提示文本包含该编号；用例结束前删除',
+      description: '作为测试工程师，我希望新建故事后 UML 视图立刻增加用例节点，以便验证用例图跟随数据变化',
+      acceptance: '用例节点计数 +1 且节点标注包含该编号；用例结束前删除',
       priority: 'Could', sprint: 1, activity: 2, status: 0, owner_id: 1
     })
     expect(created.status, '造数:创建故事应成功').toBeLessThan(300)
@@ -1897,8 +2042,8 @@ test.describe('FE-UML UML 图', () => {
     try {
       await page.reload()
       await expect(page.locator('.usecase-svg')).toBeVisible()
-      expect(await readUnmapped(), '新增故事应使未映射计数 +1').toBe(before + 1)
-      await expect(page.locator('#uml-unmapped')).toContainText(newId)
+      await expect(page.locator('.usecase-svg .uc-hit')).toHaveCount(stories.length + 1)
+      await expect(page.locator('.usecase-svg .story-ref').filter({ hasText: newId })).toHaveCount(1)
     } finally {
       await cleanupStory(request, token, newId)
       cleaned = true
@@ -1907,7 +2052,8 @@ test.describe('FE-UML UML 图', () => {
     // 清理后回到基线口径
     await page.reload()
     await expect(page.locator('.usecase-svg')).toBeVisible()
-    expect(await readUnmapped(), '清理后未映射计数应回到基线').toBe(before)
+    await expect(page.locator('.usecase-svg .uc-hit')).toHaveCount(stories.length)
+    await expect(page.locator('.usecase-svg .story-ref').filter({ hasText: newId })).toHaveCount(0)
   })
 })
 
@@ -1921,7 +2067,7 @@ test.describe('FE-AI AI 助手', () => {
     const title = uniq('QA-AI-MEETING')
     const transcript = `本次 QA 回归会议 ${title}:确认看板与甘特血缘口径一致,成员负载按周容量计算。`
 
-    await loginAndOpen(page, '/#/ai', ADMIN)
+    await loginAndOpen(page, '/#/meetings', ADMIN)
     const form = page.locator('#meeting-save-form')
     await expect(form).toBeVisible()
     await form.locator('input[name=title]').fill(title)
@@ -1968,7 +2114,7 @@ test.describe('FE-AI AI 助手', () => {
     const meetings = await apiGet(request, token, '/api/meetings')
     expect(meetings.length, '需要至少一场既存会议用于观察按钮状态').toBeGreaterThan(0)
 
-    await loginAndOpen(page, '/#/ai', ADMIN)
+    await loginAndOpen(page, '/#/meetings', ADMIN)
     await page.locator('#meeting-select').selectOption(meetings[0].id)
     await expect(page.locator('#meeting-delete')).toBeEnabled()
     // 不真删:点击后取消确认框,按钮与列表都不应变
@@ -1983,7 +2129,7 @@ test.describe('FE-AI AI 助手', () => {
     const meetings = await apiGet(request, token, '/api/meetings')
     expect(meetings.length).toBeGreaterThan(0)
 
-    await loginAndOpen(page, '/#/ai', MEMBER)
+    await loginAndOpen(page, '/#/meetings', MEMBER)
     await page.locator('#meeting-select').selectOption(meetings[0].id)
     await expect(page.locator('#meeting-delete')).toBeDisabled()
     await expect(page.locator('#meeting-delete')).toHaveAttribute('title', /管理员或负责人/)
@@ -1994,17 +2140,15 @@ test.describe('FE-AI AI 助手', () => {
     const meetings = await apiGet(request, token, '/api/meetings')
     expect(meetings.length).toBeGreaterThan(0)
 
-    await loginAndOpen(page, '/#/ai', VIEWER)
+    await loginAndOpen(page, '/#/meetings', VIEWER)
     await page.locator('#meeting-select').selectOption(meetings[0].id)
     await expect(page.locator('#meeting-delete')).toBeDisabled()
     await expect(page.locator('#meeting-delete')).toHaveAttribute('title', /只读/)
   })
 
-  test('[FE-AI-02] agent/config 拉取后界面显示「已配置模型」状态,分析按钮可用', async ({ page, request }) => {
+  test('[FE-AI-02] 会议 Agent 按服务端配置启用或禁用分析入口', async ({ page, request }) => {
     const token = await apiLogin(request, ADMIN)
     const cfg = await apiGet(request, token, '/api/agent/config')
-    expect(cfg.configured, '后端应已配置模型').toBe(true)
-    expect(cfg.worker_enabled, '工作线程应已启用').toBe(true)
 
     // 找一场没有 Agent 运行记录的会议(没有 run 时「分析会议」未被历史结果禁用)
     const meetings = await apiGet(request, token, '/api/meetings')
@@ -2015,20 +2159,23 @@ test.describe('FE-AI AI 助手', () => {
     }
     expect(fresh, '应存在尚无分析记录的会议(基线里有待分析会议)').toBeTruthy()
 
-    await loginAndOpen(page, '/#/ai', ADMIN)
+    await loginAndOpen(page, '/#/meetings', ADMIN)
+    await page.locator('details').filter({ has: page.locator('summary', { hasText: '通用会议 Agent' }) }).locator('summary').click()
     const panel = page.locator('#meeting-agent-panel')
     await expect(panel).toBeVisible()
-    await expect(panel.locator('.small').first())
-      .toHaveText('将会议转写和查询到的项目数据发送到已配置模型分析；生成的建议仍需人工审核。')
+    await expect(panel.locator('.small').first()).toHaveText(cfg.configured && cfg.worker_enabled
+      ? '将会议转写和查询到的项目数据发送到已配置模型分析；生成的建议仍需人工审核。'
+      : '服务端模型密钥尚未配置或工作线程未启用；可继续手动录入建议。')
 
     await page.locator('#meeting-select').selectOption(fresh.id)
     await expect(panel).toHaveAttribute('data-meeting-id', fresh.id)
     await expect(page.locator('#agent-message')).toContainText('选择已保存会议后可开始分析')
-    await expect(page.locator('#agent-start')).toBeEnabled()
+    if (cfg.configured && cfg.worker_enabled) await expect(page.locator('#agent-start')).toBeEnabled()
+    else await expect(page.locator('#agent-start')).toBeDisabled()
 
-    // 已配置的对照面:未选中会议时按钮不可用(config 之外还有前置条件)
+    // 未选中会议时，整个 Agent 详情入口收起。
     await page.locator('#meeting-select').selectOption('')
-    await expect(page.locator('#agent-start')).toBeDisabled()
+    await expect(page.locator('#agent-start')).toHaveCount(0)
   })
 
   test('[FE-AI-03] 会议音频区可上传本地 mp3 并在列表出现,随后删除清理', async ({ page, request }) => {
@@ -2041,8 +2188,9 @@ test.describe('FE-AI AI 助手', () => {
     page.on('dialog', d => d.accept())
 
     try {
-      await loginAndOpen(page, '/#/ai', ADMIN)
+      await loginAndOpen(page, '/#/meetings', ADMIN)
       await page.locator('#meeting-select').selectOption(meeting.id)
+      await page.getByRole('tab', { name: '语音会议' }).click()
       const recorder = page.locator('#meeting-recorder')
       await expect(recorder).toBeVisible()
       await expect(recorder.locator('.audio-row')).toHaveCount(before.length)
@@ -2089,6 +2237,35 @@ test.describe('FE-AI AI 助手', () => {
  * FE-OFF · 离线演示模式
  * ================================================================================== */
 test.describe('FE-OFF 离线演示模式', () => {
+  test('[FE-OFF-02] 已解除的史诗归属和已清空的史诗列表在刷新后保持', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__AICAP_API_BASE__ = 'http://127.0.0.1:59999'
+      if (!localStorage.getItem('qa-offline-epic-seeded')) {
+        localStorage.setItem('aiguanli-pixel-stories-v1', JSON.stringify([{
+          id: 'US03', title: '离线故事', description: '离线检查', acceptance: '刷新后保持未归属',
+          priority: 'Must', status: 0, sprint: 1, owner: 0, activity: 2, epicId: null
+        }]))
+        localStorage.setItem('aiguanli-pixel-epics-v1', '[]')
+        localStorage.setItem('qa-offline-epic-seeded', '1')
+      }
+    })
+    await page.goto('/#/board')
+    await expect(page.locator('#mode-chip')).toHaveText('离线 · 演示数据(点击重连)')
+    await page.locator('#boardtab').click()
+    const card = page.locator('#board .card[data-id="US03"]')
+    await expect(card).toBeVisible()
+    await expect(card.locator('.epic-tag')).toHaveCount(0)
+    await page.reload()
+    await page.locator('#boardtab').click()
+    await expect(card.locator('.epic-tag')).toHaveCount(0)
+    await card.click()
+    await expect(page.locator('#editor select[name=epic_id]')).toHaveValue('')
+    await expect(page.locator('#editor select[name=epic_id] option')).toHaveCount(1)
+    await page.locator('#editor').getByRole('button', { name: '取消' }).click()
+    await page.locator('#manage-epics').click()
+    await expect(page.locator('#epic-manager li')).toHaveCount(0)
+  })
+
   test('[FE-OFF-01] API 指向死端口且存在旧基线缓存时,仍渲染 US01–US37 而不是崩溃', async ({ page }) => {
     const errors = []
     page.on('pageerror', e => errors.push(e.message))
@@ -2133,15 +2310,15 @@ test.describe('FE-OFF 离线演示模式', () => {
 
     // 其它视图在离线态同样可用(不因 API 不可达而崩溃)
     await page.goto('/#/gantt')
-    await expect(page.locator('.grow.parent')).toHaveCount(12)
-    await expect(page.locator('.grow.mgmt')).toHaveCount(4)
+    await expect(page.locator('.grow.task')).toHaveCount(16)
+    await expect(page.locator('.grow.task .gbar.mgmt')).toHaveCount(4)
     await page.goto('/#/members')
     await expect(page.locator('#member-grid .mcard')).toHaveCount(5)
     // 离线时成员画像板块给出离线说明而不是报错
     await expect(page.locator('#member-profiles')).toHaveCount(0)
     await expect(page.locator('.view').getByText('离线演示模式：画像需连接后端读取')).toBeVisible()
     await page.goto('/#/uml')
-    await expect(page.locator('.usecase-svg .uc-hit')).toHaveCount(15)
+    await expect(page.locator('.usecase-svg .uc-hit')).toHaveCount(37)
     await expect(page.locator('.sequence-svg')).toContainText('Spring Boot 后端')
 
     expect(errors, '离线演示不应抛出未捕获异常').toEqual([])

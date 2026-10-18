@@ -10,6 +10,7 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.MilestoneMapper;
 import com.aicap.service.ProjectScopedResolver;
+import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /** 规划结果的确定性校验与影响分析，模型不能绕过这些规则。 */
@@ -36,6 +38,7 @@ public class PlanningAnalysisValidator {
     private final ImpactAnalysisService impactAnalysis;
     private final MilestoneMapper milestones;
     private final ProjectScopedResolver resolver;
+    private final ProjectAccessService projectAccess;
 
     public ObjectNode validate(String text) throws AgentError { throw new AgentError("project_context_missing", "projectId 必填"); }
 
@@ -221,10 +224,12 @@ public class PlanningAnalysisValidator {
         int[] load = weeklyLoad(projectId, target.getId());
         int start = Math.max(1, task.getWeekStart()); int end = Math.min(6, task.getWeekEnd());
         int count = Math.max(1, end - start + 1); int base = task.getHours() / count; int remainder = task.getHours() % count;
+        double weeklyCapacity = projectAccess.weeklyCapacity(projectId, target.getId());
         for (int week = start; week <= end; week++) {
             int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
-            if (after > target.getCapacityHours()) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
-                    + " 调整后 " + after + "h / 周容量 " + target.getCapacityHours() + "h");
+            if (after > weeklyCapacity) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
+                    + " 调整后 " + after + "h / 周容量 "
+                    + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
         }
     }
 

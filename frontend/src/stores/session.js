@@ -15,10 +15,10 @@ export const useSessionStore = defineStore('session', {
     booting: false
   }),
   getters: {
-    isViewer: s => s.apiMode && s.currentUser && s.currentUser.role === 'viewer',
+    isViewer: s => s.apiMode && !!s.currentUser && (useProjectsStore().currentProject?.can_write ?? s.currentUser.can_write ?? s.currentUser.role !== 'viewer') === false,
     /** 在线且角色为 admin/owner —— 与后端 `Roles.reviewer()` 同口径(删除故事/会议等入口的后端要求);
      *  离线演示模式下后端不可达,不参与判定,写入口不受限 */
-    canReview: s => s.apiMode && !!s.currentUser && ['admin', 'owner'].includes(s.currentUser.role),
+    canReview: s => s.apiMode && !!s.currentUser && (useProjectsStore().currentProject?.can_manage ?? s.currentUser.can_manage ?? ['admin', 'owner'].includes(s.currentUser.role)),
     online: s => s.apiMode && !!s.currentUser
   },
   actions: {
