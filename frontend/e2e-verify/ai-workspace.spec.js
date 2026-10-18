@@ -1,13 +1,20 @@
 import { test, expect } from '@playwright/test'
 
-test('AI 办公室三栏齐备且默认进会议同事页并标明离线样例', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/health', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.route('http://127.0.0.1:8100/health', route => route.fulfill({ status: 503, body: '{}' }))
+})
+
+test('AI 办公室展示四个工位，打开会议抽屉后标明离线样例', async ({ page }) => {
   await page.goto('/#/office')
   const offlineChoice = page.locator('#login-offline')
   if (await offlineChoice.isVisible().catch(() => false)) await offlineChoice.click()
 
   await expect(page.getByRole('heading', { name: 'AI 办公室' })).toBeVisible()
-  await expect(page.locator('#view-office .office-chat')).toBeVisible()
-  await expect(page.locator('#view-office .office-feed')).toBeVisible()
+  await expect(page.locator('#view-office .pixel-room')).toBeVisible()
+  await expect(page.locator('.room-desk')).toHaveCount(4)
+  await page.getByRole('button', { name: '打开译的会议同事' }).click()
+  await expect(page.locator('.office-drawer')).toBeVisible()
   await expect(page.getByRole('tab', { name: '成员画像' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '会议工作区' })).toBeVisible()
   await expect(page.getByText('离线演示 · 静态会议样例 · 非真实模型分析')).toBeVisible()

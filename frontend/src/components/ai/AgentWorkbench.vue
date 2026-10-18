@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 import MeetingView from '@/views/MeetingView.vue'
@@ -23,6 +23,11 @@ const route = useRoute()
 const router = useRouter()
 const projects = useProjectsStore()
 const active = ref('meeting')
+const props = defineProps({ initialTab: { type: String, default: '' } })
+const emit = defineEmits(['select'])
+watch(() => props.initialTab, value => {
+  if (tabs.some(tab => tab.id === value)) active.value = value
+}, { immediate: true })
 
 /* 深链落位:审核中心「返回来源会议」与会议分析深链靠 query 传参,重定向进办公室
    后 query 落在 /office 上 —— 见到这些键就把会议 tab 顶到前面;?tab= 显式指定优先。 */
@@ -48,7 +53,19 @@ function openExtra(name) {
 /* 办公室的像素工位卡与这里的 tab 是同一份状态:点工位 = 切 tab。
    只暴露一个 select,深链 query 的落位逻辑仍由下面的 watch 独占。 */
 function select(id) {
-  if (tabs.some(t => t.id === id)) active.value = id
+  if (tabs.some(t => t.id === id)) { active.value = id; emit('select', id) }
+}
+function onTabKeydown(event) {
+  const current = tabs.findIndex(tab => tab.id === active.value)
+  let next
+  if (event.key === 'ArrowRight') next = (current + 1) % tabs.length
+  else if (event.key === 'ArrowLeft') next = (current + tabs.length - 1) % tabs.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = tabs.length - 1
+  else return
+  event.preventDefault()
+  select(tabs[next].id)
+  nextTick(() => document.getElementById(`wb-tab-${tabs[next].id}`)?.focus())
 }
 defineExpose({ select })
 </script>
@@ -61,7 +78,7 @@ defineExpose({ select })
         :id="`wb-tab-${t.id}`" :aria-controls="`wb-panel-${t.id}`"
         :aria-selected="active === t.id" :tabindex="active === t.id ? 0 : -1"
         :class="{ 'is-active': active === t.id }"
-        @click="active = t.id"
+        @click="select(t.id)" @keydown="onTabKeydown"
       ><span class="wb-colleague" aria-hidden="true">{{ t.colleague }}</span>{{ t.label }}</button>
     </div>
     <div :id="`wb-panel-${activeTab.id}`" class="wb-panel" role="tabpanel" :aria-labelledby="`wb-tab-${activeTab.id}`">

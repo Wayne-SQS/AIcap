@@ -1,5 +1,6 @@
 <script setup>
 import { computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -9,6 +10,8 @@ import SupervisorAvatar from '@/components/SupervisorAvatar.vue'
 import SupervisorChat from '@/components/SupervisorChat.vue'
 
 const project = useProjectStore()
+const route = useRoute()
+const isOffice = computed(() => route.meta.legacyName === 'office' || route.name === 'office')
 
 /* 一致性自检:数据变化后跑一次 checkConsistency(仅控制台告警,不改数据)
    对齐 legacy 新版 renderAll() → checkConsistency() 的常驻校验;
@@ -23,7 +26,7 @@ watch(dataSignature, () => project.checkConsistency())
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ 'is-office': isOffice }">
     <AppSidebar />
     <main class="main">
       <TopBar />
