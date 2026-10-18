@@ -10,6 +10,7 @@
 #   加 -Build 可顺带重新构建(注意:java -jar 会锁住 jar,必须先把旧进程停掉再构建)
 #   默认**连会议智能体一起起**(它是独立进程,见 ai-service\启动会议智能体.ps1);
 #   只要 Java 用 -SkipAi。规划/画像/项目生成是 Java 进程内的 worker,不需要单独起。
+#   8080 已在跑时**跳过启动并照常返回**(不带 -Build 的前提),见下面端口检查处的注释。
 param([switch]$Build, [switch]$SkipAi, [int]$AiPort = 8090)
 
 $ErrorActionPreference = 'Stop'
@@ -17,8 +18,20 @@ $jb = Split-Path -Parent $MyInvocation.MyCommand.Path          # java-backend
 $repoRoot = Split-Path -Parent $jb
 Set-Location $jb
 
+# 端口已被占用时**不当成失败**：多服务的编排脚本(启动全部.ps1)会在 8080 起来之后再回来
+# 等健康检查，一个已经在跑的实例本来就是它要的结果；直接中止会把后面的
+# 主管编排层(8100)、前端(5173)一起带走 —— 实测就这么被带走了一整段。
+# 但 -Build 是例外：构建要覆盖 target\aicap-java-backend.jar，而 java -jar 正锁着它，
+# 这时必须由人先停进程(实测 mvn repackage 的报错是
+# "Unable to rename ... .jar to ....jar.original"，从现象看不出是被锁)。
 $busy = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
-if ($busy) { throw "8080 已被 PID $($busy.OwningProcess) 占用;java -jar 会锁住 jar,请先停掉它再启动" }
+if ($busy) {
+    if ($Build) {
+        throw "8080 已被 PID $($busy.OwningProcess) 占用，而 -Build 需要覆盖 target\aicap-java-backend.jar（它正锁着该文件）。请先停掉那个进程再带 -Build 启动。"
+    }
+    Write-Host "8080 已在运行(PID $($busy.OwningProcess))，跳过启动(沿用既有实例)"
+    return
+}
 
 # 端口写死:shell 里可能残留 SERVER_PORT(实测撞过 60076 —— WorkBuddy 自己的端口),
 # 后端会起在别的端口上并且因端口被占而启动失败,报错还看不出是端口变量的问题。
