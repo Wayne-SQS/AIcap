@@ -292,6 +292,12 @@ async def _plan_phase(
         {
             # route 就是触发型工具名（§2.4 的契约），它是"派给谁/派了什么"的唯一无歧义标识
             "agent": route,
+            # 触发型工具的回执**形状不止一种**：规划/画像是 run 口径（run_id/status/deduplicated），
+            # 会议分析是产物口径（analysis_id/storage_status，2026-10-15 起同步执行，不建 run）。
+            # 所以这里既归一化出 run 三兄弟（老回执形状不变），也把原始 result 整包带上 ——
+            # 后者是模型据以答复的唯一凭据：**丢掉它，主管就只能去 query_agent_runs 里
+            # 抓一个旧的 meeting run 当成本次产物，说出与事实相反的话**（2026-10-15 真机实测）。
+            "result": result,
             "job_id": result.get("run_id"),
             "mode": "trigger",
             "status": result.get("status"),

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -49,11 +50,30 @@ public class PlatformAgentController {
      * 统一工具调用。
      *
      * <p>响应恒为 200(含业务失败),理由见 {@link PlatformToolService}。
+     *
+     * <p><b>为什么这里要把 Authorization 头单独取出来</b>:会议分析的派活需要带用户身份
+     * 反向调 ai-service(它得凭这个令牌读回会议原文与成员表),而 {@code AuthContext} 只存
+     * User、不存原始令牌。令牌只在本次调用栈里走一趟,不进日志、不落库(红线⑤同源口径)。
      */
     @PostMapping("/tools/{toolName}")
     public PlatformToolService.ToolOutcome invoke(@PathVariable String toolName,
-                                                  @RequestBody(required = false) JsonNode args) {
+                                                  @RequestBody(required = false) JsonNode args,
+                                                  @RequestHeader(value = "Authorization", required = false)
+                                                  String authorization) {
         User caller = Roles.writer();
-        return toolService.invoke(toolName, args, caller);
+        return toolService.invoke(toolName, args, caller, bearerToken(authorization));
+    }
+
+    /** {@code "Bearer xxx"} → {@code "xxx"};缺失或形状不对返回 null(由工具层判为 invalid_arguments) */
+    private static String bearerToken(String authorization) {
+        if (authorization == null) {
+            return null;
+        }
+        String value = authorization.trim();
+        if (value.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            String token = value.substring(7).trim();
+            return token.isEmpty() ? null : token;
+        }
+        return null;
     }
 }

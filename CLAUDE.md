@@ -174,6 +174,13 @@ cd qa && npm install && npx playwright test    # 单独跑 qa/ 那套 E2E
 
 **`projectId` 由基类统一注入(2026-10-14)**:多项目改造后所有业务接口的 `projectId` 是**必填** `@RequestParam`,但几百个历史调用点都没带 —— 于是每个用例卡在同一个 422 上,真正的断言根本跑不到(135 个红的真因就是这个,不是缺列)。`ContractTestSupport` 现在自动补:URL 上一律补 `?projectId=P001`(`PROJECT_ID`,登录与项目列表除外);请求体只在白名单路径补(`/api/meetings` → `project_id`,`/api/agents/tools/` → `project_id`)—— DTO 是 strict(未知字段拒绝),**不能对所有 body 无脑注入**。multipart 请求不经过基类(自己 `rest.exchange`),要自己把 `projectId` 拼进 URL,**只拼一处**:query 与表单各放一份时 Spring 会把两个值拼成 `P001,P001`,症状是 404「项目不存在或已归档」,比缺参数还难认。要专门验证"缺 project_id 会被拒"的用例走 `requestWithoutProject(...)`,别硬碰注入。
 
+> ⚠️ `requestWithoutProject` 在 2026-10-15 之前**只关掉了请求体注入,URL 上的 `?projectId=P001` 照加** —— 拿它验"缺 projectId"的用例实际走的是带参分支,断言为 200 时甚至照样绿(plat19 侥幸仍然有效,因为它读的是 body)。现已改成 URL 与 body 都不补;改写这类用例前先确认要断言的是哪一侧。
+
+**meeting-id 类端点的 `projectId` 可选(2026-10-15)**:多项目改造漏了一条整合链 —— 会议 Agent(`ai-service`)全模块 grep 不到 `projectId`,而它调的 Java 端点里 `GET /api/meetings/{id}`、`GET /api/meetings/{id}/audio`、`GET /api/audio/{id}`、**`GET /api/stories`、`GET /api/tasks`** 当时都必填,于是五类分析**全链路 502**(链首第一步就 422,后面的断点根本走不到)。分两半收口:
+
+- **会议域三点**(`MeetingController#getMeeting`、`MeetingAudioController#list/#play`)的 `projectId` 改成 `required = false`,缺省时走 `MeetingService#requireScopedMeeting`:从 `meetings.project_id` 反解后再 `requireMember`。**反解不放松权限**(判的还是同一张成员表、同一个 requireMember),显式给了不符的 projectId 仍是 404 —— 契约由 `MeetingAudioContractTest#missingProjectId_resolvesFromMeeting_butStillEnforcesMembership` 钉住。
+- **`/api/stories`、`/api/tasks` 不能这么做**:这两条路径里没有 meetingId,Java 无从反解;让它们"缺参数就返回全部项目"等于跨项目串数据(踩红线 3)。所以改由 ai-service 侧带上:`StoryReadTool` / `TaskReadTool` 的 `project_id` 是**必填**构造参数(忘了传当场 `TypeError`,不退化成"无项目读"),值只能来自 `SavedMeeting.project_id`(Java 会议记录回读,不接受调用方 body 或模型提供;该字段缺失即 502 fail closed),在 `api.py:scoped_readers()` 里**按请求**绑定(工具实例绑死一个项目,跨会议复用会把 A 项目的故事喂进 B 项目的分析)。新增另一条读路径时忘了绑,就是又一个 422。
+
 **老库升级别只改 `schema.sql`(2026-10-14 的教训)**:多项目改造把 stories/tasks/milestones 主键从业务编号换成 `internal_id` 自增 + `code` 编号,只改了建表语句 —— 新库是对的,**老库永远停在旧主键**,一读故事/任务就 `Unknown column 'internal_id'`。补列与数据回填现在都在 `SchemaUpgrader`(`migrateInternalKeys` / `backfillReferenceSnapshots` / `ensureReferencedProjectsExist`),改完务必跑一次"实体字段 vs 数据库列"核对(`java-backend/data/check_entity_columns.py`,它列出"实体有、表里没有"的列,这类缺失编译不报错、只在运行时 500)。另外 `story_logs`/`activity_records`/`difficulty_assessments` 还要补 `*_internal_id` + `*_code_snapshot`:编号可在项目内复用,没有快照就无法回答"这条日志当时指的是哪个故事";缺了它**删故事会 500**。
 
 ## 红线(任何改动不得违反)

@@ -40,14 +40,17 @@ public class PlatformToolCatalog {
     public static final String SEMANTIC_SEARCH = "semantic_search";
 
     /**
-     * S5′ 触发型工具(契约 §2.4):只创建 run 落审批队列,**不写业务表**。
+     * S5′ 触发型工具(契约 §2.4)。三枚都只产出"待人工确认的产物",**不写业务表**。
      *
-     * <p>三枚都能"只建 run 就返回",靠的是各自域都有后台消费者:
-     * 会议 ← {@code MeetingAnalysisTrigger}(走既有 run 队列)、
-     * 规划 ← {@code PlanningWorkerTask}、
-     * 画像 ← {@code ProfileWorkerTask}(2026-10-15 补齐)。
-     * 画像这枚此前标着"暂缓":当时 {@code runAnalysis} 是同步的,兑现不了"只建 run 就返回",
-     * 会吃穿编排层的有界循环预算 —— 缺口已由画像队列(queued 状态 + 租约)补上。
+     * <p>执行形态分两种,别混为一谈:
+     * <ul>
+     *   <li>规划 ← {@code PlanningWorkerTask}、画像 ← {@code ProfileWorkerTask}:
+     *       <b>异步</b>,只建 run 入队就返回(各自有后台消费者);</li>
+     *   <li>会议 ← {@code MeetingAnalysisTrigger}(2026-10-15 接上 ai-service 新链路):
+     *       <b>同步</b>,平台层带调用方令牌转发到 8090,回来才返回 {@code analysis_id}。
+     *       为什么不能也走队列:令牌不得持久化,消费者拿不到用户身份就读不回会议原文
+     *       (详见 {@link MeetingAnalysisTrigger})。所以"阻塞 2~3 秒"是它的固有形态。</li>
+     * </ul>
      */
     public static final String START_MEETING_ANALYSIS = "start_meeting_analysis";
     public static final String START_PLAN_DRAFT = "start_plan_draft";
@@ -64,6 +67,16 @@ public class PlatformToolCatalog {
     public static final List<String> TRIGGER_TOOLS =
             List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT, START_PROFILE_ANALYSIS);
 
+    /**
+     * 会议类型枚举的线上字面量(进 schema,供主管识别)。
+     *
+     * <p>与 {@link MeetingType#wire()} 同源:这里手写一份是因为 {@code Map.of} 的键值要在
+     * 类初始化时就定下来,而枚举遍历放静态块里更绕;两处一致性由
+     * {@code PlatformAgentContractTest} 的枚举用例钉住(改了这边不改 {@link MeetingType} 会红)。
+     */
+    public static final List<String> MEETING_TYPE_WIRE =
+            List.of("daily_scrum", "sprint_planning", "sprint_review", "sprint_retrospective", "backlog_refinement");
+
     public static final String PLATFORM_VERSION = "1.0";
 
     /**
@@ -73,7 +86,8 @@ public class PlatformToolCatalog {
     public static final List<String> LIMITATIONS = List.of(
             "未配置当前 Sprint 日期",
             "任务无状态字段;工时是计划值,不能据此计算完成度或过载",
-            "读数据只读;触发型工具(start_*)只创建 run 落入审批队列,不写业务数据");
+            "读数据只读;触发型工具(start_*)只产出分析或草案,不写业务数据",
+            "会议分析(start_meeting_analysis)是同步调用,一次约 2~3 秒才返回,不是后台排队");
 
     /**
      * 一个工具的能力声明。
@@ -154,10 +168,13 @@ public class PlatformToolCatalog {
         out.add(new ToolSpec(
                 QUERY_AGENT_RUNS,
                 AGENT_PLATFORM,
-                "查询本项目三个智能体域的 run 状态与产物存在性:planning=规划草案 / profile=画像分析 /"
-                        + " meeting=会议分析。用于回答「刚才派的活好了吗/到哪一步了/失败了吗」,"
+                "查询本项目三个智能体域的产物状态:planning=规划草案 / profile=画像分析 /"
+                        + " meeting=会议分析产物(五类分析落库的记录,不是队列 run)。"
+                        + "用于回答「刚才派的活好了吗/到哪一步了/失败了吗」,"
                         + "按创建时间倒序最多 20 条;kind 与 run_id 可省。"
-                        + "注意:run 状态随后台执行随时变化,回答进展前必须现查,不得凭记忆断言。",
+                        + "会议条目的 status 口径与队列一致:awaiting_review=有提案待人工复核 /"
+                        + "completed=已结束;label 里另有 approval 与 type 两项原始信息。"
+                        + "注意:状态随后台执行随时变化,回答进展前必须现查,不得凭记忆断言。",
                 objectSchema(Map.of(
                                 "project_id", strField("Project id", 1, 20),
                                 "kind", strField("planning|profile|meeting, optional", 1, 20),
@@ -169,8 +186,17 @@ public class PlatformToolCatalog {
         out.add(new ToolSpec(
                 START_MEETING_ANALYSIS,
                 AGENT_PLATFORM,
-                "触发一次会议分析(产出进会议建议审批队列,需人工确认)。只创建 run,不修改任何业务数据。",
-                objectSchema(Map.of("meeting_id", strField("Meeting id", 1, 36)), "meeting_id"),
+                "驱动会议智能体分析一场已保存的会议,产出落会议建议审批队列(需人工确认后才可能改业务数据)。"
+                        + "analyses 五类:status=站会 / planning=规划会 / review=评审会 / retro=回顾会 / refinement=需求梳理会。"
+                        + "meeting_type 必填:从用户的话里认得出就带上,认不出就不要猜、先反问。"
+                        + "current_sprint/target_sprint 仅在会议原文明确提到时才给(1~4),否则留空。"
+                        + "调用是同步的:一次模型分析约 2~3 秒,不要因为「没立刻回来」就重派。",
+                objectSchema(Map.of(
+                                "meeting_id", strField("Meeting id", 1, 36),
+                                "meeting_type", enumField("Meeting type", MEETING_TYPE_WIRE),
+                                "current_sprint", sprintField("Current sprint (optional, 1-4)"),
+                                "target_sprint", sprintField("Target sprint (optional, planning only)")),
+                        "meeting_id", "meeting_type"),
                 null,
                 false,
                 false));
@@ -305,6 +331,27 @@ public class PlatformToolCatalog {
         ObjectNode node = mapper.createObjectNode();
         node.put("type", "integer");
         node.put("minimum", 1);
+        node.put("title", title);
+        return node;
+    }
+
+    /** 枚举字段:把可选值写进 schema,模型才能"认得就带上、认不出就缺参" */
+    private JsonNode enumField(String title, List<String> values) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("type", "string");
+        node.put("title", title);
+        ArrayNode arr = mapper.createArrayNode();
+        values.forEach(arr::add);
+        node.set("enum", arr);
+        return node;
+    }
+
+    /** Sprint 序号(1~4),可空 */
+    private JsonNode sprintField(String title) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("type", "integer");
+        node.put("minimum", 1);
+        node.put("maximum", 4);
         node.put("title", title);
         return node;
     }

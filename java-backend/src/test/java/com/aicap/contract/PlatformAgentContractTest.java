@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 
 import com.aicap.platform.MeetingAnalysisTrigger;
+import com.aicap.platform.MeetingType;
 import com.aicap.platform.PlatformToolCatalog;
 import org.springframework.beans.factory.ObjectProvider;
 import java.util.LinkedHashSet;
@@ -78,6 +79,10 @@ class PlatformAgentContractTest extends ContractTestSupport {
 
     @Autowired
     private LlmProperties llmProperties;
+
+    /** PLAT-27 要自己造会议与分析行(种子数据里没有会议),故直连测试库 */
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     // ==================== 配置绑定 ====================
 
@@ -468,5 +473,112 @@ class PlatformAgentContractTest extends ContractTestSupport {
 
         assertStatus(post(TOOLS + "query_agent_runs", token(USER_VIEWER),
                 json(map("project_id", projectId))), 403);
+    }
+
+    /**
+     * PLAT-25:会议分析的**类型枚举**两处必须同源。
+     *
+     * <p>2026-10-15 起 {@code start_meeting_analysis} 必填 {@code meeting_type},
+     * 而线上可选值在 catalog 里是手写的一份字面量({@code MEETING_TYPE_WIRE})、
+     * 语义源是 {@link MeetingType} 枚举。两处一旦分叉,表现是"模型照 schema 传了值、
+     * 平台却认不出"→ 稳定的 {@code invalid_arguments},且**不会有任何编译错误**。
+     * 这条用例就是那份分叉的看门人(改一处忘另一处必红)。
+     */
+    @Test
+    void plat25_meetingTypeEnum_matchesCatalogWireValues() {
+        Set<String> fromEnum = new LinkedHashSet<>();
+        for (MeetingType type : MeetingType.values()) {
+            fromEnum.add(type.wire());
+            // 解析必须认得自己的字面量,也认得枚举名(模型可能给 planning/retro 这种简称)
+            assertEquals(type, MeetingType.parse(type.wire()), "枚举解不出自己的字面量: " + type.wire());
+            assertEquals(type, MeetingType.parse(type.name()), "枚举解不出自己的名字: " + type.name());
+        }
+        assertEquals(new LinkedHashSet<>(PlatformToolCatalog.MEETING_TYPE_WIRE), fromEnum,
+                "catalog 的 MEETING_TYPE_WIRE 与 MeetingType 枚举分叉了");
+        assertEquals(5, fromEnum.size(), "五类会议,多了少了都是合约变更");
+        assertEquals(null, MeetingType.parse("kickoff"), "认不出的类型必须回 null(由工具层拒为 invalid_arguments)");
+        assertEquals(null, MeetingType.parse(null), "null 必须回 null,不是默认值");
+    }
+
+    /** PLAT-25b:枚举必须真的进了 schema —— 模型看不到的枚举等于不存在(与 project_id 那次同一个坑) */
+    @Test
+    void plat25b_meetingType_isDeclaredInToolSchema() {
+        ApiResponse r = get(CATALOG, token(USER_ADMIN));
+        JsonNode tool = null;
+        for (JsonNode t : r.json().path("tools")) {
+            if (PlatformToolCatalog.START_MEETING_ANALYSIS.equals(t.path("name").asText())) {
+                tool = t;
+                break;
+            }
+        }
+        assertTrue(tool != null, "本环境应当发布 start_meeting_analysis(有实现): " + r.body());
+        JsonNode properties = tool.path("args_schema").path("properties");
+        assertEquals("string", properties.path("meeting_type").path("type").asText(),
+                "meeting_type 必须在 schema 里声明: " + tool);
+        Set<String> declared = new LinkedHashSet<>();
+        properties.path("meeting_type").path("enum").forEach(v -> declared.add(v.asText()));
+        assertEquals(new LinkedHashSet<>(PlatformToolCatalog.MEETING_TYPE_WIRE), declared,
+                "schema 里的 enum 与线上字面量不一致: " + tool);
+        Set<String> required = new LinkedHashSet<>();
+        tool.path("args_schema").path("required").forEach(v -> required.add(v.asText()));
+        assertTrue(required.contains("meeting_type"), "meeting_type 必须必填: " + tool);
+        assertTrue(required.contains("meeting_id"), "meeting_id 必须必填: " + tool);
+    }
+
+    /**
+     * PLAT-27:会议域的回查必须读**分析产物表**,不是退役的 {@code meeting_agent_runs}。
+     *
+     * <p>修的是真机实测的假话:主管被问"分析好了吗",它把旧表里一条 2026-09-13 的
+     * 僵尸 run(状态永远 {@code awaiting_review})当成本次产物报了出来。根因是
+     * {@code start_meeting_analysis} 已改成同步转发 ai-service、产物落
+     * {@code meeting_*_analyses},而回查还读着那张平台早就不写的表。
+     *
+     * <p>两条断言把方向钉死:①新产物**看得见**且状态被译成队列口径;②旧表的行
+     * **看不见**(它不该再被当成"会议智能体的进展")。
+     */
+    @Test
+    void plat27_queryAgentRuns_readsMeetingAnalyses_notTheRetiredRunTable() {
+        String projectId = firstProjectId();
+        String meetingId = UUID.randomUUID().toString();
+        String analysisId = UUID.randomUUID().toString();
+        String legacyRunId = UUID.randomUUID().toString();
+        int userId = jdbc.queryForObject("SELECT id FROM users WHERE username = ?", Integer.class, USER_ADMIN);
+
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
+                        + "VALUES (?,?,?,?,NOW(),?)",
+                meetingId, "回查口径用例", "站会原文", userId, projectId);
+        jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,"
+                        + "transcript,result_json,snapshots_json,created_at) "
+                        + "VALUES (?,?,?,?,?,?,?,?,NOW())",
+                analysisId, meetingId, userId, UUID.randomUUID().toString(), "pending",
+                "站会原文", "{\"summary\":\"x\",\"proposed_actions\":[{\"id\":\"a\"}]}", "[]");
+        // 同一场会议上再放一条**旧表**的行:它不该出现在回查里
+        jdbc.update("INSERT INTO meeting_agent_runs(id,meeting_id,requested_by,status,attempt,model,"
+                        + "prompt_version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,NOW(),NOW())",
+                legacyRunId, meetingId, userId, "awaiting_review", 1, "legacy-model", "v0");
+
+        ApiResponse r = post(TOOLS + "query_agent_runs", token(USER_ADMIN),
+                json(map("project_id", projectId, "kind", "meeting")));
+        assertEquals(200, r.status(), r.body());
+        JsonNode runs = r.json().path("result").path("runs");
+        assertTrue(runs.isArray() && runs.size() > 0, "应看得见刚落的分析产物: " + r.body());
+
+        boolean sawAnalysis = false;
+        for (JsonNode run : runs) {
+            assertEquals("meeting", run.path("kind").asText(), r.body());
+            assertFalse(legacyRunId.equals(run.path("run_id").asText()),
+                    "退役的 meeting_agent_runs 不得再作为会议进展出现: " + run);
+            if (analysisId.equals(run.path("run_id").asText())) {
+                sawAnalysis = true;
+                // 存储口径 pending → 队列口径 awaiting_review(有提案待人工复核)
+                assertEquals("awaiting_review", run.path("status").asText(), run.toString());
+                assertTrue(run.path("has_result").asBoolean(), run.toString());
+                assertTrue(run.path("label").asText().contains("type: daily_scrum"),
+                        "label 应带上会议类型,便于主管分辨: " + run);
+                assertTrue(run.path("label").asText().contains("approval: pending"),
+                        "label 应保留原始存储口径: " + run);
+            }
+        }
+        assertTrue(sawAnalysis, "分析产物 " + analysisId + " 应在回查结果里: " + r.body());
     }
 }

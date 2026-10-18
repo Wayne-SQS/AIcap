@@ -251,6 +251,9 @@ async def _run_loop(
 ) -> None:
     session_id = state["session_id"]
     run_id = state["run_id"]
+    # 本轮派活回执（规划相的事实）。**只用于拼模型请求，不进检查点** ——
+    # 检查点里只留循环自己要的那份对话状态（`test_plan_outcome_does_not_ride_in_the_checkpoint`）。
+    dispatch_note: str | None = None
     # 相对时间预算：检查点里存的是"已经用掉多少秒"，本进程据此重建绝对 deadline。
     # 存绝对 monotonic() 的话，跨进程归零、毫无意义。
     base_elapsed = float(state.get("elapsed_seconds") or 0.0)
@@ -276,6 +279,12 @@ async def _run_loop(
             raise _Gate("run_timeout", f"恢复时预算已耗尽（已用 {base_elapsed:.0f}s / {MAX_SECONDS}s）")
 
         catalog = await client.catalog(jwt)
+        # 本轮的派活回执：历史纪要排除本 run（防把自己算成历史），所以这一条要单独取 ——
+        # 否则模型看不见"这一轮已经派过活"，会在派活成功之后答"我无法派活"。
+        # 恢复路径也取：规划相只在**新 run** 上跑，而恢复时同样需要这条事实来汇报产物。
+        dispatch_note = await _current_dispatch_note(
+            client=client, jwt=jwt, session_id=session_id, current_run_id=run_id
+        )
         if not state.get("messages"):
             # 会话纪要(契约 §2.7):同会话此前已终局轮次的 user/assistant 消息对。
             # 只在**全新拼装**时注入 —— 检查点恢复路径的 messages 已在里面,不重复注入。
@@ -302,7 +311,9 @@ async def _run_loop(
 
         for step in range(int(state.get("step") or 0), MAX_STEPS):
             state["step"] = step + 1
-            response, usage = await _model_step(model, messages, schemas, used, final=False)
+            response, usage = await _model_step(
+                model, _request_messages(messages, dispatch_note), schemas, used, final=False
+            )
             calls = response.get("tool_calls") or []
             messages.append(response)
             await emit(
@@ -412,6 +423,110 @@ async def _run_loop(
 # --------------------------------------------------------------------------
 
 
+def _dispatch_note(data: dict[str, Any]) -> str:
+    """把一条 `agent.dispatched` 回执翻成一行给模型看的话。
+
+    两种回执形状**都要如实转述**（2026-10-15 修）：
+
+    - **产物口径**（会议分析 `start_meeting_analysis`）：回执是
+      `{analysis_id, meeting_id, storage_status}` —— 这里必须把 `analysis_id` 与
+      `storage_status` 带进纪要。旧实现只认 `run_id/status`，于是写出
+      "start_meeting_analysis → run_id None, 派发时状态 None"：模型手里**没有任何
+      本次产物的标识**，只能去 `query_agent_runs` 抓一个旧的 meeting run 当结果，
+      真机实测答出了与事实相反的话（把 9 月那条僵尸 run 报成刚才的分析）。
+    - **run 口径**（`start_plan_draft` / `start_profile_analysis`）：`job_id` + `status`
+      + 是否复用既有 run，形状与措辞保持不变。
+    """
+    agent = data.get("agent")
+    result = data.get("result")
+    result = result if isinstance(result, dict) else {}
+
+    analysis_id = result.get("analysis_id")
+    if isinstance(analysis_id, str) and analysis_id:
+        storage = result.get("storage_status") or data.get("status") or "未知"
+        # 存储状态是要点：no_changes = 本轮没有变更提案；pending = 有待审提案
+        return f"{agent} → 分析产物 analysis_id {analysis_id}，存储状态 {storage}"
+
+    note = f"{agent} → run_id {data.get('job_id')}, 派发时状态 {data.get('status')}"
+    if data.get("deduplicated"):
+        note += "（复用既有 run）"
+    return note
+
+
+def _request_messages(messages: list[dict[str, Any]], dispatch_note: str | None) -> list[dict[str, Any]]:
+    """拼这一次模型请求的消息：在最后一条 user 之前插入本轮派活回执。
+
+    **不能写进 `state["messages"]`** —— 那份是检查点的内容，而规划相的路由事实
+    有自己的落点（`agent_events` + `routing_logs`），塞第二份进去正是恢复路径最容易读歪的地方
+    （`test_plan_outcome_does_not_ride_in_the_checkpoint` 钉着这条）。所以这里只做一次
+    请求期的临时拼接：持久化的那条路径原样不动，模型这一侧则看得见"这一轮已经派过活"。
+
+    没有派活（问问题的轮次）时原样返回，连列表都不复制新的形状。
+    """
+    if not dispatch_note:
+        return messages
+    index = len(messages)
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            index = i
+            break
+    note = {
+        "role": "system",
+        "content": f"本轮已派活：{dispatch_note}。这是**已经发生的事实**，不是待办："
+                   "直接据此汇报产物，不要说「我无法触发/没有这个能力」，"
+                   "也不要让用户自己去平台侧发起。",
+    }
+    return [*messages[:index], note, *messages[index:]]
+
+
+async def _read_events(client: JavaClient, *, jwt: str, session_id: str) -> list[Any]:
+    """分页读完一个会话的事件（取最近 `HISTORY_MAX_EVENTS` 条）。
+
+    纪要注入与"本轮派活回执"两处都要这一份读法；读法只此一处，免得两边分页口径分叉。
+    """
+    rows: list[Any] = []
+    after_seq = 0
+    while len(rows) < config.HISTORY_MAX_EVENTS:
+        page = await client.list_events(session_id=session_id, after_seq=after_seq, jwt=jwt)
+        if not page:
+            break
+        rows.extend(page)
+        after_seq = page[-1].id
+        if len(page) < config.EVENT_PAGE_LIMIT:
+            break
+    return rows[-config.HISTORY_MAX_EVENTS :]
+
+
+async def _current_dispatch_note(
+    *,
+    client: JavaClient,
+    jwt: str,
+    session_id: str,
+    current_run_id: str,
+) -> str | None:
+    """**本轮**（`current_run_id`）规划相是否已经派过活；派了就回那一行注记。
+
+    为什么必须单独取一次（2026-10-15 真机实测的缺口）：历史纪要刻意排除本 run，
+    于是"本轮已经派活"这件事对模型是**不可见**的。会议分析改成同步派活后后果立现：
+    模型自问"我能不能触发会议分析"，答"我的工具里没有 start_meeting_analysis"（这倒是真的
+    ——触发型工具刻意不进工具循环），于是整段答复在**已经派活成功**之后反过来告诉用户
+    "我无法触发，请人工去发起"。发出去的事件与说出口的话互相矛盾。
+
+    读失败就返回 None（缺这行注记仍能答，只是可能说岔）—— 观测不可用不能反过来打断对话。
+    """
+    try:
+        rows = await _read_events(client, jwt=jwt, session_id=session_id)
+    except PlatformError:
+        return None
+    notes = [
+        _dispatch_note(detail)
+        for row in rows
+        if row.run_id == current_run_id and row.type == "agent.dispatched"
+        and isinstance(detail := (row.detail or {}), dict)
+    ]
+    return "；".join(notes) if notes else None
+
+
 async def _history_messages(
     *,
     client: JavaClient,
@@ -436,17 +551,7 @@ async def _history_messages(
     打断对话。JWT 只用于这次读取，绝不进返回的 messages（红线）。
     """
     try:
-        rows: list[Any] = []
-        after_seq = 0
-        while len(rows) < config.HISTORY_MAX_EVENTS:
-            page = await client.list_events(session_id=session_id, after_seq=after_seq, jwt=jwt)
-            if not page:
-                break
-            rows.extend(page)
-            after_seq = page[-1].id
-            if len(page) < config.EVENT_PAGE_LIMIT:
-                break
-        rows = rows[-config.HISTORY_MAX_EVENTS :]
+        rows = await _read_events(client, jwt=jwt, session_id=session_id)
     except PlatformError:
         return []
 
@@ -475,11 +580,7 @@ async def _history_messages(
             slot["terminal"] = True
             slot["error"] = f"{data.get('code', 'error')}: {data.get('message', '')}"
         elif row.type == "agent.dispatched":
-            note = (f"{data.get('agent')} → run_id {data.get('job_id')}, "
-                    f"派发时状态 {data.get('status')}")
-            if data.get("deduplicated"):
-                note += "（复用既有 run）"
-            slot["dispatched"].append(note)
+            slot["dispatched"].append(_dispatch_note(data))
 
     messages: list[dict[str, Any]] = []
     for run_id in order[-config.HISTORY_MAX_RUNS :]:

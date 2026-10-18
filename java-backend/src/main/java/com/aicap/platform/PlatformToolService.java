@@ -3,11 +3,9 @@ package com.aicap.platform;
 import com.aicap.common.AgentError;
 import com.aicap.common.ApiException;
 import com.aicap.entity.Meeting;
-import com.aicap.entity.MeetingAgentRun;
 import com.aicap.entity.PlanningAgentRun;
 import com.aicap.entity.ProfileAgentRun;
 import com.aicap.entity.User;
-import com.aicap.mapper.MeetingAgentRunMapper;
 import com.aicap.mapper.MeetingMapper;
 import com.aicap.mapper.PlanningAgentRunMapper;
 import com.aicap.mapper.ProfileAgentRunMapper;
@@ -29,6 +27,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -118,22 +117,38 @@ public class PlatformToolService {
     private final ProfileAgentService profileService;
 
     /**
-     * run 回查(query_agent_runs)用的四个只读 Mapper。经 BaseMapper.selectList 走,
-     * 不新写 SQL:三张 run 表都已有实体映射,归一化发生在本方法内。
+     * run 回查(query_agent_runs)用的只读查询面。
+     *
+     * <p>planning / profile 两域各有实体映射,走 {@code BaseMapper.selectList};
+     * 会议域**不能**再走 {@code MeetingAgentRun} —— 那张表随老 agent 包退役,
+     * 平台早已不再写它(见 {@link #queryMeetingAnalyses}),留在这里就是把僵尸行
+     * 当成"会议智能体的进展"报给主管。
      */
     private final PlanningAgentRunMapper planningRunMapper;
     private final ProfileAgentRunMapper profileRunMapper;
-    private final MeetingAgentRunMapper meetingAgentRunMapper;
     private final MeetingMapper meetingMapper;
+
+    /**
+     * 会议域的分析产物表(五类,列完全一致),用 JdbcTemplate 现查。
+     *
+     * <p>为什么不建五个实体 + Mapper:这五张表结构逐列相同,而这里只需要
+     * 4 列 + {@code result_json} 是否存在——建五个实体类换来的只是更多样板。
+     * 表名是**编译期常量进白名单**的,不来自任何外部输入。
+     */
+    private final JdbcTemplate jdbc;
 
     /**
      * 调用一个工具。
      *
      * @param caller 已经过 {@code Roles.writer()} 校验的调用者;工具内部还会再查一次库,
      *               因为在 LLM 长循环里用户角色可能在调用途中被改掉(既有约定,不改)
+     * @param bearerToken 调用方的**原始** Bearer 令牌(不含 {@code Bearer } 前缀)。
+     *               只有会议分析的派活需要它:ai-service 必须带用户身份才能读回会议原文与成员表,
+     *               而"令牌不落库"决定了它只能在同一请求内透传,不能塞进队列让消费者稍后自取。
+     *               其余工具忽略该参数。
      * @throws ApiException 工具名不存在(404)
      */
-    public ToolOutcome invoke(String toolName, JsonNode args, User caller) {
+    public ToolOutcome invoke(String toolName, JsonNode args, User caller, String bearerToken) {
         PlatformToolCatalog.ToolSpec spec = catalog.find(toolName);
         if (spec == null) {
             throw ApiException.notFound("未知工具: " + toolName);
@@ -147,7 +162,8 @@ public class PlatformToolService {
                         success(toolName, meetingTools.execute(toolName, safeArgs, caller.getId(), requireProject(projectId)),
                                 null, started);
                 case PlatformToolCatalog.AGENT_PROFILE -> invokeProfile(toolName, safeArgs, requireProject(projectId), started);
-                case PlatformToolCatalog.AGENT_PLATFORM -> invokePlatform(toolName, safeArgs, caller, requireProject(projectId), started);
+                case PlatformToolCatalog.AGENT_PLATFORM ->
+                        invokePlatform(toolName, safeArgs, caller, requireProject(projectId), bearerToken, started);
                 default -> throw ApiException.notFound("未知工具: " + toolName);
             };
         } catch (AgentError e) {
@@ -183,7 +199,8 @@ public class PlatformToolService {
         return scoped;
     }
 
-    private ToolOutcome invokePlatform(String toolName, JsonNode args, User caller, String projectId, long started) {
+    private ToolOutcome invokePlatform(String toolName, JsonNode args, User caller, String projectId,
+                                       String bearerToken, long started) {
         if (PlatformToolCatalog.SEMANTIC_SEARCH.equals(toolName)) {
             return semanticSearch(args, caller, started);
         }
@@ -191,7 +208,7 @@ public class PlatformToolService {
             return queryAgentRuns(args, caller, projectId, started);
         }
         if (PlatformToolCatalog.START_MEETING_ANALYSIS.equals(toolName)) {
-            return startMeetingAnalysis(args, caller, started);
+            return startMeetingAnalysis(args, bearerToken, started);
         }
         if (PlatformToolCatalog.START_PLAN_DRAFT.equals(toolName)) {
             return startPlanDraft(args, caller, projectId, started);
@@ -208,12 +225,16 @@ public class PlatformToolService {
     private static final int RUN_LABEL_CHARS = 160;
 
     /**
-     * 回查三个智能体域的 run 状态(契约 §2.4 第 17 枚,只读)。
+     * 回查三个智能体域的产物状态(契约 §2.4 第 17 枚,只读)。
      *
-     * <p>为什么会议域要走 meetings 间接过滤:{@code meeting_agent_runs} 的 project_id 列虽由
-     * SchemaUpgrader 补上,但实体与写入路径都没接它(恒 NULL)—— 按"实体里真有值的列"过滤,
-     * 会议 run 经 {@code meetings.project_id} 圈定;planning / profile 两域实体的 projectId
-     * 是队列作用域,直接过滤。三域各自查询后按创建时间归并,超过上限截尾。
+     * <p>三域的"产物"载体各不相同,归一化发生在本方法内:
+     * <ul>
+     *   <li>planning / profile:各有队列表,{@code project_id} 就是队列作用域,直接过滤;</li>
+     *   <li>meeting:{@code meeting_*_analyses}(五类分析产物),没有 project_id 列,
+     *       经 {@code meetings.project_id} 圈定 meeting_id —— 见 {@link #queryMeetingAnalyses}
+     *       (该域**不再**读 {@code meeting_agent_runs},理由在那边)。</li>
+     * </ul>
+     * 三域各自查询后按创建时间归并,超过上限截尾。
      *
      * <p>{@code result_json} 一律不整包返回(规划草案与画像整包都可能很大):只给
      * {@code has_result},产物本身走各自的审批界面看 —— 本工具的职责是"状态",不是"内容"。
@@ -258,22 +279,7 @@ public class PlatformToolService {
             }
         }
         if (kind.isEmpty() || "meeting".equals(kind)) {
-            List<Meeting> meetings = meetingMapper.selectList(
-                    new LambdaQueryWrapper<Meeting>().eq(Meeting::getProjectId, projectId).select(Meeting::getId));
-            if (!meetings.isEmpty()) {
-                List<String> meetingIds = meetings.stream().map(Meeting::getId).toList();
-                var qw = new LambdaQueryWrapper<MeetingAgentRun>().in(MeetingAgentRun::getMeetingId, meetingIds);
-                if (!runId.isEmpty()) {
-                    qw.eq(MeetingAgentRun::getId, runId);
-                }
-                qw.orderByDesc(MeetingAgentRun::getCreatedAt);
-                for (MeetingAgentRun r : meetingAgentRunMapper.selectList(qw)) {
-                    rows.add(new RunRow("meeting", r.getId(), r.getStatus(), r.getCreatedAt(), r.getUpdatedAt(),
-                            "meeting_id: " + r.getMeetingId(),
-                            joinError(r.getErrorCode(), r.getErrorMessage()),
-                            r.getResultJson() != null && !r.getResultJson().isBlank()));
-                }
-            }
+            rows.addAll(queryMeetingAnalyses(projectId, runId));
         }
 
         rows.sort(java.util.Comparator.comparing(RunRow::createdAt,
@@ -301,6 +307,82 @@ public class PlatformToolService {
         return success(tool, result, null, started);
     }
 
+    /**
+     * 会议域的分析产物(五类)归一化成 run 行。
+     *
+     * <p><b>为什么是这五张表、而不是 {@code meeting_agent_runs}</b>(2026-10-15):
+     * 老 agent 包退役后平台不再往那张表写任何东西,全库只剩历史行(实测 1 行,
+     * 2026-09-13,状态 {@code awaiting_review} 永远不动)。而 {@code start_meeting_analysis}
+     * 改成同步转发 ai-service 之后,真正的产物落在 {@code meeting_*_analyses}。
+     * 继续读旧表的后果真机实测过:主管被问"分析好了吗",它把这个永不推进的旧 run
+     * 报成"刚刚跑完的产物",并让用户去按那个 run_id 找正文 —— 与事实相反。
+     *
+     * <p>状态映射:表的 {@code status} 是 ai-service 的**存储**口径
+     * ({@code pending}=有提案待审 / {@code no_changes}=本轮无变更),直接透出会让主管
+     * 与队列口径(queued/running/…)混着看,故译成同一套词:
+     * {@code awaiting_review} / {@code completed}。原始口径另给一个
+     * {@code result.approval} 字段(不放进 status,免得两个词义打架)。
+     *
+     * <p>{@code result_json} 只回"有没有",不回正文 —— 与 planning/profile 两域同一纪律
+     * (正文可能很大,且属审批界面该看的东西)。
+     */
+    private List<RunRow> queryMeetingAnalyses(String projectId, String runId) {
+        List<Meeting> meetings = meetingMapper.selectList(
+                new LambdaQueryWrapper<Meeting>().eq(Meeting::getProjectId, projectId).select(Meeting::getId));
+        if (meetings.isEmpty()) {
+            return List.of();
+        }
+        List<String> meetingIds = meetings.stream().map(Meeting::getId).toList();
+        String inClause = String.join(",", java.util.Collections.nCopies(meetingIds.size(), "?"));
+
+        List<RunRow> rows = new ArrayList<>();
+        // 表名来自下面这个字面量清单,不接受任何外部输入
+        for (String table : MEETING_ANALYSIS_TABLES) {
+            StringBuilder sql = new StringBuilder("SELECT id, meeting_id, status, created_at, ")
+                    .append("(result_json IS NOT NULL AND result_json <> '') AS has_result ")
+                    .append("FROM ").append(table)
+                    .append(" WHERE meeting_id IN (").append(inClause).append(")");
+            List<Object> params = new ArrayList<>(meetingIds);
+            if (!runId.isEmpty()) {
+                sql.append(" AND id = ?");
+                params.add(runId);
+            }
+            rows.addAll(jdbc.query(sql.toString(), (rs, rowNum) -> {
+                String approval = rs.getString("status");
+                // 存储口径 → 队列口径:有提案=待人工复核,无变更=已结束
+                String status = "pending".equals(approval) ? "awaiting_review" : "completed";
+                java.sql.Timestamp created = rs.getTimestamp("created_at");
+                java.time.LocalDateTime createdAt = created == null ? null : created.toLocalDateTime();
+                String meetingId = rs.getString("meeting_id");
+                String label = "meeting_id: " + meetingId
+                        + ", type: " + meetingId2Type(table).wire()
+                        + ", approval: " + approval;
+                return new RunRow("meeting", rs.getString("id"), status, createdAt, createdAt,
+                        label, null, rs.getBoolean("has_result"));
+            }, params.toArray()));
+        }
+        return rows;
+    }
+
+    /** 五张分析表的表名(与 {@code ai-service} 的五个端点一一对应);进 SQL 前只可能取自这里 */
+    private static final List<String> MEETING_ANALYSIS_TABLES = List.of(
+            "meeting_status_analyses",
+            "meeting_planning_analyses",
+            "meeting_review_analyses",
+            "meeting_retro_analyses",
+            "meeting_refinement_analyses");
+
+    /** 表名 → 会议类型(给 label 用,让主管知道这条产物是哪类分析) */
+    private static MeetingType meetingId2Type(String table) {
+        return switch (table) {
+            case "meeting_status_analyses" -> MeetingType.STATUS;
+            case "meeting_planning_analyses" -> MeetingType.PLANNING;
+            case "meeting_review_analyses" -> MeetingType.REVIEW;
+            case "meeting_retro_analyses" -> MeetingType.RETRO;
+            default -> MeetingType.REFINEMENT;
+        };
+    }
+
     /** 三域归一化后的 run 行,仅用于排序与组装,不外泄 */
     private record RunRow(String kind, String runId, String status,
                           java.time.LocalDateTime createdAt, java.time.LocalDateTime updatedAt,
@@ -317,26 +399,75 @@ public class PlatformToolService {
 
 
     /**
-     * 触发一次会议分析(S5′ 触发型工具,契约 §2.4)。**只创建 run**,不写任何业务表。
+     * 驱动会议智能体分析一场已保存会议(触发型工具,契约 §2.4)。**只产出分析**,不写业务表。
      *
-     * <p>幂等口径:底层 {@code meeting_agent_runs} 有 {@code UNIQUE KEY meeting_id} ——
-     * 一个会议只会有一条 run,所以"已存在"就返回它并标 {@code deduplicated=true}
-     * (不论它是 queued/running 还是已终局;要重跑终局的 run 走既有 retry 端点)。
+     * <p><b>执行口径(2026-10-15 修订)</b>:与另外两枚触发型工具不同,本枚<b>同步</b>完成 ——
+     * 平台层带调用方令牌转发到 ai-service,产出落 {@code meeting_*_analyses},回
+     * {@code analysis_id}。理由见 {@link MeetingAnalysisTrigger} 的类注释(队列无人消费 +
+     * 令牌不得持久化 ⇒ 谁持有令牌谁在同一请求内执行)。
+     *
+     * <p><b>meeting_type 必填</b>:五类各自端点、产出结构完全不同,猜错等于把评审会当站会分析。
+     * 缺参就如实拒为 {@code invalid_arguments},让"没说就反问"由既有规则承担,而不是在这里猜。
+     *
+     * <p>幂等:交给 ai-service 的 {@code client_request_id}(本层每次生成一个);
+     * 主管重复派活会产生新的 analysis,这是会议分析的正常语义(同一场会可被反复分析)。
      */
-    private ToolOutcome startMeetingAnalysis(JsonNode args, User caller, long started) {
+    private ToolOutcome startMeetingAnalysis(JsonNode args, String bearerToken, long started) {
         String tool = PlatformToolCatalog.START_MEETING_ANALYSIS;
         String meetingId = args.path("meeting_id").asText("").trim();
         if (meetingId.isEmpty()) {
             return failure(tool, "invalid_arguments", "meeting_id 必填", started);
+        }
+        MeetingType meetingType = MeetingType.parse(args.path("meeting_type").asText(""));
+        if (meetingType == null) {
+            // 枚举里没有 = 模型没说清或说错了。把可选值回给模型,它下一轮就能补上(不是服务故障)
+            return failure(tool, "invalid_arguments",
+                    "meeting_type 必填且须为五类之一: " + String.join(" | ", PlatformToolCatalog.MEETING_TYPE_WIRE), started);
         }
         MeetingAnalysisTrigger trigger = meetingTriggers.getIfAvailable();
         if (trigger == null) {
             return failure(tool, "agent_tool_unavailable",
                     "会议智能体未启用,无法触发分析", started);
         }
-        MeetingAnalysisTrigger.Triggered triggered = trigger.trigger(meetingId, caller.getId());
-        return success(tool, triggerJson(triggered.runId(), triggered.status(), triggered.deduplicated()),
-                null, started);
+        Integer currentSprint = parseSprint(args, "current_sprint");
+        if (currentSprint == INVALID_SPRINT) {
+            return failure(tool, "invalid_arguments", "current_sprint 须为 1~4", started);
+        }
+        Integer targetSprint = parseSprint(args, "target_sprint");
+        if (targetSprint == INVALID_SPRINT) {
+            return failure(tool, "invalid_arguments", "target_sprint 须为 1~4", started);
+        }
+        MeetingAnalysisTrigger.Analyzed analyzed =
+                trigger.analyze(meetingId, meetingType, currentSprint, targetSprint, bearerToken);
+        return success(tool, analyzeJson(analyzed), null, started);
+    }
+
+    /** {@link #parseSprint} 的"给了但越界"哨兵。用哨兵而不是异常:这是模型给的参数错,该回 ok=false */
+    private static final Integer INVALID_SPRINT = Integer.MIN_VALUE;
+
+    /**
+     * 读一个可空的 Sprint 参数(1~4)。
+     *
+     * <p>三种结果要分清:**没给** → {@code null}(照常继续);**给了合法值** → 该值;
+     * **给了越界值** → {@link #INVALID_SPRINT}。越界不能静默当成"没给" —— sprint 会进模型的
+     * 上下文,把一个 7 悄悄丢掉等于让分析基于错误前提跑完,而调用方还以为传对了。
+     */
+    private static Integer parseSprint(JsonNode args, String field) {
+        JsonNode node = args.path(field);
+        if (node.isMissingNode() || node.isNull() || node.asText("").isBlank()) {
+            return null;
+        }
+        int value = node.asInt(0);
+        return (value < 1 || value > 4) ? INVALID_SPRINT : value;
+    }
+
+    /** 会议分析产物的回执:只给指针与存储状态,产物本身在前端面板与审批队列里看 */
+    private ObjectNode analyzeJson(MeetingAnalysisTrigger.Analyzed analyzed) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("analysis_id", analyzed.analysisId());
+        node.put("meeting_id", analyzed.meetingId());
+        node.put("storage_status", analyzed.storageStatus());
+        return node;
     }
 
     /**

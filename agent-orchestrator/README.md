@@ -42,10 +42,20 @@ S4′.2 交付了有界循环 + 事件落库 + 检查点恢复；**S5′ 在循�
 ```
 session.start       ← loop 的 on_claim
 intent.routed       ← 派活：必须先于任何 tool.call / agent.dispatched（契约 §3.4#2）
-agent.dispatched    ← 触发型工具回执：job_id / status / deduplicated
+agent.dispatched    ← 触发型工具回执：result（整包）+ job_id / status / deduplicated
 model.step … tool.call/tool.result …   ← 有界循环
 run.end
 ```
+
+**`agent.dispatched` 的回执形状有两种**（2026-10-15）：`result` 是触发型工具返回的原始
+`result` 对象，**必须整包带上**。规划 / 画像两域是 run 口径（`run_id`/`status`/`deduplicated`，
+即 `job_id` 三兄弟），会议分析是**产物口径**（`analysis_id`/`storage_status`，同步执行、
+不建 run）。旧实现只读 `run_id/status`，于是会议派活在纪要里退化成
+「run_id None, 派发时状态 None」——模型手里没有任何本次产物的标识，转而去
+`query_agent_runs` 抓一条旧的 meeting run 当结果，答出与事实相反的话（真机实测）。
+**本轮的派活回执以请求期 system 消息注入**（`loop._request_messages`），
+**不进检查点**：规划相的事实有自己的落点（`agent_events` + `routing_logs`），
+塞第二份正是恢复路径最容易读歪的地方。
 
 反问那一轮则是 `clarify.request` → `run.end{status: "clarify"}`：**不派活、不进循环**，
 用户的答复以新一轮 `/chat` 进来。**问问题那一轮**（"现在有几个任务在推进？"）没有
