@@ -333,7 +333,12 @@ async def _run_loop(
                     messages.append({"role": "user", "content": _GROUNDING_NUDGE.format(tools=missing)})
                     await save()
                     continue
-                final, usage = await _model_step(model, messages, [], used, final=True)
+                # 收尾也要带上本轮派活回执：只给非 final 的每一步拼、收尾那一次用裸
+                # messages，模型在"写结论"这最后一步就看不见"已经派过活" —— 真机实测
+                # 的形态是：派活事件已经落库，答复却写"我无法新增任务，只能给建议"。
+                final, usage = await _model_step(
+                    model, _request_messages(messages, dispatch_note), [], used, final=True
+                )
                 messages.append(final)
                 await emit("model.step", {"step": step + 1, "usage": usage, "final": True})
                 # 终局不写检查点：run 是否结束由 run.end/run.error 事件标记，
@@ -474,7 +479,9 @@ def _request_messages(messages: list[dict[str, Any]], dispatch_note: str | None)
         "role": "system",
         "content": f"本轮已派活：{dispatch_note}。这是**已经发生的事实**，不是待办："
                    "直接据此汇报产物，不要说「我无法触发/没有这个能力」，"
-                   "也不要让用户自己去平台侧发起。",
+                   "也不要让用户自己去平台侧发起。"
+                   "产物需要人工确认时如实说明在哪确认：规划草案（含新增任务）在"
+                   "「AI 工作台 · 画图智能体」确认后才会写入业务数据；会议提案在审批队列审核。",
     }
     return [*messages[:index], note, *messages[index:]]
 

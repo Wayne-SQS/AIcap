@@ -29,11 +29,7 @@ const navGroups = [
     title: '智能协作',
     topGap: true,
     items: [
-      { view: 'ai', icon: '✦', label: 'AI 工作台' },
-      { view: 'meetings', icon: '◉', label: '会议工作区' },
-      { view: 'submit-agent', icon: '↗', label: '任务提交分析' },
-      { view: 'profile-agent', icon: '◌', label: '成员画像分析' },
-      { view: 'drawing-agent', icon: '✎', label: '画图智能体' },
+      { view: 'office', icon: '⌂', label: 'AI 办公室' },
       { view: 'review', icon: '✓', label: '提案审核中心' }
     ]
   }

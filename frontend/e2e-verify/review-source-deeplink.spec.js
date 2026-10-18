@@ -21,6 +21,7 @@ test('来源分析深链刷新后仍选中指定会议、类型和分析记录',
     if (path === '/api/health') body = { status: 'ok' }
     else if (path === '/api/auth/me') body = { id: 1, username: 'owner', display_name: '负责人', role: 'owner' }
     else if (path === '/api/auth/users') body = [{ id: 1, username: 'owner', display_name: '负责人', role: 'owner' }]
+    else if (path === '/api/projects') body = [{ id: 'P1', name: '验收项目' }]
     else if (path === '/api/meetings') body = [{ id: meetingId, title: 'Sprint 计划会', transcript: '我们准备调整下一轮 Sprint。' }]
     else if (path === `/api/meetings/${meetingId}/planning-analyses`) body = [{
       id: analysisId, client_request_id: 'planning-request-9', submitted_by: 1,
@@ -38,7 +39,9 @@ test('来源分析深链刷新后仍选中指定会议、类型和分析记录',
     }, body: JSON.stringify(body) })
   })
 
-  await page.goto(`/#/meetings?meetingId=${meetingId}&type=planning&analysisId=${analysisId}&proposalId=proposal-planning-9&fromReview=1&status=pending&source=planning`)
+  // 多项目改造后会议列表按 projectId 加载,深链一律走项目作用域路由;
+  // redirect 会把它连同 params+query 一起带进 /projects/P1/office,reload 后上下文不丢
+  await page.goto(`/#/projects/P1/meetings?meetingId=${meetingId}&type=planning&analysisId=${analysisId}&proposalId=proposal-planning-9&fromReview=1&status=pending&source=planning`)
   await expect(page.locator('#meeting-select')).toHaveValue(meetingId)
   await expect(page.getByLabel('会议分析类型')).toHaveValue('planning')
   await expect(page.getByLabel('Planning分析记录')).toHaveValue(analysisId)

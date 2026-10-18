@@ -581,4 +581,114 @@ class PlatformAgentContractTest extends ContractTestSupport {
         }
         assertTrue(sawAnalysis, "分析产物 " + analysisId + " 应在回查结果里: " + r.body());
     }
+
+    /**
+     * PLAT-28:会议列表只读工具 —— 主管解析"最近一场/标题里点名的那场"的数据来源。
+     *
+     * <p>此前"分析最近一场站会"只能被反复追问 {@code meeting_id}:规划相不调工具,而相对指代
+     * 必须查一次列表才能落到具体 id。这里钉三件事:① 按 {@code created_at} 倒序
+     * (解析"最近"依赖这个顺序,换序会让解析静默错位);② 只回元数据,**不得带回 transcript**;
+     * ③ 参数越界走 {@code ok=false} 而不是 500。
+     */
+    @Test
+    void plat28_listMeetings_listsMetadataNewestFirstWithoutTranscript() {
+        String projectId = firstProjectId();
+        int userId = jdbc.queryForObject("SELECT id FROM users WHERE username = ?", Integer.class, USER_ADMIN);
+        String olderId = UUID.randomUUID().toString();
+        String newerId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
+                        + "VALUES (?,?,?,?,DATE_SUB(NOW(), INTERVAL 2 DAY),?)",
+                olderId, "列表用例-较早的会", "较早原文", userId, projectId);
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
+                        + "VALUES (?,?,?,?,NOW(),?)",
+                newerId, "列表用例-最近的会", "最近原文", userId, projectId);
+
+        ApiResponse r = post(TOOLS + "list_meetings", token(USER_ADMIN), json(map("project_id", projectId)));
+        assertEquals(200, r.status(), r.body());
+        assertTrue(r.json().path("ok").asBoolean(), r.body());
+        JsonNode items = r.json().path("result").path("items");
+        assertTrue(items.isArray() && items.size() >= 2, "应列出刚插入的会议: " + r.body());
+        assertEquals(newerId, items.get(0).path("id").asText(),
+                "必须按 created_at 倒序（\"最近一场\"依赖此顺序）: " + r.body());
+        for (JsonNode item : items) {
+            assertTrue(item.has("id") && item.has("title") && item.has("created_at"), item.toString());
+            assertFalse(item.has("transcript"), "会议列表不得带回转写正文: " + item);
+        }
+        assertFalse(r.body().contains("最近原文"), "转写正文不得出现在响应里: " + r.body());
+
+        ApiResponse filtered = post(TOOLS + "list_meetings", token(USER_ADMIN),
+                json(map("project_id", projectId, "keyword", "较早")));
+        assertEquals(200, filtered.status(), filtered.body());
+        JsonNode filteredItems = filtered.json().path("result").path("items");
+        assertEquals(1, filteredItems.size(), "keyword 应按标题过滤: " + filtered.body());
+        assertEquals(olderId, filteredItems.get(0).path("id").asText(), filtered.body());
+
+        ApiResponse badLimit = post(TOOLS + "list_meetings", token(USER_ADMIN),
+                json(map("project_id", projectId, "limit", 99)));
+        assertEquals(200, badLimit.status(), badLimit.body());
+        assertFalse(badLimit.json().path("ok").asBoolean(), "limit 越界应 ok=false: " + badLimit.body());
+        assertEquals("invalid_tool_arguments", badLimit.json().path("error_code").asText(), badLimit.body());
+
+        ApiResponse catalog = get(CATALOG, token(USER_ADMIN));
+        JsonNode tool = null;
+        for (JsonNode t : catalog.json().path("tools")) {
+            if ("list_meetings".equals(t.path("name").asText())) tool = t;
+        }
+        assertTrue(tool != null, "catalog 应发布 list_meetings: " + catalog.body());
+        assertTrue(tool.path("read_only").asBoolean(), "list_meetings 必须只读: " + tool);
+        assertTrue(tool.path("args_schema").path("required").toString().contains("project_id"),
+                "list_meetings 必须声明 project_id（否则兜底注入不会生效）: " + tool);
+    }
+
+    /**
+     * PLAT-29:会议分析摘要工具 —— 主管能在对话框里转述结论。
+     *
+     * <p>派活工具只回 {@code analysis_id},用户问"结论是什么"时主管需要现读一次产物。
+     * 这里钉三件事:① 摘要字段齐全、可直接转述;② **不得带回 transcript 与证据全文**
+     * (提案正文属审批界面);③ 跨项目不可见(与会议域端点同口径的 404)。
+     */
+    @Test
+    void plat29_getMeetingAnalysis_returnsDigestButNeverTranscript() {
+        String projectId = firstProjectId();
+        int userId = jdbc.queryForObject("SELECT id FROM users WHERE username = ?", Integer.class, USER_ADMIN);
+        String meetingId = UUID.randomUUID().toString();
+        String analysisId = UUID.randomUUID().toString();
+        String transcript = "转写正文-不应出现在摘要里";
+        jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
+                        + "VALUES (?,?,?,?,NOW(),?)",
+                meetingId, "摘要用例-站会", transcript, userId, projectId);
+        String resultJson = "{\"schema_version\":\"1.0\",\"meeting_id\":\"" + meetingId + "\","
+                + "\"meeting_type\":\"daily_scrum\",\"summary\":\"今天完成了依赖校验的联调。\","
+                + "\"proposed_actions\":[{\"proposal_id\":\"P1\",\"action\":\"update_story_status\","
+                + "\"changes\":{\"story_id\":\"US01\",\"to_status\":2},\"reason\":\"站会确认完成\","
+                + "\"evidence\":[{\"segment_id\":\"S1\",\"quote\":\"证据原文-不应外传\"}]}],"
+                + "\"open_questions\":[\"阻塞项是否已解决？\"]}";
+        jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,"
+                        + "transcript,result_json,snapshots_json,created_at) VALUES (?,?,?,?,?,?,?,?,NOW())",
+                analysisId, meetingId, userId, UUID.randomUUID().toString(), "pending",
+                transcript, resultJson, "[]");
+
+        ApiResponse r = post(TOOLS + "get_meeting_analysis", token(USER_ADMIN),
+                json(map("project_id", projectId, "analysis_id", analysisId)));
+        assertEquals(200, r.status(), r.body());
+        assertTrue(r.json().path("ok").asBoolean(), r.body());
+        JsonNode digest = r.json().path("result");
+        assertEquals(analysisId, digest.path("analysis_id").asText(), r.body());
+        assertEquals("daily_scrum", digest.path("kind").asText(), r.body());
+        assertEquals(meetingId, digest.path("meeting_id").asText(), r.body());
+        assertEquals("摘要用例-站会", digest.path("meeting_title").asText(), r.body());
+        assertTrue(digest.path("summary").asText().contains("依赖校验"), "摘要应可转述: " + r.body());
+        assertEquals(1, digest.path("proposal_count").asInt(), r.body());
+        assertEquals(1, digest.path("proposals").size(), r.body());
+        assertEquals("update_story_status", digest.path("proposals").get(0).path("action").asText(), r.body());
+        assertEquals(1, digest.path("open_questions").size(), r.body());
+        assertFalse(r.body().contains(transcript), "摘要不得带回会议转写正文: " + r.body());
+        assertFalse(r.body().contains("证据原文"), "证据全文不得出现在摘要里: " + r.body());
+
+        // 跨项目:分析属于本项目,调用方换一个项目读 → 404(不暴露"存在但无权查看")
+        String otherProject = projectId.equals("P002") ? "P001" : "P002";
+        ApiResponse cross = post(TOOLS + "get_meeting_analysis", token(USER_ADMIN),
+                json(map("project_id", otherProject, "analysis_id", analysisId)));
+        assertEquals(404, cross.status(), "跨项目读分析必须 404: " + cross.body());
+    }
 }

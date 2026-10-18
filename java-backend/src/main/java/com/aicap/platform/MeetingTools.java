@@ -1,10 +1,12 @@
 package com.aicap.platform;
 
 import com.aicap.common.AgentError;
+import com.aicap.entity.Meeting;
 import com.aicap.entity.PoolItem;
 import com.aicap.entity.Story;
 import com.aicap.entity.Task;
 import com.aicap.entity.User;
+import com.aicap.mapper.MeetingMapper;
 import com.aicap.mapper.PoolItemMapper;
 import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
@@ -38,6 +40,7 @@ public class MeetingTools {
     private final StoryMapper storyMapper;
     private final PoolItemMapper poolItemMapper;
     private final TaskMapper taskMapper;
+    private final MeetingMapper meetingMapper;
     private final ObjectMapper objectMapper;
 
     // ---------- 工具 JSON Schema 定义(对齐 TOOL_TYPES 的 model_json_schema) ----------
@@ -79,6 +82,11 @@ public class MeetingTools {
         list.add(function("project_summary",
                 "查询真实故事统计及当前数据能力限制。",
                 projectOnlySchema()));
+        list.add(function("list_meetings",
+                "按项目列出已保存会议(id/标题/创建时间),按创建时间倒序,最多20条。"
+                        + "用于把「最近一场」「标题里点名的那场」解析成 meeting_id;"
+                        + "只回元数据,不返回会议转写正文。",
+                meetingsListSchema()));
         return list;
     }
 
@@ -120,6 +128,32 @@ public class MeetingTools {
         ObjectNode project = objectMapper.createObjectNode();
         project.put("type", "string"); project.put("minLength", 1);
         props.set("project_id", project);
+        ArrayNode required = objectMapper.createArrayNode();
+        required.add("project_id");
+        return objectSchema(props, required);
+    }
+
+    /**
+     * 会议列表工具的参数声明。
+     *
+     * <p>{@code project_id} 必填(平台按它做成员校验);{@code keyword} 是标题包含匹配,
+     * 供"分析《Sprint2 规划会》那一场"这类点名使用;{@code limit} 上限 20,与其余工具一致。
+     * <b>刻意不透出 {@code transcript}</b> —— 转写正文只在会议分析链路里用,不该出现在能力清单的
+     * 返回里(主管只需要"有哪些会议",不需要原文)。
+     */
+    private ObjectNode meetingsListSchema() {
+        ObjectNode props = objectMapper.createObjectNode();
+        ObjectNode project = objectMapper.createObjectNode();
+        project.put("type", "string"); project.put("minLength", 1);
+        props.set("project_id", project);
+        ObjectNode keyword = objectMapper.createObjectNode();
+        keyword.put("type", "string"); keyword.put("minLength", 1); keyword.put("maxLength", 100);
+        keyword.put("title", "Title keyword");
+        props.set("keyword", keyword);
+        ObjectNode limit = objectMapper.createObjectNode();
+        limit.put("type", "integer"); limit.put("minimum", 1); limit.put("maximum", 20);
+        limit.put("title", "Limit");
+        props.set("limit", limit);
         ArrayNode required = objectMapper.createArrayNode();
         required.add("project_id");
         return objectSchema(props, required);
@@ -182,6 +216,36 @@ public class MeetingTools {
         return scoped;
     }
 
+    /** {@code list_meetings} 的合法入参(对齐 pydantic StrictModel:extra=forbid) */
+    private record MeetingsQuery(String projectId, String keyword, int limit) {
+    }
+
+    private MeetingsQuery listMeetingsArgs(JsonNode arguments, String runProjectId) throws AgentError {
+        String scoped = requireProjectContext(arguments, runProjectId);
+        ObjectNode node = objectArgs("list_meetings", arguments);
+        if (node.size() < 1 || node.size() > 3) {
+            throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
+        }
+        String keyword = null;
+        if (node.has("keyword")) {
+            JsonNode kw = node.path("keyword");
+            if (!kw.isTextual()) throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
+            keyword = kw.asText();
+            if (keyword.isBlank() || keyword.length() > 100) {
+                throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
+            }
+        }
+        int limit = 10;
+        if (node.has("limit")) {
+            JsonNode raw = node.path("limit");
+            if (!raw.isInt() || raw.asInt() < 1 || raw.asInt() > 20) {
+                throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
+            }
+            limit = raw.asInt();
+        }
+        return new MeetingsQuery(scoped, keyword, limit);
+    }
+
     private JsonNode maybeOwnerId(String name, JsonNode arguments) throws AgentError {
         ObjectNode node = objectArgs(name, arguments);
         if (node.size() == 1 && node.has("project_id")) return null;
@@ -212,6 +276,10 @@ public class MeetingTools {
         switch (name) {
             case "project_summary" -> {
                 return projectSummary(requireProjectContext(arguments, projectId));
+            }
+            case "list_meetings" -> {
+                MeetingsQuery query = listMeetingsArgs(arguments, projectId);
+                return listMeetings(query);
             }
             case "list_members" -> {
                 emptyArgs(name, arguments);
@@ -249,6 +317,32 @@ public class MeetingTools {
         limits.add("任务无状态字段");
         limits.add("本轮只能提出新增需求池建议，其他变更请人工处理");
         node.set("limitations", limits);
+        return node;
+    }
+
+    /**
+     * 按项目列已保存会议。
+     *
+     * <p>只回 {@code id/title/created_at}(+ {@code truncated} 标记),**不回转写正文**:
+     * 主管需要的是"哪一场",原文只该在会议分析链路里被读取。排序写死为 {@code created_at DESC},
+     * 因为回填的相对指代("最近一场/最新/上一场")依赖这个顺序,换序会让解析静默错位。
+     */
+    private ObjectNode listMeetings(MeetingsQuery query) {
+        QueryWrapper<Meeting> qw = new QueryWrapper<Meeting>().eq("project_id", query.projectId());
+        if (query.keyword() != null) qw.like("title", query.keyword());
+        qw.orderByDesc("created_at").last("LIMIT " + (query.limit() + 1));
+        List<Meeting> rows = meetingMapper.selectList(qw);
+        ArrayNode items = objectMapper.createArrayNode();
+        for (Meeting m : rows.subList(0, Math.min(query.limit(), rows.size()))) {
+            ObjectNode item = objectMapper.createObjectNode();
+            item.put("id", m.getId());
+            item.put("title", m.getTitle());
+            item.put("created_at", m.getCreatedAt() == null ? "" : m.getCreatedAt().toString());
+            items.add(item);
+        }
+        ObjectNode node = objectMapper.createObjectNode();
+        node.set("items", items);
+        node.put("truncated", rows.size() > query.limit());
         return node;
     }
 

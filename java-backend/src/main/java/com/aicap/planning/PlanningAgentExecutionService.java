@@ -32,6 +32,11 @@ public class PlanningAgentExecutionService {
                 case "UPDATE_TASK_PRIORITY" -> actions.updateTaskPriority(projectId, action.path("task_id").asText().toUpperCase(), action.path("before_priority").asText("Should"), action.path("after_priority").asText(), user);
                 case "CREATE_MILESTONE" -> actions.createMilestone(projectId, action.path("milestone_id").asText().toUpperCase(), action.path("name").asText(), action.path("week").asInt(), action.path("description").asText(""), csv(action.get("related_task_ids")), user);
                 case "UPDATE_MILESTONE" -> actions.updateMilestone(projectId, action.path("milestone_id").asText().toUpperCase(), action.path("before_snapshot").asText(), action.path("after_name").asText(), action.path("after_week").asInt(), action.path("after_description").asText(""), csv(action.get("after_related_task_ids")), user);
+                case "CREATE_TASK" -> actions.createTask(projectId, action.path("name").asText(),
+                        action.path("owner_id").asInt(), action.path("hours").asInt(),
+                        action.path("week_start").asInt(), action.path("week_end").asInt(),
+                        action.path("priority").asText("Should"), action.path("task_type").asText("feature"),
+                        csv(action.get("story_ref")), csv(action.get("depends_on")), user);
                 default -> throw new IllegalStateException("规划包含未支持的动作");
             }
         }

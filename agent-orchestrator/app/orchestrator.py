@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -164,6 +165,183 @@ def find_route(routes: Sequence[Route], name: str | None) -> Route | None:
     return None
 
 
+# --------------------------------------------------------------------------
+# 会议指代的确定性解析（2026-10-18）
+# --------------------------------------------------------------------------
+#
+# 背景（真机实测）：「分析最近一场站会」被反复追问 meeting_id —— plan() 是
+# "一次模型调用 + 纯规则判定"，**规划相不调工具**，而"最近一场 / 标题里点名的那场"
+# 是相对指代，不查列表就永远落不到具体 id。所以这里补一条**只读**解析路径：
+# 需要时由 plan() 调一次 list_meetings（平台只读工具），再按下面的顺序确定性映射。
+#
+# 为什么不做成"让模型自己编一个 id"或"猜一个最像的"：编出来的 id 会让触发型工具
+# 稳定返回 404/无效会议，而用户看到的是"分析已派发"—— 比反问更糟。
+
+#: 触发型工具名（与 Java 的 `PlatformToolCatalog.START_MEETING_ANALYSIS` 同字面量）
+MEETING_ANALYSIS_TOOL = "start_meeting_analysis"
+
+#: 只读的会议列表工具名 —— 解析相对指代的唯一数据来源
+MEETING_LIST_TOOL = "list_meetings"
+
+#: 类型关键词 → 线上字面量。**长词在前**（"每日站会"先于"站会"），否则短词会先命中同一句话。
+_MEETING_TYPE_WORDS: tuple[tuple[str, str], ...] = (
+    ("每日站会", "daily_scrum"),
+    ("站会", "daily_scrum"),
+    ("晨会", "daily_scrum"),
+    ("规划会", "sprint_planning"),
+    ("计划会", "sprint_planning"),
+    ("规划", "sprint_planning"),
+    ("评审会", "sprint_review"),
+    ("验收会", "sprint_review"),
+    ("评审", "sprint_review"),
+    ("回顾会", "sprint_retrospective"),
+    ("复盘", "sprint_retrospective"),
+    ("回顾", "sprint_retrospective"),
+    ("需求梳理", "backlog_refinement"),
+    ("梳理会", "backlog_refinement"),
+    ("梳理", "backlog_refinement"),
+)
+
+#: 相对指代词 —— 命中就取倒序第一条（`list_meetings` 已按 `created_at DESC` 返回）
+_RECENT_WORDS = ("最近", "最新", "上一场", "上上次", "最后", "刚才")
+
+
+def infer_meeting_type(utterance: str) -> str | None:
+    """从原话里认会议类型。认不出回 `None` —— **不猜**。"""
+    for word, wire in _MEETING_TYPE_WORDS:
+        if word in (utterance or ""):
+            return wire
+    return None
+
+
+def _normalize_title(text: str) -> str:
+    """标题匹配用：去掉空白/标点/大小写差异，只留可比较的字符。"""
+    return re.sub(r"[\s《》「」【】\"'“”‘’·:：,，。.!！?？\-—_/\\]+", "", text or "").lower()
+
+
+def _match_meeting(utterance: str, meetings: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """在**已按时间倒序**的会议列表里挑一场；挑不出来回 `None`。"""
+    if not meetings:
+        return None
+    normalized = _normalize_title(utterance)
+    named = [
+        meeting
+        for meeting in meetings
+        if _normalize_title(str(meeting.get("title") or ""))
+        and _normalize_title(str(meeting.get("title") or "")) in normalized
+    ]
+    if named:
+        return named[0]
+    if any(word in (utterance or "") for word in _RECENT_WORDS):
+        return meetings[0]
+    if len(meetings) == 1:
+        return meetings[0]
+    return None
+
+
+def resolve_meeting_reference(
+    utterance: str,
+    meetings: Sequence[dict[str, Any]],
+    proposal: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """把"最近一场 / 标题里点名的那场"回填进 `args`。**纯函数、无 IO、可单独测。**
+
+    返回 `(新的 proposal, 选中的会议或 None)`。只对 `start_meeting_analysis` 生效：
+
+    - `meeting_id` 缺失且能从标题点名 / 相对指代 / 唯一候选解析出来 → 回填；
+    - `meeting_type` 缺失且原话里有类型关键词 → 回填；
+    - 模型已经给了 `meeting_id` 就**不覆盖** —— 它可能真的知道某场会议的 id。
+
+    **刻意不改 `confidence`**：解析到 id 不代表意图听准了，阈值判定仍归 `apply_rules`。
+    """
+    if proposal.get("route") != MEETING_ANALYSIS_TOOL:
+        return proposal, None
+    raw_args = proposal.get("args")
+    args = dict(raw_args) if isinstance(raw_args, dict) else {}
+    chosen: dict[str, Any] | None = None
+    if _blank(args.get("meeting_id")):
+        chosen = _match_meeting(utterance, meetings)
+        if chosen is not None and not _blank(chosen.get("id")):
+            args["meeting_id"] = chosen["id"]
+    if _blank(args.get("meeting_type")):
+        inferred = infer_meeting_type(utterance)
+        if inferred:
+            args["meeting_type"] = inferred
+    return {**proposal, "args": args}, chosen
+
+
+def _declares(catalog: Catalog, name: str) -> bool:
+    return any(tool.name == name for tool in catalog.tools)
+
+
+async def _resolve_meeting_step(
+    proposal: dict[str, Any],
+    utterance: str,
+    *,
+    user_jwt: str,
+    project_id: str | None,
+    client: JavaClient | None,
+    catalog: Catalog,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """必要时拉一次会议列表并解析指代。
+
+    只在"模型要派会议分析、且没给 `meeting_id`"时发这次只读调用 —— 它是额外往返，
+    不该出现在每一轮对话里。拿不到列表（工具没发布 / Java 异常 / 没有项目上下文）就
+    **当作没有会议**：解析是增强，不能反过来把反问流程打挂（与
+    `loop._history_messages` 的降级口径一致）。
+    """
+    if proposal.get("route") != MEETING_ANALYSIS_TOOL:
+        return proposal, None
+    args = proposal.get("args") if isinstance(proposal.get("args"), dict) else {}
+    if not _blank(args.get("meeting_id")):
+        return proposal, None
+    if client is None or not project_id or not _declares(catalog, MEETING_LIST_TOOL):
+        return proposal, {"attempted": False, "meetings": [], "resolved": False}
+    try:
+        outcome = await client.call_tool(
+            MEETING_LIST_TOOL, {"project_id": project_id, "limit": 20}, user_jwt
+        )
+    except Exception:  # noqa: BLE001 —— PlatformError 等：解析失败不影响照常反问
+        return proposal, {"attempted": False, "meetings": [], "resolved": False}
+    result = outcome.result if isinstance(outcome.result, dict) else {}
+    rows = result.get("items") if isinstance(result.get("items"), list) else []
+    meetings = [row for row in rows if isinstance(row, dict)]
+    resolved, chosen = resolve_meeting_reference(utterance, meetings, proposal)
+    return resolved, {"attempted": True, "meetings": meetings, "resolved": chosen is not None}
+
+
+def _refine_meeting_clarify(decision: Plan, context: dict[str, Any] | None) -> Plan:
+    """这一轮确实做过会议解析、但没解析出来时，把反问改得更具体。
+
+    - 本项目一场会议都没有 → 说清楚"先去会议室保存一场"，否则用户会一直补 id；
+    - 有会议但认不出 → 选项换成**真实会议标题**（点一下就命中标题匹配）。
+    """
+    if not context or not context.get("attempted") or context.get("resolved"):
+        return decision
+    if decision.clarify is None or decision.route is not None:
+        return decision
+    meetings = context.get("meetings") or []
+    if not meetings:
+        clarify = {
+            "question": "本项目还没有已保存的会议。请先在「会议工作区 → 文本会议」保存一场记录，再让我分析。",
+            "options": [],
+        }
+    else:
+        titles = [str(meeting.get("title") or "") for meeting in meetings[:4]]
+        clarify = {
+            "question": "要分析哪一场会议？",
+            "options": [f"分析《{title}》" for title in titles if title],
+        }
+    return Plan(
+        intent=decision.intent,
+        route=decision.route,
+        confidence=decision.confidence,
+        reason=decision.reason,
+        args=decision.args,
+        clarify=clarify,
+    )
+
+
 def candidates(routes: Sequence[Route], *, chosen: str | None = None) -> list[dict[str, Any]]:
     """留痕里的候选集合（`routing_logs.candidates_json`）。
 
@@ -216,7 +394,18 @@ _RULES = (
     "5. 用户要求的若是**写库/开启采集**这类「要批准」的动作，**不要反问确认**：\n"
     "   给出最贴近的路由即可 —— 产出走审批队列，由人确认。\n"
     "6. 不得虚构参数值：推断不出的必填参数就不要填，更不要用占位字符串凑数。\n"
-    "7. 只输出上面那六个字段，不要夹带任何其他内容。"
+    "7. 只输出上面那六个字段，不要夹带任何其他内容。\n"
+    "8. 会议分析特例：meeting_id 不必从原话里挖 —— 编排层会用会议列表工具解析「最近一场」"
+    "或原话里点名的标题。所以**不要**因为推断不出 meeting_id 就降低 confidence；"
+    "meeting_type 认不出来时照常低 confidence + clarify（类型不能替你猜）。\n"
+    "9. 会议分析是**同步**的：会议分析工具的回执里就带 analysis_id。"
+    "用户要「分析结果 / 结论」时，必须调 get_meeting_analysis(analysis_id) 读摘要再转述"
+    "（summary、提案要点、待确认问题），并说明这是**待人工确认的提案**；"
+    "不许凭记忆编造结论，也不许用「转写正文我读不到」代替回答 —— 摘要就是答案。\n"
+    "10. 新增任务（「加一个/建一个任务」）是 start_plan_draft 的能力，**不要**回答"
+    "「没有新增任务这个能力」。任务的负责人与执行周是必填项：原话里已经给出（点名成员、"
+    "说了第几周或 Sprint N）就直接派；缺负责人或时间时**只问一次**（把缺的项合成一句，"
+    "别一轮一轮问），拿到答复后再派。负责人用成员姓名表述即可，画图智能体会按真实成员表解析。"
 )
 
 
@@ -573,4 +762,14 @@ async def plan(
     # `final=True` 要的是**结论**那一发：真实 `ModelClient` 会据此带上
     # `response_format=json_object` 并去掉 tools（见 model_client.complete）。
     response, _usage = await resolved.complete(messages, [], final=True)
-    return apply_rules(_parse_proposal(response.get("content")), routes)
+    proposal = _parse_proposal(response.get("content"))
+    proposal, meeting_context = await _resolve_meeting_step(
+        proposal,
+        utterance,
+        user_jwt=user_jwt,
+        project_id=project_id,
+        client=client,
+        catalog=catalog,
+    )
+    decision = apply_rules(proposal, routes)
+    return _refine_meeting_clarify(decision, meeting_context)

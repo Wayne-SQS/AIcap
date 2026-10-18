@@ -5,7 +5,7 @@ import com.aicap.planning.ImpactAnalysisService;
 import com.aicap.planning.PlanningAnalysisValidator;
 import com.aicap.planning.PlanningAgentRunner;
 import com.aicap.planning.PlanningAgentService;
-import com.aicap.agent.ModelClient;
+import com.aicap.llm.ModelClient;
 import com.aicap.entity.PlanningAgentRun;
 import com.aicap.mapper.PlanningAgentRunMapper;
 import com.aicap.mapper.TaskMapper;

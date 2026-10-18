@@ -9,6 +9,8 @@ import com.aicap.mapper.StoryMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.MilestoneMapper;
+import com.aicap.mapper.ProjectMemberMapper;
+import com.aicap.entity.ProjectMember;
 import com.aicap.service.ProjectScopedResolver;
 import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -39,6 +41,7 @@ public class PlanningAnalysisValidator {
     private final MilestoneMapper milestones;
     private final ProjectScopedResolver resolver;
     private final ProjectAccessService projectAccess;
+    private final ProjectMemberMapper projectMembers;
 
     public ObjectNode validate(String text) throws AgentError { throw new AgentError("project_context_missing", "projectId 必填"); }
 
@@ -70,6 +73,7 @@ public class PlanningAnalysisValidator {
                     case "UPDATE_TASK_PRIORITY" -> validatePriority(projectId, action, actionKeys, impacts);
                     case "CREATE_MILESTONE" -> validateCreateMilestone(projectId, action, actionKeys, warnings, impacts);
                     case "UPDATE_MILESTONE" -> validateUpdateMilestone(projectId, action, actionKeys, warnings, impacts);
+                    case "CREATE_TASK" -> validateCreateTask(projectId, action, actionKeys, warnings, impacts);
                     default -> throw new AgentError("unsupported_action", "不支持的规划动作: " + type);
                 }
             }
@@ -186,6 +190,89 @@ public class PlanningAnalysisValidator {
     private void validateUpdateMilestone(String projectId, ObjectNode action, Set<String> keys, ArrayNode warnings, ArrayNode impacts) throws AgentError {
         String id = action.path("milestone_id").asText("").trim().toUpperCase(); if (!keys.add("milestone:" + id + ":update")) throw new AgentError("milestone_update_duplicate", "里程碑修改动作不能重复: " + id); Milestone row = resolver.findMilestone(projectId, id); if (row == null) throw new AgentError("entity_not_found", "里程碑不存在: " + id);
         JsonNode before = action.path("before"); if (before.has("week") && before.path("week").asInt() != row.getWeek()) throw new AgentError("stale_plan", "里程碑已发生变化，请重新生成规划"); JsonNode afterNode = action.get("after"); if (!(afterNode instanceof ObjectNode after)) throw new AgentError("invalid_plan", "里程碑修改必须提供 after 对象"); int week = integer(after, "week", row.getWeek()); String name = after.path("name").asText(row.getName()); String related = after.has("related_task_ids") ? csv(after.get("related_task_ids")) : normalize(row.getRelatedTaskIds()); validateMilestoneFields(projectId, id, name, week, related); action.put("milestone_id", id); action.put("after_name", name); action.put("after_week", week); action.put("after_description", after.path("description").asText(row.getDescription())); action.put("after_related_task_ids", related); action.put("before_snapshot", snapshot(row)); milestoneWarnings(projectId, related, week, warnings); impacts.add(mapper.createObjectNode().put("entity", id).put("kind", "milestone").put("before", "W" + row.getWeek()).put("after", "W" + week));
+    }
+
+    /**
+     * 新增任务({@code CREATE_TASK})—— 规划智能体的第 8 种动作。
+     *
+     * <p>模型**不能**只给一句"文档整理":任务表的 {@code owner_id/hours/week_start/week_end}
+     * 都是 NOT NULL,缺一项在这里就被拒(而不是执行时炸一个 500)。负责人的真伪也在这里核对:
+     * 必须是**本项目成员**,不能只凭 {@code GET /members} 里存在就放行(跨项目串人)。
+     *
+     * <p>不做的两件事:① 不猜看板卡(挂卡属于人工在 UI 里的动作);② 不校验"任务周次必须落在
+     * 故事 Sprint 内"——那是软约束,手工新增也不拦,这里只出 warning。
+     */
+    private void validateCreateTask(String projectId, ObjectNode action, Set<String> keys,
+                                    ArrayNode warnings, ArrayNode impacts) throws AgentError {
+        String name = action.path("name").asText("").trim();
+        if (name.isBlank()) throw new AgentError("invalid_plan", "新增任务必须给出名称");
+        if (name.length() > 200) throw new AgentError("invalid_plan", "任务名称不能超过 200 字");
+        if (!keys.add("task_new:" + name)) throw new AgentError("invalid_plan", "新增任务动作不能重复: " + name);
+        if (!action.path("owner_id").isIntegralNumber()) throw new AgentError("invalid_plan", "新增任务必须给出负责人编号(owner_id)");
+        int ownerId = action.path("owner_id").asInt();
+        User owner = users.selectById(ownerId);
+        if (owner == null) throw new AgentError("entity_not_found", "成员不存在: " + ownerId);
+        if (projectMembers.selectCount(new QueryWrapper<ProjectMember>()
+                .eq("project_id", projectId).eq("user_id", ownerId)) == 0) {
+            throw new AgentError("invalid_plan", owner.getDisplayName() + " 不是本项目成员");
+        }
+        if (!action.path("hours").isIntegralNumber()) throw new AgentError("invalid_plan", "新增任务必须给出工时(hours)");
+        int hours = action.path("hours").asInt();
+        if (hours < 0 || hours > 999) throw new AgentError("invalid_plan", "工时必须在 0..999 之间");
+        int start = integer(action, "week_start", -1);
+        int end = integer(action, "week_end", -1);
+        if (start < 1 || end > 6 || start > end) {
+            throw new AgentError("invalid_schedule", "任务排期必须在 W1-W6 且开始周不能晚于结束周");
+        }
+        String priority = action.path("priority").asText("Should");
+        if (!Set.of("Must", "Should", "Could").contains(priority)) {
+            throw new AgentError("invalid_priority", "任务优先级必须是 Must/Should/Could");
+        }
+        String taskType = action.path("task_type").asText("feature");
+        if (!Set.of("feature", "management").contains(taskType)) {
+            throw new AgentError("invalid_plan", "task_type 仅支持 feature/management");
+        }
+        String storyRef = csv(action.get("story_ref"));
+        for (String ref : split(storyRef)) {
+            if (resolver.findStory(projectId, ref) == null) throw new AgentError("entity_not_found", "关联故事不存在: " + ref);
+        }
+        String dependsOn = csv(action.get("depends_on"));
+        for (String dep : split(dependsOn)) {
+            Task predecessor = resolver.findTask(projectId, dep);
+            if (predecessor == null) throw new AgentError("entity_not_found", "前置任务不存在: " + dep);
+            if (predecessor.getWeekEnd() != null && predecessor.getWeekEnd() > start) {
+                throw new AgentError("dependency_conflict", "任务不能早于前置任务 " + predecessor.getId() + " 结束");
+            }
+        }
+        action.put("name", name);
+        action.put("owner_id", ownerId);
+        action.put("owner_name", owner.getDisplayName());
+        action.put("hours", hours);
+        action.put("week_start", start);
+        action.put("week_end", end);
+        action.put("priority", priority);
+        action.put("task_type", taskType);
+        if (!storyRef.isBlank()) action.put("story_ref", storyRef);
+        if (!dependsOn.isBlank()) action.put("depends_on", dependsOn);
+
+        // 负载预警:新任务按周摊到负责人现有负载上,与调负责人时同一套容量口径
+        int[] load = weeklyLoad(projectId, ownerId);
+        double weeklyCapacity = projectAccess.weeklyCapacity(projectId, ownerId);
+        int count = Math.max(1, end - start + 1);
+        int base = hours / count;
+        int remainder = hours % count;
+        for (int week = start; week <= end; week++) {
+            int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
+            if (after > weeklyCapacity) {
+                warnings.add("成员负载：" + owner.getDisplayName() + " W" + week + " 新增后 " + after
+                        + "h / 周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
+            }
+        }
+        impacts.add(mapper.createObjectNode()
+                .put("entity", name)
+                .put("kind", "task_create")
+                .put("before", "不存在")
+                .put("after", owner.getDisplayName() + " · " + weekRange(start, end) + " · " + hours + "h"));
     }
 
     private void validateMilestoneFields(String projectId, String id, String name, int week, String related) throws AgentError { if (!id.matches("M[A-Z0-9_-]+")) throw new AgentError("invalid_milestone", "里程碑编号格式无效"); if (name.isBlank()) throw new AgentError("invalid_milestone", "里程碑名称不能为空"); if (week < 1 || week > 6) throw new AgentError("invalid_milestone", "里程碑周次必须在 W1-W6"); for (String ref : split(related)) if (resolver.findTask(projectId, ref) == null) throw new AgentError("entity_not_found", "关联任务不存在: " + ref); }

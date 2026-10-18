@@ -1,23 +1,23 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 
+/* 智能协作收敛为两处入口:AI 办公室 + 提案审核中心(2026-10-18)。
+   ai-demo / project-generator 降级为办公室右侧的能力项,但路由保留
+   (project-generator 还承担 /projects/new 的复用)。 */
 const workspaceViews = [
-  { name: 'overview', label: '项目总览', component: () => import('@/views/OverviewView.vue') },
-  { name: 'pool', label: '需求池', component: () => import('@/views/PoolView.vue') },
-  { name: 'board', label: '用户故事看板', component: () => import('@/views/BoardView.vue') },
-  { name: 'gantt', label: '甘特图', component: () => import('@/views/GanttView.vue') },
-  { name: 'members', label: '成员任务图', component: () => import('@/views/MembersView.vue') },
-  { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
-  { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
-  { name: 'ai', label: 'AI 工作台', component: () => import('@/views/AiView.vue') },
-  { name: 'meetings', label: '会议工作区', component: () => import('@/views/MeetingView.vue') },
-  { name: 'submit-agent', label: '任务提交分析', component: () => import('@/views/SubmitAgentView.vue') },
-  { name: 'profile-agent', label: '成员画像分析', component: () => import('@/views/ProfileAgentView.vue') },
+  { name: 'office', label: 'AI 办公室', component: () => import('@/views/OfficeView.vue') },
+  { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') },
   { name: 'ai-demo', label: 'AI 对话演示', component: () => import('@/views/AiDemoView.vue') },
-  { name: 'drawing-agent', label: 'Planning Agent', component: () => import('@/views/DrawingAgentView.vue') },
-  { name: 'project-generator', label: '智能生成项目图', component: () => import('@/views/ProjectGeneratorView.vue') },
-  { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') }
+  { name: 'project-generator', label: '智能生成项目图', component: () => import('@/views/ProjectGeneratorView.vue') }
 ]
+
+/* 旧智能协作入口 → 办公室。redirect 必须**原样透传 params + query**:
+   审核中心「返回来源会议」深链(fromReview/status/meetingId/type/analysisId)
+   全靠 query 传,丢了深链就断;项目作用域那套还要带 projectId。 */
+const legacyOfficeRedirects = ['ai', 'meetings', 'submit-agent', 'profile-agent', 'drawing-agent']
+const toOffice = to => String(to.name || '').startsWith('project-')
+  ? { name: 'project-office', params: to.params, query: to.query }
+  : { name: 'office', query: to.query }
 
 const routes = [
   { path: '/', redirect: { name: 'projects' } },
@@ -34,7 +34,16 @@ const routes = [
     path: `/${name}`,
     name,
     component
-  }))
+  })),
+  ...legacyOfficeRedirects.flatMap(name => [
+    {
+      path: `/projects/:projectId/${name}`,
+      name: `project-${name}`,
+      redirect: toOffice,
+      meta: { legacyName: name, projectScoped: true }
+    },
+    { path: `/${name}`, name, redirect: toOffice }
+  ])
 ]
 
 const router = createRouter({ history: createWebHashHistory(), routes })

@@ -213,7 +213,7 @@ async def _plan_phase(
         # 清单在同一个 run 里只拉一次：plan() 用它派生路由，本层用它拼留痕的 candidates。
         catalog = await client.catalog(jwt)
         decision = await orchestrator.plan(utterance, jwt, model=model, catalog=catalog,
-                                           project_id=project_id)
+                                           project_id=project_id, client=client)
     except ModelError as error:
         # 没配密钥（`not_configured`）、模型不可达、返回的不是合法 JSON —— 全部如实上报。
         # **没有任何兜底路由**：这里绝不会"猜一个 route 让它继续跑"。

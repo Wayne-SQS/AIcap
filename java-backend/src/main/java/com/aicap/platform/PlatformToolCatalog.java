@@ -63,6 +63,14 @@ public class PlatformToolCatalog {
      */
     public static final String QUERY_AGENT_RUNS = "query_agent_runs";
 
+    /**
+     * 会议分析**摘要**工具(契约 §2.4,只读):派活工具只回 {@code analysis_id},
+     * 用户问"结论是什么"时主管需要现读一次产物。只回结论性摘要
+     * (summary / 提案要点 / 待确认问题),**不回会议转写正文与原始 result_json** ——
+     * 提案正文仍属审批界面。
+     */
+    public static final String GET_MEETING_ANALYSIS = "get_meeting_analysis";
+
     /** 触发型工具的名字集合:PLAT-04 与分派共用一处,避免两处清单分叉 */
     public static final List<String> TRIGGER_TOOLS =
             List.of(START_MEETING_ANALYSIS, START_PLAN_DRAFT, START_PROFILE_ANALYSIS);
@@ -184,6 +192,20 @@ public class PlatformToolCatalog {
                 true,
                 false));
         out.add(new ToolSpec(
+                GET_MEETING_ANALYSIS,
+                AGENT_PLATFORM,
+                "读取一次会议分析的**摘要**(结论、提案要点、待确认问题),用于把分析结果转述给用户。"
+                        + "只回摘要与要点,不回会议转写正文、不回原始分析 JSON;"
+                        + "analysis_id 来自 start_meeting_analysis 的回执,或 query_agent_runs 会议条目里的 run_id。"
+                        + "提案未经人工审核,转述时必须说明「待人工确认」。",
+                objectSchema(Map.of(
+                                "project_id", strField("Project id", 1, 20),
+                                "analysis_id", strField("Analysis id", 1, 80)),
+                        "project_id", "analysis_id"),
+                null,
+                true,
+                false));
+        out.add(new ToolSpec(
                 START_MEETING_ANALYSIS,
                 AGENT_PLATFORM,
                 "驱动会议智能体分析一场已保存的会议,产出落会议建议审批队列(需人工确认后才可能改业务数据)。"
@@ -203,7 +225,9 @@ public class PlatformToolCatalog {
         out.add(new ToolSpec(
                 START_PLAN_DRAFT,
                 AGENT_PLATFORM,
-                "为一句规划请求生成结构化修改草案(草案仍需人工确认后才执行)。只创建 run,不修改任何业务数据。",
+                "为一句规划请求生成结构化修改草案(草案仍需人工确认后才执行)。只创建 run,不修改任何业务数据。"
+                        + "支持「新增任务」(例如「加一个文档整理的任务」:给出名称/负责人/工时/周次即可,"
+                        + "缺负责人默认发起人、缺工时默认 8h),以及调整负责人、排期、Sprint、依赖、优先级与里程碑。",
                 // project_id 必须声明:多项目之后 planning run 的作用域就是它,
                 // 服务端缺它会以 invalid_arguments 拒绝(PlatformToolService.startPlanDraft)。
                 // 不声明 = 模型不知道要传 = 主管路由对了也派不出去(真机实测过一次)。

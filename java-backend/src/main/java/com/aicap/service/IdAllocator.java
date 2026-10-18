@@ -3,8 +3,10 @@ package com.aicap.service;
 import com.aicap.common.ApiException;
 import com.aicap.entity.PoolItem;
 import com.aicap.entity.Story;
+import com.aicap.entity.Task;
 import com.aicap.mapper.PoolItemMapper;
 import com.aicap.mapper.StoryMapper;
+import com.aicap.mapper.TaskMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -37,12 +39,14 @@ public class IdAllocator {
 
     private static final Pattern US_ID = Pattern.compile("^US(\\d+)$");
     private static final Pattern R_ID = Pattern.compile("^R(\\d+)$");
+    private static final Pattern TASK_ID = Pattern.compile("^T(\\d+)$");
 
     /** 顺延探测上限:足以覆盖正常并发,且保证不会无限循环(超过即判定为异常并报 409) */
     private static final int MAX_PROBE = 50;
 
     private final StoryMapper storyMapper;
     private final PoolItemMapper poolItemMapper;
+    private final TaskMapper taskMapper;
 
     /** 下一个可用的故事编号({@code US%02d});已被占用的号自动顺延 */
     public String nextStoryId(String projectId) {
@@ -80,6 +84,32 @@ public class IdAllocator {
             }
         }
         throw ApiException.conflict("需求池编号分配连续冲突，请稍后重试");
+    }
+
+    /**
+     * 下一个可用的任务编号({@code T%02d});编号在<b>项目内</b>唯一。
+     *
+     * <p>此前"手工新增任务"在 {@code TaskPoolController} 里内联了同一段"扫最大值 + 1"。
+     * 现在规划智能体的 {@code CREATE_TASK} 也要新建任务 —— 两处各写一份，编号规则一改
+     * 就会分叉（本类存在的理由，见类注释）。所以收进这里，手工新增与 Agent 新增共用。
+     */
+    public String nextTaskId(String projectId) {
+        String scoped = com.aicap.service.ProjectAccessService.normalize(projectId);
+        int max = 0;
+        for (Task t : taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>().eq("project_id", scoped))) {
+            Matcher m = TASK_ID.matcher(t.getId());
+            if (m.matches()) {
+                max = Math.max(max, Integer.parseInt(m.group(1)));
+            }
+        }
+        for (int i = 0; i < MAX_PROBE; i++) {
+            String candidate = String.format("T%02d", max + 1 + i);
+            if (taskMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Task>()
+                    .eq("project_id", scoped).eq("code", candidate)) == 0) {
+                return candidate;
+            }
+        }
+        throw ApiException.conflict("任务编号分配连续冲突，请稍后重试");
     }
 
     /*

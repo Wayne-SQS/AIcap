@@ -35,6 +35,7 @@ test('语音来源链展示确认人与分析会议，并能打开独立分析�
     if (path === '/api/health') body = { status: 'ok' }
     else if (path === '/api/auth/me') body = { id: 1, username: 'reviewer', display_name: '审核负责人', role: 'admin', capacity_hours: 60 }
     else if (path === '/api/auth/users') body = [{ id: 1, username: 'reviewer', display_name: '审核负责人', role: 'admin', capacity_hours: 60 }]
+    else if (path === '/api/projects') body = [{ id: 'P1', name: '验收项目' }]
     else if (path === '/api/meetings') body = meetings
     else if (path === `/api/meetings/${sourceId}/audio`) body = audio
     else if (path === `/api/meetings/${sourceId}/transcript-versions`) body = [version]
@@ -44,7 +45,7 @@ test('语音来源链展示确认人与分析会议，并能打开独立分析�
     }, body: JSON.stringify(body) })
   })
 
-  await page.goto(`/#/meetings?meetingId=${sourceId}`)
+  await page.goto(`/#/projects/P1/meetings?meetingId=${sourceId}`)
   const meetingSelect = page.locator('#meeting-select')
   await expect(meetingSelect).toHaveValue(sourceId)
   await page.getByRole('tab', { name: '语音会议' }).click()
@@ -71,7 +72,7 @@ test('语音来源链展示确认人与分析会议，并能打开独立分析�
   await expect(page).toHaveURL(/workflow=manual/)
   await page.reload()
   await expect(page.getByRole('tab', { name: '手动录入一条待审核建议' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'meeting-workflow-tab-manual')
+  await expect(page.locator('#meeting-workflow-panel')).toHaveAttribute('aria-labelledby', 'meeting-workflow-tab-manual')
 })
 
 test('语音来源链确认失败后可原请求重试并生成独立分析会议', async ({ page }) => {
@@ -108,6 +109,7 @@ test('语音来源链确认失败后可原请求重试并生成独立分析会�
     if (path === '/api/health') body = { status: 'ok' }
     else if (path === '/api/auth/me') body = { id: 1, username: 'reviewer', display_name: '审核负责人', role: 'admin', capacity_hours: 60 }
     else if (path === '/api/auth/users') body = [{ id: 1, username: 'reviewer', display_name: '审核负责人', role: 'admin', capacity_hours: 60 }]
+    else if (path === '/api/projects') body = [{ id: 'P1', name: '验收项目' }]
     else if (path === '/api/meetings') body = confirmed ? [sourceMeeting, analysisMeeting] : [sourceMeeting]
     else if (path === `/api/meetings/${sourceId}/audio`) body = audio
     else if (path === `/api/meetings/${sourceId}/transcript-versions` && request.method() === 'GET') body = confirmed ? [{ ...version, confirmation: confirmed }] : [version]
@@ -127,7 +129,7 @@ test('语音来源链确认失败后可原请求重试并生成独立分析会�
     return route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) })
   })
 
-  await page.goto(`/#/meetings?meetingId=${sourceId}&workflow=audio`)
+  await page.goto(`/#/projects/P1/meetings?meetingId=${sourceId}&workflow=audio`)
   await expect(page.getByRole('tab', { name: '语音会议' })).toHaveAttribute('aria-selected', 'true')
   const versions = page.getByRole('region', { name: '转写版本与人工核对' })
   await expect(versions.getByLabel('已保存转写版本')).toHaveValue(versionId)

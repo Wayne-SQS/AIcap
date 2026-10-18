@@ -33,6 +33,13 @@ public class PlanningAgentRunner {
             UPDATE_TASK_PRIORITY: {type,task_id,before_priority,after_priority}
             CREATE_MILESTONE: {type,milestone_id,name,week,description,related_task_ids:[...]}
             UPDATE_MILESTONE: {type,milestone_id,before:{name,week,description,related_task_ids},after:{...}}
+            CREATE_TASK: {type,name,owner_id,hours,week_start,week_end,priority,task_type,story_ref,depends_on}
+            新增任务规则（用户说"加一个/建一个任务"时）：
+            - name 用用户原话里的任务内容（例如"文档整理"），不要改写成别的标题；
+            - owner_id 必须是 get_members 返回的真实成员编号：用户点名某人就按姓名匹配，找不到或重名时不要猜，在 answer 里问清并返回 actions=[]；
+            - 用户没指定负责人时默认发起人；没指定工时默认 8；没指定优先级默认 Should；
+            - 没指定时间时：用户说了 Sprint N 就换算成 W(2N-1)…W(2N)；仍无依据时用 W1-W1，并在 warnings 里注明"排期按默认值，请在确认前核对"；
+            - 不关联故事的任务 task_type 用 management，关联了故事用 feature；kanban_card_id 不要填（挂卡由人工在界面完成）。
             最终只输出 JSON，字段为 intent,summary,answer,actions,affected_entities,warnings,requires_confirmation。
             不确定目标实体时不要猜 ID，应通过工具查询并在 answer 中说明无法确定。
             """;
@@ -42,8 +49,19 @@ public class PlanningAgentRunner {
     public ObjectNode analyze(String projectId, String request, ModelClient client) throws AgentError { return analyze(projectId, request, client, (kind, detail) -> { }); }
 
     public ObjectNode analyze(String projectId, String request, ModelClient client, BiConsumer<String, String> eventSink) throws AgentError {
+        return analyze(projectId, request, null, client, eventSink);
+    }
+
+    /**
+     * @param requesterName 发起人显示名(prompt 里"未指定负责人时默认发起人"的依据)。
+     *                      查不到时传 null —— 模型会退化成"没有默认值",由 validator 兜底拒绝。
+     */
+    public ObjectNode analyze(String projectId, String request, String requesterName,
+                              ModelClient client, BiConsumer<String, String> eventSink) throws AgentError {
         List<JsonNode> messages = new ArrayList<>();
-        messages.add(message("system", PROMPT));
+        messages.add(message("system", requesterName == null || requesterName.isBlank()
+                ? PROMPT
+                : PROMPT + "\n本次请求的发起人是「" + requesterName + "」；新增任务未指定负责人时默认由发起人负责。\n"));
         messages.add(message("user", request));
         for (int step = 0; step < LlmProperties.MAX_STEPS; step++) {
             ModelClient.Completion completion = client.complete(messages, tools.definitions(), false);

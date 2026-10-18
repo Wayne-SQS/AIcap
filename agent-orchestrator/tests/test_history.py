@@ -33,10 +33,14 @@ class RecordingModel:
 
     def __init__(self) -> None:
         self.first_messages: list[dict[str, Any]] | None = None
+        # 收尾那一次看到的 messages —— 派活回执必须在**每一步**（含 final）都在，
+        # 否则模型写结论时看不见"已经派过活"，会答"我无法新增任务/只能给建议"
+        self.final_messages: list[dict[str, Any]] | None = None
         self._non_final_calls = 0
 
     async def complete(self, messages, tools, *, final: bool = False):
         if final:
+            self.final_messages = [dict(m) for m in messages]
             return make_final('{"answer": "ok"}'), {}
         self._non_final_calls += 1
         if self._non_final_calls == 1:
@@ -253,6 +257,11 @@ async def test_current_turn_dispatch_is_visible_to_the_model_but_not_in_the_chec
     systems = [m for m in (model.first_messages or []) if m.get("role") == "system"]
     assert any("a-9" in str(m.get("content")) for m in systems), systems
     assert any("已经发生的事实" in str(m.get("content")) for m in systems), systems
+
+    # 收尾那一次也必须带同一份回执（2026-10-18 真机实测：只给非 final 拼，模型在
+    # 写结论的最后一步看不见"已派活"，于是派活成功后答复"我无法新增任务"）
+    final_systems = [m for m in (model.final_messages or []) if m.get("role") == "system"]
+    assert any("a-9" in str(m.get("content")) for m in final_systems), final_systems
 
     blob = json.dumps(platform.checkpoint_state(run_id), ensure_ascii=False)
     assert "start_meeting_analysis" not in blob, "规划相的事实不得进检查点"

@@ -139,7 +139,6 @@ class ProjectAccessContractTest extends ContractTestSupport {
             assertEquals(404, delete("/api/milestones/" + milestone.json().path("id").asText(), admin).status());
             assertEquals(1, selected(HttpMethod.GET, "/api/dashboard", admin, id, null).json().path("total").asInt());
         } finally {
-            jdbc.update("DELETE FROM task_logs WHERE project_id=?", id);
             jdbc.update("DELETE FROM tasks WHERE project_id=?", id);
             jdbc.update("DELETE FROM story_logs WHERE project_id=?", id);
             jdbc.update("DELETE FROM stories WHERE project_id=?", id);

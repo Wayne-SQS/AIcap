@@ -161,6 +161,38 @@ class FakePlatform:
             or {"run_id": f"run-{name}-1", "deduplicated": False, "status": "queued"}
         )
 
+    def add_read_only_tool(
+        self,
+        name: str,
+        *,
+        result: dict[str, Any] | None = None,
+        description: str = "只读工具",
+        agent: str = "meeting",
+        properties: dict[str, Any] | None = None,
+        required: tuple[str, ...] = (),
+    ) -> None:
+        """往 catalog 里添一枚**只读**工具（它不会变成路由）。
+
+        `list_meetings` 这类工具由编排层在规划相主动调用，所以它必须出现在 catalog 里
+        才会被 `plan()` 用到；`read_only=True` 也顺便证明"只读工具不会成为派活路由"。
+        """
+        schema: dict[str, Any] = {"type": "object", "properties": properties or {}}
+        if required:
+            schema["required"] = list(required)
+        self.extra_tools.append(
+            {
+                "name": name,
+                "agent": agent,
+                "description": description,
+                "args_schema": schema,
+                "args_hint": None,
+                "read_only": True,
+                "uses_retrieval": False,
+            }
+        )
+        payload = result if result is not None else {"items": []}
+        self.tools.setdefault(name, lambda arguments, _payload=payload: copy.deepcopy(_payload))
+
     # ------------------------------------------------------------------
     # 测试用的摆位工具
     # ------------------------------------------------------------------

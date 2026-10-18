@@ -241,12 +241,10 @@ public class TaskPoolController {
         for (String dep : deps)
             if (taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scoped).eq("code", dep)) == null)
                 throw ApiException.badRequest("前置任务不存在: " + dep);
-        int next = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scoped)).stream()
-                .map(Task::getId).filter(id -> id.matches("T\\d+"))
-                .mapToInt(id -> Integer.parseInt(id.substring(1))).max().orElse(0) + 1;
         Task task = new Task();
         task.setProjectId(scoped);
-        task.setId(String.format("T%02d", next));
+        // 编号分配与规划智能体的 CREATE_TASK 共用一处（IdAllocator），别再内联第二份
+        task.setId(idAllocator.nextTaskId(scoped));
         task.setName(name.value()); task.setOwnerId(owner.value()); task.setHours(hours.value());
         task.setEstimatedHours(hours.value()); task.setWeekStart(start.value()); task.setWeekEnd(end.value());
         task.setStoryRef(String.join(",", refs)); task.setDependsOn(String.join(",", deps));

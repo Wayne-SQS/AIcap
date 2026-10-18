@@ -33,7 +33,6 @@ TRUNCATE TABLE meeting_suggestion_records;
 TRUNCATE TABLE suggestions;
 TRUNCATE TABLE meetings;
 TRUNCATE TABLE story_logs;
-TRUNCATE TABLE task_logs;
 TRUNCATE TABLE tasks;
 TRUNCATE TABLE pool_items;
 TRUNCATE TABLE stories;

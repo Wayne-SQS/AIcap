@@ -156,6 +156,8 @@ public class PlanningAgentService {
     private String actionTarget(JsonNode action) {
         if (action.hasNonNull("task_id")) return action.path("task_id").asText();
         if (action.hasNonNull("milestone_id")) return action.path("milestone_id").asText();
+        // CREATE_TASK 还没有编号(执行时才分配),事件文案用任务名称
+        if (action.hasNonNull("name")) return action.path("name").asText();
         return action.path("story_id").asText();
     }
 

@@ -34,6 +34,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 平台工具调用的统一入口(S3)。
@@ -206,6 +207,9 @@ public class PlatformToolService {
         }
         if (PlatformToolCatalog.QUERY_AGENT_RUNS.equals(toolName)) {
             return queryAgentRuns(args, caller, projectId, started);
+        }
+        if (PlatformToolCatalog.GET_MEETING_ANALYSIS.equals(toolName)) {
+            return getMeetingAnalysis(args, projectId, started);
         }
         if (PlatformToolCatalog.START_MEETING_ANALYSIS.equals(toolName)) {
             return startMeetingAnalysis(args, bearerToken, started);
@@ -381,6 +385,139 @@ public class PlatformToolService {
             case "meeting_retro_analyses" -> MeetingType.RETRO;
             default -> MeetingType.REFINEMENT;
         };
+    }
+
+    /** 摘要返回的截断口径:转述够用,又不把上下文撑爆 */
+    private static final int DIGEST_SUMMARY_CHARS = 800;
+    private static final int DIGEST_FIELD_CHARS = 160;
+    private static final int DIGEST_MAX_PROPOSALS = 10;
+    private static final int DIGEST_MAX_QUESTIONS = 5;
+
+    /**
+     * 读取一次会议分析的**摘要**(契约 §2.4,只读)。
+     *
+     * <p>派活工具只回 {@code analysis_id} + {@code storage_status};用户问"结论是什么"时主管
+     * 需要现读一次产物。本方法只从 {@code meeting_*_analyses.result_json} 取结论性字段
+     * (summary / proposed_actions / open_questions / decisions)并做截断:
+     * **转写正文、原始 result_json、evidence 全文一律不回** —— 提案正文仍属审批界面。
+     *
+     * <p>项目隔离:分析属于哪场会议,就只在**该会议所在项目**内可见;与调用方项目不一致
+     * 一律 404(与会议域端点同一口径),"存在但你没权看"不单独暴露。
+     */
+    private ToolOutcome getMeetingAnalysis(JsonNode args, String projectId, long started) {
+        String tool = PlatformToolCatalog.GET_MEETING_ANALYSIS;
+        String analysisId = args.path("analysis_id").asText("").trim();
+        if (analysisId.isEmpty() || analysisId.length() > 80) {
+            return failure(tool, "invalid_arguments", "analysis_id 必填", started);
+        }
+        if (projectId == null || projectId.isBlank()) {
+            return failure(tool, "invalid_arguments", "project_id 必填", started);
+        }
+        for (String table : MEETING_ANALYSIS_TABLES) {
+            List<Map<String, Object>> rows = jdbc.queryForList(
+                    "SELECT id, meeting_id, status, created_at, result_json FROM " + table
+                            + " WHERE id = ? LIMIT 1", analysisId);
+            if (rows.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> row = rows.get(0);
+            String meetingId = row.get("meeting_id") == null ? null : String.valueOf(row.get("meeting_id"));
+            Meeting meeting = meetingId == null ? null : meetingMapper.selectById(meetingId);
+            if (meeting == null || !projectId.equals(ProjectAccessService.normalize(meeting.getProjectId()))) {
+                throw ApiException.notFound("分析记录不存在或无权查看");
+            }
+            return success(tool, meetingAnalysisDigest(table, analysisId, meeting, row), null, started);
+        }
+        throw ApiException.notFound("分析记录不存在或无权查看");
+    }
+
+    /** 把一条分析行的 {@code result_json} 压成"可转述"的摘要(不整包外传) */
+    private ObjectNode meetingAnalysisDigest(String table, String analysisId, Meeting meeting,
+                                             Map<String, Object> row) {
+        ObjectNode result = mapper.createObjectNode();
+        result.put("analysis_id", analysisId);
+        result.put("kind", meetingId2Type(table).wire());
+        result.put("meeting_id", meeting.getId());
+        result.put("meeting_title", meeting.getTitle());
+        putOrNull(result, "status", row.get("status") == null ? null : String.valueOf(row.get("status")));
+        java.sql.Timestamp created = (java.sql.Timestamp) row.get("created_at");
+        putOrNull(result, "created_at", created == null ? null : created.toLocalDateTime().toString());
+
+        JsonNode body = parseResultJson(row.get("result_json") == null ? null : String.valueOf(row.get("result_json")));
+        result.put("summary", truncate(body.path("summary").asText(""), DIGEST_SUMMARY_CHARS));
+
+        JsonNode actions = body.path("proposed_actions");
+        ArrayNode proposals = mapper.createArrayNode();
+        int proposalCount = 0;
+        if (actions.isArray()) {
+            proposalCount = actions.size();
+            for (JsonNode action : actions) {
+                if (proposals.size() >= DIGEST_MAX_PROPOSALS) break;
+                proposals.add(digestAction(action));
+            }
+        }
+        result.put("proposal_count", proposalCount);
+        result.set("proposals", proposals);
+
+        ArrayNode questions = mapper.createArrayNode();
+        JsonNode openQuestions = body.path("open_questions");
+        if (openQuestions.isArray()) {
+            for (JsonNode question : openQuestions) {
+                if (questions.size() >= DIGEST_MAX_QUESTIONS) break;
+                questions.add(truncate(question.isTextual() ? question.asText("") : question.toString(),
+                        DIGEST_FIELD_CHARS));
+            }
+        }
+        result.set("open_questions", questions);
+
+        JsonNode decisions = body.path("decisions");
+        if (decisions.isArray() && decisions.size() > 0) {
+            ArrayNode slim = mapper.createArrayNode();
+            for (JsonNode decision : decisions) {
+                if (slim.size() >= DIGEST_MAX_QUESTIONS) break;
+                slim.add(truncate(decision.isTextual() ? decision.asText("") : decision.toString(),
+                        DIGEST_FIELD_CHARS));
+            }
+            result.set("decisions", slim);
+        }
+        result.put("limitations", "摘要来自未审核的分析产物;提案需人工审核后才可能改业务数据。"
+                + "会议转写正文与证据全文不在本工具返回范围内。");
+        return result;
+    }
+
+    /** 单条提案只留"能转述"的字段:动作、理由、changes 里的标量(长文本截断) */
+    private ObjectNode digestAction(JsonNode action) {
+        ObjectNode item = mapper.createObjectNode();
+        item.put("proposal_id", action.path("proposal_id").asText(""));
+        item.put("action", action.path("action").asText(""));
+        item.put("reason", truncate(action.path("reason").asText(""), DIGEST_FIELD_CHARS));
+        JsonNode changes = action.path("changes");
+        if (changes.isObject()) {
+            ObjectNode slim = mapper.createObjectNode();
+            changes.fields().forEachRemaining(entry -> {
+                JsonNode value = entry.getValue();
+                if (value.isTextual()) {
+                    slim.put(entry.getKey(), truncate(value.asText(""), DIGEST_FIELD_CHARS));
+                } else if (value.isNumber() || value.isBoolean()) {
+                    slim.set(entry.getKey(), value);
+                }
+            });
+            item.set("changes", slim);
+        }
+        return item;
+    }
+
+    /** 解析 result_json;坏数据当空对象(如实给"没有摘要",不让一次坏行炸掉整次读取) */
+    private JsonNode parseResultJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return mapper.createObjectNode();
+        }
+        try {
+            return mapper.readTree(raw);
+        } catch (Exception e) {
+            log.warn("meeting analysis result_json 无法解析: {}", e.toString());
+            return mapper.createObjectNode();
+        }
     }
 
     /** 三域归一化后的 run 行,仅用于排序与组装,不外泄 */

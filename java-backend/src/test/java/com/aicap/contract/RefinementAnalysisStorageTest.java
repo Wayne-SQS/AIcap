@@ -59,7 +59,8 @@ class RefinementAnalysisStorageTest {
                     }
                     throw new UnsupportedOperationException(method.getName());
                 });
-            return new com.aicap.service.IdAllocator(stories,null);
+            // 第三个参数是任务编号分配用的 TaskMapper:本类只测故事/需求池编号,不需要任务映射
+            return new com.aicap.service.IdAllocator(stories,null,null);
         }
     }
     AnnotationConfigApplicationContext context;

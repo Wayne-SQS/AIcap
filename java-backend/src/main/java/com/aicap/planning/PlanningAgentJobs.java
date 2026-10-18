@@ -27,6 +27,7 @@ public class PlanningAgentJobs {
     private final PlanningAgentEventMapper events;
     private final PlanningAgentRunner runner;
     private final PlanningAgentTools tools;
+    private final com.aicap.mapper.UserMapper users;
     private final ModelClient client;
     private final LlmProperties props;
     private final ObjectMapper mapper;
@@ -141,7 +142,11 @@ public class PlanningAgentJobs {
         event(run, "running", "画图智能体开始读取项目数据并分析");
         try {
             client.setModelOverride(run.getModel());
-            ObjectNode result = runner.analyze(run.getProjectId(), run.getRequestText(), client,
+            // 发起人显示名喂给 prompt:新增任务未指定负责人时默认由发起人负责(查不到就传 null)
+            com.aicap.entity.User requester = run.getRequestedBy() == null
+                    ? null : users.selectById(run.getRequestedBy());
+            ObjectNode result = runner.analyze(run.getProjectId(), run.getRequestText(),
+                    requester == null ? null : requester.getDisplayName(), client,
                     (kind, detail) -> event(run, kind, detail));
             run.setResultJson(result.toString());
             event(run, "plan_generated", "已生成结构化修改方案");

@@ -86,8 +86,8 @@ onUnmounted(() => clearTimeout(timer))
         <div class="planning-plan">
           <div class="planning-plan-title"><b>{{ result.summary }}</b><span class="small">{{ actionCount }} 项修改</span></div>
           <p v-if="result.answer">{{ result.answer }}</p>
-          <div v-for="(a, index) in result.actions" :key="`${a.type}-${a.task_id || a.story_id || a.milestone_id || 'unknown'}-${index}`" class="planning-action">
-            <b>{{ a.task_id || a.story_id || a.milestone_id }}</b>
+          <div v-for="(a, index) in result.actions" :key="`${a.type}-${a.task_id || a.story_id || a.milestone_id || a.name || 'unknown'}-${index}`" class="planning-action">
+            <b>{{ a.type === 'CREATE_TASK' ? '新任务' : (a.task_id || a.story_id || a.milestone_id) }}</b>
             <template v-if="a.type === 'UPDATE_TASK_OWNER'"> · 负责人 {{ a.from_owner_name || a.from_owner_id }} → {{ a.to_owner_name || a.to_owner_id }}</template>
             <template v-else-if="a.type === 'UPDATE_TASK_SCHEDULE'"> · 排期 W{{ a.start_week }}-W{{ a.end_week }}</template>
             <template v-else-if="a.type === 'UPDATE_STORY_SPRINT'"> · Sprint {{ a.sprint }}</template>
@@ -95,6 +95,10 @@ onUnmounted(() => clearTimeout(timer))
             <template v-else-if="a.type === 'UPDATE_TASK_PRIORITY'"> · 优先级 {{ a.before_priority }} → {{ a.after_priority }}</template>
             <template v-else-if="a.type === 'CREATE_MILESTONE'"> · 新建里程碑 {{ a.name }} · W{{ a.week }} · 关联 {{ a.related_task_ids || '无' }}</template>
             <template v-else-if="a.type === 'UPDATE_MILESTONE'"> · 里程碑 {{ a.after_name || a.name }} · W{{ a.after_week || a.week }} · 关联 {{ a.after_related_task_ids || '无' }}</template>
+            <template v-else-if="a.type === 'CREATE_TASK'">
+              · 新建任务 {{ a.name }} · 负责人 {{ a.owner_name || a.owner_id }} · W{{ a.week_start }}-W{{ a.week_end }} · {{ a.hours }}h
+              <span v-if="a.story_ref"> · 关联 {{ a.story_ref }}</span>
+            </template>
           </div>
         </div>
         <div v-if="result.impacts?.length" class="planning-impacts"><b>影响对象</b><div v-for="(impact, index) in result.impacts" :key="index"><strong>{{ impact.entity }}</strong> · {{ impact.before }} → {{ impact.after }}<span v-if="impact.detail"> · {{ impact.detail }}</span></div></div>

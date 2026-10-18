@@ -7,7 +7,9 @@
       看事件。这就是为什么 `running` 是靠事件推进的,不是靠 HTTP 响应。
 
    2. **终局后不关流**。契约 §3.4#4 允许 `agent.report` 在 `run.end` 之后到达,
-      所以拿到 `done` 也不断开连接;`stream` 只在组件卸载/主动放弃时才 abort。
+      所以拿到 `done` 也不断开连接。流由 store 常驻持有:收起对话框、切页面、
+      卸载组件都**不** abort —— 对话在 AI 办公室里是常驻的,浮窗只是它的另一个
+      观察窗;只有 `resetSession`(换个话题)或 `send()` 换了会话时才断流重连。
 
    3. **seq 是唯一权威顺序**。事件可能重放+增量混着来;`timeline` 按 seq 排序而不是
       按到达顺序,这样断线重连后补来的历史事件会插到正确位置。 */
@@ -190,11 +192,6 @@ export const useSupervisorStore = defineStore('supervisor', {
       this.messages = []
       this.running = false
       this.notice = ''
-    },
-
-    closeStream() {
-      if (this.stream) this.stream.abort()
-      this.stream = null
     }
   }
 })

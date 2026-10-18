@@ -30,6 +30,8 @@ public class ProjectPlanningActionService {
     private final MilestoneMapper milestoneMapper;
     private final ProjectAccessService projectAccess;
     private final ProjectScopedResolver resolver;
+    private final IdAllocator idAllocator;
+    private final TaskStoryRelationService taskStoryRelations;
 
     @Transactional
     public Task updateTaskOwner(String projectId, String taskId, Integer ownerId, User actor) {
@@ -105,6 +107,69 @@ public class ProjectPlanningActionService {
         if (!current.equals(before)) throw ApiException.conflict("任务优先级已发生变化，请重新生成规划");
         if (!Set.of("Must", "Should", "Could").contains(after)) throw ApiException.badRequest("任务优先级必须是 Must/Should/Could");
         task.setPriority(after); taskMapper.updateById(task); return task;
+    }
+
+    /**
+     * 新增任务(规划智能体 {@code CREATE_TASK} 与手工新增共用的业务动作)。
+     *
+     * <p>校验口径与 {@code TaskPoolController#createTask} 对齐:名称 → 负责人存在且是项目成员
+     * → 工时 0..999 → 周次 W1-W6 → 优先级/类型枚举 → 关联故事存在 → 前置任务存在且不早于其结束周。
+     * **编号分配走 {@link IdAllocator#nextTaskId}**,不要再在这里内联一份"扫最大值 + 1"。
+     *
+     * <p>任务类型默认 {@code feature};没有关联故事时调用方应显式给 {@code management}
+     * (与手工新增"管理类任务不挂看板卡"的口径一致)。看板卡由人工在 UI 里挂,Agent 不猜。
+     */
+    @Transactional
+    public Task createTask(String projectId, String name, Integer ownerId, Integer hours,
+                           Integer weekStart, Integer weekEnd, String priority, String taskType,
+                           String storyRef, String dependsOn, User actor) {
+        requireWriter(actor);
+        String scopedProjectId = ProjectAccessService.normalize(projectId);
+        projectAccess.requireWriter(scopedProjectId);
+        if (name == null || name.isBlank()) throw ApiException.badRequest("任务名称不能为空");
+        if (name.trim().length() > 200) throw ApiException.unprocessable("任务名称不能超过 200 字");
+        if (ownerId == null) throw ApiException.unprocessable("负责人必填");
+        if (userMapper.selectById(ownerId) == null) throw ApiException.badRequest("负责人不存在");
+        projectAccess.requireProjectMember(scopedProjectId, ownerId);
+        if (hours == null || hours < 0 || hours > 999) throw ApiException.unprocessable("工时必须在 0..999 之间");
+        if (weekStart == null || weekEnd == null || weekStart < 1 || weekEnd > 6 || weekStart > weekEnd) {
+            throw ApiException.badRequest("任务排期必须在 W1-W6 且开始周不能晚于结束周");
+        }
+        String type = (taskType == null || taskType.isBlank()) ? "feature" : taskType.trim();
+        if (!Set.of("feature", "management").contains(type)) throw ApiException.unprocessable("task_type 仅支持 feature/management");
+        String level = (priority == null || priority.isBlank()) ? "Should" : priority.trim();
+        if (!Set.of("Must", "Should", "Could").contains(level)) throw ApiException.unprocessable("任务优先级必须是 Must/Should/Could");
+        String refs = normalize(storyRef);
+        for (String ref : csv(refs)) {
+            if (resolver.findStory(scopedProjectId, ref) == null) throw ApiException.badRequest("关联故事不存在: " + ref);
+        }
+        String deps = normalize(dependsOn);
+        for (String dep : csv(deps)) {
+            Task predecessor = resolver.findTask(scopedProjectId, dep);
+            if (predecessor == null) throw ApiException.badRequest("前置任务不存在: " + dep);
+            if (predecessor.getWeekEnd() != null && predecessor.getWeekEnd() > weekStart) {
+                throw ApiException.badRequest("任务不能早于前置任务 " + predecessor.getId() + " 结束");
+            }
+        }
+        Task task = new Task();
+        task.setProjectId(scopedProjectId);
+        task.setId(idAllocator.nextTaskId(scopedProjectId));
+        task.setName(name.trim());
+        task.setOwnerId(ownerId);
+        task.setHours(hours);
+        task.setEstimatedHours(hours);
+        task.setWeekStart(weekStart);
+        task.setWeekEnd(weekEnd);
+        task.setStoryRef(refs.isBlank() ? null : refs);
+        task.setDependsOn(deps.isBlank() ? null : deps);
+        task.setTaskType(type);
+        task.setPriority(level);
+        task.setStatus(0);
+        task.setProgress(0);
+        task.setBlocked(0);
+        taskMapper.insert(task);
+        taskStoryRelations.replaceRelations(scopedProjectId, task, task.getStoryRef());
+        return task;
     }
 
     @Transactional

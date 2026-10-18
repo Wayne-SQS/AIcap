@@ -574,3 +574,107 @@ async def test_plan_with_injected_catalog_skips_the_extra_round_trip():
 
     assert decision.route == MEETING_ROUTE
     assert len(platform.trace) == before
+
+
+# ==========================================================================
+# 会议指代解析（2026-10-18）：list_meetings + resolve_meeting_reference
+# ==========================================================================
+#
+# 真机实测的问题：「分析最近一场站会」被反复追问 meeting_id —— plan() 规划相不调工具，
+# 而相对指代必须查一次列表才能落成具体 id。这里的用例钉三件事：
+# ① 纯函数把"最近/标题点名/类型关键词"确定性映射成 args；② plan() 只在必要时发那次
+# 只读调用；③ 解析不出来时反问换成本项目真实的会议标题，一场都没有时明说"先去保存"。
+
+MEETINGS = [
+    {"id": "mt-new", "title": "站会 2026-10-18", "created_at": "2026-10-18T09:00:00"},
+    {"id": "mt-old", "title": "Sprint2 规划会 · 真实调用验证", "created_at": "2026-09-13T09:40:39"},
+]
+
+
+def _platform_with_meetings(rows=None) -> FakePlatform:
+    platform = FakePlatform()
+    platform.add_read_only_tool(
+        "list_meetings",
+        result={"items": list(rows if rows is not None else MEETINGS), "truncated": False},
+        required=("project_id",),
+    )
+    return platform
+
+
+async def plan_with_project(platform: FakePlatform, model, utterance: str, project_id: str = "P001") -> Plan:
+    async with JavaClient(BASE, transport=platform.transport()) as client:
+        return await plan(utterance, TOKEN, model=model, client=client, project_id=project_id)
+
+
+def test_infer_meeting_type_maps_keywords_and_refuses_unknown():
+    assert orchestrator.infer_meeting_type("分析最近一场站会") == "daily_scrum"
+    assert orchestrator.infer_meeting_type("看看规划会") == "sprint_planning"
+    assert orchestrator.infer_meeting_type("回顾一下") == "sprint_retrospective"
+    assert orchestrator.infer_meeting_type("帮我梳理一下需求") == "backlog_refinement"
+    assert orchestrator.infer_meeting_type("随便聊聊") is None
+
+
+def test_resolve_meeting_reference_prefers_title_then_recency():
+    proposal = {"route": MEETING_ROUTE, "args": {}}
+
+    by_title, chosen = orchestrator.resolve_meeting_reference(
+        "分析《Sprint2 规划会 · 真实调用验证》", MEETINGS, proposal
+    )
+    assert chosen is not None and by_title["args"]["meeting_id"] == "mt-old"
+    assert by_title["args"]["meeting_type"] == "sprint_planning"
+
+    by_recency, chosen = orchestrator.resolve_meeting_reference("分析最近一场站会", MEETINGS, proposal)
+    assert chosen is not None and by_recency["args"]["meeting_id"] == "mt-new"
+    assert by_recency["args"]["meeting_type"] == "daily_scrum"
+
+    ambiguous, chosen = orchestrator.resolve_meeting_reference("分析一下会议", MEETINGS, proposal)
+    assert chosen is None and "meeting_id" not in ambiguous["args"]
+
+
+def test_resolve_meeting_reference_never_overwrites_model_id():
+    proposal = {"route": MEETING_ROUTE, "args": {"meeting_id": "m-1"}}
+    resolved, chosen = orchestrator.resolve_meeting_reference("分析最近一场", MEETINGS, proposal)
+    assert resolved["args"]["meeting_id"] == "m-1" and chosen is None
+
+
+def test_non_meeting_route_is_left_alone():
+    proposal = {"route": PLAN_DRAFT_ROUTE, "args": {}}
+    resolved, chosen = orchestrator.resolve_meeting_reference("分析最近一场站会", MEETINGS, proposal)
+    assert resolved == proposal and chosen is None
+
+
+async def test_plan_resolves_latest_meeting_without_asking():
+    platform = _platform_with_meetings()
+    model = ScriptedModel(plan_reply(args={}))  # 模型没给 meeting_id
+    decision = await plan_with_project(platform, model, "分析最近一场站会")
+    assert decision.route == MEETING_ROUTE
+    assert decision.args == {"meeting_id": "mt-new", "meeting_type": "daily_scrum"}
+    assert decision.clarify is None
+    assert any(call["name"] == "list_meetings" for call in platform.calls)
+
+
+async def test_plan_never_calls_list_meetings_when_id_already_given():
+    platform = _platform_with_meetings()
+    model = ScriptedModel(plan_reply())  # 默认带 meeting_id=m-1
+    decision = await plan_with_project(platform, model, "分析会议 m-1")
+    assert decision.route == MEETING_ROUTE
+    assert not any(call["name"] == "list_meetings" for call in platform.calls)
+
+
+async def test_plan_says_no_meetings_exist_instead_of_asking_for_an_id():
+    platform = _platform_with_meetings([])
+    model = ScriptedModel(plan_reply(route=MEETING_ROUTE, args={"meeting_id": ""}, confidence=0.9))
+    decision = await plan_with_project(platform, model, "分析最近一场站会")
+    assert decision.route is None
+    assert decision.clarify is not None
+    assert "还没有已保存的会议" in decision.clarify["question"]
+
+
+async def test_plan_offers_real_titles_when_it_cannot_tell_which_meeting():
+    platform = _platform_with_meetings()
+    model = ScriptedModel(plan_reply(route=MEETING_ROUTE, args={"meeting_id": ""}, confidence=0.9))
+    decision = await plan_with_project(platform, model, "分析一下会议")
+    assert decision.route is None
+    assert decision.clarify is not None
+    assert decision.clarify["question"] == "要分析哪一场会议？"
+    assert any("站会 2026-10-18" in option for option in decision.clarify["options"])

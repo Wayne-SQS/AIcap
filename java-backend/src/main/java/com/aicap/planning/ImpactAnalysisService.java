@@ -124,6 +124,8 @@ public class ImpactAnalysisService {
                 }
             } else if ("CREATE_MILESTONE".equals(type)) {
                 checkMilestoneTasks(projectId, csvValue(action.get("related_task_ids"), ""), intValue(action, "week", -1), delay, sprint, future);
+            } else if ("CREATE_TASK".equals(type)) {
+                checkNewTask(projectId, action, load, beforeLoads, afterLoads, sprint);
             } else if ("UPDATE_MILESTONE".equals(type)) {
                 int week = intValue(action, "after_week", -1);
                 String related = csvValue(action.get("after_related_task_ids"), "");
@@ -140,6 +142,52 @@ public class ImpactAnalysisService {
         report.set("delayRisk", delay);
         report.set("futureTaskImpact", future);
         return report;
+    }
+
+    /** 新增任务的负载与 Sprint 一致性:把新任务按周摊进负责人的 after 负载,再比周容量。 */
+    private void checkNewTask(String projectId, ObjectNode action, ArrayNode load,
+                              Map<Integer, int[]> beforeLoads, Map<Integer, int[]> afterLoads,
+                              ArrayNode sprint) {
+        int ownerId = intValue(action, "owner_id", -1);
+        int start = intValue(action, "week_start", 1);
+        int end = intValue(action, "week_end", start);
+        int hours = intValue(action, "hours", 0);
+        String name = action.path("name").asText("新任务");
+        if (start < 1 || end > 6 || start > end) return;
+        if (ownerId > 0) {
+            int[] before = beforeLoads.getOrDefault(ownerId, new int[6]);
+            int[] after = afterLoads.computeIfAbsent(ownerId, ignored -> before.clone());
+            int count = Math.max(1, end - start + 1);
+            int base = hours / count;
+            int remainder = hours % count;
+            for (int week = start; week <= end; week++) {
+                after[week - 1] += base + (week - start < remainder ? 1 : 0);
+            }
+            User owner = users.selectById(ownerId);
+            if (owner != null) {
+                double weeklyCapacity = projectAccess.weeklyCapacity(projectId, ownerId);
+                for (int week = 0; week < 6; week++) {
+                    if (after[week] > weeklyCapacity) {
+                        addRisk(load, "high", name, owner.getDisplayName() + " W" + (week + 1)
+                                + "：新增后 " + after[week] + "h，周容量 "
+                                + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
+                    }
+                }
+                if (sum(before) != sum(after)) {
+                    addRisk(load, "info", name, "成员 " + owner.getDisplayName() + " 总工时 "
+                            + sum(before) + "h → " + sum(after) + "h");
+                }
+            }
+        }
+        Set<Integer> sprints = new HashSet<>();
+        for (int week = start; week <= end; week++) sprints.add((week + 1) / 2);
+        for (String ref : refs(csvValue(action.get("story_ref"), ""))) {
+            Story story = resolver.findStory(projectId, ref);
+            if (story != null && story.getSprint() != null && !sprints.contains(story.getSprint())) {
+                addRisk(sprint, "info", name, name + " 的执行周 W" + start + "-W" + end
+                        + " 与 " + story.getId() + " 的 Sprint" + story.getSprint() + " 不一致");
+            }
+        }
     }
 
     private void checkDependencies(String projectId, Task task, int start, int end, ArrayNode dependency, ArrayNode future) {
