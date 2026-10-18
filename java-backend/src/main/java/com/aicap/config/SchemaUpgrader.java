@@ -62,6 +62,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             {"weekly_capacity_hours", "`weekly_capacity_hours` int DEFAULT NULL"},
     };
 
+    private static final String[][] STORY_LOG_COLUMNS = {
+            {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
+            {"story_code_snapshot", "`story_code_snapshot` varchar(20) DEFAULT NULL"},
+    };
+
     private static final String[][] KNOWLEDGE_CHUNK_COLUMNS = {
             {"embedding_model", "`embedding_model` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
             {"acl_rank", "`acl_rank` int DEFAULT NULL"},
@@ -72,6 +77,7 @@ public class SchemaUpgrader implements ApplicationRunner {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
             migrateProjects(conn);
+            added.addAll(migrateStoryLogs(conn));
             execute(conn, "CREATE TABLE IF NOT EXISTS roles (name varchar(50) NOT NULL, can_write tinyint(1) NOT NULL DEFAULT 0, can_manage tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY(name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             execute(conn, "CREATE TABLE IF NOT EXISTS epics (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, name varchar(100) NOT NULL, description varchar(500) NOT NULL DEFAULT '', created_at datetime NOT NULL, PRIMARY KEY(id), KEY ix_epics_project(project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             if (tableExists(conn, "stories")) {
@@ -121,6 +127,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             // 列缺失会让后续播种与接口静默出错,因此启动即失败,不做降级
             throw new IllegalStateException("存量库列迁移失败: " + e.getMessage(), e);
         }
+    }
+
+    Set<String> migrateStoryLogs(Connection conn) throws SQLException {
+        if (!tableExists(conn, "story_logs")) return Set.of();
+        return addMissing(conn, "story_logs", STORY_LOG_COLUMNS);
     }
 
     /** 多项目平滑迁移：保留现有正式项目，不再重建已物理删除的历史 P001。 */
