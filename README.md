@@ -234,8 +234,14 @@ java -jar target\aicap-java-backend.jar
 | `GITHUB_ENABLED` | 是 | `true` 开启同步 |
 | `GITHUB_REPO` | 是 | 仓库名,格式 `owner/repo` |
 | `GITHUB_TOKEN` | 是 | Personal Access Token(fine-grained PAT 需仓库 Contents:Read / Pull requests:Read 等只读权限;**不要把 token 提交进仓库**) |
+| `GITHUB_PROJECT_ID` | 否 | 单仓库部署的显式项目归属(如 `P002`)。仅当同步仓库 == `GITHUB_REPO` 时生效,`repository-project-mapping` 优先;多项目场景不要设 |
 | `GITHUB_USER_MAPPING` | 是 | GitHub 用户名 → 系统成员真名 的 JSON 映射 |
 | `GITHUB_AUTO_SYNC_HOURS` | 否 | `0`(默认)= 不启用定时同步,只靠成员动作触发 |
+
+> **令牌失效可自检**:`GET /api/profile-agent/github/status` 会真实探测一次 `GET /repos/{repo}`(缓存 5 分钟),返回
+> `token.state` = `ok` / `invalid` / `no_access` / `forbidden` / `unreachable` + `message`。状态异常时前端同步区亮红点并给出重新生成提示,不用等同步失败才发现。
+>
+> 变量清单模板见根目录 `.env.example`(**只含变量名与说明,不含任何真实值**);`.env` 与 `java-backend/.env` 已被 `.gitignore` 忽略。
 
 ## 4.3 同步机制与边界
 
@@ -251,7 +257,9 @@ java -jar target\aicap-java-backend.jar
 
 ## 4.5 安全须知
 
-- API Key 与 GitHub Token **一律走环境变量**;`.gitignore` 已忽略 `backend/.env` 与运行产物,不要把密钥写进任何 `.md/.bat/.vue/.java` 后提交。
+- API Key 与 GitHub Token **一律走环境变量**;`.gitignore` 已忽略 `.env`(任意层级)、`backend/.env`、`deploy/.env` 与运行产物,只提交 `.env.example` 模板。不要把密钥写进任何 `.md/.bat/.vue/.java` 后提交。
+- 本仓库是**公开仓库**:密钥一旦进入 git 历史,后续提交删除也无效(`git log -S` 仍可捞回),唯一补救是立刻到平台吊销重发。仓库里出现过 `github_pat_...` 字样的地方全部是文档占位示例,不含真值。
+- Token 建议设 90 天有效期并记录到期日;过期后上面 §4.2 的 `token.state` 会直接报 `invalid`,不需要靠同步失败排查。
 - 同步与写入口对 `Roles.writer()`(管理员/负责人/成员)开放,只读查看者不可见也不可调用(403)。
 - 送审建议进入「审核中心」,**人工审核通过才会执行**,LLM 只提出建议不直接改数据。
 
