@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS `stories` (
   `internal_id` bigint NOT NULL AUTO_INCREMENT,
   `project_id` varchar(20) NOT NULL,
   `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '旧业务主键,多项目改造后降级为普通可空列(存量库保留)',
   `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `role` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `internal_id` bigint NOT NULL AUTO_INCREMENT,
   `project_id` varchar(20) NOT NULL,
   `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '旧业务主键,多项目改造后降级为普通可空列(存量库保留)',
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `owner_id` int NOT NULL,
   `hours` int NOT NULL,
@@ -229,6 +231,36 @@ CREATE TABLE IF NOT EXISTS `story_logs` (
   `user_id` int DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 任务状态变更历史:GET /api/tasks/{code}/history 的数据来源。
+-- 只记录状态迁移(old_status=NULL 表示创建),与 story_logs 的「审计日志」定位区分开。
+CREATE TABLE IF NOT EXISTS `task_logs` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) NOT NULL,
+  `task_id` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `old_status` int DEFAULT NULL,
+  `new_status` int NOT NULL,
+  `user_id` int NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_task_logs_project_task` (`project_id`,`task_id`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 审批队列影子索引(ReviewQueueShadowIndexService):跨域待办的只读索引。
+-- 唯一键与 ON DUPLICATE KEY UPDATE 的语义保持一致:(source, analysis_id, proposal_index)。
+-- 注:此前只在开发库里手工建过,全新库会因 reset_test_data.sql 的 TRUNCATE 直接失败。
+CREATE TABLE IF NOT EXISTS `review_queue_proposals` (
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `analysis_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `proposal_index` int NOT NULL,
+  `meeting_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `proposal_id` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime NOT NULL,
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `execution_status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`source`,`analysis_id`,`proposal_index`),
+  KEY `ix_review_queue_proposals_meeting` (`meeting_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 成员画像(1:1 users):技术栈 / 工作能力 / 熟悉的开发流程领域,均存 JSON 数组文本
@@ -445,6 +477,7 @@ CREATE TABLE IF NOT EXISTS `milestones` (
   `internal_id` bigint NOT NULL AUTO_INCREMENT,
   `project_id` varchar(20) NOT NULL,
   `code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '旧业务主键,多项目改造后降级为普通可空列(存量库保留)',
   `name` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
   `week` int NOT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',

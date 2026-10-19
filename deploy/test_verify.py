@@ -131,6 +131,15 @@ class ComposeStructureTests(unittest.TestCase):
         self.assertNotEqual(self.compose, weakened)
         self.assertComposeFails(weakened, 'compose_env_not_fail_closed:DB_PASSWORD')
 
+    def test_optional_orchestrator_key_does_not_reopen_required_services(self):
+        # 编排层刻意允许 AICAP_LLM_API_KEY=${...:-}(无模型也能起并如实降级);
+        # 但必需服务(java/ai)里任何一处变成 :- 仍必须被拦住。
+        weakened = self.compose.replace(
+            'AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:?set AICAP_LLM_API_KEY in deploy/.env}',
+            'AICAP_LLM_API_KEY: ${AICAP_LLM_API_KEY:-}', 1)
+        self.assertNotEqual(self.compose, weakened)
+        self.assertComposeFails(weakened, 'compose_env_not_fail_closed:AICAP_LLM_API_KEY')
+
     def test_seed_switch_defaulting_to_true_is_rejected(self):
         weakened = self.compose.replace('${AICAP_SEED_ON_START:-false}',
                                         '${AICAP_SEED_ON_START:-true}')
@@ -174,7 +183,10 @@ class ComposeStructureTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 code = verify.main(['--env-file', str(env), '--model-root', str(models)])
             self.assertEqual(0, code)
-            self.assertIn('nginx_sse_not_configured', output.getvalue())
+            # nginx 现已配置 SSE(proxy_buffering off / X-Accel-Buffering),
+            # 所以本次 main() 应直接通过;gap 的"只报告不失败"由
+            # test_nginx_sse_settings_are_a_reported_gap_never_a_failure 单独钉住。
+            self.assertIn('Deployment verification passed', output.getvalue())
 
 
 if __name__ == '__main__':

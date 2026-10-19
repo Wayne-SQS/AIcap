@@ -123,10 +123,14 @@ def verify_compose(text: str) -> None:
             raise VerificationError(f'compose_service_missing:{service}')
         if not re.search(r'^[ ]+healthcheck:', services[service], re.M):
             raise VerificationError(f'compose_healthcheck_missing:{service}')
+    # 只约束"没有它起不来"的服务(mysql/java/ai)。agent-orchestrator 刻意允许
+    # AICAP_LLM_API_KEY=${...:-}(没有模型也能起,并如实上报 llm_configured=false);
+    # 把规则套到整份文件,会把这条有意设计误判成"弱默认值回潮"。
+    required = '\n'.join(services[service] for service in COMPOSE_SERVICES)
     for key in FAIL_CLOSED_ENV:
-        # Every occurrence must be fail-closed: a single `${VAR:-default}` anywhere
-        # (DB_PASSWORD is used by two services) silently reopens the weak default.
-        if not re.search(rf'\$\{{{key}:\?', text) or re.search(rf'\$\{{{key}:-', text):
+        # 必需服务里每一处都必须 fail-closed:一处 `${VAR:-default}` 就会重新打开弱默认值
+        # (DB_PASSWORD 在 mysql 与 java 各出现一次)。
+        if not re.search(rf'\$\{{{key}:\?', required) or re.search(rf'\$\{{{key}:-', required):
             raise VerificationError(f'compose_env_not_fail_closed:{key}')
     if re.search(rf'^[ ]*{SEED_SWITCH}:[ ]*["\']?true["\']?[ ]*$', text, re.M):
         raise VerificationError('compose_seed_default_true')

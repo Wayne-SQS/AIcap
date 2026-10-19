@@ -4,17 +4,20 @@ import com.aicap.planning.PlanningAgentTools;
 import com.aicap.planning.ImpactAnalysisService;
 import com.aicap.planning.PlanningAnalysisValidator;
 import com.aicap.planning.PlanningAgentRunner;
-import com.aicap.planning.PlanningAgentService;
 import com.aicap.llm.ModelClient;
 import com.aicap.entity.PlanningAgentRun;
+import com.aicap.entity.Task;
 import com.aicap.mapper.PlanningAgentRunMapper;
 import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -36,11 +39,11 @@ class StoryGapFixContractTest extends ContractTestSupport {
     @Autowired private ImpactAnalysisService impactAnalysisService;
     @Autowired private PlanningAnalysisValidator planningValidator;
     @Autowired private PlanningAgentRunner planningRunner;
-    @Autowired private PlanningAgentService planningService;
     @Autowired private PlanningAgentRunMapper planningRuns;
     @Autowired private TaskMapper taskMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private JdbcTemplate jdbc;
 
     @Test
     void epicCanBeMaintainedAndStoryKeepsItsProjectScopedAssignment() {
@@ -141,17 +144,23 @@ class StoryGapFixContractTest extends ContractTestSupport {
         }
     }
 
+    /**
+     * 容量口径(多项目改造后):用户 capacity_hours 是「六周总容量」的历史字段,
+     * 每周容量以 project_members.weekly_capacity_hours 为准(成员页/规划校验同一口径)。
+     * 本用例验证 0 周容量既能写入、也能被工具与影响分析读到。
+     */
     @Test
     void zeroCapacityIsWritableAndReadable() throws Exception {
         String admin = token(USER_ADMIN);
         int previous = get("/api/auth/users", admin).json().get(0).path("capacity_hours").asInt();
+        Integer previousWeekly = memberWeeklyCapacity(admin, PROJECT_ID, 1);
         try {
             assertEquals(403, patch("/api/auth/users/1", token(USER_VIEWER), json(map("capacity_hours", 0))).status());
             assertEquals(200, patch("/api/auth/users/1", admin, json(map("capacity_hours", 0))).status());
             assertEquals(0, get("/api/auth/users", admin).json().get(0).path("capacity_hours").asInt());
-            assertEquals(0, planningAgentTools.execute("P002", "get_member_load",
-                    objectMapper.createObjectNode().put("owner_id", 1)).path("capacity_hours").asInt());
-            assertEquals(0.0, planningAgentTools.execute("P002", "get_member_load",
+            putWeeklyCapacity(admin, PROJECT_ID, 1, 0);
+            assertEquals(0, memberWeeklyCapacity(admin, PROJECT_ID, 1));
+            assertEquals(0.0, planningAgentTools.execute(PROJECT_ID, "get_member_load",
                     objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").asDouble());
             JsonNode profile = get("/api/profile-agent/analysis?start=2026-08-25&end=2026-09-15", admin).json();
             boolean checkedProfile = false;
@@ -167,35 +176,40 @@ class StoryGapFixContractTest extends ContractTestSupport {
             var plan = objectMapper.createObjectNode();
             plan.putArray("actions").addObject().put("type", "UPDATE_TASK_OWNER")
                     .put("task_id", otherTask).put("to_owner_id", 1);
-            assertTrue(impactAnalysisService.analyze(plan).toString().contains("周容量 0.0h"));
-            assertEquals(200, patch("/api/auth/users/1", admin, "{\"capacity_hours\":null}").status());
-            assertTrue(get("/api/auth/users", admin).json().get(0).path("capacity_hours").isNull());
-            assertTrue(planningAgentTools.execute("P002", "get_member_load",
-                    objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").isNull());
-            assertTrue(impactAnalysisService.analyze(plan).toString().contains("周容量未配置"));
+            assertTrue(impactAnalysisService.analyze(PROJECT_ID, plan).toString().contains("周容量 0.0h"));
+            // 现行用户容量接口只接受 0..10000 的整数,null 由项目成员的 weekly_capacity_hours 表达
+            assertEquals(422, patch("/api/auth/users/1", admin, "{\"capacity_hours\":null}").status());
         } finally {
             assertEquals(200, patch("/api/auth/users/1", admin, json(map("capacity_hours", previous))).status());
+            putWeeklyCapacity(admin, PROJECT_ID, 1, previousWeekly);
         }
     }
 
+    /** 成员页与规划校验读同一个周容量:显式 10h/周时两边都必须是 10。 */
     @Test
     void aiPlanningChecksTheSameWeeklyCapacityAsMemberPage() throws Exception {
         String admin = token(USER_ADMIN);
+        Integer previousWeekly = memberWeeklyCapacity(admin, PROJECT_ID, 1);
         String otherTask = null;
         for (JsonNode task : get("/api/tasks", admin).json())
             if (task.path("owner_id").asInt() != 1) { otherTask = task.path("id").asText(); break; }
         assertNotNull(otherTask);
-        var plan = objectMapper.createObjectNode().put("summary", "核对容量");
-        plan.putArray("actions").addObject().put("type", "UPDATE_TASK_OWNER")
-                .put("task_id", otherTask).put("to_owner_id", 1);
-        JsonNode validated = planningValidator.validate(plan.toString());
-        assertTrue(validated.path("warnings").toString().contains("周容量 10.0h"), validated.toString());
-        assertEquals(10.0, planningAgentTools.execute("P002", "get_member_load",
-                objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").asDouble());
+        try {
+            putWeeklyCapacity(admin, PROJECT_ID, 1, 10);
+            assertEquals(10, memberWeeklyCapacity(admin, PROJECT_ID, 1));
+            var plan = objectMapper.createObjectNode().put("summary", "核对容量");
+            plan.putArray("actions").addObject().put("type", "UPDATE_TASK_OWNER")
+                    .put("task_id", otherTask).put("to_owner_id", 1);
+            JsonNode validated = planningValidator.validate(PROJECT_ID, plan.toString());
+            assertTrue(validated.path("warnings").toString().contains("周容量 10.0h"), validated.toString());
+            assertEquals(10.0, planningAgentTools.execute(PROJECT_ID, "get_member_load",
+                    objectMapper.createObjectNode().put("owner_id", 1)).path("weekly_capacity_hours").asDouble());
+        } finally {
+            putWeeklyCapacity(admin, PROJECT_ID, 1, previousWeekly);
+        }
     }
 
     @Test
-    @Transactional
     void planningAgentReadsWeeklyCapacityBeforeProposingAnOverloadedAssignment() throws Exception {
         String admin = token(USER_ADMIN);
         JsonNode chosen = null;
@@ -204,51 +218,87 @@ class StoryGapFixContractTest extends ContractTestSupport {
         assertNotNull(chosen);
         String taskId = chosen.path("id").asText();
         int originalOwner = chosen.path("owner_id").asInt();
+        Integer previousWeekly = memberWeeklyCapacity(admin, PROJECT_ID, 1);
+        String runId = null;
+        try {
+            putWeeklyCapacity(admin, PROJECT_ID, 1, 10);
 
-        ModelClient client = mock(ModelClient.class);
-        var toolCall = objectMapper.createObjectNode().put("role", "assistant");
-        toolCall.putArray("tool_calls").addObject().put("id", "capacity-read")
-                .putObject("function").put("name", "get_member_load")
-                .put("arguments", "{\"owner_id\":1}");
-        var noTools = objectMapper.createObjectNode().put("role", "assistant").put("content", "已读取容量");
-        var result = objectMapper.createObjectNode().put("summary", "调整负责人");
-        result.putArray("actions").addObject().put("type", "UPDATE_TASK_OWNER")
-                .put("task_id", taskId).put("to_owner_id", 1);
-        var finalMessage = objectMapper.createObjectNode().put("role", "assistant")
-                .put("content", result.toString());
-        assertEquals("get_member_load", toolCall.at("/tool_calls/0/function/name").asText());
-        var rounds = new java.util.concurrent.atomic.AtomicInteger();
-        doAnswer(invocation -> new ModelClient.Completion(
-                invocation.getArgument(2, Boolean.class) ? finalMessage
-                        : rounds.getAndIncrement() == 0 ? toolCall : noTools,
-                java.util.Map.of())).when(client).complete(anyList(), anyList(), anyBoolean());
+            ModelClient client = mock(ModelClient.class);
+            var toolCall = objectMapper.createObjectNode().put("role", "assistant");
+            toolCall.putArray("tool_calls").addObject().put("id", "capacity-read")
+                    .putObject("function").put("name", "get_member_load")
+                    .put("arguments", "{\"owner_id\":1}");
+            var noTools = objectMapper.createObjectNode().put("role", "assistant").put("content", "已读取容量");
+            var result = objectMapper.createObjectNode().put("summary", "调整负责人");
+            result.putArray("actions").addObject().put("type", "UPDATE_TASK_OWNER")
+                    .put("task_id", taskId).put("to_owner_id", 1);
+            var finalMessage = objectMapper.createObjectNode().put("role", "assistant")
+                    .put("content", result.toString());
+            assertEquals("get_member_load", toolCall.at("/tool_calls/0/function/name").asText());
+            var rounds = new java.util.concurrent.atomic.AtomicInteger();
+            doAnswer(invocation -> new ModelClient.Completion(
+                    invocation.getArgument(2, Boolean.class) ? finalMessage
+                            : rounds.getAndIncrement() == 0 ? toolCall : noTools,
+                    java.util.Map.of())).when(client).complete(anyList(), anyList(), anyBoolean());
 
-        var plan = planningRunner.analyze("把任务分配给管理员并核对容量", client);
-        assertTrue(plan.path("requires_confirmation").asBoolean(), plan.toString());
-        assertTrue(plan.path("warnings").toString().contains("周容量 10.0h"), plan.toString());
-        assertEquals(originalOwner, taskOwner(admin, taskId));
+            var plan = planningRunner.analyze(PROJECT_ID, "把任务分配给管理员并核对容量", client);
+            assertTrue(plan.path("requires_confirmation").asBoolean(), plan.toString());
+            assertTrue(plan.path("warnings").toString().contains("周容量 10.0h"), plan.toString());
+            assertEquals(originalOwner, taskOwner(admin, taskId));
 
-        var messages = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
-        verify(client).complete(messages.capture(), anyList(), eq(true));
-        assertTrue(messages.getValue().stream().anyMatch(message ->
-                message.toString().contains("weekly_capacity_hours") && message.toString().contains("10.0")),
-                messages.getValue().toString());
+            var messages = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+            verify(client).complete(messages.capture(), anyList(), eq(true));
+            assertTrue(messages.getValue().stream().anyMatch(message ->
+                    message.toString().contains("weekly_capacity_hours") && message.toString().contains("10.0")),
+                    messages.getValue().toString());
 
-        var run = new PlanningAgentRun();
-        run.setId(UUID.randomUUID().toString());
-        run.setRequestedBy(1);
-        run.setRequestText("把任务分配给管理员并核对容量");
-        run.setStatus("waiting_confirmation");
-        run.setAttempt(1);
-        run.setModel("fixture");
-        run.setPromptVersion("planning-owner-v1");
-        run.setResultJson(plan.toString());
-        run.setCreatedAt(LocalDateTime.now());
-        run.setUpdatedAt(LocalDateTime.now());
-        planningRuns.insert(run);
-        assertEquals(originalOwner, taskMapper.selectById(taskId).getOwnerId());
-        assertEquals("completed", planningService.confirm(run.getId(), userMapper.selectById(1)).get("status"));
-        assertEquals(1, taskMapper.selectById(taskId).getOwnerId());
+            var run = new PlanningAgentRun();
+            runId = UUID.randomUUID().toString();
+            run.setId(runId);
+            run.setProjectId(PROJECT_ID);
+            run.setRequestedBy(1);
+            run.setRequestText("把任务分配给管理员并核对容量");
+            run.setStatus("waiting_confirmation");
+            run.setAttempt(1);
+            run.setModel("fixture");
+            run.setPromptVersion("planning-owner-v1");
+            run.setResultJson(plan.toString());
+            run.setCreatedAt(LocalDateTime.now());
+            run.setUpdatedAt(LocalDateTime.now());
+            planningRuns.insert(run);
+            assertEquals(originalOwner, taskRow(taskId).getOwnerId());
+            // 确认走真实 HTTP 入口 —— 直接调 service.confirm 没有 AuthContext,执行相会报"未登录"
+            ApiResponse confirmed = post("/api/planning-agent/runs/" + runId + "/confirm?projectId=" + PROJECT_ID,
+                    admin, null);
+            assertEquals(200, confirmed.status(), confirmed.body());
+            assertEquals("completed", confirmed.json().path("status").asText(), confirmed.body());
+            assertEquals(1, taskRow(taskId).getOwnerId());
+        } finally {
+            if (runId != null) {
+                jdbc.update("DELETE FROM planning_agent_events WHERE run_id=?", runId);
+                jdbc.update("DELETE FROM planning_agent_runs WHERE id=?", runId);
+            }
+            patch("/api/tasks/" + taskId, admin, json(map("owner_id", originalOwner)));
+            putWeeklyCapacity(admin, PROJECT_ID, 1, previousWeekly);
+        }
+    }
+
+    private Task taskRow(String taskId) {
+        return taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", PROJECT_ID).eq("code", taskId));
+    }
+
+    /** 成员周容量以项目成员为准(读:GET /api/projects/{id}/members) */
+    private Integer memberWeeklyCapacity(String admin, String projectId, int userId) {        for (JsonNode member : get("/api/projects/" + projectId + "/members", admin).json())
+            if (member.path("user_id").asInt() == userId)
+                return member.path("weekly_capacity_hours").isNull() ? null : member.path("weekly_capacity_hours").asInt();
+        return null;
+    }
+
+    private void putWeeklyCapacity(String admin, String projectId, int userId, Integer weekly) {
+        String body = weekly == null ? "{\"weekly_capacity_hours\":null}"
+                : "{\"weekly_capacity_hours\":" + weekly + "}";
+        ApiResponse r = request(HttpMethod.PUT, "/api/projects/" + projectId + "/members/" + userId, admin, body);
+        assertEquals(200, r.status(), r.body());
     }
 
     private int taskOwner(String token, String taskId) {
