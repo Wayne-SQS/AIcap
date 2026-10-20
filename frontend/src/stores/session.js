@@ -91,8 +91,14 @@ export const useSessionStore = defineStore('session', {
       this.currentUser = data.user
       setAuthToken(this.authToken)
       this.apiMode = true
-      this.loginOpen = false
-      await this.loadWorkspace()
+      /* 先把项目数据装载就绪,再关登录弹窗:弹窗关闭是「已就绪」的唯一可见信号,
+         若先关窗再加载,看板会短暂显示「已同步 0 条真实故事」,验收用例也会在数据到位前就断言。
+         装载逻辑复用 loadWorkspace(自带失败清理与提示),这里只管「一定关窗」。 */
+      try {
+        await this.loadWorkspace()
+      } finally {
+        this.loginOpen = false
+      }
       const { notify } = useToast()
       notify('欢迎，' + this.currentUser.display_name)
     },

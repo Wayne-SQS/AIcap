@@ -844,121 +844,35 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
   .sup-chat{right:10px;left:10px;width:auto;bottom:82px}
 }
 
-/* ==== AI 办公室(三栏:主管对话 / 过程时间轴 / 同事工作台) ==== */
-.office-view{max-width:1460px}
-.office-sum{grid-template-columns:1fr 1fr 1fr}
-.office-grid{
-  display:grid;
-  grid-template-columns:minmax(300px,400px) minmax(240px,1fr) minmax(400px,1.5fr);
-  gap:14px;align-items:stretch;
-}
-.office-col{min-width:0;display:flex;flex-direction:column;gap:10px}
-
-/* 左栏:主管对话常驻面板。头部复用 .sup-head 像素风;正文复用 .sup-* 全局样式 */
-.office-chat{
-  border:3px solid var(--ink);background:var(--paper);box-shadow:4px 4px 0 var(--ink);
-  height:calc(100vh - 250px);min-height:480px;
-}
-.office-chat .sup-head{border-bottom:3px solid var(--ink)}
-.office-chat .sup-body{flex:1}
-
-/* 中栏:过程时间轴(全量,按 run 分组) */
-.office-feed{
-  border:3px solid var(--ink);background:var(--paper-2);box-shadow:4px 4px 0 var(--ink);
-  height:calc(100vh - 250px);min-height:480px;
-}
-.office-feed-head{
-  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
-  padding:9px 10px;border-bottom:3px solid var(--ink);background:var(--paper);
-}
-.office-feed-head b{font-size:13px}
-.office-feed-head small{font-family:var(--mono);font-size:10px;color:var(--muted)}
-.office-feed-body{
-  flex:1;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:9px;
-  background:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-  background-size:18px 18px;
-}
-.office-feed-run{
-  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
-  margin-top:4px;padding:3px 6px;border:2px solid var(--ink);background:var(--green);
-  font-family:var(--mono);font-size:10.5px;font-weight:700;
-}
-.office-feed-run:first-child{margin-top:0}
-.office-feed-run small{font-weight:400;color:var(--ink-soft)}
-.office-feed .sup-steps{border-left-color:var(--blue-2)}
-
-/* 右栏:同事工作台 tab */
-.office-work .wb{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}
-.wb-tabs{display:flex;flex-wrap:wrap;gap:6px}
-.wb-tabs button{
-  padding:6px 10px;border:2px solid var(--ink);background:var(--paper);
-  box-shadow:2px 2px 0 var(--ink);font-size:12.5px;font-weight:700;
-  display:inline-flex;align-items:center;gap:6px;
-}
-.wb-tabs button:hover{background:var(--paper-2)}
-.wb-tabs button.is-active{background:var(--green);box-shadow:inset 0 -3px 0 var(--ink)}
-.wb-tabs button:focus-visible{outline:3px solid #c1662a;outline-offset:2px}
-.wb-colleague{
-  display:inline-grid;place-items:center;width:18px;height:18px;
-  border:2px solid var(--ink);background:var(--paper);
-  font-family:var(--mono);font-size:10.5px;font-weight:900;
-}
-.wb-tabs button.is-active .wb-colleague{background:var(--paper)}
-.wb-panel{
-  flex:1;min-height:0;overflow-y:auto;
-  border:3px solid var(--ink);background:var(--paper);box-shadow:4px 4px 0 var(--ink);
-  padding:14px;
-}
-/* 会议 tab 整体复用 MeetingView,压掉 .view 的页级留白与限宽 */
-.wb-panel .view{padding:0;max-width:none;animation:none}
-.wb-panel .hero{margin-bottom:14px}
-.wb-panel .hero h1{font-size:24px}
-.wb-extra{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.wb-extra-label{font-family:var(--mono);font-size:10px;color:var(--muted)}
-.wb-extra button{
-  padding:4px 9px;font-size:11.5px;border:2px dashed var(--line);
-  background:var(--paper-2);color:var(--ink-soft);display:inline-flex;gap:6px;align-items:baseline;
-}
-.wb-extra button:hover{border-color:var(--ink);background:var(--yellow);color:var(--ink)}
-.wb-extra button small{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
-.workbench-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-
-@media(max-width:1100px){
-  .office-grid{grid-template-columns:1fr 1fr}
-  .office-work{grid-column:1 / -1}
-  .office-chat,.office-feed{height:520px}
-}
-@media(max-width:760px){
-  .office-sum{grid-template-columns:1fr}
-  .office-grid{grid-template-columns:1fr}
-  .office-work{grid-column:auto}
-  .office-chat,.office-feed{height:auto;min-height:420px;max-height:560px}
-  .office-chat .sup-body,.office-feed-body{max-height:420px}
-}
-
 /* ============================================================
-   AI 办公室 · 像素办公室(2026-10-19 整体改版)
-   门牌 / 场景(墙 + 地板 + 四张工位) / 三栏(前台 · 白板 · 工位区)
-   纪律沿用:零圆角、零模糊阴影(只用 Npx Npx 0)、2/3px 硬描边。
+   AI 办公室(2026-10-19 改版:门牌行 + 状态行 + 两栏)
+   左栏 = 本的常驻对话 + 白板抽屉(全量过程,默认收起);
+   右栏 = 工位条(译/衡/绘,工位卡即 tab)+ 工作面板。
+   纪律:零圆角、零模糊阴影(只用 Npx Npx 0)、2/3px 硬描边。
+   .office-chat / .office-feed 类名保留 —— e2e 可见性断言钉住。
    ============================================================ */
+.office-view{
+  max-width:1460px;
+  /* 一屏化:整间办公室锁进视口(减去 topbar 实测高 ~60.8px),门牌/状态行固定,
+     两栏各自内部滚动 —— 对话(sup-body)、白板(feed-body)、工作面板
+     (wb-panel)都是独立滚动区,页面不再被内容撑成纵向长条。 */
+  height:calc(100vh - 61px);
+  display:flex; flex-direction:column;
+  padding:12px 22px 16px;
+}
 
-/* ---- 门牌 ---- */
+/* ---- 门牌行:身份 + 项目 + 本的状态灯 + 待审徽标 + 刷新 ---- */
 .of-sign{
   position:relative; display:flex; align-items:center; justify-content:space-between;
-  gap:16px; flex-wrap:wrap; margin-bottom:10px; padding:12px 16px;
+  gap:14px; flex-wrap:wrap; flex:0 0 auto; margin-bottom:8px; padding:9px 14px;
   border:3px solid var(--ink); background:var(--green); box-shadow:var(--shadow);
 }
 .of-sign::after{
   content:""; position:absolute; inset:5px; border:1px dashed rgba(34,52,44,.32); pointer-events:none;
 }
 .of-sign-main{display:flex; align-items:center; gap:14px; min-width:0}
-.of-sign-room{
-  display:grid; place-items:center; width:54px; height:54px; flex:0 0 54px;
-  border:3px solid var(--ink); background:var(--ink); color:var(--green);
-  font:900 24px/1 var(--mono); letter-spacing:1px;
-}
-.of-sign-text h1{margin:0; font-size:30px; line-height:1.1; letter-spacing:2px}
-.of-sign-text .eyebrow{color:var(--ink-soft)}
+.of-sign-text h1{margin:0; font-size:21px; line-height:1.15; letter-spacing:2px}
+.of-sign-text .eyebrow{font-size:10.5px}
 .of-sign-side{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end}
 .of-sign-project{
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -976,99 +890,93 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .of-lamp.is-offline i{background:var(--gray)}
 .of-lamp.is-no-platform i,.of-lamp.is-no-key i{background:var(--red)}
 .of-sign-btn{padding:5px 11px; font-size:12px; box-shadow:2px 2px 0 var(--ink)}
+.of-review-link{
+  padding:5px 11px; font:700 12px/1.2 var(--mono);
+  background:var(--yellow); box-shadow:2px 2px 0 var(--ink);
+}
+.of-review-link:hover{background:var(--orange)}
 
-.of-lede{margin:0 0 14px; color:var(--muted); font-size:14px}
+/* ---- 状态行:一句话交代当前上下文(离线演示 / 未选项目 / 在线摘要) ---- */
+.of-statusline{
+  display:flex; align-items:center; gap:9px; flex:0 0 auto;
+  margin:0 0 10px; padding:5px 12px;
+  border:2px solid var(--ink); background:var(--paper);
+  font-size:12px; color:var(--ink-soft);
+}
+.of-statusline::before{
+  content:""; flex:0 0 9px; width:9px; height:9px;
+  border:1.5px solid var(--ink); background:var(--gray);
+}
+.of-statusline.is-ok::before{background:var(--green-2)}
+.of-statusline.is-warn{background:#fdf6d8}
+.of-statusline.is-warn::before{background:var(--yellow)}
+.of-statusline.is-offline{background:var(--paper-2)}
 
-/* ---- 墙上的三张便签 ---- */
-.of-sum{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:16px}
-.of-note{
-  position:relative; display:flex; flex-direction:column; gap:6px;
-  padding:15px 14px 12px; border:2px solid var(--ink); background:var(--paper);
-  box-shadow:var(--shadow);
+/* ---- 两栏 ---- */
+.of-grid{
+  display:grid;
+  grid-template-columns:minmax(320px,1fr) minmax(430px,1.55fr);
+  grid-template-rows:minmax(0,1fr);   /* 行高封顶,内容不许把格子撑开 */
+  gap:12px; align-items:stretch;
+  flex:1 1 auto; min-height:0;
 }
-.of-note:nth-child(2){background:#fdf6d8}
-.of-note:nth-child(3){background:#e8f1f7}
-.of-note-pin{
-  position:absolute; top:-8px; left:16px; width:16px; height:16px;
-  border:2px solid var(--ink); background:var(--red); box-shadow:1px 1px 0 var(--ink);
-}
-.of-note h4{
-  margin:0; font:700 11px/1.2 var(--mono); letter-spacing:1.2px;
-  color:var(--ink-soft); text-transform:uppercase;
-}
-.of-note b{font-size:19px; line-height:1.25; overflow-wrap:anywhere}
-.of-note .small{margin:0}
-.of-note-actions{display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; padding-top:9px}
-.of-note-actions button{padding:5px 9px; font-size:11.5px; box-shadow:2px 2px 0 var(--ink)}
+.of-grid > *{min-width:0}
+.of-left{display:flex; flex-direction:column; gap:10px; min-height:0}
 
-/* ---- 办公室场景 ---- */
-.of-scene{
-  margin-bottom:16px; border:3px solid var(--ink); background:var(--paper);
-  box-shadow:var(--shadow); overflow:hidden;
+/* 前台:本 的常驻对话。头部复用 .sup-head,正文复用 .sup-* 全局样式;
+   在左栏里弹性伸展,与白板抽屉共享列高(180 保底:白板展开时对话不被挤没) */
+.office-chat.of-frontdesk{
+  position:relative; display:flex; flex-direction:column; flex:1 1 auto;
+  min-height:180px;
+  border:3px solid var(--ink); background:var(--paper); box-shadow:4px 4px 0 var(--ink);
 }
-.of-scene-wall{
-  position:relative; height:92px; border-bottom:4px solid var(--ink);
+.of-frontdesk .sup-head{background:var(--green); border-bottom:3px solid var(--ink)}
+.of-frontdesk .sup-body{flex:1; min-height:0}
+.of-frontdesk .sup-foot,.of-frontdesk .sup-suggest{flex:0 0 auto}
+
+/* 白板抽屉:头部常驻可点,体默认收起 —— 对话气泡里已有每轮过程,
+   抽屉只服务"翻旧账"。有新事件时由脚本自动展开 */
+.office-feed.of-whiteboard{
+  flex:0 0 auto;
+  border:3px solid var(--ink); background:#fbfbf5; box-shadow:4px 4px 0 var(--ink);
+}
+.office-feed-head{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px; width:100%;
+  padding:9px 12px; border:0; border-bottom:3px solid transparent;
+  background:#fffdf2; box-shadow:none; text-align:left; font-size:inherit;
+}
+.office-feed-head:hover{background:#f6f2df}
+.office-feed-head:active{transform:none}
+.office-feed.is-open .office-feed-head{border-bottom-color:var(--ink)}
+.office-feed-head b{font-size:13px}
+.office-feed-head small{font-family:var(--mono); font-size:10px; color:var(--muted)}
+.office-feed-body{
+  max-height:min(28vh,300px); overflow-y:auto; padding:11px;
+  display:flex; flex-direction:column; gap:9px;
   background:
-    repeating-linear-gradient(90deg, transparent 0 38px, rgba(34,52,44,.05) 38px 40px),
-    linear-gradient(#eef2e2, #e2ead2);
+    linear-gradient(rgba(34,52,44,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34,52,44,.05) 1px, transparent 1px);
+  background-size:22px 22px;
 }
-.of-window{
-  position:absolute; left:18px; top:12px; width:104px; height:64px;
-  border:3px solid var(--ink); background:linear-gradient(#b7d3e8, #d8e8f3);
-  box-shadow:inset 0 0 0 2px var(--paper); overflow:hidden;
+.office-feed-run{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  margin-top:4px; padding:3px 6px; border:2px solid var(--ink); background:var(--yellow);
+  font-family:var(--mono); font-size:10.5px; font-weight:700;
+  transform:rotate(-.6deg);
 }
-.of-window::before,.of-window::after{content:""; position:absolute; background:var(--paper)}
-.of-window::before{left:50%; top:0; bottom:0; width:3px; transform:translateX(-1px)}
-.of-window::after{top:50%; left:0; right:0; height:3px; transform:translateY(-1px)}
-.of-cloud{
-  position:absolute; left:8px; top:16px; width:16px; height:7px; background:#fff;
-  box-shadow:8px -5px 0 0 #fff, 22px 0 0 0 #fff; opacity:.95;
-  animation:of-drift 16s linear infinite;
-}
-.of-cloud.is-far{top:38px; left:34px; opacity:.75; animation-duration:22s; animation-direction:reverse}
-@keyframes of-drift{from{transform:translateX(-8px)}to{transform:translateX(48px)}}
-.of-clock{
-  position:absolute; left:146px; top:16px; width:42px; height:42px;
-  border:3px solid var(--ink); background:var(--paper); box-shadow:2px 2px 0 var(--ink);
-}
-.of-clock i{
-  position:absolute; left:50%; top:50%; width:3px; height:13px; background:var(--ink);
-  transform-origin:50% 100%; transform:translate(-50%,-100%) rotate(32deg);
-}
-.of-clock::after{
-  content:""; position:absolute; left:50%; top:50%; width:3px; height:9px; background:var(--ink);
-  transform-origin:50% 100%; transform:translate(-50%,-100%) rotate(150deg);
-}
-.of-wall-note{
-  position:absolute; left:206px; top:20px; padding:5px 10px;
-  border:2px solid var(--ink); background:#fffdf0; box-shadow:2px 2px 0 var(--ink);
-  font:700 10.5px/1.4 var(--mono); letter-spacing:1px; color:var(--ink-soft);
-  transform:rotate(-1.2deg);
-}
-.of-plant{position:absolute; right:116px; bottom:2px; width:46px; height:46px; image-rendering:pixelated}
-.of-door{
-  position:absolute; right:22px; top:10px; width:62px; height:80px;
-  border:3px solid var(--ink); background:linear-gradient(#d8b98a, #c9a77c);
-  box-shadow:inset 0 0 0 2px rgba(34,52,44,.12);
-}
-.of-door::after{
-  content:""; position:absolute; right:9px; top:36px; width:7px; height:7px;
-  background:var(--ink); border:1px solid var(--ink);
-}
-.of-scene-floor{
-  position:relative; display:flex; justify-content:center; align-items:flex-end;
-  gap:18px; flex-wrap:wrap; padding:18px 18px 20px;
-  background-color:var(--paper-2);
-  background-image:
-    linear-gradient(45deg, rgba(34,52,44,.035) 25%, transparent 25%, transparent 75%, rgba(34,52,44,.035) 75%),
-    linear-gradient(45deg, rgba(34,52,44,.035) 25%, transparent 25%, transparent 75%, rgba(34,52,44,.035) 75%);
-  background-size:28px 28px; background-position:0 0, 14px 14px;
-}
+.office-feed-run:first-child{margin-top:0}
+.office-feed-run small{font-weight:400; color:var(--ink-soft)}
+.office-feed .sup-steps{background:#fff; border-left-color:var(--orange-2)}
 
-/* ---- 工位卡 ---- */
+/* ---- 右栏:工位条 + 工作面板 ---- */
+.of-work{display:flex; flex-direction:column; min-width:0; min-height:0}
+.of-work .wb{display:flex; flex-direction:column; gap:10px; flex:1; min-height:0}
+
+/* 工位条:三张横条工位卡,卡即 tab(单一状态源,没有第二套 tab) */
+.wb-tabs.of-strip{display:flex; flex-wrap:wrap; gap:10px; flex:0 0 auto}
 .of-desk{
-  position:relative; display:flex; flex-direction:column; align-items:center; gap:3px;
-  width:146px; padding:11px 10px 12px; text-align:center;
+  position:relative; flex:1 1 170px; display:flex; align-items:center; gap:10px;
+  padding:8px 11px; text-align:left;
   border:3px solid var(--ink); background:var(--paper);
   box-shadow:3px 3px 0 var(--ink);
   transition:transform .12s, box-shadow .12s, background .12s;
@@ -1076,90 +984,79 @@ dialog header button{border:none;box-shadow:none;background:none;font-size:22px;
 .of-desk:hover{background:#f3f5e9; transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--ink)}
 .of-desk.is-active{background:var(--green); transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--ink)}
 .of-desk:active{transform:translate(1px,1px); box-shadow:1px 1px 0 var(--ink)}
-.of-desk-lamp{position:absolute; top:7px; right:7px; width:10px; height:10px; border:2px solid var(--ink); background:var(--gray)}
+.of-desk:focus-visible{outline:3px solid #c1662a; outline-offset:2px}
+.of-desk .of-avatar{flex:0 0 46px; margin:0}
+.of-desk-lamp{
+  position:absolute; top:7px; right:7px; width:10px; height:10px;
+  border:2px solid var(--ink); background:var(--gray);
+}
 .of-desk-lamp.is-online{background:var(--green-2)}
-.of-desk-lamp.is-busy{background:var(--orange); animation:sup-blink .8s steps(1) infinite}
+.of-desk-lamp.is-warn{background:var(--yellow)}
+.of-desk-lamp.is-down{background:var(--red)}
+.of-desk-lamp.is-demo{background:var(--gray)}
 .of-desk-lamp.is-probing{background:var(--yellow); animation:sup-blink .8s steps(1) infinite}
-.of-desk-lamp.is-no-platform,.of-desk-lamp.is-no-key{background:var(--red)}
-.of-desk-screen{
-  display:flex; flex-direction:column; justify-content:center; gap:3px;
-  width:100%; height:32px; padding:4px 6px; overflow:hidden;
-  border:2px solid var(--ink); background:#1f2e27;
-}
-.of-desk-screen i{display:block; height:3px; background:var(--green-2); opacity:.75}
-.of-desk-screen i:nth-child(2){width:70%; opacity:.5}
-.of-desk-screen i:nth-child(3){width:44%; opacity:.32}
-.of-desk .of-avatar{margin:3px 0 1px}
-.of-desk-name{font:900 21px/1 var(--mono); letter-spacing:2px}
-.of-desk-role{font:700 9.5px/1.2 var(--mono); color:var(--ink-soft); letter-spacing:1px}
-.of-desk-hint{min-height:26px; font-size:11px; line-height:1.35; color:var(--muted)}
+.of-desk-text{display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0; flex:1}
+.of-desk-name{font:900 19px/1 var(--mono); letter-spacing:2px; display:flex; align-items:baseline; gap:7px}
+.of-desk-name small{font:700 11px/1 var(--mono); color:var(--ink-soft); letter-spacing:1px}
+.of-desk-hint{font-size:11px; line-height:1.35; color:var(--muted)}
 
-/* ---- 屋里的三栏 ---- */
-.of-grid{
-  display:grid;
-  grid-template-columns:minmax(300px,380px) minmax(250px,1fr) minmax(430px,1.65fr);
-  gap:14px; align-items:stretch;
+/* 衡的两件工作:画像分析 / 提交分析 —— 一个同事的两件事,不是两个入口 */
+.wb-subtabs{display:flex; flex-wrap:wrap; gap:8px; flex:0 0 auto}
+.wb-subtabs button{
+  padding:5px 12px; font-size:12.5px; font-weight:700;
+  border:2px solid var(--ink); background:var(--paper); box-shadow:2px 2px 0 var(--ink);
 }
-.of-grid > *{min-width:0}
+.wb-subtabs button:hover{background:var(--paper-2)}
+.wb-subtabs button.is-active{background:var(--green); box-shadow:inset 0 -3px 0 var(--ink)}
 
-/* 前台:本 的常驻对话 */
-.office-chat.of-frontdesk{
-  position:relative; height:580px; min-height:0;
+/* 工作面板:只挂激活 tab,内容在面板内滚动 —— 右栏高度被视口锁定后,
+   这里的 overflow 才真正生效(旧版父级无界,整页被撑到 900px+) */
+.wb-panel{
+  flex:1; min-height:0; overflow-y:auto;
   border:3px solid var(--ink); background:var(--paper); box-shadow:4px 4px 0 var(--ink);
+  padding:12px;
 }
-.of-frontdesk .sup-head{background:var(--green)}
-.of-frontdesk-tag{
-  position:absolute; right:8px; bottom:6px; pointer-events:none;
-  font:700 9px/1 var(--mono); letter-spacing:1.5px; color:rgba(34,52,44,.35);
-  background:var(--paper); padding:2px 4px; border:1px solid rgba(34,52,44,.2);
+/* 深链定位补偿:独立页给 sticky topbar 留的 90px 余量,在面板内滚动了,收紧 */
+.wb-panel [data-source-suggestion],
+.wb-panel [data-source-proposal]{scroll-margin-top:12px}
+/* 会议 tab 整体复用 MeetingView,压掉 .view 的页级留白与限宽 */
+.wb-panel .view{padding:0; max-width:none; animation:none}
+.wb-extra{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.wb-extra-label{font-family:var(--mono); font-size:10px; color:var(--muted)}
+.wb-extra button{
+  padding:4px 9px; font-size:11.5px; border:2px dashed var(--line);
+  background:var(--paper-2); color:var(--ink-soft); display:inline-flex; gap:6px; align-items:baseline;
 }
+.wb-extra button:hover{border-color:var(--ink); background:var(--yellow); color:var(--ink)}
+.wb-extra button.is-plain{border-style:solid; background:var(--paper); color:var(--ink)}
+.wb-extra button small{font-family:var(--mono); font-size:9.5px; color:var(--muted)}
 
-/* 白板:过程时间轴 */
-.office-feed.of-whiteboard{
-  height:580px; min-height:0;
-  border:3px solid var(--ink); background:#fbfbf5; box-shadow:4px 4px 0 var(--ink);
+/* MeetingView 嵌入模式:hero 已由 embedded prop 隐藏,审核中心深链
+   保留一条紧凑返回行(按钮文案被 e2e 深链用例钉住,别改) */
+.view.is-embedded{padding:0; max-width:none; animation:none}
+.mv-embedded-bar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+  margin-bottom:12px; padding:8px 10px;
+  border:2px solid var(--ink); background:var(--yellow); box-shadow:2px 2px 0 var(--ink);
 }
-.of-whiteboard .office-feed-head{background:#fffdf2}
-.of-whiteboard .office-feed-body{
-  background:
-    linear-gradient(rgba(34,52,44,.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34,52,44,.05) 1px, transparent 1px);
-  background-size:22px 22px;
-}
-.of-whiteboard .office-feed-run{background:var(--yellow); transform:rotate(-.6deg)}
-.of-whiteboard .sup-steps{background:#fff; border-left-color:var(--orange-2)}
-
-/* 工位区:同事工作台。与前台/白板同高,内容在面板内滚动 —— 否则 MeetingView
-   的自然高度会把整行撑到 900px 以上,三栏就完全不对齐了。 */
-.of-work{display:flex; flex-direction:column; min-width:0; height:580px; min-height:0}
-.of-work .wb{display:flex; flex-direction:column; gap:10px; height:100%; min-height:0}
-.of-work .wb-tabs{flex:0 0 auto}
-.of-work .wb-panel{flex:1; min-height:0; overflow-y:auto}
-.of-work .wb-extra{flex:0 0 auto}
+.mv-embedded-bar button{padding:5px 11px; font-size:12.5px}
+.mv-embedded-bar p{margin:0}
 
 /* ---- 响应式 ---- */
-/* 三栏最小宽 300+250+430+2gap=1008,左栏 238 + 页边距 56 = 294 —— 窗口窄于
-   约 1302px 时三栏放不下,会顶出横向滚动条。断点按这个数收,不按 1160 拍脑袋。 */
-@media(max-width:1320px){
-  .of-grid{grid-template-columns:1fr 1fr}
-  .of-work{grid-column:1 / -1; height:620px}
-  .office-chat.of-frontdesk,.office-feed.of-whiteboard{height:520px}
-}
-@media(max-width:860px){
-  .of-wall-note{display:none}
-  .of-plant{display:none}
+/* 左 320 + 右 430 + gap 12 = 762,加页边距 44 ≈ 806;侧栏 238,
+   窗口窄于约 1060px 时两栏放不下,堆叠。堆叠后放弃一屏锁定,
+   回退自然文档流(窄屏滚动是合理的),各面板仍保内部滚动。 */
+@media(max-width:1060px){
+  .office-view{height:auto}
+  .of-grid{grid-template-columns:1fr; grid-template-rows:none}
+  .of-left .office-chat.of-frontdesk{min-height:420px}
+  .of-work .wb{min-height:520px}
 }
 @media(max-width:760px){
-  .of-sign{padding:10px 12px}
-  .of-sign-text h1{font-size:24px}
-  .of-sign-room{width:44px; height:44px; flex:0 0 44px; font-size:19px}
-  .of-sum{grid-template-columns:1fr}
-  .of-grid{grid-template-columns:1fr}
-  .of-work{grid-column:auto; height:620px}
-  .office-chat.of-frontdesk,.office-feed.of-whiteboard{height:auto; min-height:440px; max-height:600px}
-  .office-chat.of-frontdesk .sup-body,.of-whiteboard .office-feed-body{max-height:440px}
-  .of-scene-wall{height:74px}
-  .of-clock,.of-door{display:none}
-  .of-scene-floor{gap:12px; padding:14px}
-  .of-desk{width:calc(50% - 8px); max-width:170px}
+  .of-sign{padding:8px 11px}
+  .of-sign-text h1{font-size:18px}
+  .of-sign-project{max-width:150px}
+  .of-desk{flex-basis:100%}
+  .office-feed-body{max-height:260px}
 }
+

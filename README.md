@@ -18,7 +18,7 @@
 
 ## 当前推荐运行与验证入口
 
-当前完整运行方式是 `deploy/compose.yaml`：Nginx、Java 后端、会议 Agent 与 MySQL 组成四容器服务。新成员克隆后的依赖准备、密钥配置、启动、健康检查、数据备份与七类会议浏览器验收，请按 **[`deploy/README.md`](deploy/README.md)** 操作；克隆快速入口见 **[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md)**。不要用归档 FastAPI 目录中的 Compose 文件代替生产编排。
+当前完整运行方式是 `deploy/compose.yaml`：Nginx、Java 后端、会议 Agent 与 MySQL 组成四容器服务。新成员克隆后的依赖准备、密钥配置、启动、健康检查、数据备份与七类会议浏览器验收，请按 **`deploy/` 目录中的脚本与编排**操作；克隆快速入口见 **[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md)**。不要用归档 FastAPI 目录中的 Compose 文件代替生产编排。
 
 当前仓库使用的测试结果和边界以部署指南中的“当前验证边界”、各模块测试文档及最近一次 CI/本机验收记录为准。下文的 v3 用例数量、旧式本机启动命令和阶段说明属于历史记录，保留作追溯参考，不是当前发布入口。
 
@@ -291,7 +291,7 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 ## 4.5 一键启动脚本
 
-`java-backend/启动后端.ps1`(UTF-8 带 BOM,给 PowerShell 5.1 用):检查 8080 是否被占用 → 可选 `-Build` 重新打包 → 从 **Windows 凭据管理器**取 GitHub token、从 `backend/.env` 取 LLM Key → 注入上述环境变量 → 后台启动并把日志写到 `target\backend-dev.log`。**密钥只在运行时读取,不落盘、不进仓库**。
+`java-backend/启动后端.ps1`(UTF-8 带 BOM,给 PowerShell 5.1 用):检查 8080 是否被占用 → 可选 `-Build` 重新打包 → 从 **Windows 凭据管理器**取 GitHub token、从 `backend/.env` 取 LLM Key(首次使用请复制 `backend/.env.example` 为 `backend/.env` 后填写) → 注入上述环境变量 → 后台启动并把日志写到 `target\backend-dev.log`。**密钥只在运行时读取,不落盘、不进仓库**。
 
 ## 4.6 安全须知
 
@@ -313,11 +313,9 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 |---|---|
 | `frontend/` | 现行前端:Vue3 + Vite(8 视图,像素风;后端在线走 API,离线自动回退) |
 | `java-backend/` | 现行后端:Spring Boot 3.5 + MyBatis-Plus(默认 8080,连 MySQL 3307 `AIcap` 库) |
-| `backend/` | 历史归档:FastAPI 后端 + SQLAlchemy + pytest(参考实现);其 `docker-compose.yml` 只服务旧开发环境(库 `AIcap`,端口 3307),现行编排见 `deploy/` |
+| `backend/` | 起本机 MySQL 3307 / Qdrant 6333 用 `docker-compose.yml` + `init.sql`;FastAPI 参考实现仅仓库归档保留,不随交付包提供 |
 | `ai-service/` | 会议 Agent 与离线语音转写/说话人分离服务 |
 | `deploy/` | 当前 Docker Compose 部署、配置模板、验证与备份工具 |
-| `legacy/` | 历史归档:Vue 改造前的旧版单文件前端 |
-| `docs/`、`docs/superpowers/` | 设计规格、实施计划与各能力说明 |
 | `qa/` | 前后端测试用例、执行记录与报告 |
 
 ## 5.2 技术栈与运行形态
@@ -348,7 +346,7 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 **五类会议闭环**(合并自 `main`):Daily 更新状态、Planning 调整 Sprint、Review 标记验收完成、Retro 创建行动项、Refinement 补齐后创建故事,均为「保存文本 → 分析提案 → 人工审核 → 单独执行 → 审计」同一形态。审核中心通过前端 adapter 读取每种既有来源记录,**不复制审核决定**;跨来源的审核与执行按钮深链回来源会议;部分来源加载失败时队列会提示结果可能不完整;离线模式只显示本机演示数据,不形成服务器审核或模型结论。
 
-会议工作区除 MySQL / Java / 前端外还需启动 `ai-service` Python 服务(默认 8090,`AICAP_LLM` 配置加载在该进程)。缺密钥时新流程**明确报错**,不返回规则或演示提案。隔离业务联调与真实模型质量的不同验证边界见 [`qa/DAILY_LIVE.md`](qa/DAILY_LIVE.md) 与 `ai-service/evals/` 质量报告;试用步骤见 [`docs/会议Agent_五类会议试用指南.md`](docs/会议Agent_五类会议试用指南.md),旧入口配置记录保留于 [`docs/会议Agent_DeepSeek运行与验收.md`](docs/会议Agent_DeepSeek运行与验收.md)。
+会议工作区除 MySQL / Java / 前端外还需启动 `ai-service` Python 服务(默认 8090,`AICAP_LLM` 配置加载在该进程)。缺密钥时新流程**明确报错**,不返回规则或演示提案。隔离业务联调与真实模型质量的不同验证边界见 `ai-service/evals/` 评测数据;试用步骤与旧入口配置记录见 `docs/会议Agent_五类会议试用指南.md`、`docs/会议Agent_DeepSeek运行与验收.md`(设计文档未随交付包提供)。
 
 ## 5.5 各能力实现要点
 
@@ -373,17 +371,11 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 # 六、测试与质量
 
-容器化生产形态（同源Nginx网关、Java、会议Agent、MySQL、持久化卷及上线验证）见 **[`deploy/README.md`](deploy/README.md)**。
+容器化生产形态（同源Nginx网关、Java、会议Agent、MySQL、持久化卷及上线验证）见 `deploy/compose.yaml` 与 `deploy/verify.py`。
 
 ## 测试交付物
 
-前后端历史功能测试的用例设计、执行记录与报告位于 [`qa/`](qa/)。其中 v3 数量和 `qa/run-all.ps1` 编排反映旧本机测试基线，不代表当前部署验收范围：
-
-| 文档 | 内容 |
-|---|---|
-| [`qa/测试用例设计_当前基线_v3.md`](qa/测试用例设计_当前基线_v3.md) | **180 条**用例设计(后端契约 128 / 前端 E2E 44 / 浏览器验收 8),含优先级与未覆盖缺口登记 |
-| [`qa/测试执行记录_当前基线_v3.md`](qa/测试执行记录_当前基线_v3.md) | 逐条执行实况、并发 flake 分析与复跑结论 |
-| [`qa/测试报告_当前基线_v3.md`](qa/测试报告_当前基线_v3.md) | 缺陷清单(9 条:7 条已修复 + 2 条环境项)与逐条修复验证表 |
+前后端测试用例与脚本位于 [`qa/`](qa/)。历史执行记录与设计文档未随交付包提供；`qa/run-all.ps1` 反映旧本机测试基线，不代表当前部署验收范围。
 
 一键跑全套(需 MySQL 3307、后端 8080、Vite 5173 已启动;脚本会强制指向 JDK 23):
 
@@ -397,7 +389,7 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 > 跑全量后端测试**需要 Qdrant 容器**(`cd backend && docker compose up -d qdrant`):索引与检索两组契约测试各跑两遍实现,qdrant 那一遍连不上会直接失败 —— 不做静默跳过,因为 ACL 在 Qdrant 侧落在 payload 而非 SQL 里,漏测就是权限后门。
 
-更早的 legacy 基线(旧 `index.html` + FastAPI 后端)测试文档仍在 `qa/` 内,已标注「旧基线」仅作归档;运行前置与目录说明见 `qa/README.md`。
+更早的 legacy 基线(旧 `index.html` + FastAPI 后端)测试文档未随交付包提供。
 
 ---
 
@@ -422,18 +414,11 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 # 八、文档索引
 
-文档已于 2026-10-13 重新分层。**全量清单与状态说明见 [`docs/README.md`](docs/README.md)**。
+设计文档(docs/)未随交付包提供;代码与测试即本仓库的权威实现。
 
-| 层 | 目录 | 回答什么 |
-|---|---|---|
-| **01-产品** | `docs/01-产品/` | 做什么、有几个智能体、各自职责边界 |
-| **02-契约** | `docs/02-契约/` | 接口长什么样、当前进度（**唯一进度口径**） |
-| **03-能力** | `docs/03-能力/` | 某个功能具体怎么运作 |
-| **_process** | `docs/_process/` | 开发日志与派工记录（**不是交付物**） |
+**入口**：[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md)
 
-**入口**：[`上手指南_克隆后如何运行.md`](上手指南_克隆后如何运行.md) · [`deploy/README.md`](deploy/README.md) · [`ai-service/README.md`](ai-service/README.md) · [`agent-orchestrator/README.md`](agent-orchestrator/README.md) · [`qa/README.md`](qa/README.md)
-
-**权威口径**：[`docs/01-产品/智能体产品契约.md`](docs/01-产品/智能体产品契约.md) —— 智能体名单、命名、职责边界以此为准，其余文档不得重述。
+**权威口径**：智能体名单、命名、职责边界以代码与 `docs/01-产品/智能体产品契约.md`(设计文档未随交付包提供)为准。
 
 ---
 
@@ -441,7 +426,7 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 ## A.1 静态原型新版内容移植(mcc 提交 `9b14ec5`)
 
-队友 mcc 在静态单文件原型上新提交了一版「四类视图完善+一体化」(`legacy/index.html`,现在就是仓库里那份),本轮把其中的**内容与样式**移植进 Vue,但**交互全部按 Vue 重写**(她的原实现是内联 `onclick` + 全局事件委托、编辑后不刷新其它视图),并按「不牺牲既有能力」的原则处理冲突:
+队友 mcc 在静态单文件原型上新提交了一版「四类视图完善+一体化」(静态原型,归档目录未随交付包提供),本轮把其中的**内容与样式**移植进 Vue,但**交互全部按 Vue 重写**(她的原实现是内联 `onclick` + 全局事件委托、编辑后不刷新其它视图),并按「不牺牲既有能力」的原则处理冲突:
 
 | 项 | 结论 |
 |---|---|
@@ -458,8 +443,8 @@ $env:AICAP_EMBEDDING_DIMENSION = "64"
 
 ## A.2 会议交互修复(2026-09-07)
 
-已支持修改后采纳并保留原始建议、移入看板时选择 Sprint/负责人,以及完整展示会议行动项、协调事项和验收约束。更新后重启后端、强制刷新前端;旧会议可复制并重新分析。接口变更与验证情况见 [`docs/会议Agent交互修复与项目侧接续_2026-09-07.md`](docs/会议Agent交互修复与项目侧接续_2026-09-07.md)。
+已支持修改后采纳并保留原始建议、移入看板时选择 Sprint/负责人,以及完整展示会议行动项、协调事项和验收约束。更新后重启后端、强制刷新前端;旧会议可复制并重新分析。接口变更与验证情况见 `docs/会议Agent交互修复与项目侧接续_2026-09-07.md`(设计文档未随交付包提供)。
 
 ## A.3 完成任务触发链(2026-09-15)
 
-补上「成员完成任务 → 触发智能体 → 读 GitHub 提交物 → 只评估提交者」这条链:新增任务状态入口(成员任务明细抽屉 / 甘特任务详情)、`useAgentRefresh.js`(唯一触发入口,串行排队)、`/analysis/run` 的 `userId` 收窄、`/github/sync` 权限对齐 `Roles.writer()`、任务提交面板按成员可查与如实报总数。详见 [`docs/任务提交与画像智能体_说明.md`](docs/任务提交与画像智能体_说明.md)。
+补上「成员完成任务 → 触发智能体 → 读 GitHub 提交物 → 只评估提交者」这条链:新增任务状态入口(成员任务明细抽屉 / 甘特任务详情)、`useAgentRefresh.js`(唯一触发入口,串行排队)、`/analysis/run` 的 `userId` 收窄、`/github/sync` 权限对齐 `Roles.writer()`、任务提交面板按成员可查与如实报总数。详见 `docs/任务提交与画像智能体_说明.md`(设计文档未随交付包提供)。

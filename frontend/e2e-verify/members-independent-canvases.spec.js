@@ -4,6 +4,8 @@ const ADMIN = '李锐铭'
 const PASSWORD = '123456'
 
 async function login(page) {
+  // 多项目改造后项目号是业务接口的必填上下文,先预置项目号再登录
+  await page.addInitScript(() => localStorage.setItem('aiguanli-current-project', 'P001'))
   await page.goto('/#/members')
   await expect(page.locator('#login')).toBeVisible()
   await page.locator('#login-user').fill(ADMIN)
@@ -61,9 +63,17 @@ test('Members independent canvases keep zoom, fit, scroll and owner confirmation
   await page.evaluate(() => window.scrollTo(0, 0))
   const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight)
   expect(pageHeight).toBeGreaterThan(page.viewportSize().height * 2)
-  for (const viewport of await page.locator('.member-module-viewport').all()) {
-    await viewport.scrollIntoViewIfNeeded()
-    await viewport.evaluate(node => { node.scrollTop = node.scrollHeight })
+  const viewports = page.locator('.member-module-viewport')
+  for (let index = 0; index < 4; index++) {
+    const viewport = viewports.nth(index)
+    // 每轮先把页面归零并显式定位该模块,给下方留出滚动余量:
+    // 页面一旦被顶到 max scroll,再 wheel 就无处可去,会把「页内滚动」误判成假红
+    await viewport.evaluate(node => {
+      node.scrollTop = node.scrollHeight
+      const max = document.documentElement.scrollHeight - window.innerHeight
+      const top = node.getBoundingClientRect().top + window.scrollY
+      window.scrollTo(0, Math.min(Math.max(0, top - 80), Math.max(0, max - 120)))
+    })
     const beforePageScroll = await page.evaluate(() => window.scrollY)
     const box = await viewport.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height - 20, 120))

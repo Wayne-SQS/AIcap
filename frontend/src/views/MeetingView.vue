@@ -3,10 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
 import MeetingPanel from '@/components/ai/MeetingPanel.vue'
+/* embedded:嵌在 AI 办公室右栏时由 AgentWorkbench 传入 —— 隐藏页级 hero,
+   只在 fromReview 深链时保留一条紧凑的"返回审核中心"行(按钮文案与
+   e2e 深链用例钉住的完全一致,别改)。 */
+defineProps({ embedded: Boolean })
 const route = useRoute()
 const router = useRouter()
 const meeting = useMeetingStore()
-defineProps({ embedded: Boolean })
 const page = ref(null)
 const sourceSuggestion = computed(() => meeting.suggestions.find(item =>
   item.id === route.query.suggestionId && item.meeting_id === route.query.meetingId))
@@ -55,7 +58,12 @@ watch(() => [route.query.meetingId, route.query.analysisId, route.query.proposal
 onMounted(() => nextTick(focusSource))
 onBeforeUnmount(() => sourceObserver?.disconnect())
 </script>
-<template><section ref="page" class="view" :class="{ 'embedded-agent-view': embedded }"><div v-if="!embedded" class="hero"><div><div class="eyebrow">MEETING WORKSPACE / 会议流程</div><h1>会议工作区</h1><p>选择文本会议、语音会议或手动录入建议。分析、审核和业务执行是独立步骤。</p><button v-if="route.query.fromReview === '1'" type="button" @click="returnToReview">← 返回审核中心（保留筛选）</button><p v-if="route.query.fromReview === '1'" class="small">从审核中心打开 · {{ meeting.selectedMeeting?.title || '正在加载会议' }} · <span v-if="route.query.sourceType === 'general'">通用会议建议</span><span v-else>{{ route.query.type }} 分析</span></p></div></div>
+<template><section ref="page" class="view" :class="{ 'is-embedded': embedded }">
+  <div v-if="!embedded" class="hero"><div><div class="eyebrow">MEETING WORKSPACE / 会议流程</div><h1>会议工作区</h1><p>选择文本会议、语音会议或手动录入建议。分析、审核和业务执行是独立步骤。</p><button v-if="route.query.fromReview === '1'" type="button" @click="returnToReview">← 返回审核中心（保留筛选）</button><p v-if="route.query.fromReview === '1'" class="small">从审核中心打开 · {{ meeting.selectedMeeting?.title || '正在加载会议' }} · <span v-if="route.query.sourceType === 'general'">通用会议建议</span><span v-else>{{ route.query.type }} 分析</span></p></div></div>
+  <div v-else-if="route.query.fromReview === '1'" class="mv-embedded-bar">
+    <button type="button" @click="returnToReview">← 返回审核中心（保留筛选）</button>
+    <p class="small">从审核中心打开 · {{ meeting.selectedMeeting?.title || '正在加载会议' }} · <span v-if="route.query.sourceType === 'general'">通用会议建议</span><span v-else>{{ route.query.type }} 分析</span></p>
+  </div>
   <article v-if="route.query.sourceType === 'general' && sourceSuggestion" class="source-suggestion" :data-source-suggestion="sourceSuggestion.id" tabindex="-1">
     <h2>来源会议建议 · {{ sourceSuggestion.id }}</h2>
     <p>会议：{{ meeting.selectedMeeting?.title || sourceSuggestion.meeting_title }} · 状态：{{ sourceSuggestion.status === 'pending' ? '待审核' : sourceSuggestion.status === 'approved' ? '已采纳' : '已拒绝' }}</p>

@@ -5,7 +5,7 @@ import { meetingsApi } from '@/api/meetings'
 import { suggestionsApi } from '@/api/suggestions'
 
 /* 会议域 store:对齐 meeting-review.js meetingReviewState + meeting-agent.js agentUI
-   在线:会议/建议/Agent 配置与运行;离线由 AiView 走演示分支,不进本 store */
+   在线:会议/建议/Agent 配置与运行;离线由办公室(OfficeView/MeetingView)走演示分支,不进本 store */
 export const useMeetingStore = defineStore('meeting', {
   state: () => ({
     meetings: [],

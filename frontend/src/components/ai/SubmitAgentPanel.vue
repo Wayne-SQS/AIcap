@@ -317,7 +317,7 @@ function fmtSync(p) {
   return `拉取 ${n} 条 → 入库 ${p.synced ?? 0} / 跳过 ${p.skipped ?? 0}${p.warnings?.length ? ` / ${p.warnings.length} 条警告` : ''}`
 }
 
-/* 登录态就绪后再拉取(与 AiView 对会议 store 的 watch 同范式):
+/* 登录态就绪后再拉取(与会议 store 的 watch 同范式):
    - 原实现在 setup 顶层无条件 checkGithub(),离线演示模式 / 未登录时必然 401,
      client.js 的 401 分支会触发全局 handleUnauthorized() → 误弹「登录已过期」并强制打开登录框,
      且 githubStatus 被永久污染成 { enabled:false, error:'未登录' };

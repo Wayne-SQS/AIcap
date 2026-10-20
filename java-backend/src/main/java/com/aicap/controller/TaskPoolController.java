@@ -22,6 +22,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -64,6 +65,8 @@ public class TaskPoolController {
     private final ProjectPlanningActionService planningActions;
     private final ProjectAccessService projectAccess;
     private final com.aicap.service.TaskStoryRelationService taskStoryRelations;
+    /** 任务状态历史(见 schema.sql 的 task_logs):PATCH 落库 + GET .../history 复读 */
+    private final JdbcTemplate jdbc;
 
     // ---------- 工具 ----------
 
@@ -131,6 +134,44 @@ public class TaskPoolController {
             }
         }
         return false;
+    }
+
+    /** 项目内全部任务(依赖周次校验一次取回,避免逐条查询) */
+    private List<Task> projectTasks(String projectId) {
+        return taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", projectId));
+    }
+
+    /** 依赖排期的宽松解析:只认 Txx,脏数据跳过而不是把整个写接口打成 400 */
+    private List<String> dependencyRefs(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(value.split(","))
+                .map(String::trim).map(v -> v.toUpperCase(Locale.ROOT))
+                .filter(v -> v.matches("T\\d+"))
+                .toList();
+    }
+
+    /**
+     * 依赖的排期约束:前置任务不能晚于本任务结束周;本任务也不能晚于任何后续任务的结束周。
+     * (项目只在周粒度上排期,允许同周重叠。)
+     */
+    private void validateDependencyWeeks(String taskId, List<String> dependencies, int endWeek,
+                                         List<Task> projectRows) {
+        Map<String, Task> byId = projectRows.stream()
+                .collect(Collectors.toMap(Task::getId, t -> t, (a, b) -> a));
+        for (String dependencyId : dependencies) {
+            Task prerequisite = byId.get(dependencyId);
+            if (prerequisite != null && prerequisite.getWeekEnd() != null
+                    && prerequisite.getWeekEnd() > endWeek)
+                throw ApiException.badRequest("前置任务 " + dependencyId + " 的结束周晚于任务 " + taskId);
+        }
+        for (Task downstream : projectRows) {
+            if (!downstream.getId().equals(taskId)
+                    && dependencyRefs(downstream.getDependsOn()).contains(taskId)
+                    && downstream.getWeekEnd() != null && endWeek > downstream.getWeekEnd())
+                throw ApiException.badRequest("任务 " + taskId + " 的结束周晚于后续任务 " + downstream.getId());
+        }
     }
 
     // ---------- 字段级校验(对齐 pydantic TaskPatch 约束,先于业务校验) ----------
@@ -209,7 +250,7 @@ public class TaskPoolController {
     @PostMapping("/tasks")
     @Transactional
     public TaskDtos.TaskOut createTask(@RequestBody JsonNode body, @RequestParam String projectId) {
-        Roles.writer();
+        User actor = Roles.writer();
         projectAccess.requireWriter(projectId);
         String scoped = ProjectAccessService.normalize(projectId);
         NullableField<String> name = textField(body, "name", 200, true);
@@ -244,7 +285,9 @@ public class TaskPoolController {
         Task task = new Task();
         task.setProjectId(scoped);
         // 编号分配与规划智能体的 CREATE_TASK 共用一处（IdAllocator），别再内联第二份
-        task.setId(idAllocator.nextTaskId(scoped));
+        String taskId = idAllocator.nextTaskId(scoped);
+        validateDependencyWeeks(taskId, deps, end.value(), projectTasks(scoped));
+        task.setId(taskId);
         task.setName(name.value()); task.setOwnerId(owner.value()); task.setHours(hours.value());
         task.setEstimatedHours(hours.value()); task.setWeekStart(start.value()); task.setWeekEnd(end.value());
         task.setStoryRef(String.join(",", refs)); task.setDependsOn(String.join(",", deps));
@@ -252,7 +295,51 @@ public class TaskPoolController {
         task.setStatus(0); task.setProgress(0); task.setBlocked(0);
         taskMapper.insert(task);
         taskStoryRelations.replaceRelations(scoped, task, task.getStoryRef());
+        // 创建即记一条历史(old_status=NULL),GET /tasks/{id}/history 才有完整链条
+        jdbc.update("INSERT INTO task_logs(project_id,task_id,old_status,new_status,user_id,created_at)"
+                + " VALUES (?,?,NULL,?,?,CURRENT_TIMESTAMP)", scoped, taskId, 0, actor.getId());
         return TaskDtos.toOut(task, refs);
+    }
+
+    /** GET /api/tasks/{taskId}/history:任务状态变更历史(旧 → 新,按 id 升序) */
+    @GetMapping("/tasks/{taskId}/history")
+    public List<Map<String, Object>> taskHistory(@PathVariable String taskId, @RequestParam String projectId) {
+        projectAccess.requireMember(projectId);
+        String scoped = ProjectAccessService.normalize(projectId);
+        if (taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scoped).eq("code", taskId)) == null)
+            throw ApiException.notFound("任务不存在");
+        return jdbc.queryForList("SELECT id,task_id,old_status,new_status,user_id,created_at"
+                + " FROM task_logs WHERE project_id=? AND task_id=? ORDER BY id", scoped, taskId);
+    }
+
+    /** DELETE /api/tasks/{taskId}:删除任务并清掉依赖/关联边(保留故事本身) */
+    @DeleteMapping("/tasks/{taskId}")
+    @Transactional
+    public TaskDtos.DeleteOut deleteTask(@PathVariable String taskId, @RequestParam String projectId) {
+        Roles.writer();
+        projectAccess.requireWriter(projectId);
+        String scoped = ProjectAccessService.normalize(projectId);
+        Task task = taskMapper.selectOne(new QueryWrapper<Task>().eq("project_id", scoped).eq("code", taskId));
+        if (task == null) throw ApiException.notFound("任务不存在");
+        // 后续任务的前置列表里去掉被删任务,避免留下悬空引用
+        for (Task other : projectTasks(scoped)) {
+            if (taskId.equals(other.getId())) continue;
+            List<String> deps = parseRefs(other.getDependsOn(), "T");
+            if (deps.contains(taskId)) {
+                other.setDependsOn(deps.stream().filter(id -> !id.equals(taskId)).collect(Collectors.joining(",")));
+                taskMapper.updateById(other);
+            }
+        }
+        Long internalId = task.getInternalId();
+        if (internalId != null) {
+            jdbc.update("DELETE FROM task_story_relations WHERE project_id=? AND task_internal_id=?", scoped, internalId);
+            jdbc.update("DELETE FROM task_dependencies WHERE project_id=? AND (predecessor_task_internal_id=? OR successor_task_internal_id=?)",
+                    scoped, internalId, internalId);
+            jdbc.update("DELETE FROM milestone_tasks WHERE project_id=? AND task_internal_id=?", scoped, internalId);
+        }
+        jdbc.update("DELETE FROM task_logs WHERE project_id=? AND task_id=?", scoped, taskId);
+        taskMapper.deleteById(internalId);
+        return new TaskDtos.DeleteOut(true);
     }
 
     /**
@@ -275,6 +362,7 @@ public class TaskPoolController {
         if (task == null) {
             throw ApiException.notFound("任务不存在");
         }
+        Integer oldStatus = task.getStatus();
 
         // ---- 1) 字段级约束(对应 pydantic TaskPatch) ----
         NullableField<String> name = textField(body, "name", 200, true);
@@ -345,6 +433,11 @@ public class TaskPoolController {
                 throw ApiException.badRequest("任务依赖不能形成循环");
             }
             normalizedDependsOn = String.join(",", deps);
+        }
+        if (body.has("depends_on") || weekEnd.present()) {
+            validateDependencyWeeks(taskId,
+                    dependencyRefs(body.has("depends_on") ? normalizedDependsOn : task.getDependsOn()),
+                    we, projectTasks(scopedProjectId));
         }
 
         // ---- 3) status/progress 联动(单给其一时推导另一个;status=3 保留原进度) ----
@@ -425,6 +518,11 @@ public class TaskPoolController {
         taskMapper.updateById(task);
         if (body.has("story_ref")) {
             taskStoryRelations.replaceRelations(scopedProjectId, task, normalizedStoryRef);
+        }
+        if (finalStatus != null && !finalStatus.equals(oldStatus)) {
+            jdbc.update("INSERT INTO task_logs(project_id,task_id,old_status,new_status,user_id,created_at)"
+                            + " VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)",
+                    scopedProjectId, taskId, oldStatus, finalStatus, actor.getId());
         }
         return TaskDtos.toOut(task, taskStoryRelations.storyCodes(scopedProjectId, task));
     }

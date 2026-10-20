@@ -12,6 +12,11 @@ _tmp_*.py
 # 本地留存的过程记录，仅本地查阅
 qa/测试执行记录_后端_mcc整合.md
 
+# 交付物工作区与备份(生成脚本/证据/成品 zip,属交付物不属源码仓库;防止误提交打包产物)
+docx-work-*/
+.docx-backup-*/
+*.lnk
+
 # 系统文件
 .DS_Store
 Thumbs.db

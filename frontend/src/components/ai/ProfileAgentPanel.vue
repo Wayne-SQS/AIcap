@@ -251,7 +251,7 @@ const LEVEL_TEXT = { low: '低', medium: '中', high: '高', extreme: '极高' }
 const LEVEL_COLOR = { low: '#4caf50', medium: '#ffc107', high: '#ff9800', extreme: '#f44336' }
 const TYPE_TEXT = { commit: 'Commit', pr: 'PR', review: 'Review', bugfix: '缺陷修复', task_done: '任务完成', test: '测试', note: '状态更新' }
 
-/* 登录态就绪后再拉取(与 AiView 对会议 store 的 watch 同范式):
+/* 登录态就绪后再拉取(与会议 store 的 watch 同范式):
    - 离线演示模式 / 未登录时直接发请求会 401,而 client.js 的 401 分支会触发全局
      handleUnauthorized() → 误弹「登录已过期」并强制打开登录框;
    - 若面板先挂载、之后才登录(在 AI 页面点顶栏登录),也必须能自动补拉,

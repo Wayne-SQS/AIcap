@@ -21,7 +21,7 @@ const navGroups = [
       { view: 'board', icon: '▦', label: '用户故事看板' },
       { view: 'gantt', icon: '▤', label: '甘特图' },
       { view: 'members', icon: '▥', label: '成员任务图' },
-      { view: 'profiles', icon: '▤', label: '成员画像' },
+      { view: 'profiles', icon: '▤', label: '画像档案' },
       { view: 'uml', icon: '◇', label: 'UML 图' }
     ]
   },

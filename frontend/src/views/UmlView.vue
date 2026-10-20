@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 
@@ -19,7 +20,8 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
    这里保持同一口径,只是数据源换成了响应式 store。 */
 
 const project = useProjectStore()
-const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${project.currentProjectId || 'none'}`)
+const projects = useProjectsStore()
+const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${projects.currentProjectId || 'none'}`)
 
 /* ==================== 用例图 ==================== */
 const MIN_USECASE_WIDTH = 140
@@ -413,7 +415,7 @@ function saveUmlLayout() {
 watch(() => project.stories.map(story => story.id), ids => {
   syncUsecaseLayout(ids.map(id => project.stories.find(story => story.id === id)).filter(Boolean))
 }, { immediate: true })
-watch(() => project.currentProjectId, async () => {
+watch(() => projects.currentProjectId, async () => {
   resetUmlLayout()
   syncUsecaseLayout(project.stories)
   await nextTick()

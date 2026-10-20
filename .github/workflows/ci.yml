@@ -1,0 +1,136 @@
+name: CI
+
+# 质量闸门:后端契约测试(含 MySQL/Qdrant 两条向量库实现)、AI 服务与编排层单测、前端构建。
+# 本地等价命令见 README「全部测试套件」与 qa/run-all.ps1。
+on:
+  push:
+    branches: [main, feat/agent-tool-layer]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Java 契约测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-2026
+          MYSQL_DATABASE: AIcap
+          MYSQL_USER: aiguanli
+          MYSQL_PASSWORD: aiguanli-2026
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot-2026 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '23'
+          cache: maven
+
+      - name: 创建契约测试库并授权
+        run: |
+          mysql -h 127.0.0.1 -P 3307 -uroot -proot-2026 -e \
+            "CREATE DATABASE IF NOT EXISTS aicap_java_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; \
+             GRANT ALL PRIVILEGES ON aicap_java_test.* TO 'aiguanli'@'%'; FLUSH PRIVILEGES;"
+
+      - name: 等待 Qdrant 就绪
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:6333/readyz; then echo "qdrant ready"; exit 0; fi
+            sleep 2
+          done
+          echo "qdrant did not become ready" >&2
+          exit 1
+
+      - name: 全量契约测试
+        working-directory: java-backend
+        # 契约测试对 mysql / qdrant 两套向量库实现各跑一遍,缺一即失败是刻意设计
+        run: mvn -B test
+
+      - name: 上传失败报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: java-backend/target/surefire-reports
+          if-no-files-found: ignore
+
+  python:
+    name: AI 服务与编排层单测
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            ai-service/requirements.txt
+            agent-orchestrator/pyproject.toml
+
+      - name: 部署配置自检(deploy/verify.py 单元测试)
+        working-directory: deploy
+        run: python -m unittest test_verify -v
+
+      - name: 安装 ai-service 依赖
+        working-directory: ai-service
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: ai-service 用例
+        working-directory: ai-service
+        run: python -m unittest discover -s tests -v
+
+      - name: 安装编排层依赖
+        working-directory: agent-orchestrator
+        run: python -m pip install -e ".[dev]"
+
+      - name: 编排层用例
+        working-directory: agent-orchestrator
+        run: python -m pytest -q
+
+  frontend:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 构建
+        working-directory: frontend
+        run: npm run build

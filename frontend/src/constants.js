@@ -22,7 +22,7 @@ export const VIEW_NAMES = {
   members: '成员任务图',
   profiles: '成员画像',
   uml: 'UML 图',
-  ai: 'AI 工作台',
+  office: 'AI 办公室',
   agents: '智能体调用中心',
   review: '提案审核中心'
 }

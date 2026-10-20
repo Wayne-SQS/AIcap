@@ -23,8 +23,11 @@ test('分页队列只读取当前页详情并保留下一页游标', async ({ pa
     }
     try {
       const { loadReviewQueuePage } = await import('/src/api/reviewQueue.js')
+      /* 只统计本次调用发出的请求:页面挂载时的启动请求(/api/projects 等)会混进 paths,
+         用例断言的是队列分页这条链路自己的请求序列。 */
+      const mark = paths.length
       const queue = await loadReviewQueuePage({ status: 'pending', source: 'all' }, null, 2)
-      return { ...queue, paths }
+      return { ...queue, paths: paths.slice(mark) }
     } finally { window.fetch = originalFetch }
   })
   expect(result.errors).toEqual([])
@@ -55,7 +58,9 @@ test('工作台摘要只读取汇总接口和最近一条提案详情', async ({
     }
     try {
       const { loadReviewQueueSummary } = await import('/src/api/reviewQueue.js')
-      return { ...await loadReviewQueueSummary(), paths }
+      const mark = paths.length
+      const summary = await loadReviewQueueSummary()
+      return { ...summary, paths: paths.slice(mark) }
     } finally { window.fetch = originalFetch }
   })
   expect(result.pendingCount).toBe(51)
@@ -83,7 +88,9 @@ test('没有提案时摘要仍保留最近会议且不读取详情', async ({ pa
     }
     try {
       const { loadReviewQueueSummary } = await import('/src/api/reviewQueue.js')
-      return { ...await loadReviewQueueSummary(), paths }
+      const mark = paths.length
+      const summary = await loadReviewQueueSummary()
+      return { ...summary, paths: paths.slice(mark) }
     } finally { window.fetch = originalFetch }
   })
   expect(result.latestEntry).toBeNull()

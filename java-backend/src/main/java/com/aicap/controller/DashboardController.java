@@ -6,10 +6,12 @@ import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +25,7 @@ public class DashboardController {
 
     private final StoryMapper storyMapper;
     private final ProjectAccessService projectAccess;
+    private final JdbcTemplate jdbc;
 
     @GetMapping("")
     public Map<String, Object> dashboard(@org.springframework.web.bind.annotation.RequestParam String projectId) {
@@ -53,6 +56,15 @@ public class DashboardController {
         body.put("todo", todo);
         body.put("percent", percent);
         body.put("by_sprint", bySprint);
+        // 最近一次服务端变更:故事日志 / 任务状态日志 / 需求池三处取最大值。
+        // 空库或从未变更时返回 null,由前端显示"—"。
+        Timestamp latest = jdbc.queryForObject("SELECT GREATEST("
+                + "COALESCE((SELECT MAX(created_at) FROM story_logs WHERE project_id=?),'1970-01-01'),"
+                + "COALESCE((SELECT MAX(created_at) FROM task_logs WHERE project_id=?),'1970-01-01'),"
+                + "COALESCE((SELECT MAX(created_at) FROM pool_items WHERE project_id=?),'1970-01-01'))",
+                Timestamp.class, scopedProjectId, scopedProjectId, scopedProjectId);
+        body.put("last_updated_at", latest == null || latest.toLocalDateTime().getYear() == 1970
+                ? null : latest.toLocalDateTime());
         return body;
     }
 

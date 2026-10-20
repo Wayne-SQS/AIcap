@@ -3,8 +3,24 @@ import { test, expect } from '@playwright/test'
 test('提案队列只读权限：查看者可查看但没有审核写操作', async ({ page }) => {
   const writes = []
   let suggestionStatus = 'pending'
+  /* 队列分页里 general 来源的载荷是 SuggestionOut:索引只带 proposalId,详情由前端
+     回源 /api/suggestions/{id}(见 reviewQueue.js hydrateReviewQueuePage)。缺这条 mock
+     会让 general 行整条落空 —— data-meeting-suggestion 与状态都没有,审核按钮也就无从渲染。 */
+  const suggestion = () => ({
+    id: 'suggestion-1', meeting_id: 'meeting-1', meeting_title: '权限检查会议',
+    // createdAt 早于 daily 提案:队列按时间倒序,daily 必须仍是第一张卡
+    created_at: '2026-10-09T00:30:00',
+    status: suggestionStatus, origin: 'manual', evidence: '完善评审流程', note: '确认后再开发',
+    changes: { title: '改进评审流程', priority: 'Should', description: '增加步骤状态' },
+    ...(suggestionStatus === 'rejected' ? { reviewed_by: 1, reviewed_at: '2026-10-09T02:00:00Z', reason: '本轮暂不处理' } : {})
+  })
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'mock-token'))
+  // 多项目改造后项目号是业务接口的必填上下文:预置项目号 + 让 /api/projects 返回该项目,
+  // 否则 loadProjects 会把 P001 清空,ReviewView.refresh() 会卡在「请先选择项目」而队列永远为空。
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'mock-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('http://127.0.0.1:8080/api/**', async route => {
     const request = route.request()
     const { pathname } = new URL(request.url())
@@ -12,15 +28,22 @@ test('提案队列只读权限：查看者可查看但没有审核写操作', as
 
     let body = []
     if (pathname === '/api/health') body = { status: 'ok' }
+    else if (pathname === '/api/projects') body = [{ id: 'P001', name: '权限检查项目', status: 'active' }]
     else if (pathname === '/api/auth/me') body = { id: 8, username: 'reader', display_name: '只读成员', role: 'viewer' }
     else if (pathname === '/api/auth/users') body = [{ id: 8, username: 'reader', display_name: '只读成员', role: 'viewer' }]
     else if (pathname === '/api/meetings') body = [{ id: 'meeting-1', title: '权限检查会议', transcript: '我们要完善评审流程。' }]
-    else if (pathname === '/api/suggestions') body = [{
-      id: 'suggestion-1', meeting_id: 'meeting-1', meeting_title: '权限检查会议',
-      status: suggestionStatus, origin: 'manual', evidence: '完善评审流程', note: '确认后再开发',
-      changes: { title: '改进评审流程', priority: 'Should', description: '增加步骤状态' },
-      ...(suggestionStatus === 'rejected' ? { reviewed_by: 1, reviewed_at: '2026-10-09T02:00:00Z', reason: '本轮暂不处理' } : {})
-    }]
+    else if (pathname === '/api/review-queue') body = {
+      // 队列页的分页契约(多项目改造后新增):服务端过滤 + 游标;详情仍逐组回源
+      items: [
+        { source: 'daily', meetingId: 'meeting-1', meetingTitle: '权限检查会议', analysisId: 'analysis-1',
+          proposalId: 'status-proposal-1', createdAt: '2026-10-09T01:00:00', status: 'pending', executionStatus: 'not_started' },
+        { source: 'general', meetingId: 'meeting-1', meetingTitle: '权限检查会议', analysisId: 'suggestion-1',
+          proposalId: 'suggestion-1', createdAt: '2026-10-09T02:00:00', status: 'pending', executionStatus: 'not_started' }
+      ],
+      nextCursor: null
+    }
+    else if (pathname === '/api/suggestions') body = [suggestion()]
+    else if (pathname === '/api/suggestions/suggestion-1') body = suggestion()
     else if (pathname === '/api/suggestions/suggestion-1/review' && request.method() === 'POST') {
       suggestionStatus = 'rejected'
       body = {
