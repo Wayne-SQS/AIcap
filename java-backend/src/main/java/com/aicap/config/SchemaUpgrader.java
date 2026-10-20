@@ -64,7 +64,9 @@ public class SchemaUpgrader implements ApplicationRunner {
      */
     private static final String[][] STORY_LOG_COLUMNS = {
             {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
-            {"story_code_snapshot", "`story_code_snapshot` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"},
+            // 列定义与 schema.sql 对齐:快照列不写 COLLATE,继承表默认 utf8mb4_unicode_ci。
+            // 写了 COLLATE 的 ALTER 在 H2(MODE=MySQL) 上不被接受,StoryLogMigrationTest 会直接红。
+            {"story_code_snapshot", "`story_code_snapshot` varchar(20) DEFAULT NULL"},
     };
 
     private static final String[][] ACTIVITY_RECORD_COLUMNS = {
