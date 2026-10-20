@@ -30,6 +30,7 @@ const navGroups = [
     topGap: true,
     items: [
       { view: 'office', icon: '⌂', label: 'AI 办公室' },
+      { view: 'agents', icon: '⌘', label: '智能体调用中心' },
       { view: 'review', icon: '✓', label: '提案审核中心' }
     ]
   }

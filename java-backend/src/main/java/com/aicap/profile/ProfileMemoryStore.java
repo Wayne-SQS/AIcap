@@ -102,6 +102,48 @@ public class ProfileMemoryStore {
         return new Memory(sb.toString(), 0, manual.size(), 0);
     }
 
+    /**
+     * 批量难度记忆:一次查表产出「项目级校准(各任务共享一次)+ 各任务自身历史」。
+     * 逐任务调用 {@link #difficultyMemory(String)} 会把同一段项目级参考复制 N 份塞进 prompt
+     * (N 次 SQL + N 份冗余 token),批量评估下必须合并。
+     */
+    public BatchDifficultyMemory difficultyMemoryBatch(java.util.Collection<String> taskCodes) {
+        List<DifficultyAssessment> history = difficultyMapper.selectList(new QueryWrapper<DifficultyAssessment>()
+                .orderByDesc("id").last("LIMIT 50"));
+        StringBuilder shared = new StringBuilder();
+        List<DifficultyAssessment> manual = history.stream()
+                .filter(a -> "manual".equals(a.getAssessedBy())).limit(10).toList();
+        if (!manual.isEmpty()) {
+            shared.append("### 项目级人工修正参考(负责人确认过的难度结论,均来自其他任务,仅作校准参考)\n");
+            for (DifficultyAssessment a : manual) {
+                shared.append("- 任务 ").append(a.getTaskId()).append(": ").append(a.getLevel())
+                        .append("(").append(a.getScore()).append("分) 依据: ").append(compact(a.getBasis())).append('\n');
+            }
+        } else {
+            shared.append("### 项目级人工修正参考\n- 暂无,按当前证据独立判断\n");
+        }
+        Map<String, String> perTask = new LinkedHashMap<>();
+        for (String code : taskCodes) {
+            List<DifficultyAssessment> same = history.stream()
+                    .filter(a -> code != null && code.equals(a.getTaskId())).toList();
+            if (same.isEmpty()) {
+                perTask.put(code, "");
+                continue;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (DifficultyAssessment a : same) {
+                sb.append("- [").append(a.getAssessedBy()).append("] ").append(a.getLevel())
+                        .append("(").append(a.getScore()).append("分) 依据: ").append(compact(a.getBasis())).append('\n');
+            }
+            perTask.put(code, sb.toString());
+        }
+        return new BatchDifficultyMemory(shared.toString(), perTask);
+    }
+
+    /** 批量难度记忆:sharedText=项目级共享校准,perTask=各任务自身历史(无历史则空串) */
+    public record BatchDifficultyMemory(String sharedText, Map<String, String> perTask) {
+    }
+
     /** 记忆使用情况统计(进可观测输出) */
     public Map<String, Object> stats(Memory m) {
         Map<String, Object> out = new LinkedHashMap<>();

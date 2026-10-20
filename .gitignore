@@ -16,6 +16,12 @@ qa/测试执行记录_后端_mcc整合.md
 .DS_Store
 Thumbs.db
 
+# 环境变量文件:含 LLM Key / GitHub Token,任何层级都不进仓库
+# 只提交 .env.example 模板(变量名与说明,值留空)
+.env
+.env.local
+java-backend/.env
+
 # python / backend
 backend/.env
 deploy/.env
@@ -72,3 +78,9 @@ ai-service/.planning-quality/
 
 # Temporary AI collaboration messages; durable decisions belong in docs/
 .agent-collab/
+
+# IDE 配置(个人工作区,不进仓库)
+.idea/
+
+# 本地回归测试临时产物(备份/响应快照)
+.tmptest/

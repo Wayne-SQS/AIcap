@@ -40,6 +40,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -246,9 +247,30 @@ public class ProfileAgentService {
     public List<ProfileAgentDtos.DifficultyOut> assessDifficulty(String projectId, LocalDate start, LocalDate end,
                                                                   boolean llmAndPersist) {
         String scopedProjectId = ProjectAccessService.normalize(projectId);
-        List<Task> tasks = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId));
-        Map<String, Integer> downstream = downstreamCounts(tasks);   // 4.5: 被后续任务依赖数
+        List<Task> all = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId));
+        // 依赖图是全局结构,必须基于全量任务统计(否则窗口外前置任务被漏掉,下游数失真)
+        Map<String, Integer> downstream = downstreamCounts(all);   // 4.5: 被后续任务依赖数
+
+        // 按查询范围过滤:此前 start/end 完全没被使用,任意范围都返回全表评估(名不副实)
+        int[] span = projectWeekSpan(scopedProjectId, start, end);
+        Set<String> scope = scopeTaskIds(scopedProjectId, start, end, all, span);
+        List<Task> tasks = (scope == null) ? all : all.stream().filter(t -> scope.contains(t.getId())).toList();
+        if (span != null) {
+            log.info("[profile-agent] 难度评估范围过滤: {}~{} → 项目周 {}~{}, 任务 {}/{} 在范围内",
+                    start, end, span[0], span[1], tasks.size(), all.size());
+            // 范围内一个任务都没有(例:项目排期到第 6 周,用户选了第 7 周):
+            // 难度是任务固有属性,返回空表没有任何信息量,还会让"跑一次分析"看起来毫无产出。
+            // 这里回退为全量并记 warn —— 宁可多给,不要给空。
+            if (tasks.isEmpty() && !all.isEmpty()) {
+                tasks = all;
+                log.warn("[profile-agent] 难度评估范围 {}~{} (项目周 {}~{}) 内无任务,回退为全量 {} 个任务",
+                        start, end, span[0], span[1], all.size());
+            }
+        }
+
+        // 第一遍:区分「可直接复用」与「本轮待评估」,以便把待评估任务合并成一次批量 LLM 调用
         List<ProfileAgentDtos.DifficultyOut> out = new ArrayList<>();
+        List<Task> pending = new ArrayList<>();
         for (Task t : tasks) {
             if (t.getStatus() != null && t.getStatus() == 3) continue; // 已取消不评估
             DifficultyAssessment manual = latestAssessment(scopedProjectId, t.getId(), "manual");
@@ -256,20 +278,77 @@ public class ProfileAgentService {
                 out.add(toDifficultyOut(manual));
                 continue;
             }
+            DifficultyAssessment existing = latestAssessment(scopedProjectId, t.getId(), "ai", "rules");
+            if (existing != null) {   // 已有智能体/规则评估则复用,不重复扣费
+                out.add(toDifficultyOut(existing));
+                continue;
+            }
+            pending.add(t);
+        }
+
+        if (!llmAndPersist) {
+            // 只读预览:规则引擎即时算(assessed_by=rules),不落库、不调 LLM —— 零费用零副作用
+            for (Task t : pending) {
+                out.add(toDifficultyOut(bindTask(
+                        ruleEngineAssessment(t, false, downstream.getOrDefault(t.getId(), 0)), scopedProjectId, t)));
+            }
+            return out;
+        }
+
+        // 正式分析:一次批量调用覆盖全部待评估任务(N 次规划循环 → ceil(N/batchSize) 次直调)
+        final boolean llmOk = brain.available();
+        final boolean batchOn = llmOk && brain.batchEnabled();
+        final Map<String, com.aicap.profile.ProfileAgentBrain.DifficultyConclusion> batch;
+        if (!pending.isEmpty() && batchOn) {
+            List<com.aicap.profile.ProfileAgentBrain.TaskFacts> facts = new ArrayList<>();
+            for (Task t : pending) {
+                facts.add(new com.aicap.profile.ProfileAgentBrain.TaskFacts(
+                        t, downstream.getOrDefault(t.getId(), 0)));
+            }
+            batch = brain.batchAssessDifficulty(scopedProjectId, facts);   // null=不可用;空/部分=模型漏了该任务
+        } else {
+            batch = null;
+        }
+
+        // 未命中任务的兜底策略:
+        // - 批量被显式关闭(灰度回滚)→ 回退为「每个任务单跑一次规划循环」,即改造前行为
+        // - 批量已生效 → 只对少量漏评补单任务,避免"批量失败→逐个重跑"把成本打回原形
+        // - LLM 不可用 → 规则引擎
+        long missed = pending.stream()
+                .filter(t -> batch == null || !batch.containsKey(t.getId())).count();
+        boolean allowSingleFallback;
+        if (!llmOk) {
+            allowSingleFallback = false;
+            log.info("[profile-agent] 难度评估:LLM 不可用,{} 个任务全部走规则引擎", pending.size());
+        } else if (!batchOn) {
+            allowSingleFallback = !pending.isEmpty();
+            log.info("[profile-agent] 难度评估:批量已关闭(灰度回滚),{} 个任务逐个跑规划循环", pending.size());
+        } else {
+            allowSingleFallback = missed > 0 && missed <= Math.max(2, (long) Math.ceil(pending.size() * 0.1));
+            log.info("[profile-agent] 难度评估批量完成: 待评估={}, 批量命中={}, 漏评={}, 单任务补评估={}",
+                    pending.size(), pending.size() - missed, missed, allowSingleFallback);
+        }
+
+        for (Task t : pending) {
             // H3 修复:按任务粒度加锁,同一任务的评估串行化,防并发重复评估/重复落库
             Object lock = taskLocks.computeIfAbsent(t.getId(), k -> new Object());
             synchronized (lock) {
-                DifficultyAssessment existing = latestAssessment(scopedProjectId, t.getId(), "ai", "rules");
-                if (existing != null) {   // 已有智能体/规则评估则复用,不重复扣费
-                    out.add(toDifficultyOut(existing));
+                DifficultyAssessment raced = latestAssessment(scopedProjectId, t.getId(), "manual", "ai", "rules");
+                if (raced != null) {   // 加锁后复核:并发下可能已被其它线程评估落库
+                    out.add(toDifficultyOut(raced));
                     continue;
                 }
-                if (!llmAndPersist) {
-                    // 只读预览:规则引擎即时算(assessed_by=rules),不落库、不调 LLM
-                out.add(toDifficultyOut(bindTask(ruleEngineAssessment(t, false, downstream.getOrDefault(t.getId(), 0)), scopedProjectId, t)));
-                    continue;
+                int dc = downstream.getOrDefault(t.getId(), 0);
+                com.aicap.profile.ProfileAgentBrain.DifficultyConclusion c =
+                        batch == null ? null : batch.get(t.getId());
+                DifficultyAssessment ai;
+                if (c != null) {
+                    ai = toAssessment(scopedProjectId, t, c);              // 批量 LLM 命中
+                } else if (allowSingleFallback) {
+                    ai = buildAiAssessment(scopedProjectId, t, dc);        // 少量漏评:单任务 LLM 补
+                } else {
+                    ai = ruleEngineAssessment(t, true, dc);                // 规则引擎兜底
                 }
-                DifficultyAssessment ai = buildAiAssessment(scopedProjectId, t, downstream.getOrDefault(t.getId(), 0));   // LLM 内核优先,失败降级规则引擎
                 ai.setProjectId(scopedProjectId);
                 ai.setTaskInternalId(t.getInternalId());
                 ai.setTaskCodeSnapshot(t.getId());
@@ -278,6 +357,75 @@ public class ProfileAgentService {
             }
         }
         return out;
+    }
+
+    /** 把批量/单任务的 LLM 结论落成评估实体(与 buildAiAssessment 同口径,抽出避免重复) */
+    private DifficultyAssessment toAssessment(String projectId, Task t,
+                                              com.aicap.profile.ProfileAgentBrain.DifficultyConclusion c) {
+        List<String> basis = new ArrayList<>(c.basis());
+        basis.add("[confidence=" + c.confidence() + ", evidence=" + c.evidenceRefs() + "]");
+        DifficultyAssessment a = new DifficultyAssessment();
+        a.setProjectId(ProjectAccessService.normalize(projectId));
+        a.setTaskId(t.getId());
+        a.setTaskInternalId(t.getInternalId());
+        a.setTaskCodeSnapshot(t.getId());
+        a.setLevel(c.level());
+        a.setScore(c.score());
+        a.setBasis(writeJson(basis));
+        a.setAssessedBy("ai");
+        a.setCreatedAt(LocalDateTime.now());
+        return a;
+    }
+
+    /**
+     * 项目第 1 周的锚点 = 最早一条活动记录所在周的周一;无活动记录 → null(无法映射周次)。
+     */
+    private LocalDate projectAnchorOrNull(String projectId) {
+        ActivityRecord first = activityMapper.selectOne(new QueryWrapper<ActivityRecord>()
+                .eq("project_id", projectId)
+                .orderByAsc("happened_at").last("LIMIT 1"));
+        if (first == null || first.getHappenedAt() == null) return null;
+        return first.getHappenedAt().toLocalDate()
+                .with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    }
+
+    /**
+     * 把查询时间范围映射成「项目相对周」闭区间 [w1,w2]。
+     * start/end 任一为空、或无锚点可映射 → 返回 null 表示「不按范围过滤」。
+     */
+    private int[] projectWeekSpan(String projectId, LocalDate start, LocalDate end) {
+        if (start == null || end == null) return null;
+        LocalDate anchor = projectAnchorOrNull(projectId);
+        if (anchor == null) return null;
+        int w1 = (int) java.time.temporal.ChronoUnit.WEEKS.between(anchor, start) + 1;
+        int w2 = (int) java.time.temporal.ChronoUnit.WEEKS.between(anchor, end) + 1;
+        return new int[]{Math.min(w1, w2), Math.max(w1, w2)};
+    }
+
+    /**
+     * 本次范围内的任务业务码集合;返回 null = 不过滤(全量)。
+     * 纳入条件(满足其一):计划周 [week_start, week_end] 与范围周区间重叠;或窗口内有该任务的活动记录。
+     * week 字段缺失的任务无法判定,保守纳入。
+     */
+    private Set<String> scopeTaskIds(String projectId, LocalDate start, LocalDate end, List<Task> tasks, int[] span) {
+        if (span == null) return null;
+        Set<String> ids = new HashSet<>();
+        for (Task t : tasks) {
+            Integer ws = t.getWeekStart(), we = t.getWeekEnd();
+            if (ws == null || we == null) {
+                ids.add(t.getId());           // 无周次信息,无从排除 → 纳入
+                continue;
+            }
+            if (ws <= span[1] && we >= span[0]) ids.add(t.getId());
+        }
+        List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
+                .eq("project_id", projectId)
+                .ge("happened_at", start.atStartOfDay())
+                .le("happened_at", end.atTime(23, 59, 59)));
+        for (ActivityRecord a : acts) {
+            if (a.getTaskId() != null && !a.getTaskId().isBlank()) ids.add(a.getTaskId());
+        }
+        return ids;
     }
 
     /** 4.5: 统计每个任务被多少后续任务依赖(影响后续任务的程度,如"被两个后续任务依赖→高难度") */
@@ -455,7 +603,8 @@ public class ProfileAgentService {
         }
         List<Task> tasks = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", scopedProjectId));
         Map<String, ProfileAgentDtos.DifficultyOut> diffByTask = new HashMap<>();
-        for (ProfileAgentDtos.DifficultyOut d : assessDifficulty(scopedProjectId, start, end, useLlm)) {
+        List<ProfileAgentDtos.DifficultyOut> difficultyOuts = assessDifficulty(scopedProjectId, start, end, useLlm);
+        for (ProfileAgentDtos.DifficultyOut d : difficultyOuts) {
             diffByTask.put(d.taskId(), d);
         }
 
@@ -464,24 +613,100 @@ public class ProfileAgentService {
         for (User u : users) {
             members.add(memberAnalysis(projectId, u, tasks, diffByTask, start, end, useLlm));
         }
+        final List<Map<String, Object>> membersForFacts = members;
+        final List<User> usersForFacts = users;
+        final List<Task> tasksForFacts = tasks;
+        final Map<String, ProfileAgentDtos.DifficultyOut> diffForFacts = diffByTask;
         // ---- LLM 内核优先:团队风险归因;失败/未配置 → 规则引擎降级 ----
         // 单人范围(onlyUserId!=null)不调 LLM:团队风险必须看全体成员,只看一个人会把
         // "他在做关键路径""模块集中在他身上"这类判断做错,宁可降级规则引擎并如实标注。
         boolean llmTeam = false;
         if (useLlm && onlyUserId == null && brain.available()) {
             try {
+                /* 事实基座:规则引擎判定所用的事实在这里全部注入给模型。
+                   此前只喂了任务名/工时/负载率,模型既无从归因、也无从判断"是缺评审还是没录数据",
+                   这是团队风险 LLM 结论质量差(乃至整批失败→静默降级)的重要成因。 */
+                List<ActivityRecord> acts = activityMapper.selectList(new QueryWrapper<ActivityRecord>()
+                        .eq("project_id", scopedProjectId)
+                        .ge("happened_at", start.atStartOfDay())
+                        .le("happened_at", end.atTime(23, 59, 59)));
+                LocalDate recentCut = LocalDate.now().minusDays(7);
+
+                // 任务维度:[review 数, test 数, 活动总数, 近 7 天活动数]
+                Map<String, int[]> taskStat = new HashMap<>();
+                Map<String, String> taskLast = new HashMap<>();
+                // 成员维度:活动类型计数 + 最近活动
+                Map<Integer, Map<String, Integer>> userTypeCount = new HashMap<>();
+                Map<Integer, String> userLast = new HashMap<>();
+                for (ActivityRecord a : acts) {
+                    String d = a.getHappenedAt() == null ? "" : a.getHappenedAt().toLocalDate().toString();
+                    String tid = a.getTaskId();
+                    Integer uid = a.getUserId();
+                    if (uid != null) {
+                        userTypeCount.computeIfAbsent(uid, k -> new HashMap<>())
+                                .merge(a.getActivityType() == null ? "other" : a.getActivityType(), 1, Integer::sum);
+                        if (!d.isBlank() && d.compareTo(userLast.getOrDefault(uid, "")) > 0) userLast.put(uid, d);
+                    }
+                    if (tid == null || tid.isBlank()) continue;
+                    int[] v = taskStat.computeIfAbsent(tid, k -> new int[4]);
+                    v[2]++;
+                    String type = a.getActivityType() == null ? "" : a.getActivityType();
+                    if ("review".equals(type)) v[0]++;
+                    if ("test".equals(type)) v[1]++;
+                    if (!d.isBlank() && d.compareTo(recentCut.toString()) >= 0) v[3]++;
+                    if (!d.isBlank() && d.compareTo(taskLast.getOrDefault(tid, "")) > 0) taskLast.put(tid, d);
+                }
+                // 成员未完成任务工时 / 高难度未完成任务数
+                Map<Integer, Integer> openHours = new HashMap<>();
+                Map<Integer, Integer> highCnt = new HashMap<>();
+                for (Task t : tasksForFacts) {
+                    if (t.getOwnerId() == null || (t.getStatus() != null && t.getStatus() >= 2)) continue;
+                    openHours.merge(t.getOwnerId(), t.getHours() == null ? 0 : t.getHours(), Integer::sum);
+                    ProfileAgentDtos.DifficultyOut d = diffForFacts.get(t.getId());
+                    if (d != null && ("high".equals(d.level()) || "extreme".equals(d.level()))) {
+                        highCnt.merge(t.getOwnerId(), 1, Integer::sum);
+                    }
+                }
+
                 Map<String, Object> teamFacts = new LinkedHashMap<>();
                 teamFacts.put("range", start + " ~ " + end);
-                teamFacts.put("members", members.stream().map(m -> Map.of(
-                        "user_id", m.get("user_id"),
-                        "display_name", m.get("display_name"),
-                        "current_load_percent", m.get("current_load_percent"),
-                        "generated_by", m.get("generated_by"))).toList());
-                teamFacts.put("tasks", tasks.stream().map(t -> Map.of(
-                        "task_id", t.getId(), "name", t.getName() == null ? "" : t.getName(),
-                        "status", t.getStatus() == null ? 0 : t.getStatus(),
-                        "owner_id", t.getOwnerId() == null ? 0 : t.getOwnerId(),
-                        "hours", t.getHours() == null ? 0 : t.getHours())).toList());
+                teamFacts.put("current_project_week", currentProjectWeek(scopedProjectId));
+                teamFacts.put("members", membersForFacts.stream().map(m -> {
+                    // 用 LinkedHashMap:允许 null 值(Map.of 遇 null 会直接 NPE)
+                    LinkedHashMap<String, Object> o = new LinkedHashMap<>();
+                    Integer ui = toIntOrNull(m.get("user_id"));
+                    User u = ui == null ? null
+                            : usersForFacts.stream().filter(x -> ui.equals(x.getId())).findFirst().orElse(null);
+                    o.put("user_id", m.get("user_id"));
+                    o.put("display_name", m.get("display_name"));
+                    o.put("current_load_percent", m.get("current_load_percent"));
+                    o.put("capacity_hours", u == null || u.getCapacityHours() == null ? 60 : u.getCapacityHours());
+                    o.put("open_task_hours", ui == null ? 0 : openHours.getOrDefault(ui, 0));
+                    o.put("high_difficulty_open_tasks", ui == null ? 0 : highCnt.getOrDefault(ui, 0));
+                    o.put("activity_counts", userTypeCount.getOrDefault(ui, Map.of()));
+                    o.put("last_activity_at", userLast.getOrDefault(ui, ""));
+                    return o;
+                }).toList());
+                teamFacts.put("tasks", tasksForFacts.stream().map(t -> {
+                    LinkedHashMap<String, Object> o = new LinkedHashMap<>();
+                    ProfileAgentDtos.DifficultyOut d = diffForFacts.get(t.getId());
+                    int[] v = taskStat.getOrDefault(t.getId(), new int[4]);
+                    o.put("task_id", t.getId());
+                    o.put("name", t.getName() == null ? "" : t.getName());
+                    o.put("status", t.getStatus() == null ? 0 : t.getStatus());
+                    o.put("status_text", statusText(t.getStatus()));
+                    o.put("owner_id", t.getOwnerId() == null ? 0 : t.getOwnerId());
+                    o.put("hours", t.getHours() == null ? 0 : t.getHours());
+                    o.put("week_end", t.getWeekEnd() == null ? 0 : t.getWeekEnd());
+                    o.put("difficulty", d == null ? "" : d.level());
+                    o.put("difficulty_score", d == null ? 0 : d.score());
+                    o.put("review_count", v[0]);
+                    o.put("test_count", v[1]);
+                    o.put("activity_count", v[2]);
+                    o.put("recent_activity_count_7d", v[3]);
+                    o.put("last_activity_at", taskLast.getOrDefault(t.getId(), ""));
+                    return o;
+                }).toList());
                 List<Map<String, Object>> llmRisks = brain.teamRisks(projectId, teamFacts);
                 if (llmRisks != null) {
                     // H5 修复:过滤幻觉实体——LLM 引用的 user_id/task_id 必须在真实集合内,否则丢弃该条
@@ -501,9 +726,11 @@ public class ProfileAgentService {
                         teamRisks.add(r);
                     }
                     llmTeam = true;   // LLM 结论(即使为空列表也视为合法结论)优先于规则引擎
+                    log.info("[profile-agent] 团队风险 LLM 归因完成: {} 条", teamRisks.size());
                 }
-            } catch (Exception ignore) {
-                // 落入规则引擎降级
+            } catch (Exception e) {
+                // 不再静默:降级必须留痕,否则"配了 LLM 却出规则结论"无从察觉
+                log.warn("[profile-agent] 团队风险 LLM 归因失败,降级规则引擎: {}", e.getMessage());
             }
         }
         if (!llmTeam) {
@@ -521,15 +748,19 @@ public class ProfileAgentService {
         result.put("range_start", start.toString());
         result.put("range_end", end.toString());
         result.put("generated_at", LocalDateTime.now().format(TS));
-        // L1 修复:engine 按成员/风险实际引擎统计(任一成员或风险走了 LLM 即标 llm)
-        boolean anyLlm = members.stream().anyMatch(m -> "llm".equals(m.get("generated_by")))
-                || (!useLlm ? false : llmTeam);
+        // 成员画像与团队风险各自的实际引擎:分开标注,避免"engine=llm"掩盖风险部分其实走了规则引擎
+        boolean anyMemberLlm = members.stream().anyMatch(m -> "llm".equals(m.get("generated_by")));
+        boolean anyLlm = anyMemberLlm || (!useLlm ? false : llmTeam);
         result.put("engine", anyLlm ? "llm" : "rules_fallback");
+        result.put("members_engine", anyMemberLlm ? "llm" : "rules_fallback");
+        result.put("risks_engine", llmTeam ? "llm" : "rules_fallback");
         // 本次评估范围:team = 全团队(人工触发/送审);member:N = 只评估第 N 号成员(完成任务触发)
         result.put("scope", onlyUserId == null ? "team" : "member:" + onlyUserId);
         result.put("data_sources", List.of("activity_records(手动/导入的活动事实)", "tasks(任务状态与工时)", "difficulty_assessments(难度评估)", "member_profiles(成员画像)"));
         result.put("members", members);
         result.put("team_risks", teamRisks);
+        // 本次范围内的任务难度评估(范围生效后可直观察:换范围 → 条目随之变化)
+        result.put("difficulty", difficultyOuts);
         return result;
     }
 
@@ -988,6 +1219,14 @@ public class ProfileAgentService {
         if (first == null || first.getHappenedAt() == null) return -1;
         LocalDate anchor = first.getHappenedAt().toLocalDate()
                 .with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        long weeks = java.time.temporal.ChronoUnit.WEEKS.between(anchor, LocalDate.now());
+        return (int) weeks + 1;
+    }
+
+    /** 按项目取当前项目周(锚点只在该项目内取,避免跨项目活动污染周次) */
+    private int currentProjectWeek(String projectId) {
+        LocalDate anchor = projectAnchorOrNull(projectId);
+        if (anchor == null) return -1;
         long weeks = java.time.temporal.ChronoUnit.WEEKS.between(anchor, LocalDate.now());
         return (int) weeks + 1;
     }

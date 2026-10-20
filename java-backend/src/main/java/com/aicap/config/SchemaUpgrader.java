@@ -145,6 +145,9 @@ public class SchemaUpgrader implements ApplicationRunner {
             added.addAll(migrateInternalKeys(conn));
             // 数据引用的项目必须在 projects 表里存在,否则接口一律 404「项目不存在或已归档」
             added.addAll(ensureReferencedProjectsExist(conn));
+            // story_logs 补 internal-key 审计列(story_internal_id / story_code_snapshot),
+            // 与 stories 的 id→code 迁移配套,否则改名后的历史记录追溯不到
+            added.addAll(migrateStoryLogs(conn));
             // 队友变更:自定义角色与史诗两张表只对全新库由 schema.sql 建,老库不会重跑它,靠这里补建
             execute(conn, "CREATE TABLE IF NOT EXISTS roles (name varchar(50) NOT NULL, can_write tinyint(1) NOT NULL DEFAULT 0, can_manage tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY(name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             execute(conn, "CREATE TABLE IF NOT EXISTS epics (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, name varchar(100) NOT NULL, description varchar(500) NOT NULL DEFAULT '', created_at datetime NOT NULL, PRIMARY KEY(id), KEY ix_epics_project(project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -225,6 +228,11 @@ public class SchemaUpgrader implements ApplicationRunner {
             // 列缺失会让后续播种与接口静默出错,因此启动即失败,不做降级
             throw new IllegalStateException("存量库列迁移失败: " + e.getMessage(), e);
         }
+    }
+
+    Set<String> migrateStoryLogs(Connection conn) throws SQLException {
+        if (!tableExists(conn, "story_logs")) return Set.of();
+        return addMissing(conn, "story_logs", STORY_LOG_COLUMNS);
     }
 
     /** 多项目平滑迁移：保留现有正式项目，不再重建已物理删除的历史 P001。 */

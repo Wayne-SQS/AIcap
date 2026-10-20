@@ -13,6 +13,9 @@ const workspaceViews = [
   { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
   { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
   { name: 'office', label: 'AI 办公室', component: () => import('@/views/OfficeView.vue') },
+  /* AI 统一调用页:与办公室是同一批能力的两种入口,保留独立路由(不占用 legacyOfficeRedirects
+     里已声明的名字,否则会出现重名路由) */
+  { name: 'agents', label: '智能体调用中心', component: () => import('@/views/AgentsView.vue') },
   { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') },
   { name: 'ai-demo', label: 'AI 对话演示', component: () => import('@/views/AiDemoView.vue') },
   { name: 'project-generator', label: '智能生成项目图', component: () => import('@/views/ProjectGeneratorView.vue') }

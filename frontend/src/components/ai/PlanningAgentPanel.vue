@@ -13,7 +13,9 @@ const session = useSessionStore()
 const request = ref('')
 const run = ref(null)
 const busy = ref(false)
+const refreshError = ref('')
 let timer = null
+let mounted = true
 const result = computed(() => run.value?.result)
 const statusText = { queued: '排队中', running: '正在读取项目数据并分析', waiting_confirmation: '待确认执行', executing: '正在执行', completed: '已完成', cancelled: '已取消', failed: '分析失败' }
 const eventSteps = computed(() => {
@@ -37,16 +39,24 @@ const impactGroups = computed(() => {
   ].map(([key, title]) => ({ key, title, items: report[key] || [] })).filter(group => group.items.length)
 })
 async function refresh(id = run.value?.id) {
-  if (!id) return
-  run.value = await agentApi.planning.get(id, projects.currentProjectId)
+  if (!id || !mounted) return
+  const projectId = projects.currentProjectId
   clearTimeout(timer)
-  if (['queued', 'running'].includes(run.value.status)) timer = setTimeout(() => refresh(id), 1500)
+  refreshError.value = ''
+  try {
+    const next = await agentApi.planning.get(id, projectId)
+    if (!mounted || projectId !== projects.currentProjectId) return
+    run.value = next
+    if (['queued', 'running'].includes(next.status)) timer = setTimeout(() => refresh(id), 1500)
+  } catch (error) {
+    if (mounted && projectId === projects.currentProjectId) refreshError.value = error.message || '读取运行状态失败'
+  }
 }
 async function submit() {
   const text = request.value.trim()
   if (!text || busy.value) return
   busy.value = true
-  try { run.value = await agentApi.planning.create(text, projects.currentProjectId); request.value = ''; await refresh(run.value.id) }
+  try { const next = await agentApi.planning.create(text, projects.currentProjectId); if (!mounted) return; run.value = next; request.value = ''; await refresh(next.id) }
   catch (e) { notify('画图分析失败：' + e.message) }
   finally { busy.value = false }
 }
@@ -64,7 +74,7 @@ async function cancel() {
   catch (e) { await refresh(run.value.id); notify(e.message) }
   finally { busy.value = false }
 }
-onUnmounted(() => clearTimeout(timer))
+onUnmounted(() => { mounted = false; clearTimeout(timer) })
 </script>
 <template>
   <section class="planning-agent-panel" aria-labelledby="planning-agent-title">
@@ -74,9 +84,10 @@ onUnmounted(() => clearTimeout(timer))
     </div>
     <form class="planning-agent-form" @submit.prevent="submit">
       <textarea v-model="request" rows="2" maxlength="2000" placeholder="例如：把 T08 改给孙秋实；T08 现在是谁负责？" aria-label="画图智能体请求"></textarea>
-      <button class="primary" type="submit" :disabled="busy">{{ busy ? '分析中…' : '生成规划' }}</button>
+      <button class="primary" type="submit" :disabled="busy || !request.trim() || ['queued', 'running', 'executing', 'waiting_confirmation'].includes(run?.status)">{{ busy ? '分析中…' : '生成规划' }}</button>
     </form>
     <div v-if="run" class="planning-agent-run">
+      <p v-if="refreshError" class="planning-error" role="alert">{{ refreshError }} <button type="button" @click="refresh()">重试读取结果</button></p>
       <div class="planning-run-head"><b>{{ statusText[run.status] || run.status }}</b><span class="small">{{ run.request_text }}</span></div>
       <div v-if="eventSteps.length" class="planning-steps" aria-label="Agent 工作进度">
         <span v-for="step in eventSteps" :key="step.kind + step.message" :class="{ failed: step.kind === 'failed' }">{{ step.label }}</span>

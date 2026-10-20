@@ -4,9 +4,11 @@ import com.aicap.entity.Task;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,11 +18,13 @@ import java.util.Map;
  * - 结论必须带 confidence 与 evidence_refs(锚定工具调用),满足"可解释/幻觉检测"验收。
  * - startRecording/collectSteps 供运行留痕:每次 run 的 thought/action/observation/tokens 全记录。
  */
+@Slf4j
 @Service
 public class ProfileAgentBrain {
 
     private final ProfileAgentRuntime runtime;
     private final ProfileMemoryStore memoryStore;
+    private final ProfileLlmProperties props;
     private final ObjectMapper objectMapper;
 
     /** 线程级录制:仅在 runAnalysis 时开启,GET 预览不留痕也不泄漏 */
@@ -34,14 +38,20 @@ public class ProfileAgentBrain {
     private static final ThreadLocal<Integer> TOKENS = ThreadLocal.withInitial(() -> 0);
 
     public ProfileAgentBrain(ProfileAgentRuntime runtime, ProfileMemoryStore memoryStore,
-                             ObjectMapper objectMapper) {
+                             ProfileLlmProperties props, ObjectMapper objectMapper) {
         this.runtime = runtime;
         this.memoryStore = memoryStore;
+        this.props = props;
         this.objectMapper = objectMapper;
     }
 
     public boolean available() {
         return runtime.available();
+    }
+
+    /** 批量难度评估开关(false = 回退为逐个任务跑规划循环的旧行为,便于灰度对照) */
+    public boolean batchEnabled() {
+        return props != null && props.isBatchEnabled();
     }
 
     // ---------- 步骤录制(任务 #7 的可观测基础) ----------
@@ -145,6 +155,83 @@ public class ProfileAgentBrain {
         }
     }
 
+    // ---------- 1b. 批量难度评估(直调,一次请求覆盖多个任务) ----------
+
+    /** 批量评估的输入:任务 + 该任务被多少后续任务依赖 */
+    public record TaskFacts(Task task, int downstreamCount) {
+    }
+
+    private static final String BATCH_DIFF_SYSTEM = """
+            你是"AI 任务提交与成员能力画像智能体"的任务难度评估内核。
+            输入是一批任务的事实,你的职责:逐个评估难度(0-100 分与 low|medium|high|extreme 档)。
+            禁止关键字匹配式判断(如任务名含"权限"就加分)——必须综合工时、依赖链、
+            被后续任务依赖数(影响后续任务的程度)、阻塞状态、排期周次,给出因果论证。
+            参考"项目级人工修正参考"做尺度校准(它来自其他任务,只校准不照抄);
+            某任务有历史评估时不要无理由推翻。
+            只输出 JSON(不要输出其它文字):
+            {"results":[{"task_id":"T01","level":"low|medium|high|extreme","score":0-100,
+              "basis":["依据1(+N分原因)","依据2",...],"confidence":0.0-1.0,
+              "evidence_refs":["facts:T01.hours=16","facts:T01.downstream_tasks=4",...]}]}
+            必须覆盖输入的每一个 task_id;信息不足时降低 confidence 并说明缺什么,禁止编造。
+            """;
+
+    /**
+     * 批量难度评估:把 N 次「单任务规划循环」压成 ceil(N/batchSize) 次直调。
+     *
+     * @return key=任务业务码(code),value=结论;null=LLM 不可用或整批失败(交由上层降级),
+     *         空/部分=模型漏了部分任务(上层只对少量漏评补单任务)
+     */
+    public Map<String, DifficultyConclusion> batchAssessDifficulty(String projectId, List<TaskFacts> facts) {
+        if (!available() || facts == null || facts.isEmpty()) return null;
+        int size = Math.max(1, props == null ? 8 : props.getBatchSize());
+        ProfileMemoryStore.BatchDifficultyMemory mem = memoryStore.difficultyMemoryBatch(
+                facts.stream().map(f -> f.task().getId()).toList());
+        Map<String, DifficultyConclusion> out = new LinkedHashMap<>();
+        for (int from = 0; from < facts.size(); from += size) {
+            List<TaskFacts> chunk = facts.subList(from, Math.min(from + size, facts.size()));
+            try {
+                var arr = objectMapper.createArrayNode();
+                for (TaskFacts f : chunk) {
+                    Task t = f.task();
+                    var o = arr.addObject();
+                    o.put("task_id", t.getId());
+                    o.put("name", t.getName() == null ? "" : t.getName());
+                    o.put("status", t.getStatus() == null ? 0 : t.getStatus());
+                    o.put("hours", t.getHours() == null ? 0 : t.getHours());
+                    o.put("depends_on", t.getDependsOn() == null ? "" : t.getDependsOn());
+                    o.put("downstream_tasks", f.downstreamCount());
+                    o.put("week_start", t.getWeekStart() == null ? 0 : t.getWeekStart());
+                    o.put("week_end", t.getWeekEnd() == null ? 0 : t.getWeekEnd());
+                    o.put("blocked", t.getBlocked() != null && t.getBlocked() == 1);
+                    String own = mem.perTask().get(t.getId());
+                    if (own != null && !own.isBlank()) o.put("history", own);
+                }
+                String user = "## 项目级人工修正参考\n" + mem.sharedText()
+                        + "\n## 待评估任务(" + chunk.size() + " 个)\n" + objectMapper.writeValueAsString(arr);
+                String raw = runtime.singleShot(BATCH_DIFF_SYSTEM, user);
+                if (raw == null) continue;
+                JsonNode root = objectMapper.readTree(raw);
+                JsonNode results = root.path("results");
+                if (!results.isArray()) continue;
+                for (JsonNode n : results) {
+                    String tid = n.path("task_id").asText("");
+                    String level = n.path("level").asText("");
+                    int score = n.path("score").asInt(-1);
+                    if (tid.isBlank()
+                            || !List.of("low", "medium", "high", "extreme").contains(level)
+                            || score < 0 || score > 100) continue;
+                    List<String> basis = toStringList(n.path("basis"));
+                    if (basis.isEmpty()) continue;
+                    out.put(tid, new DifficultyConclusion(level, score, basis,
+                            n.path("confidence").asDouble(0.5), toStringList(n.path("evidence_refs"))));
+                }
+            } catch (Exception e) {
+                log.warn("[profile-agent] 批量难度评估第 {} 块失败: {}", from / size + 1, e.getMessage());
+            }
+        }
+        return out;
+    }
+
     // ---------- 2. 成员分析(LLM 内核) ----------
 
     private static final String MEMBER_SYSTEM = """
@@ -226,29 +313,41 @@ public class ProfileAgentBrain {
 
     // ---------- 3. 团队风险归因(LLM 内核) ----------
 
+    /* 直调版团队风险内核:事实已在 prompt 里给全,不再注入工具与步进协议。
+       实测规划循环在 deepseek-chat 上经常 8 步内不收敛 → 步数耗尽拿到残缺输出 →
+       解析失败被上层 catch 吞掉 → 表现为「配了 LLM 却出规则引擎的结论」。 */
     private static final String RISK_SYSTEM = """
             你是"AI 任务提交与成员能力画像智能体"的团队风险归因内核。
-            输入是团队各成员的负载/任务/活动摘要与历史记忆。你的职责:识别团队级风险并归因。
+            输入是系统统计出的团队事实(任务/成员/活动/难度,可信),你的职责:识别团队级风险并归因。
             已知风险类型(kind): overload(负载过高)/single_point(关键单点依赖)/stalled(长期无进展)/
             missing_review(高难度缺Review)/missing_test(任务缺测试活动记录)/
             module_concentration(某模块工作集中在少数人)/milestone_risk(里程碑延期);
-            也可基于证据提出其他类型。
-            规则:每条风险必须有具体证据与可执行的建议行动;宁可少报不可编造;
-            对可疑点(如某任务无活动)先调用工具核实再下结论。
-            收敛时输出 JSON:
+            若证据指向清单外的问题,可用自定义 kind(snake_case 英文),并把它写清楚。
+            判定口径(与规则引擎保持一致,避免两套结论漂移):
+            - 负载: current_load_percent >= 90 视为过载
+            - 单点: 同一人同时是 >= 2 个 high/extreme 难度未完成任务的唯一负责人
+            - 延期: week_end <= current_project_week 且任务未完成
+            - 停滞: 近 7 天无活动且任务未完成
+            - 缺评审/缺测试: 高难度任务但 review_count/test_count 为 0
+            关键:区分「真风险」与「数据缺失」。review_count=0 既可能是没评审,也可能是评审了没录活动;
+            后者请在 inference 里明确写"可能是活动未录入",不要断言成质量问题。
+            聚合要求:同类风险合并成一条并点名最关键的对象,全部风险最多 12 条;宁可少报不可编造。
+            每条必须有具体证据(引用事实字段名与数值)、归因推断、可执行建议。
+            只输出 JSON:
             {"risks":[{"kind":"...","user_id":1,"task_id":"可选","member":"可选","task_name":"可选",
-              "evidence":"具体证据","inference":"归因推断","suggested_action":"建议行动","confidence":0.0-1.0,
-              "evidence_refs":["..."]}],
+              "evidence":"具体证据(引用字段)","inference":"归因推断","suggested_action":"建议行动",
+              "confidence":0.0-1.0,"evidence_refs":["members:1.current_load_percent=100", "..."]}],
              "confidence":0.0-1.0}
             """;
 
-    /** LLM 团队风险;不可用/失败/输出不合法 → null(降级规则引擎) */
+    /** LLM 团队风险(单次直调);不可用/失败/输出不合法 → null(降级规则引擎) */
     public List<Map<String, Object>> teamRisks(String projectId, Map<String, Object> teamFacts) {
         if (!available()) return null;
         try {
             String facts = "## 团队事实摘要(由系统统计,可信)\n" + objectMapper.writeValueAsString(teamFacts);
-            AgentRunOutcome o = runPhase(projectId, "team", RISK_SYSTEM, facts);
-            JsonNode f = objectMapper.readTree(o.outcome().finalJson());
+            String raw = runtime.singleShot(RISK_SYSTEM, facts);
+            if (raw == null) return null;
+            JsonNode f = objectMapper.readTree(raw);
             List<Map<String, Object>> risks = objectMapper.convertValue(f.path("risks"),
                     new TypeReference<List<Map<String, Object>>>() {
                     });

@@ -116,6 +116,7 @@ export const useProjectStore = defineStore('project', {
       tasks: loadTasks(projectId),
       pool: loadPool(projectId),
       log: loadLog(projectId),
+      logError: '',
       members: structuredClone(MEMBERS),
       milestones: structuredClone(MILESTONES),
       serverSync: false,  // 在线且已完成 loadAll(控制 #savehint 文案)
@@ -347,15 +348,25 @@ export const useProjectStore = defineStore('project', {
     },
     async loadAll(projectId = useProjectsStore().currentProjectId) {
       const projects = useProjectsStore()
+      const session = useSessionStore()
+      const token = session.authToken
       const activeProjectId = projectId || projects.currentProjectId
       if (!activeProjectId) throw new Error('请先选择项目')
       projects.currentProjectId = activeProjectId
       projects.persistSelection()
+      let logError = ''
       const [st, tk, pl, lg, projectMembers, users, epics] = await Promise.all([
-        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId), storiesApi.logs(activeProjectId), projectsApi.members(activeProjectId), authApi.users(), epicsApi.list(activeProjectId)
+        storiesApi.list(activeProjectId), tasksApi.list(activeProjectId), poolApi.list(activeProjectId),
+        storiesApi.logs(activeProjectId).catch(error => {
+          if (!session.online) throw error
+          logError = error.message || '读取失败'
+          return []
+        }),
+        projectsApi.members(activeProjectId), authApi.users(), epicsApi.list(activeProjectId)
       ])
       let milestoneRows = []
       try { milestoneRows = await milestonesApi.list(activeProjectId) } catch { milestoneRows = [] }
+      if (!session.online || token !== session.authToken || activeProjectId !== projects.currentProjectId) return
       this.stories = st.map(this.mapStory)
       this.epics = epics
       this.tasks = tk.map(this.mapTask)
@@ -375,6 +386,7 @@ export const useProjectStore = defineStore('project', {
       /* 后端 /api/stories/logs 按 id 倒序(最新在前):取最新 50 条后翻成「旧 → 新」,
          与本机 addlog 的追加口径统一;展示层(ChangeLogPanel/最近更新)再按最新在前处理 */
       this.log = lg.map(l => ({ t: (l.created_at || '').slice(11, 19), type: l.log_type, id: l.story_id, detail: l.detail })).slice(0, 50).reverse()
+      this.logError = logError
       this.milestones = milestoneRows.map(m => ({
         id: m.id, week: m.week, name: m.name, desc: m.description || '',
         status: m.status || 'planned', related: m.related_task_ids ?? m.relatedTaskIds ?? ''
@@ -422,6 +434,7 @@ export const useProjectStore = defineStore('project', {
       this.tasks = []
       this.pool = []
       this.log = []
+      this.logError = ''
       this.milestones = []
       this.serverSync = false
       this.savehint = '已连接后端 · 登录后加载正式项目数据'
@@ -436,6 +449,7 @@ export const useProjectStore = defineStore('project', {
       this.members = structuredClone(MEMBERS)
       this.milestones = structuredClone(MILESTONES)
       this.log = loadLog(projectId)
+      this.logError = ''
       this.serverSync = false
       this.savehint = '拖动卡片更新状态 · 点击编辑 · 自动保存本地'
     },

@@ -34,4 +34,11 @@ public class ProfileLlmProperties {
     /** 单次 LLM 调用最大 tokens */
     private int maxTokens = 2000;
     private double temperature = 0.3;
+
+    /** 单次直调(不走工具循环)的输出预算:要一次装下聚合后的多条结论 */
+    private int singleShotMaxTokens = 4000;
+    /** 批量难度评估:单次请求合并的任务数(太大易超出输出上限导致 JSON 被截断) */
+    private int batchSize = 8;
+    /** 批量难度评估的总开关(false = 回退为逐个任务跑规划循环的旧行为,用于灰度对照) */
+    private boolean batchEnabled = true;
 }

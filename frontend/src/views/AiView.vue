@@ -108,6 +108,7 @@ function open(name, query = undefined) {
       <article class="sum-card"><h4>待处理摘要</h4><b>{{ queueLoading ? '正在统计…' : `${pendingCount} 条待审核` }}</b><p v-if="online" class="small">{{ executionCount }} 条已批准待执行。{{ queueError ? ` ${queueError}。` : '审核与执行仍由来源流程处理。' }}</p><p v-else class="small">离线演示中的待审建议仅保存在本机，不会进入服务器队列。</p><div class="workbench-actions"><button @click="open('review')">打开审核中心</button><button v-if="online" type="button" :disabled="queueLoading" @click="refreshQueueSummary">刷新摘要</button></div></article>
       <article class="sum-card"><h4>最近会议 / 提案</h4><b>{{ latestProposal?.meetingTitle || recentMeeting?.title || meeting.selectedMeeting?.title || meeting.meetings[0]?.title || '尚无已选会议' }}</b><p class="small">{{ latestProposal ? `${latestProposal.sourceLabel} · ${latestProposal.summaryText}` : recentMeeting || meeting.selectedMeeting ? '继续查看会议输入、分析与提案。' : '在线模式下可创建或选择会议。' }}</p><div class="workbench-actions"><button @click="open('meetings')">进入会议工作区</button><button v-if="latestProposal" type="button" @click="continueProposal(latestProposal)">继续查看最近提案</button></div></article>
     </div>
+    <div class="workbench-actions"><button class="primary" @click="open('agents')">打开智能体调用中心 →</button><span class="small">在同一页面选择智能体、发起分析并查看结果。</span></div>
     <div class="h-sec">智能体与工具</div>
     <div class="sum-grid agent-catalog">
       <article v-for="agent in agents" :key="agent.title" class="sum-card agent-card">

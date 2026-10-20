@@ -31,6 +31,12 @@ public class GitHubProperties {
     private String token = "";
     /** 仓库 owner/repo */
     private String repo = "";
+    /**
+     * 单仓库部署的显式项目归属(GITHUB_PROJECT_ID,如 P002)。
+     * 多仓库/多项目场景请用 repository-project-mapping;这里只在"就是这一个仓库"时用,
+     * 且仅对本类配置的 repo 生效 —— 仍然不给任何仓库瞎猜默认项目。
+     */
+    private String projectId = "";
     private String apiBase = "https://api.github.com";
     /** GitHub 登录名 → 系统 username 的映射(JSON 字符串,由同步服务解析) */
     private String userMappingJson = "";
