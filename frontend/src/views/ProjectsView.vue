@@ -18,8 +18,12 @@ const newRole = ref('member')
 const busy = ref(false)
 
 onMounted(async () => {
-  try { await projects.loadProjects() } catch (e) { error.value = e.message }
+  try { await projects.loadProjects() } catch { /* projects.loadError 提供重试入口 */ }
 })
+
+async function retryProjects() {
+  try { await projects.loadProjects() } catch { /* 错误已写入 projects.loadError */ }
+}
 
 async function enter(row) {
   error.value = ''
@@ -82,6 +86,9 @@ async function removeMember(member) {
       <button class="primary" @click="router.push({ name: 'project-new' })">+ 新建项目</button>
     </header>
     <p v-if="error" class="projects-error" role="alert">{{ error }}</p>
+    <div v-if="projects.loadError" class="projects-error" role="alert">
+      项目列表加载失败：{{ projects.loadError }} <button type="button" :disabled="projects.loading" @click="retryProjects">重试</button>
+    </div>
     <div class="projects-grid">
       <article v-for="row in projects.projects" :key="row.id" class="projects-card" :class="{ 'is-current': row.id === projects.currentProjectId }">
         <div class="projects-card-top">
@@ -102,7 +109,7 @@ async function removeMember(member) {
           <button type="button" @click="manage(row)">项目成员</button>
         </div>
       </article>
-      <p v-if="!projects.loading && !projects.projects.length" class="small">当前账号没有可访问的项目。</p>
+      <p v-if="projects.loaded && !projects.loading && !projects.projects.length" class="small">当前账号没有可访问的项目。</p>
     </div>
     <section v-if="managing" class="projects-manage">
       <h2>{{ managing.name }} · 项目成员</h2>

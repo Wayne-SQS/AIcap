@@ -46,14 +46,14 @@ export const useSessionStore = defineStore('session', {
           if (this.authToken) {
             try {
               this.currentUser = await authApi.me()
-              const project = useProjectStoreSafe()
-              if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
             } catch (e) {
               this.authToken = null
+              this.currentUser = null
               setAuthToken(null)
               useProjectStoreSafe()?.clearServerData()
               this.openLogin()
             }
+            if (this.currentUser) await this.loadWorkspace()
           } else {
             // 在线但尚未认证时，不允许启动阶段的本地缓存继续作为正式项目数据。
             useProjectStoreSafe()?.clearServerData()
@@ -69,6 +69,22 @@ export const useSessionStore = defineStore('session', {
         this.booting = false
       }
     },
+    async loadWorkspace() {
+      const project = useProjectStoreSafe()
+      if (!project) return
+      const projects = useProjectsStore()
+      try { await projects.loadProjects() }
+      catch {
+        project.clearServerData()
+        return
+      }
+      if (!projects.currentProjectId) return
+      try { await project.loadAll(projects.currentProjectId) }
+      catch (error) {
+        project.clearServerData()
+        useToast().notify('项目数据加载失败：' + error.message)
+      }
+    },
     async login(username, password) {
       const data = await authApi.login(username, password)
       this.authToken = data.access_token
@@ -76,8 +92,7 @@ export const useSessionStore = defineStore('session', {
       setAuthToken(this.authToken)
       this.apiMode = true
       this.loginOpen = false
-      const project = useProjectStoreSafe()
-      if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
+      await this.loadWorkspace()
       const { notify } = useToast()
       notify('欢迎，' + this.currentUser.display_name)
     },

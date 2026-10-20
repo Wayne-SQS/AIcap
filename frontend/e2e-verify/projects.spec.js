@@ -25,3 +25,35 @@ test('项目列表只显示有权限的项目，并从卡片进入项目工作�
   await page.getByRole('button', { name: '进入项目' }).click()
   await expect(page).toHaveURL(/#\/projects\/P003\/overview$/)
 })
+
+test('项目入口收到空列表时显示空态，不误开登录弹窗', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'test-token'))
+  await page.route('**/api/health', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
+  await page.route('**/api/auth/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 3, role: 'member', display_name: '测试成员' }) }))
+  await page.route('**/api/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+
+  await page.goto('/#/projects')
+  await expect(page.getByText('当前账号没有可访问的项目。')).toBeVisible()
+  await expect(page.locator('.projects-card')).toHaveCount(0)
+  await expect(page.locator('#login')).not.toBeVisible()
+})
+
+test('项目列表故障不伪装成空数据或登录过期，重试后恢复', async ({ page }) => {
+  let available = false
+  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'test-token'))
+  await page.route('**/api/health', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
+  await page.route('**/api/auth/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 3, role: 'member', display_name: '测试成员' }) }))
+  await page.route('**/api/projects', route => route.fulfill({
+    status: available ? 200 : 503, contentType: 'application/json',
+    body: available ? '[]' : JSON.stringify({ detail: '服务暂不可用' })
+  }))
+
+  await page.goto('/#/projects')
+  await expect(page.getByRole('alert')).toContainText('服务暂不可用')
+  await expect(page.getByText('当前账号没有可访问的项目。')).toHaveCount(0)
+  await expect(page.locator('#login')).not.toBeVisible()
+  available = true
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByText('当前账号没有可访问的项目。')).toBeVisible()
+})

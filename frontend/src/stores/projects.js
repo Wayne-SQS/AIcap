@@ -8,7 +8,8 @@ export const useProjectsStore = defineStore('projects', {
     projects: [],
     currentProjectId: localStorage.getItem(CURRENT_PROJECT_KEY) || null,
     loading: false,
-    loaded: false
+    loaded: false,
+    loadError: ''
   }),
   getters: {
     currentProject: s => s.projects.find(p => p.id === s.currentProjectId) || null
@@ -16,6 +17,7 @@ export const useProjectsStore = defineStore('projects', {
   actions: {
     async loadProjects() {
       this.loading = true
+      this.loadError = ''
       try {
         this.projects = await api('/api/projects')
         if (this.currentProjectId && !this.projects.some(p => p.id === this.currentProjectId)) {
@@ -24,6 +26,11 @@ export const useProjectsStore = defineStore('projects', {
         }
         this.loaded = true
         return this.projects
+      } catch (error) {
+        this.projects = []
+        this.loaded = false
+        this.loadError = error.message || '项目列表加载失败'
+        throw error
       } finally { this.loading = false }
     },
     async selectProject(projectId) {

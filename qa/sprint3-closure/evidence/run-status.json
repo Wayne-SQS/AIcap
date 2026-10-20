@@ -1,0 +1,17 @@
+{
+  "status": "browser_passed_sql_summary_not_generated",
+  "suite": "boundary",
+  "run_date": "2026-10-19",
+  "source_run": "qa/.daily-live/b0acbf3541af44b0be8bb39444e69f8f",
+  "browser_tests_passed": 2,
+  "browser_tests_failed": 0,
+  "sql_summary": "runner failed on a legacy SQL query after browser tests; code corrected, but rerun did not execute because automatic approval review timed out and then had no available capacity",
+  "scope": "isolated temporary MySQL, real Java, Vite and browser",
+  "base_commit": "f789f85620338a9dc682e655276815855ee17f41",
+  "source_worktree_modified": true,
+  "files": {
+    "browser.log": "570b19e10ca570548460fc675dabde804c4655c77a05029868f384d808fccdbd",
+    "zero-capacity.png": "74c0bf6325072298523f37e394ef79ad051f4232894b5991e4910ec1327c56e1"
+  },
+  "empty_screen_capture": "not archived: captured during page entrance animation; browser assertion and HTTP response remain in browser.log/test source"
+}

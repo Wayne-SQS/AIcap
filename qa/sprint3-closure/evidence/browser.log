@@ -1,0 +1,9 @@
+
+Running 2 tests using 1 worker
+
+(node:13656) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node.EXE --trace-warnings ...` to show where the warning was created)
+  ok 1 e2e-live\boundary-flow.spec.js:21:1 › real service: project entry shows a truly empty accessible list (1.4s)
+  ok 2 e2e-live\boundary-flow.spec.js:34:1 › real service: zero capacity persists, overloads positive work and stays project scoped (2.4s)
+
+  2 passed (5.8s)

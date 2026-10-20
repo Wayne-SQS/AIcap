@@ -235,7 +235,7 @@ function plannedWeeklyData(memberId) {
   })
   const weeklyCapacity = project.weeklyCapacityHours(memberId)
   const weeks = weekly.map((hours, index) => {
-    const ratio = weeklyCapacity ? hours / weeklyCapacity : 0
+    const ratio = weeklyCapacity ? hours / weeklyCapacity : hours > 0 ? Infinity : 0
     const level = hours <= 0 ? 0 : (ratio > 1 ? 4 : (ratio >= .8 ? 3 : (ratio >= .6 ? 2 : 1)))
     return { week: index + 1, hours, level, taskIds: [...new Set(taskIds[index])] }
   })
