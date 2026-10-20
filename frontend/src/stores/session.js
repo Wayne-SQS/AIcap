@@ -75,9 +75,14 @@ export const useSessionStore = defineStore('session', {
       this.currentUser = data.user
       setAuthToken(this.authToken)
       this.apiMode = true
-      this.loginOpen = false
-      const project = useProjectStoreSafe()
-      if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
+      /* 先把项目数据装载就绪,再关登录弹窗:弹窗关闭是「已就绪」的唯一可见信号,
+         若先关窗再加载,看板会短暂显示「已同步 0 条真实故事」,验收用例也会在数据到位前就断言。 */
+      try {
+        const project = useProjectStoreSafe()
+        if (project) { const projects = useProjectsStore(); await projects.loadProjects(); if (projects.currentProjectId) await project.loadAll(projects.currentProjectId) }
+      } finally {
+        this.loginOpen = false
+      }
       const { notify } = useToast()
       notify('欢迎，' + this.currentUser.display_name)
     },
