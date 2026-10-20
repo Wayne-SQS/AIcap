@@ -10,6 +10,8 @@ const ADMIN = '成员1'
 const PASSWORD = '123456'
 
 async function login(page) {
+  // 多项目改造后项目号是业务接口的必填上下文,先预置项目号再登录
+  await page.addInitScript(() => localStorage.setItem('aiguanli-current-project', 'P001'))
   await page.goto('/#/members')
   const dialog = page.locator('#login')
   await expect(dialog).toBeVisible()
@@ -19,32 +21,40 @@ async function login(page) {
   await expect(dialog).toBeHidden()
 }
 
+/* 画像不在成员任务图(/members),归 #view-profiles:办公室改版后旧的
+   ProfileAgentView 已退役,画像页是唯一入口;卡片的类名也从 .pcard/.ptitle/.chip
+   改为与 ProfilesView 对齐的 .profile-card/.profile-name/.profile-* 三套条目。 */
+const PROFILE_ITEM = '.profile-tech-tag, .profile-capability, .profile-domain-item'
+
 test('成员画像:真实后端数据 + 编辑弹窗', async ({ page }) => {
   await login(page)
 
-  const cards = page.locator('#member-profiles .pcard')
+  await page.goto('/#/profiles')
+  await expect(page.locator('#view-profiles')).toBeVisible()
+
+  const cards = page.locator('#member-profiles .profile-card')
   await expect(cards).toHaveCount(5)
 
-  // 每张卡都必须有画像标题与三个维度条目(空维度会渲染为「—」)
+  // 每张卡都必须有画像标题与三个维度条目(空维度会渲染为「暂无记录」)
   const titles = []
   const dimCounts = []
   for (let i = 0; i < 5; i++) {
     const card = cards.nth(i)
-    const title = (await card.locator('.ptitle').textContent())?.trim() || ''
+    const title = (await card.locator('.profile-name').textContent())?.trim() || ''
     titles.push(title)
-    const chips = await card.locator('.chip').count()
+    const chips = await card.locator(PROFILE_ITEM).count()
     dimCounts.push(chips)
     expect(title.length, `第 ${i + 1} 张卡应有画像标题`).toBeGreaterThan(0)
     expect(chips, `第 ${i + 1} 张卡应有技能条目`).toBeGreaterThan(5)
   }
-  // 差异化:标题与技术栈条目数不能全都一样(组长要求"各成员不一样")
+  // 差异化:标题与三套维度条目数不能全都一样(组长要求"各成员不一样")
   expect(new Set(titles).size, '画像标题应各不相同').toBe(5)
   expect(new Set(dimCounts).size, '各成员条目数不应完全一致').toBeGreaterThan(1)
   console.log('[profiles] titles=' + JSON.stringify(titles) + ' chips=' + JSON.stringify(dimCounts))
 
   // 编辑弹窗:预填 + 可保存(admin 可改任意成员)
-  const chipsBefore = await cards.first().locator('.chip').count()
-  await cards.first().locator('.edit').click()
+  const chipsBefore = await cards.first().locator(PROFILE_ITEM).count()
+  await cards.first().locator('.profile-edit').click()
   const dialog = page.locator('#profile-dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('input[placeholder*="技术负责人"]')).not.toHaveValue('')
@@ -52,12 +62,12 @@ test('成员画像:真实后端数据 + 编辑弹窗', async ({ page }) => {
   await dialog.locator('.dim').first().locator('.skill-row').last().locator('input').fill('临时验收技能')
   await dialog.locator('#profile-save').click()
   await expect(dialog).toBeHidden()
-  await expect(cards.first().locator('.chip')).toHaveCount(chipsBefore + 1)
-  const rowsAfter = await cards.first().locator('.chip').count()
+  await expect(cards.first().locator(PROFILE_ITEM)).toHaveCount(chipsBefore + 1)
+  const rowsAfter = await cards.first().locator(PROFILE_ITEM).count()
   expect(rowsAfter, '保存后画像条目数应增加').toBe(chipsBefore + 1)
 
   // 还原:删掉刚加的临时技能
-  await cards.first().locator('.edit').click()
+  await cards.first().locator('.profile-edit').click()
   await expect(dialog).toBeVisible()
   const rows = dialog.locator('.dim').first().locator('.skill-row')
   const n = await rows.count()
@@ -67,7 +77,7 @@ test('成员画像:真实后端数据 + 编辑弹窗', async ({ page }) => {
   }
   await dialog.locator('#profile-save').click()
   await expect(dialog).toBeHidden()
-  await expect(cards.first().locator('.chip')).toHaveCount(chipsBefore)
+  await expect(cards.first().locator(PROFILE_ITEM)).toHaveCount(chipsBefore)
   console.log('[profiles] edit+revert ok (chips ' + chipsBefore + ' -> ' + rowsAfter + ' -> ' + chipsBefore + ')')
 })
 
@@ -84,6 +94,9 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   await expect(page.locator('#meeting-select')).toHaveValue(/.+/, { timeout: 20000 })
   const meetingId = await page.locator('#meeting-select').inputValue()
 
+  // RecorderPanel(#meeting-recorder)只在「语音会议」工作流下挂载:保存会议走的是
+  // 默认的文本工作流,这里必须切到 audio 工位才拿得到录音区。
+  await page.locator('#meeting-workflow-tab-audio').click()
   const recorder = page.locator('#meeting-recorder')
   await expect(recorder).toBeVisible()
 
@@ -128,9 +141,10 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   console.log('[recorder] delete ok')
 
   // 清理本次验收用的会议:后端 DELETE /api/meetings/{id}(admin 可用),
+  // 多项目改造后 projectId 是必填查询参数,漏了会 422 而非 404/200,
   // 否则每跑一轮就在开发库留一条「录音验收会议」垃圾数据
   const token = await page.evaluate(() => localStorage.getItem('aiguanli_token'))
-  const gone = await page.request.delete(`http://127.0.0.1:8080/api/meetings/${meetingId}`, {
+  const gone = await page.request.delete(`http://127.0.0.1:8080/api/meetings/${meetingId}?projectId=P001`, {
     headers: { Authorization: 'Bearer ' + token }
   })
   expect([200, 404], '验收会议应被删除清理,实际 ' + gone.status()).toContain(gone.status())

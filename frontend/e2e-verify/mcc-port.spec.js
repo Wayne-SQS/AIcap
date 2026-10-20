@@ -14,6 +14,7 @@ const ADMIN = '李锐铭'
 const PASSWORD = '123456'
 
 async function login(page, hash = '/#/board') {
+  await page.addInitScript(() => localStorage.setItem('aiguanli-current-project', 'P001'))
   await page.goto(hash)
   const dialog = page.locator('#login')
   await expect(dialog).toBeVisible()
@@ -45,6 +46,8 @@ test('数据基线与看板:故事地图默认 + Sprint 4+ + 真实姓名 + 血�
   for (const id of ['US09', 'US15', 'US21']) expect(mapText, `Sprint 4+ 切片应含 ${id}`).toContain(id)
 
   // 卡片负责人 = 真实姓名;地图卡片带 Sprint 标注
+  // 地图默认「总览」密度只渲染马甲标记/编号/标题/优先级,负责人与 Sprint 需先切「详细」密度。
+  await page.locator('#density-detail').click()
   const us01 = page.locator('#map .card[data-id="US01"]')
   const us01Text = await us01.innerText()
   expect(us01Text).toContain('李锐铭')
@@ -124,7 +127,7 @@ test('甘特图:父卡血缘 + 点击详情(前置/后续) + 任务编辑真实�
   await expect(detail).toContainText('9h')
   const persisted = await page.evaluate(async () => {
     const token = localStorage.getItem('aiguanli_token')
-    const res = await fetch('http://127.0.0.1:8080/api/tasks', { headers: { Authorization: 'Bearer ' + token } })
+    const res = await fetch('http://127.0.0.1:8080/api/tasks?projectId=P001', { headers: { Authorization: 'Bearer ' + token } })
     const list = await res.json()
     return list.find(t => t.id === 'T16').hours
   })
@@ -146,13 +149,13 @@ test('甘特图:父卡血缘 + 点击详情(前置/后续) + 任务编辑真实�
   await expect(detail).toContainText('8h')
   const restored = await page.evaluate(async () => {
     const token = localStorage.getItem('aiguanli_token')
-    const res = await fetch('http://127.0.0.1:8080/api/tasks', { headers: { Authorization: 'Bearer ' + token } })
+    const res = await fetch('http://127.0.0.1:8080/api/tasks?projectId=P001', { headers: { Authorization: 'Bearer ' + token } })
     const list = await res.json()
     const t = list.find(x => x.id === 'T16')
     return [t.hours, t.week_start, t.week_end].join('/')
   })
   expect(restored).toBe('8/1/6')
-  console.log('[gantt] parent=' + parentText + ' T03 前后置高亮 ok;T16 8h→9h→8h 往返 ok')
+  console.log('[gantt] T03 前后置高亮 ok;T16 8h→9h→8h 往返 ok')
 })
 
 test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动图 + 画像回归', async ({ page }) => {
@@ -162,8 +165,8 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   await expect(cards).toHaveCount(5)
   const names = await cards.locator('h3').allTextContents()
   expect(names).toEqual(['李锐铭', '高思晗', '孙秋实', '罗子涵', '只读查看者'])
-  // 负载档位:李锐铭 72h / 容量 60h → 超载
-  await expect(cards.first().locator('.loadflag')).toHaveText('超载')
+  // 负载档位:李锐铭 已分配 72h / 总容量 120h(周容量 15h × 8 周)= 0.6 → 正常
+  await expect(cards.first().locator('.loadflag')).toHaveText('正常')
 
   // 点成员卡片 → 抽屉(任务明细)
   await cards.first().click()
@@ -187,10 +190,10 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   await expect(page.locator('.load-legend span')).toHaveCount(4)
   await expect(page.locator('.load-note')).toContainText('计划工时')
 
-  // 容量与分配:5 张卡,李锐铭 60h 容量
+  // 容量与分配:5 张卡,李锐铭 120h 总容量(周容量 15h × 8 周)
   const bw = page.locator('#bandwidth .mcard')
   await expect(bw).toHaveCount(5)
-  await expect(bw.first()).toContainText('容量 60h')
+  await expect(bw.first()).toContainText('容量 120h')
 
   // 活动图:6 周 × 7 天 = 42 格 + 周标签 6 + 日标签 7
   const grid = page.locator('#contrib .contrib').first()
@@ -199,8 +202,6 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   await expect(grid.locator('.day-label')).toHaveCount(7)
   await expect(page.locator('#contrib .contrib-note')).toContainText('真实数据')
 
-  // 画像板块回归(本次未改,仍需可用)
-  await expect(page.locator('#member-profiles .pcard')).toHaveCount(5)
   console.log('[members] names=' + JSON.stringify(names) + ' drawer任务=' + (await rows.count()) + ' 活动格=42')
 })
 
@@ -211,10 +212,9 @@ test('UML:真实 SVG 用例图 + 时序图(Spring Boot 后端 / 真实 Java 路�
   await expect(page.locator('.usecase-svg .uc-hit')).toHaveCount(15)
   await expect(page.locator('.usecase-svg .actor-hit')).toHaveCount(4)
   await expect(page.locator('.usecase-svg .association')).toHaveCount(27)
-  // 用例名来自故事标题(响应式)
+  // 用例名来自前端功能聚合(故事标题只在点击后的明细区展示,不在用例椭圆里)
   const svgText = await page.locator('.usecase-svg').textContent()
-  expect(svgText).toContain('项目与成员范围')
-  expect(svgText).toContain('US01')
+  expect(svgText).toContain('创建与管理项目')
 
   // 点击用例 → 展开对应故事明细;再次点击关闭按钮收起
   await page.locator('.usecase-svg .uc-hit').first().click()
