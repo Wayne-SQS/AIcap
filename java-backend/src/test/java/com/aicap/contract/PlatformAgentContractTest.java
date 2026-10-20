@@ -2,6 +2,7 @@ package com.aicap.contract;
 
 import com.aicap.llm.LlmProperties;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,7 @@ import com.aicap.platform.MeetingAnalysisTrigger;
 import com.aicap.platform.MeetingType;
 import com.aicap.platform.PlatformToolCatalog;
 import org.springframework.beans.factory.ObjectProvider;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.UUID;
 import java.util.List;
@@ -83,6 +85,35 @@ class PlatformAgentContractTest extends ContractTestSupport {
     /** PLAT-27 要自己造会议与分析行(种子数据里没有会议),故直连测试库 */
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    /** 本类造出来的会议,逐条收走 —— 见 {@link #removeCreatedMeetings()} */
+    private final List<String> createdMeetings = new ArrayList<>();
+
+    /**
+     * 本类造的会议必须自己删干净。
+     *
+     * <p>测试库是**跨类共享**的(同一张 {@code aicap_java_test},各类上下文只在启动时清一次),
+     * 留下"会议 + pending 分析"会被别的类的全来源队列/统计用例当成真实提案计入。
+     * 2026-10-19 CI 上 {@code ReviewQueueIndexContractTest} 多出 1 条就是这么来的。
+     */
+    @AfterEach
+    void removeCreatedMeetings() {
+        for (String id : createdMeetings) {
+            for (String family : List.of("status", "planning", "review", "retro", "refinement")) {
+                String analyses = "meeting_" + family + "_analyses";
+                jdbc.update("DELETE FROM meeting_" + family + "_proposal_executions "
+                        + "WHERE analysis_id IN (SELECT id FROM " + analyses + " WHERE meeting_id=?)", id);
+                jdbc.update("DELETE FROM meeting_" + family + "_proposal_reviews "
+                        + "WHERE analysis_id IN (SELECT id FROM " + analyses + " WHERE meeting_id=?)", id);
+                jdbc.update("DELETE FROM " + analyses + " WHERE meeting_id=?", id);
+            }
+            jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", id);
+            jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", id);
+            jdbc.update("DELETE FROM meeting_agent_runs WHERE meeting_id=?", id);
+            jdbc.update("DELETE FROM meetings WHERE id=?", id);
+        }
+        createdMeetings.clear();
+    }
 
     // ==================== 配置绑定 ====================
 
@@ -547,6 +578,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
                         + "VALUES (?,?,?,?,NOW(),?)",
                 meetingId, "回查口径用例", "站会原文", userId, projectId);
+        createdMeetings.add(meetingId);
         jdbc.update("INSERT INTO meeting_status_analyses(id,meeting_id,submitted_by,client_request_id,status,"
                         + "transcript,result_json,snapshots_json,created_at) "
                         + "VALUES (?,?,?,?,?,?,?,?,NOW())",
@@ -602,6 +634,8 @@ class PlatformAgentContractTest extends ContractTestSupport {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
                         + "VALUES (?,?,?,?,NOW(),?)",
                 newerId, "列表用例-最近的会", "最近原文", userId, projectId);
+        createdMeetings.add(olderId);
+        createdMeetings.add(newerId);
 
         ApiResponse r = post(TOOLS + "list_meetings", token(USER_ADMIN), json(map("project_id", projectId)));
         assertEquals(200, r.status(), r.body());
@@ -657,6 +691,7 @@ class PlatformAgentContractTest extends ContractTestSupport {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at,project_id) "
                         + "VALUES (?,?,?,?,NOW(),?)",
                 meetingId, "摘要用例-站会", transcript, userId, projectId);
+        createdMeetings.add(meetingId);
         String resultJson = "{\"schema_version\":\"1.0\",\"meeting_id\":\"" + meetingId + "\","
                 + "\"meeting_type\":\"daily_scrum\",\"summary\":\"今天完成了依赖校验的联调。\","
                 + "\"proposed_actions\":[{\"proposal_id\":\"P1\",\"action\":\"update_story_status\","

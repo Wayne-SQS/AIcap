@@ -131,17 +131,26 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
             if (cursor == null) break;
         }
         assertNull(cursor, "全来源游标未结束: " + all.stream().map(ReviewQueueIndexService.Item::proposalId).toList());
-        assertEquals(7, all.size());
-        assertEquals(7, new HashSet<>(all.stream().map(i -> i.source() + ":" + i.proposalId()).toList()).size());
-        assertEquals(5, all.stream().filter(i -> i.status().equals("pending")).count());
-        assertEquals("pending", all.getLast().status(), "较早的待审提案必须能翻页找到");
+        // 队列是跨类共享的同一张测试库:别的契约类若留下"会议 + 待审分析",page("all") 也会计入。
+        // 这里只认本用例自己的会议,断言不随执行顺序漂移(2026-10-19 CI 曾因残留多出 1 条而变红)。
+        List<ReviewQueueIndexService.Item> own = all.stream()
+                .filter(i -> meetingId.equals(i.meetingId())).toList();
+        assertEquals(7, own.size(), "本用例应恰好产生 7 条提案: " + all);
+        assertEquals(7, new HashSet<>(own.stream().map(i -> i.source() + ":" + i.proposalId()).toList()).size());
+        assertEquals(5, own.stream().filter(i -> i.status().equals("pending")).count());
+        assertEquals("pending", own.getLast().status(), "较早的待审提案必须能翻页找到");
         assertEquals(1, index.page("reviewed", "planning", null, null, null, null, 20).items().size());
         assertEquals(0, index.page("pending", "planning", null, null, null, null, 20).items().size());
         assertEquals(1, index.page("pending", "daily", "分页队列", null, null, null, 20).items().size());
         ReviewQueueIndexService.Summary summary = index.summary();
         assertEquals(before.pendingCount() + 5, summary.pendingCount());
         assertEquals(before.executionCount() + 1, summary.executionCount());
-        assertEquals(7, shadow.backfillMissing());
+        shadow.backfillMissing();
+        // 回填是"全库缺哪些补哪些",跨类残留也会被一并计入,故不按总条数断言:
+        // 只钉本用例的 7 条确实进了影子索引,再用第二次回填的 0 证明幂等。
+        assertEquals(7L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM review_queue_proposals WHERE meeting_id=?", Long.class, meetingId),
+                "本次 7 条提案应全部进入影子索引");
         assertEquals(summary.pendingCount(), shadow.counts().pending());
         assertEquals(summary.executionCount(), shadow.counts().execution());
         assertEquals(0, shadow.backfillMissing(), "重复回填不得覆盖已有索引行");

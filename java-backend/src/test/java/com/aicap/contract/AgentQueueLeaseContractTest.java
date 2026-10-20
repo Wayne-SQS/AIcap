@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,7 +51,15 @@ class AgentQueueLeaseContractTest {
         runIds.clear();
     }
 
-    /** 直接插一条指定租约/时间戳的 running run;列名包含本轮补的 worker_token/lease_until */
+    /**
+     * 直接插一条指定租约/时间戳的 running run;列名包含本轮补的 worker_token/lease_until。
+     *
+     * <p>时间参数<b>必须以 {@link LocalDateTime} 原样写入</b>,不能包成
+     * {@code Timestamp.valueOf(...)}:后者会让驱动按 JVM 时区 → serverTimezone 换算一次,
+     * 而 {@code PlanningAgentJobs.expireRuns()} 的比较基准是不换算的 {@code LocalDateTime}。
+     * 本机 JVM 是 +08:00 时两端恰好抵消;CI 的 JVM 是 UTC,写入值会整体偏 8 小时,
+     * 于是"租约已过期"永远不成立,run 停在 {@code running}(2026-10-19 CI 实测)。
+     */
     private String insertRunningRun(LocalDateTime leaseUntil, LocalDateTime updatedAt) {
         String id = UUID.randomUUID().toString();
         runIds.add(id);
@@ -61,8 +68,7 @@ class AgentQueueLeaseContractTest {
                         + "lease_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id, 1, "测试请求", "running", 1, "deepseek-v4-flash", "planning-owner-v1",
                 "{}", null, null, null, "worker-token",
-                leaseUntil == null ? null : Timestamp.valueOf(leaseUntil),
-                Timestamp.valueOf(updatedAt), Timestamp.valueOf(updatedAt));
+                leaseUntil, updatedAt, updatedAt);
         return id;
     }
 
