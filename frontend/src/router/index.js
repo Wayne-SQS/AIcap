@@ -5,6 +5,13 @@ import { useProjectsStore } from '@/stores/projects'
    ai-demo / project-generator 降级为办公室右侧的能力项,但路由保留
    (project-generator 还承担 /projects/new 的复用)。 */
 const workspaceViews = [
+  { name: 'overview', label: '项目总览', component: () => import('@/views/OverviewView.vue') },
+  { name: 'pool', label: '需求池', component: () => import('@/views/PoolView.vue') },
+  { name: 'board', label: '用户故事看板', component: () => import('@/views/BoardView.vue') },
+  { name: 'gantt', label: '甘特图', component: () => import('@/views/GanttView.vue') },
+  { name: 'members', label: '成员任务图', component: () => import('@/views/MembersView.vue') },
+  { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
+  { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
   { name: 'office', label: 'AI 办公室', component: () => import('@/views/OfficeView.vue') },
   { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') },
   { name: 'ai-demo', label: 'AI 对话演示', component: () => import('@/views/AiDemoView.vue') },
