@@ -2,6 +2,8 @@
 
 测试人员工作产物与执行入口。
 
+实验三 Sprint 2 回顾提出的零容量、项目入口空数据与审查签认闭环记录见 [sprint3-closure](sprint3-closure/README.md)。
+
 会议 Agent 的隔离真实服务验收使用 [DAILY_LIVE.md](DAILY_LIVE.md)，包含 Daily、Planning、Review、Retro、Refinement、Assignment及本地Transcription。`run_stt_local.py` 验证中英文合成转写；`run_diarization_local.py` 验证sherpa官方公开四人样本的自动人数与指定人数分离，均需先安装对应可选依赖和模型。Transcription真实套件可用`--stt-language zh --speaker-count 4`对本地多人MP3验证转写、指定人数分离、刷新恢复及确认闭环。页面试用见 [五类会议试用指南](../docs/会议Agent_五类会议试用指南.md)。这组新增流程独立于下方历史v3基线。
 
 ---

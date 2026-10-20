@@ -137,7 +137,7 @@ class Model(BaseHTTPRequestHandler):
 def main():
     global real_client, real_model_name
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--suite', choices=('daily', 'planning', 'review', 'retro', 'refinement', 'assignment', 'transcription'), default='daily')
+    parser.add_argument('--suite', choices=('daily', 'planning', 'review', 'retro', 'refinement', 'assignment', 'transcription', 'boundary'), default='daily')
     parser.add_argument('--stt-audio', type=Path, help='Transcription only: local MP3 fixture.')
     parser.add_argument('--stt-language', choices=('zh','en'), help='Transcription only; defaults to en.')
     parser.add_argument('--speaker-count', type=int, choices=range(1,9), help='Transcription only; defaults to 1.')
@@ -222,8 +222,14 @@ def main():
             "(SELECT COUNT(*) FROM aicap_daily_e2e.meeting_status_analyses),"
             "(SELECT COUNT(*) FROM aicap_daily_e2e.meeting_status_proposal_reviews),"
             "(SELECT COUNT(*) FROM aicap_daily_e2e.meeting_status_proposal_executions),"
-            "(SELECT COUNT(*) FROM aicap_daily_e2e.story_logs WHERE story_id='US13' AND log_type='move')")
-        if suite == 'planning':
+            "(SELECT COUNT(*) FROM aicap_daily_e2e.story_logs WHERE story_id='US13' AND log_type='move')") if suite != 'boundary' else ''
+        if suite == 'boundary':
+            counts = sql("SELECT (SELECT weekly_capacity_hours FROM aicap_daily_e2e.project_members WHERE project_id='P003' AND user_id=1),"
+                "(SELECT COUNT(*) FROM aicap_daily_e2e.tasks WHERE project_id='P003' AND hours=4),"
+                "(SELECT weekly_capacity_hours FROM aicap_daily_e2e.project_members WHERE project_id='P004' AND user_id=1),"
+                "(SELECT COUNT(*) FROM aicap_daily_e2e.tasks WHERE project_id='P004')")
+            assert counts == '0\t1\t15\t0', counts
+        elif suite == 'planning':
             counts = sql("SELECT (SELECT sprint FROM aicap_daily_e2e.stories WHERE id='US13'),"
                 "(SELECT status FROM aicap_daily_e2e.stories WHERE id='US13'),"
                 "(SELECT COUNT(*) FROM aicap_daily_e2e.meeting_planning_analyses),"
@@ -269,9 +275,9 @@ def main():
             assert counts == '1\t1\t0\t1\t1', counts
         else:
             assert counts == '1\t1\t1\t1\t1', counts
-        assert model_calls == (0 if suite == 'assignment' else 1), model_calls
-        report = dict(status='passed', suite=suite, database=sql('SELECT VERSION()'), model='faster-whisper-base-local' if suite == 'transcription' else 'none' if suite == 'assignment' else real_model_name if args.real_model else 'deterministic HTTP fixture',
-            model_mode='local_stt' if suite == 'transcription' else 'not_used' if suite == 'assignment' else 'real_provider_single_call' if args.real_model else 'fixture',
+        assert model_calls == (0 if suite in ('assignment', 'boundary') else 1), model_calls
+        report = dict(status='passed', suite=suite, database=sql('SELECT VERSION()'), model='faster-whisper-base-local' if suite == 'transcription' else 'none' if suite in ('assignment', 'boundary') else real_model_name if args.real_model else 'deterministic HTTP fixture',
+            model_mode='local_stt' if suite == 'transcription' else 'not_used' if suite in ('assignment', 'boundary') else 'real_provider_single_call' if args.real_model else 'fixture',
             model_calls=model_calls, counts=counts.split('\t'), scope='real browser/Vite/Python/Java/JWT/MySQL')
         report['speech_model_calls'] = 2 if suite == 'transcription' else 0
         if suite == 'transcription':
@@ -287,6 +293,11 @@ def main():
                 multi_speaker_segments=len(multi_segment_ids),
                 word_timestamps=sum(len(segment.get('words') or []) for segment in transcript['segments']))
         (RUN / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        if suite == 'boundary':
+            evidence = ROOT / 'qa/sprint3-closure/evidence'
+            evidence.mkdir(parents=True, exist_ok=True)
+            for name in ('browser.log', 'result.json', 'empty-projects.png', 'zero-capacity.png'):
+                shutil.copy2(RUN / name, evidence / name)
         print(json.dumps(report, ensure_ascii=False), flush=True)
     finally:
         if model:

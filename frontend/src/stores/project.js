@@ -432,6 +432,7 @@ export const useProjectStore = defineStore('project', {
       this.stories = []
       this.epics = []
       this.tasks = []
+      this.members = []
       this.pool = []
       this.log = []
       this.logError = ''
@@ -517,7 +518,9 @@ export const useProjectStore = defineStore('project', {
       if (memberIds.some((id, i) => id !== i)) {
         errors.push(`成员下标不连续：${memberIds.join('、')}（后端 users.id 必须为 1..N 连续）`)
       }
-      this.members.forEach(m => { if (this.weeklyCapacityHours(m.id) <= 0) errors.push(`成员 ${m.name} 周容量无效`) })
+      this.members.forEach(m => {
+        if (this.weeklyCapacityHours(m.id) < 0) errors.push(`成员 ${m.name} 周容量无效`)
+      })
       const legacy = [...storyIds].filter(id => /^M\d+$/.test(id))
       if (legacy.length) warnings.push(`发现旧版 Story 编号：${legacy.join('、')}`)
       const result = { warnings, errors }
