@@ -32,6 +32,7 @@ TRUNCATE TABLE meeting_approval_payloads;
 TRUNCATE TABLE meeting_suggestion_records;
 TRUNCATE TABLE suggestions;
 TRUNCATE TABLE meetings;
+TRUNCATE TABLE uml_layouts;
 TRUNCATE TABLE task_logs;
 TRUNCATE TABLE story_logs;
 TRUNCATE TABLE task_story_relations;

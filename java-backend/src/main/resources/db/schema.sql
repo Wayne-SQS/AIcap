@@ -607,3 +607,12 @@ CREATE TABLE IF NOT EXISTS milestone_tasks (
   UNIQUE KEY uq_milestone_tasks (project_id,milestone_internal_id,task_internal_id),
   KEY ix_milestone_tasks_milestone (milestone_internal_id), KEY ix_milestone_tasks_task (task_internal_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============ UML 布局(跨设备保存) ============
+CREATE TABLE IF NOT EXISTS uml_layouts (
+  project_id varchar(20) NOT NULL,
+  layout_json text NOT NULL,
+  updated_by int DEFAULT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

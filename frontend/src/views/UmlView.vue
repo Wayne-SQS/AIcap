@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/project'
 import { useProjectsStore } from '@/stores/projects'
 import { useCanvasZoom } from '@/composables/useCanvasZoom'
 import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
+import { umlLayoutApi } from '@/api/umlLayout'
 
 /* UML 图(真实 SVG,移植自 legacy/index.html renderUML())
    用例图:4 角色 / 功能级用例,Story 仅作为功能用例明细来源;
@@ -22,6 +23,7 @@ import CanvasZoomControls from '@/components/CanvasZoomControls.vue'
 const project = useProjectStore()
 const projects = useProjectsStore()
 const umlLayoutKey = computed(() => `aiguanli-uml-layout-v3-${projects.currentProjectId || 'none'}`)
+const layoutSyncText = ref('')
 
 /* ==================== 用例图 ==================== */
 const MIN_USECASE_WIDTH = 140
@@ -397,20 +399,52 @@ function resetUmlLayout() {
   participants.splice(0, participants.length, ...PARTICIPANTS.map(participant => ({ ...participant })))
   usecaseLayout.splice(0, usecaseLayout.length)
 }
-function loadUmlLayout() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(umlLayoutKey.value))
-    saved?.actors?.forEach(pos => { const item = actors.find(a => a.id === pos.id); if (item) Object.assign(item, pos) })
-    saved?.usecases?.forEach(pos => { const item = usecaseLayout.find(u => u.id === pos.id); if (item) Object.assign(item, pos) })
-    saved?.participants?.forEach(pos => { const item = participants.find(p => p.id === pos.id); if (item) item.x = pos.x })
-  } catch { /* invalid layout falls back to defaults */ }
+function applyUmlLayout(saved) {
+  saved?.actors?.forEach(pos => { const item = actors.find(a => a.id === pos.id); if (item) Object.assign(item, pos) })
+  saved?.usecases?.forEach(pos => { const item = usecaseLayout.find(u => u.id === pos.id); if (item) Object.assign(item, pos) })
+  saved?.participants?.forEach(pos => { const item = participants.find(p => p.id === pos.id); if (item) item.x = pos.x })
 }
-function saveUmlLayout() {
-  localStorage.setItem(umlLayoutKey.value, JSON.stringify({
+function readLocalUmlLayout() {
+  try {
+    return JSON.parse(localStorage.getItem(umlLayoutKey.value))
+  } catch {
+    return null
+  }
+}
+function umlLayoutPayload() {
+  return {
     actors: actors.map(({ id, x, y }) => ({ id, x, y })),
     usecases: usecaseLayout.map(({ id, x, y }) => ({ id, x, y })),
     participants: participants.map(({ id, x }) => ({ id, x }))
-  }))
+  }
+}
+async function loadUmlLayout() {
+  applyUmlLayout(readLocalUmlLayout())
+  const projectId = projects.currentProjectId
+  if (!projectId) return
+  try {
+    const res = await umlLayoutApi.get(projectId)
+    if (res && res.layout) {
+      applyUmlLayout(res.layout)
+      layoutSyncText.value = '布局已从服务器加载'
+    } else {
+      layoutSyncText.value = '布局仅保存在本机'
+    }
+  } catch (e) {
+    layoutSyncText.value = '布局仅保存在本机（服务器暂不可用）'
+  }
+}
+async function saveUmlLayout() {
+  const payload = umlLayoutPayload()
+  try { localStorage.setItem(umlLayoutKey.value, JSON.stringify(payload)) } catch { /* 本地兜底失败也不阻断拖拽 */ }
+  const projectId = projects.currentProjectId
+  if (!projectId) return
+  try {
+    await umlLayoutApi.save(projectId, payload)
+    layoutSyncText.value = '布局已同步到服务器'
+  } catch (e) {
+    layoutSyncText.value = `布局仅保存在本机：${(e && e.message) || '同步失败'}`
+  }
 }
 watch(() => project.stories.map(story => story.id), ids => {
   syncUsecaseLayout(ids.map(id => project.stories.find(story => story.id === id)).filter(Boolean))
@@ -419,7 +453,7 @@ watch(() => projects.currentProjectId, async () => {
   resetUmlLayout()
   syncUsecaseLayout(project.stories)
   await nextTick()
-  loadUmlLayout()
+  await loadUmlLayout()
 })
 loadUmlLayout()
 
@@ -494,6 +528,7 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       Story 新增、删除或重命名后，功能用例明细同步更新；节点可拖动并保存布局。
       时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
     </p>
+    <p v-if="layoutSyncText" class="uml-note small">{{ layoutSyncText }}</p>
 
     <div class="h-sec">
       用例图 · Use Case
