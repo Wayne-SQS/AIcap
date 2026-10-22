@@ -24,6 +24,7 @@ const busy = ref(false)
 const error = ref('')
 const audios = ref([])
 const clip = ref(null)          // { blob, url, ms, bytes }
+const fileInput = ref(null)
 const playUrls = ref({})        // id -> objectURL(鉴权取字节后生成)
 const audioElements = new Map()
 const rangeStops = new Map()
@@ -78,9 +79,21 @@ function pickMime() {
   return candidates.find(t => window.MediaRecorder.isTypeSupported?.(t)) || ''
 }
 
+function requireSourceMeeting() {
+  if (meetingId.value) return true
+  error.value = '请先创建或选择录音来源会议，再开始录音或上传 MP3。'
+  document.getElementById('audio-source-title')?.focus()
+  return false
+}
+
+function pickFile() {
+  error.value = ''
+  if (requireSourceMeeting()) fileInput.value?.click()
+}
+
 async function start() {
   error.value = ''
-  if (!meetingId.value) { error.value = '请先选择一个已保存会议'; return }
+  if (!requireSourceMeeting()) return
   if (!supported) { error.value = '当前浏览器不支持录音（需要麦克风权限与 MediaRecorder）'; return }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
@@ -165,6 +178,7 @@ async function toMp3(blob) {
 /* ---------- 提交 / 列表 / 回放 ---------- */
 async function submitClip() {
   if (!clip.value) return
+  if (!requireSourceMeeting()) return
   busy.value = true
   error.value = ''
   try {
@@ -186,6 +200,7 @@ async function submitFile(ev) {
   const file = ev.target.files && ev.target.files[0]
   ev.target.value = ''
   if (!file) return
+  if (!requireSourceMeeting()) return
   if (!file.name.toLowerCase().endsWith('.mp3')) { error.value = '仅支持 .mp3 文件'; return }
   busy.value = true
   error.value = ''
@@ -273,6 +288,7 @@ async function remove(row) {
 }
 
 watch(meetingId, () => {
+  error.value = ''
   clearClip()
   rangeStops.forEach(stop=>stop()); rangeStops.clear(); audioElements.clear()
   Object.values(playUrls.value).forEach(u => URL.revokeObjectURL(u))
@@ -296,19 +312,19 @@ onUnmounted(() => {
     </p>
 
     <div class="rec-actions">
-      <button v-if="!recording" class="primary" id="rec-start" :disabled="!meetingId || busy || !maySubmit" :title="readonlyTitle" @click="start">
+      <button v-if="!recording" class="primary" id="rec-start" :disabled="busy || !maySubmit" :title="readonlyTitle || (!meetingId ? '先创建或选择录音来源会议' : '')" @click="start">
         ● 开始录音
       </button>
       <button v-else class="danger" id="rec-stop" @click="stop">■ 停止录音（{{ fmtMs(elapsedMs) }}）</button>
-      <label class="file-pick" :title="readonlyTitle">
-        <input type="file" accept=".mp3,audio/mpeg" :disabled="!meetingId || busy || !maySubmit" @change="submitFile">
-        <span>选择本地 .mp3 提交</span>
-      </label>
+      <div class="file-pick">
+        <input ref="fileInput" type="file" accept=".mp3,audio/mpeg" :disabled="busy || !maySubmit" @change="submitFile">
+        <button type="button" :disabled="busy || !maySubmit" :title="readonlyTitle || (!meetingId ? '先创建或选择录音来源会议' : '')" @click="pickFile">选择本地 .mp3 提交</button>
+      </div>
       <span v-if="recording" class="rec-live"><i class="dot"></i>录音中 · {{ fmtMs(elapsedMs) }}</span>
       <span v-else-if="busy" class="small">处理中…</span>
     </div>
 
-    <p v-if="!meetingId" class="small">请先选择或保存一个会议，再录音。</p>
+    <p v-if="!meetingId" class="small">请先在上方创建或选择录音来源会议，再录音或上传 MP3。</p>
     <p v-if="!supported" class="small">提示：当前浏览器不支持录音（请用 Chrome/Edge 并允许麦克风）。仍可用本地 .mp3 提交。</p>
     <p v-if="error" role="alert" class="err">{{ error }}</p>
 
@@ -348,8 +364,9 @@ onUnmounted(() => {
 .recorder { border: 1px solid var(--line, #d8d8d8); border-radius: 10px; padding: 12px; margin: 10px 0; }
 .rec-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
 .rec-actions button { min-width: 120px; }
-.file-pick { position: relative; overflow: hidden; display: inline-flex; align-items: center; border: 1px dashed var(--line, #bbb); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
-.file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-pick { display: inline-flex; align-items: center; }
+.file-pick input { display: none; }
+.file-pick button { border-style: dashed; }
 .rec-live { display: inline-flex; align-items: center; gap: 6px; color: #b3261e; font-weight: 600; }
 .rec-live .dot { width: 9px; height: 9px; border-radius: 50%; background: #b3261e; animation: recpulse 1s infinite; }
 @keyframes recpulse { 50% { opacity: 0.25 } }

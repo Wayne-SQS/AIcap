@@ -51,6 +51,10 @@ const { session, guard } = usePermissionGuard()
 
 const saveForm = reactive({ title: '', transcript: '' })
 const saving = ref(false)
+const audioTitle = ref('')
+const savingAudio = ref(false)
+const AUDIO_SOURCE_NOTE = '录音来源会议：尚未完成音频转写与人工核对；请以关联音频和已确认转写版本为准。'
+const isAudioSource = computed(() => meeting.selectedMeeting?.transcript === AUDIO_SOURCE_NOTE)
 const deleting = ref(false)
 const proposal = reactive({ title: '', description: '', evidence: '', priority: 'Could', note: '' })
 const proposing = ref(false)
@@ -106,6 +110,17 @@ async function saveMeeting() {
     notify('会议已保存到服务器')
   } catch (err) { notify('保存失败：' + err.message) }
   finally { if (!saved) saving.value = false; else saving.value = false }
+}
+
+async function saveAudioMeeting() {
+  if (!audioTitle.value.trim() || savingAudio.value || !meeting.maySubmit) return
+  savingAudio.value = true
+  try {
+    await meeting.saveMeeting({ title: audioTitle.value.trim(), transcript: AUDIO_SOURCE_NOTE })
+    audioTitle.value = ''
+    notify('录音来源会议已创建，现在可以录音或上传 MP3')
+  } catch (err) { notify('创建录音来源会议失败：' + err.message) }
+  finally { savingAudio.value = false }
 }
 
 async function submitProposal() {
@@ -174,7 +189,15 @@ function genDemoSuggestion() {
       <label class="field">会议转写<textarea name="transcript" v-model="saveForm.transcript" required maxlength="16000" rows="5"></textarea></label>
       <button class="primary" type="submit" :disabled="!meeting.maySubmit || saving" :title="readonlyTitle">保存会议</button>
       </form>
-      <div class="h-sec">已保存会议</div>
+      <template v-if="workflow === 'audio'">
+        <div class="h-sec">语音输入与转写</div>
+        <p class="small">第 1 步：创建或选择录音来源会议。音频必须关联这条会议；转写经人工核对后会另建分析会议。</p>
+        <form id="audio-source-form" class="audio-source-form" @submit.prevent="saveAudioMeeting">
+          <label class="field">录音来源会议标题<input id="audio-source-title" v-model="audioTitle" required maxlength="200" placeholder="例如：Sprint 2 规划会录音"></label>
+          <button class="primary" type="submit" :disabled="!meeting.maySubmit || savingAudio" :title="readonlyTitle">{{ savingAudio ? '创建中…' : '创建录音来源会议' }}</button>
+        </form>
+      </template>
+      <div class="h-sec">{{ workflow === 'audio' ? '或选择已保存会议' : '已保存会议' }}</div>
       <select id="meeting-select" aria-label="已保存会议" :value="meeting.selected" @change="meeting.select($event.target.value)">
       <option value="">请选择会议</option>
       <option v-for="m in meeting.meetings" :key="m.id" :value="m.id">{{ m.title }}</option>
@@ -187,8 +210,8 @@ function genDemoSuggestion() {
       @click="deleteMeeting"
     >{{ deleting ? '删除中…' : '删除当前会议' }}</button>
       <pre id="saved-transcript" style="white-space:pre-wrap;max-height:240px;overflow:auto">{{ meeting.selectedMeeting?.transcript || '暂无会议，请先保存。' }}</pre>
-      <div v-if="workflow === 'audio'"><div class="h-sec">语音输入与转写</div><RecorderPanel /><div class="small">转写是草稿。核对并保存转写版本后，创建分析会议；创建会议本身不会自动运行分析或执行提案。</div></div>
-      <template v-if="meeting.selected">
+      <div v-if="workflow === 'audio'"><div class="h-sec">第 2 步：录音或上传 MP3，再转写与核对</div><RecorderPanel /><div class="small">转写是草稿。核对并保存转写版本后，创建分析会议；创建会议本身不会自动运行分析或执行提案。</div></div>
+      <template v-if="meeting.selected && !isAudioSource">
         <div class="h-sec">选择会议分析类型</div>
         <label v-if="analysisType !== 'assignment'" class="field">分析类型<select v-model="analysisType" aria-label="会议分析类型"><option value="daily">Daily · 更新已有故事状态</option><option value="planning">Sprint Planning · 调整 Sprint</option><option value="review">Sprint Review · 标记验收完成</option><option value="retro">Sprint Retro · 创建独立行动项</option><option value="refinement">Backlog Refinement · 补齐并创建新故事</option></select></label>
         <div class="sum-card"><b>当前会议 · {{ meeting.selectedMeeting?.title }}</b><p class="small">{{ analysisType === 'assignment' ? '分配候选先进行只读查询；保存建议后仍需审核，并单独执行。' : analysisType === 'daily' ? '结果可能提出已有故事状态更新。' : analysisType === 'planning' ? '结果可能提出 Sprint 调整。' : analysisType === 'review' ? '结果可能提出验收完成状态。' : analysisType === 'retro' ? '结果可能提出独立行动项。' : '结果可能提出补齐信息并创建新故事。' }} 未知信息会保持待确认。</p></div>
@@ -199,6 +222,7 @@ function genDemoSuggestion() {
         <RefinementAnalysisPanel v-else-if="analysisType === 'refinement'" :key="'refinement:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <details :open="analysisType === 'assignment'"><summary>Assignment 分配建议 · 只读查询后可另行保存建议</summary><AssignmentPanel :key="'assignment:' + meeting.selected" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" /></details>
       </template>
+      <p v-else-if="isAudioSource" class="empty">这是录音来源会议。请先完成录音、转写和人工核对，再打开生成的分析会议。</p>
       <p v-else class="empty">先创建或选择会议，再开始分析。</p>
     </div>
     <form v-else id="meeting-proposal-form" @submit.prevent="submitProposal" class="manual-proposal-flow">
@@ -218,5 +242,5 @@ function genDemoSuggestion() {
 </template>
 
 <style scoped>
-.meeting-workflow-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.meeting-workflow-tabs button[aria-selected="true"]{outline:2px solid currentColor;font-weight:700}.meeting-shared,.manual-proposal-flow{padding:14px;border:1px solid var(--line,#d8dce5);border-radius:8px}.transcript-evidence{white-space:pre-wrap;max-height:220px;overflow:auto;padding:12px;background:var(--surface-2,#f5f6f8)}
+.meeting-workflow-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.meeting-workflow-tabs button[aria-selected="true"]{outline:2px solid currentColor;font-weight:700}.meeting-shared,.manual-proposal-flow{padding:14px;border:1px solid var(--line,#d8dce5);border-radius:8px}.audio-source-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.audio-source-form .field{flex:1 1 280px}.transcript-evidence{white-space:pre-wrap;max-height:220px;overflow:auto;padding:12px;background:var(--surface-2,#f5f6f8)}
 </style>
