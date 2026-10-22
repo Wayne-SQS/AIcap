@@ -1,0 +1,241 @@
+{
+  "generated_at": "2026-10-22",
+  "note": "模型输出仅作复验证据，未审核、未执行",
+  "cases": [
+    {
+      "key": "daily",
+      "meeting_create_status": 201,
+      "meeting_id": "10580968-a99c-4ff4-b2c4-40a4f8eca6b1",
+      "analysis_status": 200,
+      "analysis": {
+        "schema_version": "1.0",
+        "meeting_id": "10580968-a99c-4ff4-b2c4-40a4f8eca6b1",
+        "meeting_type": "daily_scrum",
+        "summary": "李锐铭称昨天把 GitHub 同步的成员映射改完，US34 可以验收。US36 的成员状态页功能已完成，但测试还没补，团队明确先不算完成。孙秋实反馈 T12 卡在等接口，且不清楚接口交付时间，需要确认。罗子涵反馈风险列表可以运行，但数据是旧的，今天的活动尚未同步。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1-US34",
+            "action": "update_story_status",
+            "story_id": "US34",
+            "expected": {
+              "status": 0
+            },
+            "changes": {
+              "status": 2
+            },
+            "reason": "原文明说昨天把 GitHub 同步的成员映射改完，并明确 US34 可以验收，故支持将快照中的待办改为已完成，供人工审核。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "李锐铭：昨天把 GitHub 同步的成员映射改完了，US34 可以验收。"
+              }
+            ]
+          },
+          {
+            "proposal_id": "P2-US36",
+            "action": "update_story_status",
+            "story_id": "US36",
+            "expected": {
+              "status": 0
+            },
+            "changes": {
+              "status": 1
+            },
+            "reason": "原文说明 US36 的成员状态页已经做完功能部分，但测试还没补、团队明确先别算完成，因此支持由待办改为进行中，不支持改为已完成。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "高思晗：US36 的成员状态页做完了，但还没写测试。"
+              },
+              {
+                "segment_id": "S6",
+                "quote": "高思晗：功能能点，测试还没补，先别算完成。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "US34 可以验收，实际验收是否已经进行或由谁安排验收？",
+          "T12 所等待的接口何时能提供？",
+          "US36 的测试何时补写，补写后由谁确认完成？",
+          "风险列表的数据旧、今天的活动未同步，是否需要跟进同步？"
+        ],
+        "analysis_id": "321fa6d5-fc90-43a9-b0c1-be02cb65f198",
+        "client_request_id": "semantic-recheck-daily-20261022",
+        "storage_status": "pending"
+      },
+      "summary": {
+        "keys": [
+          "schema_version",
+          "meeting_id",
+          "meeting_type",
+          "summary",
+          "proposed_actions",
+          "open_questions",
+          "analysis_id",
+          "client_request_id",
+          "storage_status"
+        ]
+      }
+    },
+    {
+      "key": "review",
+      "meeting_create_status": 201,
+      "meeting_id": "333c7723-d5d8-453a-bc57-e58a5bc95ebf",
+      "analysis_status": 200,
+      "analysis": {
+        "schema_version": "1.0",
+        "meeting_id": "333c7723-d5d8-453a-bc57-e58a5bc95ebf",
+        "meeting_type": "sprint_review",
+        "summary": "会议演示了 US34、US35、US36、US37。US34 被明确表示验收通过；US35 的提交分析仅为演示，数据量不够，明确不算验收；US36 成员状态页功能可用但测试尚未补充，未给出验收结论；US37 仅演示了建议生成，影响说明刚补、复盘报告未做，被明确表示不能算完成，其是否算完成的问题以“不能算完成”回应。故事快照状态编码不等于验收结果，未提及项保持未知。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P-US34-1",
+            "action": "update_story_status",
+            "story_id": "US34",
+            "expected": {
+              "status": 0
+            },
+            "changes": {
+              "status": 2
+            },
+            "reason": "原文明确定义 US34 验收通过，且全篇无相反约束，故建议将快照状态更新为已完成。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "李锐铭：US34 我验收通过。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "US36 成员状态页功能可用但测试还没补，其验收结论是否已确认？后续以什么方式确认测试补充后的验收结果？",
+          "US37 建议生成已演示、影响说明刚补、复盘报告未做，会上明确表示不能算完成；后续需要确认完成条件与验收方式。"
+        ],
+        "analysis_id": "d8416c83-d4b7-48d3-8c99-16cce86f414b",
+        "client_request_id": "semantic-recheck-review-20261022",
+        "storage_status": "pending"
+      },
+      "summary": {
+        "keys": [
+          "schema_version",
+          "meeting_id",
+          "meeting_type",
+          "summary",
+          "proposed_actions",
+          "open_questions",
+          "analysis_id",
+          "client_request_id",
+          "storage_status"
+        ]
+      }
+    },
+    {
+      "key": "retro",
+      "meeting_create_status": 201,
+      "meeting_id": "78a51dff-fb9c-47fd-8955-5ce01cf141c1",
+      "analysis_status": 200,
+      "analysis": {
+        "schema_version": "1.0",
+        "meeting_id": "78a51dff-fb9c-47fd-8955-5ce01cf141c1",
+        "meeting_type": "sprint_retrospective",
+        "summary": "团队指出回归测试拖到最后是最大问题，讨论以后每轮第一天先跑一次全量回归；高思晗负责把回归写进检查清单；罗子涵跟进测试库残留问题，下次联调前清理。另提到文档总是最后才写，李锐铭建议文档初稿跟开发同步写，不要等到最后。",
+        "decisions": [],
+        "proposed_actions": [
+          {
+            "proposal_id": "PA-1",
+            "action": "create_action_item",
+            "changes": {
+              "title": "把回归写进检查清单",
+              "description": "高思晗负责把回归写进检查清单。",
+              "owner_id": 2,
+              "deadline_text": null
+            },
+            "reason": "高思晗明确表示负责把回归写进检查清单，属于已明确决定跟进的具体改进行动。",
+            "evidence": [
+              {
+                "segment_id": "S3",
+                "quote": "高思晗：我来负责把回归写进检查清单。"
+              }
+            ]
+          },
+          {
+            "proposal_id": "PA-2",
+            "action": "create_action_item",
+            "changes": {
+              "title": "清理测试库残留",
+              "description": "罗子涵跟进测试库残留问题，下次联调前清理。",
+              "owner_id": 4,
+              "deadline_text": "下次联调前"
+            },
+            "reason": "罗子涵明确表示测试库残留的问题由其来跟，并说明下次联调前清理，属于已明确决定跟进的具体改进行动。",
+            "evidence": [
+              {
+                "segment_id": "S4",
+                "quote": "罗子涵：测试库残留的问题我来跟，下次联调前清理。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "李锐铭提出的“以后每轮第一天先跑一次全量回归”是否已决定执行？由谁负责跟进？",
+          "李锐铭提出的“文档初稿可以跟开发同步写，不要等到最后”是否已决定采纳？由谁负责跟进？",
+          "“把回归写进检查清单”的截止时间是什么？",
+          "“清理测试库残留”的具体截止日期是什么？"
+        ],
+        "analysis_id": "76983ba1-1e29-42a5-8c5f-0274ff699b6c",
+        "client_request_id": "semantic-recheck-retro-20261022",
+        "storage_status": "pending"
+      },
+      "summary": {
+        "keys": [
+          "schema_version",
+          "meeting_id",
+          "meeting_type",
+          "summary",
+          "decisions",
+          "proposed_actions",
+          "open_questions",
+          "analysis_id",
+          "client_request_id",
+          "storage_status"
+        ]
+      }
+    },
+    {
+      "key": "refinement",
+      "meeting_create_status": 201,
+      "meeting_id": "a1a7f7f8-741c-4f56-8b0f-5b78498c107f",
+      "analysis_status": 200,
+      "analysis": {
+        "schema_version": "1.0",
+        "meeting_id": "a1a7f7f8-741c-4f56-8b0f-5b78498c107f",
+        "meeting_type": "backlog_refinement",
+        "summary": "会议讨论了接口未通时的前端先行展示方式、某个故事需补充数据不足情形的验收标准，以及 US37 影响说明的补充。关于 US38 增加导出功能，李锐铭表示范围尚未想清楚，罗子涵明确建议先放入需求池、确认后再做，因此会议未决定新增导出故事。US37 的影响说明补充属于对已有故事的修改，超出本次可创建范围，保留为待确认事项。",
+        "proposed_actions": [],
+        "open_questions": [
+          "S2 中“刚才说的那个故事”具体指哪个已有故事？其“数据不足的情况”验收要求应如何表述？",
+          "S5 中需补充的 US37 影响说明具体内容和范围是什么？该修改是否已由负责人确认执行？",
+          "S1 中“接口没通，先做前端展示、后端后面接”适用于哪个具体故事或功能？是否已形成明确需求？",
+          "US38 导出功能确认范围后，是否需要作为新需求进入需求池？"
+        ],
+        "analysis_id": "ae2cea4e-5950-480f-b300-e2f1aa0e21be",
+        "client_request_id": "semantic-recheck-refinement-20261022",
+        "storage_status": "no_changes"
+      },
+      "summary": {
+        "keys": [
+          "schema_version",
+          "meeting_id",
+          "meeting_type",
+          "summary",
+          "proposed_actions",
+          "open_questions",
+          "analysis_id",
+          "client_request_id",
+          "storage_status"
+        ]
+      }
+    }
+  ]
+}
