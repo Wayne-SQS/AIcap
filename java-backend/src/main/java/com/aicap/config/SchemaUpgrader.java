@@ -322,7 +322,9 @@ public class SchemaUpgrader implements ApplicationRunner {
         }
         // Only recover orphaned rows from a pre-project database. The marker prevents a later
         // intentional deletion of P001 from being undone on every application restart.
-        execute(conn, "INSERT INTO projects(id,name,description,status,total_sprints,created_by,created_at,updated_at) "
+        // INSERT IGNORE：多个测试上下文/进程可能同时走到这里，NOT EXISTS 与 INSERT 之间
+        // 仍有并发窗口；主键冲突不应让启动失败（幂等恢复）。
+        execute(conn, "INSERT IGNORE INTO projects(id,name,description,status,total_sprints,created_by,created_at,updated_at) "
                 + "SELECT 'P001','历史项目','从旧版单项目数据恢复','ACTIVE',COALESCE((SELECT MAX(sprint) FROM stories WHERE project_id='P001'),0),MIN(id),NOW(),NOW() FROM users "
                 + "WHERE NOT EXISTS (SELECT 1 FROM projects WHERE id='P001') AND (EXISTS (SELECT 1 FROM stories WHERE project_id='P001') OR EXISTS (SELECT 1 FROM tasks WHERE project_id='P001') OR EXISTS (SELECT 1 FROM milestones WHERE project_id='P001'))");
         execute(conn, "INSERT IGNORE INTO project_members(project_id,user_id,project_role,capacity_hours,joined_at) "
