@@ -99,6 +99,15 @@ export const useSupervisorStore = defineStore('supervisor', {
         onEvent: env => this.ingest(env),
         onError: err => {
           this.stream = null
+          // 404 = 本地记着的会话在服务端已经不存在(开发库重建/数据被清)。
+          // 这不是「离线」,不能把 health 打灰、也不该弹红字 —— 丢掉句柄就好,
+          // 下次发送会新建会话。不自愈的话每次续流都撞同一个 404(刷新页面也不恢复,
+          // 因为 id 持久化在 localStorage 里)。
+          if (err.status === 404) {
+            this.running = false
+            this.dropSession()
+            return
+          }
           if (err instanceof SupervisorOfflineError) {
             this.health = { reachable: false, java: false, llmConfigured: false }
             this.running = false
@@ -162,7 +171,23 @@ export const useSupervisorStore = defineStore('supervisor', {
       try {
         // 当前项目随每一轮带上:多项目之后工具调用普遍需要 project_id,
         // 不带就只能靠模型猜(见 api/supervisor.js 的 startChat 注释)
-        const { session_id: sid } = await startChat(utterance, this.sessionId, projectId)
+        // 记下**本次实际发出去**的那个 id:事件流那边的 404 也可能在同一时刻把
+        // this.sessionId 清成 null,这时候若用 this.sessionId 判断"还有没有会话可丢",
+        // 会把本该重试的 404 当成"没会话"直接抛给用户。
+        const usedSessionId = this.sessionId
+        let started
+        try {
+          started = await startChat(utterance, usedSessionId, projectId)
+        } catch (err) {
+          // 404 = 本地记着的会话在服务端已经不存在(开发库重建/数据被清)。
+          // 不在这里自愈的话,之后每次发送都撞同一个 404,界面只显示「没能发出去:
+          // 会话不存在」,刷新页面也不会恢复(localStorage 持久化)。
+          // 丢掉句柄后把**这一次**用新会话重发;只重试一次,免得服务端持续 404 时打转。
+          if (err.status !== 404 || !usedSessionId) throw err
+          this.dropSession()
+          started = await startChat(utterance, null, projectId)
+        }
+        const { session_id: sid } = started
         if (sid && sid !== this.sessionId) {
           this.sessionId = sid
           saveSessionId(sid)
@@ -181,14 +206,20 @@ export const useSupervisorStore = defineStore('supervisor', {
       }
     },
 
-    /** 「换个话题」:丢弃 session handle,下次发送会新建会话 */
-    resetSession() {
+    /** 丢掉本地会话句柄(会话在服务端已不存在时用):对话气泡保留,下次发送会新建会话。
+     *  时间轴整段清掉 —— 它按 seq 排序,新旧两个会话的 seq 混在一起就没有顺序可言了。 */
+    dropSession() {
       if (this.stream) this.stream.abort()
       this.stream = null
       this.sessionId = null
       saveSessionId(null)
       this.cursor = 0
       this.timeline = []
+    },
+
+    /** 「换个话题」:丢弃 session handle 与界面内容,下次发送会新建会话 */
+    resetSession() {
+      this.dropSession()
       this.messages = []
       this.running = false
       this.notice = ''

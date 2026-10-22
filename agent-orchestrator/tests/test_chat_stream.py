@@ -481,6 +481,24 @@ async def test_stream_rejects_bad_token_before_opening_the_stream():
     assert "text/event-stream" not in stream.headers.get("content-type", "")
 
 
+async def test_stream_404s_before_opening_when_session_is_unknown():
+    """会话不存在必须在**建流之前**走 HTTP 404，不能"先 200 再掐断"。
+
+    建流之后状态码已经固定成 200，Java 的 404 只能表现为流被掐断 —— 前端看到的是
+    "事件流读取失败"，既不知道原因，也不会清掉本地那个失效的会话句柄。
+    实际症状：开发库重建后前端仍记着旧 session_id，于是「和本说不了话」，且刷新
+    页面也不恢复（id 持久化在 localStorage 里）。
+    """
+    platform = FakePlatform()
+    app = _app(platform, ScriptedModel())
+
+    async with SSEStream() as stream:
+        await _open(stream, app, "no-such-session")
+
+    assert stream.status == 404
+    assert "text/event-stream" not in stream.headers.get("content-type", "")
+
+
 async def test_stream_sets_no_buffering_header():
     """`X-Accel-Buffering: no`：反代缓冲会把 SSE 退化成一坨吐出（契约 §3.1）。"""
     platform = FakePlatform()

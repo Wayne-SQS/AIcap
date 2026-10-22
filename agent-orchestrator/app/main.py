@@ -42,6 +42,7 @@ from .schemas import (
     PlatformError,
     PlatformProtocolError,
     PlatformUnavailable,
+    UnfinishedRun,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -484,6 +485,15 @@ def create_app(
             # 门禁在**流外**：令牌不认就走 HTTP 状态码，不能塞进 SSE 流
             # （前端拿到 200 会以为连上了，实际上每一帧都是错的）。
             await _gate(client, jwt)
+            # 会话不存在也必须在建流之前报 404：`StreamingResponse` 一旦开始发字节，
+            # 状态码就固定成 200 了，之后 Java 的 404 只能表现为「流被掐断」——
+            # 前端看到的是"事件流读取失败"，既不知道原因，也不会清掉本地那个已失效的
+            # 会话句柄（症状：库重建之后「和本说不了话」，刷新页面也不恢复）。
+            # 顺带把待恢复的 run 取回来，省掉 `_resume_once` 里重复的一次调用。
+            pending = await client.list_unfinished_runs(session_id=session_id, jwt=jwt)
+        except PlatformProtocolError as error:
+            await client.aclose()
+            raise _as_http(error) from None
         except PlatformUnavailable as error:
             await client.aclose()
             raise HTTPException(status_code=503, detail=error.message) from None
@@ -492,7 +502,9 @@ def create_app(
             raise
 
         return StreamingResponse(
-            _stream(request.app.state, client, jwt, session_id, _start_seq(request, after_seq)),
+            _stream(
+                request.app.state, client, jwt, session_id, _start_seq(request, after_seq), pending
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -513,6 +525,7 @@ async def _stream(
     jwt: str,
     session_id: str,
     start: int,
+    pending: list[UnfinishedRun],
 ) -> AsyncIterator[str]:
     registry: RunRegistry = app_state.registry
     # 假模型由 create_app 注入；真模型按需建 —— 没有待恢复的 run 时它根本不会被用到，
@@ -520,7 +533,7 @@ async def _stream(
     model: ModelProtocol = app_state.model or ModelClient()
 
     try:
-        await _resume_once(app_state, client, jwt, session_id, model)
+        await _resume_once(app_state, client, jwt, session_id, model, pending)
     except PlatformError:
         # 恢复失败不该把已经建立的流打断：没有可发的帧，转入正常读取循环，
         # 由心跳维持连接，故障会体现在事件流里。
@@ -555,17 +568,21 @@ async def _resume_once(
     jwt: str,
     session_id: str,
     model: ModelProtocol,
+    pending: list[UnfinishedRun],
 ) -> None:
     """惰性恢复：**每个连接只尝试一次**。
 
     这正是契约规定的触发点 —— 客户端带 `Last-Event-ID` 重连。**不能每轮心跳都试**：
     一个注定跑不完的 run（恢复后立刻又崩）会变成每 15 秒重跑一次的无限循环。
     恢复所需的 JWT 来自这次重连，`state_json` 里没有任何凭据。
+
+    待恢复的 run 由 `chat_stream` 在建流**之前**取好传进来（同时用于会话存在性校验），
+    这里不再自己查一次 —— 否则每开一条流就要多一次 Java 往返。
     """
     registry: RunRegistry = app_state.registry
     if registry.active_run(session_id) is not None:
         return
-    for row in await client.list_unfinished_runs(session_id=session_id, jwt=jwt):
+    for row in pending:
         task = asyncio.create_task(
             _background_resume(
                 JavaClient(base_url=client.base_url, transport=app_state.java_transport),

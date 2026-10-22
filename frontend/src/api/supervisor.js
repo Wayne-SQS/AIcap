@@ -183,7 +183,13 @@ export function openChatStream({ sessionId, afterSeq = 0, onEvent, onError, onCl
     }
     if (!res.ok) {
       const detail = await readDetail(res, `事件流拒绝 (${res.status})`)
-      if (!closed) onError?.(new SupervisorOfflineError(detail))
+      if (!closed) {
+        const err = new SupervisorOfflineError(detail)
+        // 带上状态码:调用方要区分「会话在服务端已不存在(404)」与「服务临时不可用」。
+        // 前者该丢句柄自愈,后者只能等(见 stores/supervisor.js#ensureStream)。
+        err.status = res.status
+        onError?.(err)
+      }
       onClose?.()
       return
     }
