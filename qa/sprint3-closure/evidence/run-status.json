@@ -1,17 +1,21 @@
 {
-  "status": "browser_passed_sql_summary_not_generated",
+  "status": "passed",
   "suite": "boundary",
-  "run_date": "2026-10-19",
-  "source_run": "qa/.daily-live/b0acbf3541af44b0be8bb39444e69f8f",
+  "run_date": "2026-10-22",
+  "source_run": "qa/.daily-live/fbe9fa912f2d41b492bd00669d6cf549",
   "browser_tests_passed": 2,
   "browser_tests_failed": 0,
-  "sql_summary": "runner failed on a legacy SQL query after browser tests; code corrected, but rerun did not execute because automatic approval review timed out and then had no available capacity",
-  "scope": "isolated temporary MySQL, real Java, Vite and browser",
-  "base_commit": "f789f85620338a9dc682e655276815855ee17f41",
-  "source_worktree_modified": true,
-  "files": {
-    "browser.log": "570b19e10ca570548460fc675dabde804c4655c77a05029868f384d808fccdbd",
-    "zero-capacity.png": "74c0bf6325072298523f37e394ef79ad051f4232894b5991e4910ec1327c56e1"
+  "sql_summary": {
+    "p003_weekly_capacity_hours": 0,
+    "p003_positive_hour_tasks": 1,
+    "p004_weekly_capacity_hours": 15,
+    "p004_tasks": 0
   },
-  "empty_screen_capture": "not archived: captured during page entrance animation; browser assertion and HTTP response remain in browser.log/test source"
+  "scope": "isolated MySQL 8.0.31, real Java/Python/Vite/JWT/browser; no model call",
+  "files_sha256": {
+    "browser.log": "d57c35548640e4538f840f7d6cf8d275649f8c6f1ebe4c92fbc3b319a0e7405b",
+    "result.json": "d7888e89a1aa981f42f79721a166e3718e52d5cc93217caecc94f0cb03df5c47",
+    "empty-projects.png": "98f951c4cf49fccc012e8ba9ca468f60380f3fa7e56f6a965235a7cddce752f7",
+    "zero-capacity.png": "586ffbc5539955985f4fab7d097261185be746bfe4ea8c5b2130b14ea11698b6"
+  }
 }

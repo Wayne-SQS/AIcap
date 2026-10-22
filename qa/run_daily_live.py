@@ -202,6 +202,20 @@ def main():
             env['AICAP_STT_EVAL_SPEAKERS'] = str(args.speaker_count or 1)
         java = start('java', [JAVA, '-jar', ROOT / 'java-backend/target/aicap-java-backend.jar'], env=env)
         wait_http('http://127.0.0.1:18180/api/health', java)
+        if suite == 'boundary':
+            # Create a genuine no-membership viewer after legacy P001 startup migration.
+            # Seeded users are all attached to P001, so none can exercise the empty list.
+            for _ in range(100):
+                if sql("SELECT COUNT(*) FROM aicap_daily_e2e.project_members pm "
+                       "JOIN aicap_daily_e2e.users u ON u.id=pm.user_id "
+                       "WHERE u.username='成员5' AND pm.project_id='P001'") == '1':
+                    break
+                time.sleep(.2)
+            else:
+                raise RuntimeError('Seed viewer was not created before boundary fixture setup')
+            sql("INSERT INTO aicap_daily_e2e.users(username,display_name,role,password_hash,color,capacity_hours) "
+                "SELECT '边界访客','边界访客','viewer',password_hash,color,capacity_hours "
+                "FROM aicap_daily_e2e.users WHERE username='成员5'")
         model = ThreadingHTTPServer(('127.0.0.1', 18191), Model)
         threading.Thread(target=model.serve_forever, daemon=True).start()
         python = start('python', [sys.executable, 'start_service.py', '--environment-only',
@@ -292,7 +306,8 @@ def main():
                 suggested_labels=sorted({item['speaker_id'] for item in assignments if item['speaker_id']}),
                 multi_speaker_segments=len(multi_segment_ids),
                 word_timestamps=sum(len(segment.get('words') or []) for segment in transcript['segments']))
-        (RUN / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        with (RUN / 'result.json').open('w', encoding='utf-8', newline='\n') as result_file:
+            result_file.write(json.dumps(report, ensure_ascii=False, indent=2))
         if suite == 'boundary':
             evidence = ROOT / 'qa/sprint3-closure/evidence'
             evidence.mkdir(parents=True, exist_ok=True)

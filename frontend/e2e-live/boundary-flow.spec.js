@@ -19,7 +19,7 @@ async function authenticatedPage(page, token, route = '/#/projects') {
 }
 
 test('real service: project entry shows a truly empty accessible list', async ({ page, request }) => {
-  const token = await login(request, '成员5')
+  const token = await login(request, '边界访客')
   const headers = { Authorization: `Bearer ${token}` }
   const projects = await request.get(`${javaBase}/api/projects`, { headers })
   expect(projects.status()).toBe(200)

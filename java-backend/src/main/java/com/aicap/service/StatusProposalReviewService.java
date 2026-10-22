@@ -119,7 +119,7 @@ public class StatusProposalReviewService {
             int desired=approved.path("changes").path("status").asInt();
             if (!retargeted && input.changes()!=null && input.storyPatch()==null && desired==original.path("changes").path("status").asInt())
                 throw ApiException.unprocessable("修改后接受必须改变目标状态或目标故事");
-            var stories=jdbc.queryForList("SELECT title,description,acceptance,priority,sprint,activity,status,owner_id FROM stories WHERE id=? FOR UPDATE",targetId);
+            var stories=jdbc.queryForList("SELECT title,description,acceptance,priority,sprint,activity,status,owner_id FROM stories WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') AND code=? FOR UPDATE",meetingId,targetId);
             if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
             var story=stories.getFirst();
             int current=((Number)story.get("status")).intValue();

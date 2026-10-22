@@ -239,8 +239,10 @@ async function hydrateReviewQueuePage(page) {
     const detail = details ? details[groupKey(ref)] || null : null
     try {
       if (ref.source === 'general') {
-        /* general 的载荷是 SuggestionOut,索引不带,始终逐条读(每组恰好 1 个请求)。 */
-        const s = await read(() => api(`/api/suggestions/${encodeURIComponent(ref.proposalId)}`))
+        /* general 的载荷是 SuggestionOut,索引不带,始终逐条读(每组恰好 1 个请求)。
+           注意:GET /api/suggestions/{id} 把 projectId 声明成必填 @RequestParam,
+           漏了会被 Spring 判成缺参(422),表现为队列整体"审核详情缺失"。 */
+        const s = await read(() => api(`/api/suggestions/${encodeURIComponent(ref.proposalId)}?projectId=${encodeURIComponent(currentProjectId() || '')}`))
         entries.push(generalRow(s))
         return
       }

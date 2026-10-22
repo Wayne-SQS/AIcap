@@ -383,7 +383,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
         <button v-if="canWrite" id="submit-github-sync" class="ghost" :disabled="githubSyncing" @click="syncGithub">
           {{ githubSyncing ? '同步中…' : '⟳ 立即同步 GitHub' }}
         </button>
-        <span v-else class="small" style="opacity:.7">同步需 管理员/负责人 权限</span>
+        <span v-else class="small" style="opacity:.7">只读账号不能触发同步</span>
       </div>
       <span v-if="lastSync && lastSync.errors && lastSync.errors.length" class="small" role="alert"
             style="flex:1 0 100%;color:#e05555">

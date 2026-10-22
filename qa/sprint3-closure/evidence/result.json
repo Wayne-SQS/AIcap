@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "suite": "boundary",
+  "database": "8.0.31",
+  "model": "none",
+  "model_mode": "not_used",
+  "model_calls": 0,
+  "counts": [
+    "0",
+    "1",
+    "15",
+    "0"
+  ],
+  "scope": "real browser/Vite/Python/Java/JWT/MySQL",
+  "speech_model_calls": 0
+}

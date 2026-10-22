@@ -37,6 +37,8 @@ public class SchemaUpgrader implements ApplicationRunner {
     private final DataSource dataSource;
     private static final String PROJECT_GENERATION_REQUEST_TEXT_MIGRATION =
             "V12_PROJECT_GENERATION_REQUEST_TEXT_TO_TEXT";
+    private static final String LEGACY_PROJECT_RECOVERY = "V13_LEGACY_PROJECT_RECOVERY";
+    private static final String LEGACY_RELATIONS = "V14_LEGACY_RELATIONS";
 
     /** (列名, 列定义) —— 顺序与 FastAPI 迁移脚本保持一致 */
     private static final String[][] TASK_COLUMNS = {
@@ -245,6 +247,7 @@ public class SchemaUpgrader implements ApplicationRunner {
         migrateScopedBusinessTable(conn, "stories", "uq_stories_project_code");
         migrateScopedBusinessTable(conn, "tasks", "uq_tasks_project_code");
         migrateScopedBusinessTable(conn, "milestones", "uq_milestones_project_code");
+        recoverLegacyProject(conn);
         addProjectColumn(conn, "story_logs");
         addProjectColumn(conn, "pool_items");
         addProjectColumn(conn, "meetings");
@@ -256,6 +259,7 @@ public class SchemaUpgrader implements ApplicationRunner {
         addProjectColumn(conn, "profile_agent_runs");
         addProjectColumn(conn, "suggestions");
         addProjectColumn(conn, "meeting_agent_runs");
+        migrateLegacyReferences(conn);
     }
 
     private void ensureProjectTables(Connection conn) throws SQLException {
@@ -288,20 +292,132 @@ public class SchemaUpgrader implements ApplicationRunner {
         if (!tableExists(conn, table)) return;
         Set<String> existingColumns = columns(conn, table);
         if (existingColumns.contains("internal_id") && existingColumns.contains("code")) {
-            // The formal tables have already been switched to the internal-key schema.
-            // Do not run the legacy `id` migration against them on every restart.
-            if (!existingColumns.contains("project_id")) {
-                throw new SQLException("正式表 " + table + " 缺少 project_id，拒绝按旧结构自动迁移");
-            }
-            if (!indexExists(conn, table, uniqueName)) {
+            if (!existingColumns.contains("project_id")) throw new SQLException(table + " 缺少 project_id");
+            if (!indexExists(conn, table, uniqueName))
                 execute(conn, "ALTER TABLE `" + table + "` ADD UNIQUE KEY `" + uniqueName + "` (project_id,code)");
-            }
             return;
         }
-        if (!existingColumns.contains("project_id")) execute(conn, "ALTER TABLE `"+table+"` ADD COLUMN project_id varchar(20) NULL AFTER id");
+        if (!existingColumns.contains("project_id")) execute(conn, "ALTER TABLE `"+table+"` ADD COLUMN project_id varchar(20) NULL");
         execute(conn, "UPDATE `"+table+"` SET project_id='P001' WHERE project_id IS NULL OR project_id=''");
-        if (!indexExists(conn, table, uniqueName)) execute(conn, "ALTER TABLE `"+table+"` ADD UNIQUE KEY `"+uniqueName+"` (project_id,id)");
         execute(conn, "ALTER TABLE `"+table+"` MODIFY COLUMN project_id varchar(20) NOT NULL");
+        if (!existingColumns.contains("code")) {
+            if (!existingColumns.contains("id")) throw new SQLException(table + " 缺少 id 和 code");
+            // The old business id becomes the public code. Drop FKs that still point at the
+            // old varchar PK; new records are related by project and internal key instead.
+            dropForeignKeysReferencing(conn, table);
+            execute(conn, "ALTER TABLE `" + table + "` CHANGE COLUMN `id` `code` varchar(20) NOT NULL");
+            existingColumns = columns(conn, table);
+        }
+        if (!existingColumns.contains("internal_id")) {
+            if (!hasPrimaryKeyOn(conn, table, "code")) throw new SQLException(table + " 的旧主键不是 code");
+            execute(conn, "ALTER TABLE `" + table + "` DROP PRIMARY KEY, ADD COLUMN `internal_id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST");
+        }
+        if (!indexExists(conn, table, uniqueName)) execute(conn, "ALTER TABLE `"+table+"` ADD UNIQUE KEY `"+uniqueName+"` (project_id,code)");
+    }
+
+    private void recoverLegacyProject(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM app_migrations WHERE name=?")) {
+            ps.setString(1, LEGACY_PROJECT_RECOVERY);
+            try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return; }
+        }
+        // Only recover orphaned rows from a pre-project database. The marker prevents a later
+        // intentional deletion of P001 from being undone on every application restart.
+        execute(conn, "INSERT INTO projects(id,name,description,status,total_sprints,created_by,created_at,updated_at) "
+                + "SELECT 'P001','历史项目','从旧版单项目数据恢复','ACTIVE',COALESCE((SELECT MAX(sprint) FROM stories WHERE project_id='P001'),0),MIN(id),NOW(),NOW() FROM users "
+                + "WHERE NOT EXISTS (SELECT 1 FROM projects WHERE id='P001') AND (EXISTS (SELECT 1 FROM stories WHERE project_id='P001') OR EXISTS (SELECT 1 FROM tasks WHERE project_id='P001') OR EXISTS (SELECT 1 FROM milestones WHERE project_id='P001'))");
+        execute(conn, "INSERT IGNORE INTO project_members(project_id,user_id,project_role,capacity_hours,joined_at) "
+                + "SELECT 'P001',id,CASE WHEN role IN ('admin','owner') THEN role WHEN role='viewer' THEN 'viewer' ELSE 'member' END,capacity_hours,NOW() FROM users WHERE EXISTS (SELECT 1 FROM projects WHERE id='P001')");
+        try (PreparedStatement ps = conn.prepareStatement("INSERT IGNORE INTO app_migrations(name,applied_at) VALUES (?,NOW())")) {
+            ps.setString(1, LEGACY_PROJECT_RECOVERY);
+            ps.executeUpdate();
+        }
+    }
+
+    private void migrateLegacyReferences(Connection conn) throws SQLException {
+        addMissing(conn, "tasks", new String[][] {
+                {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
+                {"story_ref_legacy", "`story_ref_legacy` varchar(100) DEFAULT NULL"},
+                {"depends_on_legacy", "`depends_on_legacy` varchar(100) DEFAULT NULL"},
+                {"kanban_card_id_legacy", "`kanban_card_id_legacy` varchar(10) DEFAULT NULL"}
+        });
+        execute(conn, "UPDATE tasks SET story_ref_legacy=story_ref WHERE story_ref_legacy IS NULL AND story_ref IS NOT NULL");
+        execute(conn, "UPDATE tasks SET depends_on_legacy=depends_on WHERE depends_on_legacy IS NULL AND depends_on IS NOT NULL");
+        execute(conn, "UPDATE tasks SET kanban_card_id_legacy=kanban_card_id WHERE kanban_card_id_legacy IS NULL AND kanban_card_id IS NOT NULL");
+        execute(conn, "UPDATE tasks t JOIN stories s ON s.project_id=t.project_id AND s.code=COALESCE(NULLIF(t.kanban_card_id,''),SUBSTRING_INDEX(t.story_ref,',',1)) SET t.story_internal_id=s.internal_id WHERE t.story_internal_id IS NULL");
+        addMissing(conn, "milestones", new String[][] {{"related_task_ids_legacy", "`related_task_ids_legacy` varchar(500) DEFAULT NULL"}});
+        execute(conn, "UPDATE milestones SET related_task_ids_legacy=related_task_ids WHERE related_task_ids_legacy IS NULL AND related_task_ids IS NOT NULL");
+        addMissing(conn, "story_logs", new String[][] {
+                {"story_internal_id", "`story_internal_id` bigint DEFAULT NULL"},
+                {"story_code_snapshot", "`story_code_snapshot` varchar(20) DEFAULT NULL"}
+        });
+        execute(conn, "UPDATE story_logs l JOIN stories s ON s.project_id=l.project_id AND s.code=l.story_id SET l.story_internal_id=s.internal_id,l.story_code_snapshot=s.code WHERE l.story_internal_id IS NULL");
+        for (String table : new String[] {"activity_records", "difficulty_assessments"}) {
+            addMissing(conn, table, new String[][] {
+                    {"task_internal_id", "`task_internal_id` bigint DEFAULT NULL"},
+                    {"task_code_snapshot", "`task_code_snapshot` varchar(20) DEFAULT NULL"}
+            });
+            execute(conn, "UPDATE `" + table + "` r JOIN tasks t ON t.project_id=r.project_id AND t.code=r.task_id SET r.task_internal_id=t.internal_id,r.task_code_snapshot=t.code WHERE r.task_internal_id IS NULL");
+        }
+        migrateLegacyRelations(conn);
+    }
+
+    private void migrateLegacyRelations(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM app_migrations WHERE name=?")) {
+            ps.setString(1, LEGACY_RELATIONS);
+            try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return; }
+        }
+        java.util.List<Object[]> tasks = new java.util.ArrayList<>();
+        try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(
+                "SELECT project_id,internal_id,story_internal_id,story_ref_legacy,depends_on_legacy FROM tasks")) {
+            while (rs.next()) tasks.add(new Object[] {rs.getString(1), rs.getLong(2), rs.getObject(3), rs.getString(4), rs.getString(5)});
+        }
+        try (PreparedStatement stories = conn.prepareStatement(
+                    "INSERT IGNORE INTO task_story_relations(project_id,task_internal_id,story_internal_id,created_at,updated_at) "
+                            + "SELECT ?,?,s.internal_id,NOW(),NOW() FROM stories s WHERE s.project_id=? AND s.code=? AND s.internal_id<>?");
+             PreparedStatement dependencies = conn.prepareStatement(
+                    "INSERT IGNORE INTO task_dependencies(project_id,predecessor_task_internal_id,successor_task_internal_id,created_at) "
+                            + "SELECT ?,t.internal_id,?,NOW() FROM tasks t WHERE t.project_id=? AND t.code=?")) {
+            for (Object[] task : tasks) {
+                String projectId = (String) task[0];
+                long taskId = (Long) task[1];
+                Long primaryStoryId = (Long) task[2];
+                for (String code : splitLegacyCodes((String) task[3])) {
+                    if (primaryStoryId == null) continue;
+                    stories.setString(1, projectId); stories.setLong(2, taskId);
+                    stories.setString(3, projectId); stories.setString(4, code); stories.setLong(5, primaryStoryId);
+                    stories.executeUpdate();
+                }
+                for (String code : splitLegacyCodes((String) task[4])) {
+                    dependencies.setString(1, projectId); dependencies.setLong(2, taskId);
+                    dependencies.setString(3, projectId); dependencies.setString(4, code);
+                    dependencies.executeUpdate();
+                }
+            }
+        }
+        try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(
+                "SELECT project_id,internal_id,related_task_ids_legacy FROM milestones")) {
+            java.util.List<Object[]> rows = new java.util.ArrayList<>();
+            while (rs.next()) rows.add(new Object[] {rs.getString(1), rs.getLong(2), rs.getString(3)});
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT IGNORE INTO milestone_tasks(project_id,milestone_internal_id,task_internal_id,created_at) "
+                            + "SELECT ?,?,t.internal_id,NOW() FROM tasks t WHERE t.project_id=? AND t.code=?")) {
+                for (Object[] row : rows) for (String code : splitLegacyCodes((String) row[2])) {
+                    ps.setString(1, (String) row[0]); ps.setLong(2, (Long) row[1]);
+                    ps.setString(3, (String) row[0]); ps.setString(4, code);
+                    ps.executeUpdate();
+                }
+            }
+        }
+        try (PreparedStatement ps = conn.prepareStatement("INSERT IGNORE INTO app_migrations(name,applied_at) VALUES (?,NOW())")) {
+            ps.setString(1, LEGACY_RELATIONS);
+            ps.executeUpdate();
+        }
+    }
+
+    private java.util.List<String> splitLegacyCodes(String value) {
+        if (value == null || value.isBlank()) return java.util.List.of();
+        return java.util.Arrays.stream(value.split(","))
+                .map(String::trim).filter(code -> !code.isEmpty()).distinct().toList();
     }
 
     /**

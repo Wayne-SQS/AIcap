@@ -64,16 +64,17 @@ public class PlanningProposalExecutionService {
         String storyId=approved.path("story_id").asText();
         int before=approved.path("expected").path("sprint").asInt();
         int after=approved.path("changes").path("sprint").asInt();
-        var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE id=? FOR UPDATE",storyId);
+        var stories=jdbc.queryForList("SELECT internal_id,project_id,sprint FROM stories WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') AND code=? FOR UPDATE",meetingId,storyId);
         if(stories.isEmpty() || ((Number)stories.getFirst().get("sprint")).intValue()!=before)
             throw ApiException.conflict("故事不存在或Sprint已变化，请重新分析");
-        if(jdbc.update("UPDATE stories SET sprint=? WHERE code=? AND sprint=?",after,storyId,before)!=1)
+        if(jdbc.update("UPDATE stories SET sprint=? WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') AND code=? AND sprint=?",after,meetingId,storyId,before)!=1)
             throw ApiException.conflict("故事Sprint已变化，请重新分析");
         String detail="会议Sprint提案执行："+before+" → "+after+"；meeting="+meetingId+"；analysis="+analysisId+"；proposal="+id;
         var key=new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement=connection.prepareStatement("INSERT INTO story_logs (story_id,log_type,detail,user_id,created_at) VALUES (?,'edit',?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1,storyId); statement.setString(2,detail); statement.setInt(3,executorId);
+            var statement=connection.prepareStatement("INSERT INTO story_logs (project_id,story_internal_id,story_code_snapshot,story_id,log_type,detail,user_id,created_at) VALUES (?,?,?,?,'edit',?,?,CURRENT_TIMESTAMP)",Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1,(String)stories.getFirst().get("project_id")); statement.setLong(2,((Number)stories.getFirst().get("internal_id")).longValue());
+            statement.setString(3,storyId); statement.setString(4,storyId); statement.setString(5,detail); statement.setInt(6,executorId);
             return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();
