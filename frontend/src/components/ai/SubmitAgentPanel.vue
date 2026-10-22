@@ -510,6 +510,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
                 </div>
                 <p class="small">证据: {{ r.evidence }}</p>
                 <p class="small">推断: {{ r.inference }}</p>
+                <p class="small">影响: {{ r.impact || '未提供' }}</p>
                 <p class="small ri-act">建议: {{ r.suggested_action }}</p>
               </li>
             </ul>

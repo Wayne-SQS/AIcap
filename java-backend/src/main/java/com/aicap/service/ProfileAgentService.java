@@ -1257,7 +1257,8 @@ public class ProfileAgentService {
                         "evidence", "未完成任务工时 " + e.getValue() + "h / 容量 " +
                                 (u.getCapacityHours() == null ? "未配置" : (u.getCapacityHours() * 6) + "h（六周）"),
                         "inference", "负载约 " + pct + "%,长期过载风险,建议重新分配部分任务",
-                        "suggested_action", "将低优先级任务拆分给负载较低的成员,或安排他人参与 Review"));
+                        "suggested_action", "将低优先级任务拆分给负载较低的成员,或安排他人参与 Review",
+                        "impact", "若不重新分配，该成员承担的任务存在延期风险，Sprint 里程碑与后续联调窗口会被压缩"));
             }
         }
         // 高难度集中于一人 → 关键单点依赖
@@ -1278,7 +1279,8 @@ public class ProfileAgentService {
                         "member", nameOf.get(e.getKey()),
                         "evidence", "同时承担 " + e.getValue() + " 项未完成的高难度任务",
                         "inference", "存在关键知识单点依赖,该成员请假/阻塞将直接影响里程碑",
-                        "suggested_action", "安排其他成员参与相关任务 Review,沉淀关键知识"));
+                        "suggested_action", "安排其他成员参与相关任务 Review,沉淀关键知识",
+                        "impact", "该成员一旦请假或阻塞，高难度任务无人接手，里程碑存在延期风险"));
             }
         }
         // 长期无进展任务(进行中但无近期活动)
@@ -1296,7 +1298,8 @@ public class ProfileAgentService {
                         "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
                         "evidence", "任务处于「进行中」状态,但近 7 天无任何关联活动记录",
                         "inference", "可能存在任务阻塞或任务拆分不清的问题,需进一步确认(文档 4.3 王五案例)",
-                        "suggested_action", "与负责人确认任务状态;若已阻塞,补充阻塞原因并调整排期"));
+                        "suggested_action", "与负责人确认任务状态;若已阻塞,补充阻塞原因并调整排期",
+                        "impact", "任务继续停滞会推迟其后续任务与集成联调，Sprint 交付范围可能缩小"));
             }
         }
         // 高难度任务缺 Review(文档 4.8:哪些任务缺少 Review)
@@ -1315,7 +1318,8 @@ public class ProfileAgentService {
                         "evidence", "任务为" + ("extreme".equals(d.level()) ? "极高" : "高") +
                                 "难度(" + d.score() + "分),且无任何 Review 活动记录",
                         "inference", "高难度/核心任务缺少同行评审,质量问题可能在后期集中爆发",
-                        "suggested_action", "安排其他成员对该任务进行 Review,并补测关键路径"));
+                        "suggested_action", "安排其他成员对该任务进行 Review,并补测关键路径",
+                        "impact", "缺陷留到联调或发布前才暴露，返工成本高于当前评审成本"));
             }
         }
         // 任务缺测试活动记录(文档 4.8:哪些任务缺少测试;证据为 test 类型活动)
@@ -1332,7 +1336,8 @@ public class ProfileAgentService {
                         "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
                         "evidence", "任务处于「" + statusText(t.getStatus()) + "」状态,但范围内无任何测试活动记录",
                         "inference", "可能缺少测试或测试活动未录入,质量问题可能后置暴露",
-                        "suggested_action", "确认任务是否已补充测试;未录入的测试活动请补充录入"));
+                        "suggested_action", "确认任务是否已补充测试;未录入的测试活动请补充录入",
+                        "impact", "无测试记录无法确认功能可用，发布前回归可能失败，存在带缺陷发布风险"));
             }
         }
         // 模块工作集中在少数人(文档 4.8:哪个模块的工作集中在一个人身上)
@@ -1363,7 +1368,8 @@ public class ProfileAgentService {
                         "evidence", "模块「" + mod + "」范围内 " + total + " 条活动中 " + maxCnt
                                 + " 条来自同一成员(" + Math.round(maxCnt * 100.0 / total) + "%)",
                         "inference", "该模块知识/工作高度集中在少数人,存在关键单点依赖风险",
-                        "suggested_action", "安排其他成员参与该模块任务或 Review,分散知识集中度"));
+                        "suggested_action", "安排其他成员参与该模块任务或 Review,分散知识集中度",
+                        "impact", "知识集中在该成员，人员变动会导致模块维护与排期风险"));
             }
         }
         // 本周应结束未完成(文档 4.8:延期是否影响里程碑);week_end 是项目相对周,需换算后比较
@@ -1379,7 +1385,8 @@ public class ProfileAgentService {
                         "member", nameOf.getOrDefault(t.getOwnerId(), "未分配"),
                         "evidence", "任务计划在项目第 " + t.getWeekEnd() + " 周结束(当前项目第 " + currentWeek + " 周),仍未完成",
                         "inference", "临近/超过计划截止周仍未完成,可能影响 Sprint 与里程碑交付",
-                        "suggested_action", "确认阻塞原因并调整排期;评估是否拆分任务或增加人手"));
+                        "suggested_action", "确认阻塞原因并调整排期;评估是否拆分任务或增加人手",
+                        "impact", "任务已超过计划结束周，可能影响 Sprint 交付与里程碑验收"));
             }
         }
         return risks;
@@ -1695,6 +1702,7 @@ public class ProfileAgentService {
             String evidence = String.valueOf(risk.getOrDefault("evidence", ""));
             String inference = String.valueOf(risk.getOrDefault("inference", ""));
             String action = String.valueOf(risk.getOrDefault("suggested_action", ""));
+            String impact = String.valueOf(risk.getOrDefault("impact", ""));
             String affected = kind.equals("stalled") ? "任务 " + risk.get("task_id") : "成员 " + member;
             String evidenceFull = "[" + range + "] " + evidence;
             if (!existingKeys.add(evidenceFull + "|" + affected)) {
@@ -1707,10 +1715,11 @@ public class ProfileAgentService {
             s.setKind("profile");
             s.setEvidence(evidenceFull);
             s.setAffected(affected);
-            s.setNote(inference + " → 建议行动: " + action);
+            s.setNote(inference + "；影响: " + impact + " → 建议行动: " + action);
             Map<String, Object> changes = new LinkedHashMap<>();
             changes.put("title", "协调行动(" + range + "): " + kindText(kind) + " - " + member);
-            changes.put("description", "画像智能体风险建议\n证据: " + evidence + "\n推断: " + inference + "\n建议行动: " + action);
+            changes.put("description", "画像智能体风险建议\n证据: " + evidence + "\n推断: " + inference
+                    + "\n影响: " + impact + "\n建议行动: " + action);
             changes.put("priority", kind.equals("overload") || kind.equals("single_point") ? "Should" : "Could");
             s.setChangeJson(writeJson(changes));
             s.setStatus("pending");
