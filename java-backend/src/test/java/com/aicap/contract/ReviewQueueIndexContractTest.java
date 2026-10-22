@@ -38,6 +38,7 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
     @Autowired private ObjectMapper mapper;
     private final String meetingId = UUID.randomUUID().toString();
     private final String storyId = "US" + (10000000 + Math.abs(meetingId.hashCode() % 80000000));
+    private final String otherProjectId = "P" + meetingId.substring(0, 8);
     private final List<String> analysisIds = new ArrayList<>();
     private final String suggestionId = "S" + (100000 + Math.abs(meetingId.hashCode() % 800000));
     private final List<String> suggestionIds = new ArrayList<>();
@@ -55,6 +56,7 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         }
         jdbc.update("DELETE FROM story_logs WHERE story_id=?", storyId);
         jdbc.update("DELETE FROM stories WHERE code=?", storyId);
+        jdbc.update("DELETE FROM projects WHERE id=?", otherProjectId);
         jdbc.update("DELETE FROM meeting_assignment_analyses WHERE meeting_id=?", meetingId);
         jdbc.update("DELETE FROM meeting_suggestion_records WHERE meeting_id=?", meetingId);
         for (String id : suggestionIds) jdbc.update("DELETE FROM suggestions WHERE id=?", id);
@@ -65,11 +67,16 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
     void dailyServiceWritesShadowThroughSaveReviewAndExecution() throws Exception {
         jdbc.update("INSERT INTO meetings(id,title,transcript,created_by,created_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",
                 meetingId, "索引写入测试", "测试提案已确认。", 1);
-        // 主键换成了 internal_id,业务编号落在 code;旧 id 列仍保留(迁移时降级为普通可空列),
-        // 这里两列都填,免得桩/老查询路径按 id 找不到
-        jdbc.update("INSERT INTO stories(project_id,code,id,title,description,acceptance,priority,sprint,activity,status) "
-                + "VALUES('P001',?,?,?,?,?,?,?,?,?)",
-                storyId, storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        // 只写现行业务编号 code；旧 id 兼容列在部分存量库中不存在。
+        jdbc.update("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status) "
+                + "VALUES('P001',?,?,?,?,?,?,?,?)",
+                storyId, "索引测试故事", "", "", "Must", 1, 1, 1);
+        jdbc.update("INSERT INTO projects(id,name,description,status,total_sprints,created_at,updated_at) "
+                + "VALUES(?,?,?,'ACTIVE',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                otherProjectId, "隔离测试项目", "");
+        jdbc.update("INSERT INTO stories(project_id,code,title,description,acceptance,priority,sprint,activity,status) "
+                + "VALUES(?,?,?,?,?,?,?,?,?)",
+                otherProjectId, storyId, "同编号其他项目故事", "", "", "Must", 1, 1, 1);
         String body = """
                 {"client_request_id":"shadow-daily","result":{"schema_version":"1.0","meeting_id":"%s",
                 "meeting_type":"daily_scrum","summary":"已确认","open_questions":[],"proposed_actions":[
@@ -87,6 +94,11 @@ class ReviewQueueIndexContractTest extends ContractTestSupport {
         statusExecutions.execute(meetingId, id, mapper.readTree("{\"proposal_id\":\"p1\"}"), 1);
         assertEquals("succeeded", jdbc.queryForObject(
                 "SELECT execution_status FROM review_queue_proposals WHERE source='daily' AND analysis_id=?", String.class, id));
+        assertEquals(2, jdbc.queryForObject("SELECT status FROM stories WHERE project_id='P001' AND code=?", Integer.class, storyId));
+        assertEquals(1, jdbc.queryForObject("SELECT status FROM stories WHERE project_id=? AND code=?", Integer.class, otherProjectId, storyId),
+                "执行 P001 的提案不能修改其他项目的同编号故事");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM story_logs WHERE project_id='P001' AND story_code_snapshot=? AND story_internal_id=(SELECT internal_id FROM stories WHERE project_id='P001' AND code=?)",
+                Integer.class, storyId, storyId), "执行日志须绑定当前项目和故事内部主键");
     }
 
     @Test

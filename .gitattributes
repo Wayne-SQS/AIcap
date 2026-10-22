@@ -1,0 +1,2 @@
+qa/sprint3-closure/evidence/*.log -text
+qa/sprint3-closure/evidence/*.json -text

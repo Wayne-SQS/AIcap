@@ -88,7 +88,7 @@ public class RefinementProposalReviewService {
                 throw ApiException.conflict("该提案已经审核，不能覆盖原决定");
             return out(previous);
         }
-        validateApproval(original, approved, input);
+        validateApproval(meetingId, original, approved, input);
         jdbc.update("INSERT INTO meeting_refinement_proposal_reviews (analysis_id,proposal_index,proposal_id,decision,reason,reviewed_by,reviewed_at,original_json,approved_json,execution_status) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?)",
                 analysisId,index,input.proposalId(),input.decision(),input.reason(),reviewerId,
                 original.toString(),approved==null ? null : approved.toString(),approved==null ? "not_applicable" : "not_started");
@@ -108,12 +108,12 @@ public class RefinementProposalReviewService {
             throw ApiException.unprocessable("请补齐有效的优先级、Sprint和活动编号");
     }
 
-    private void validateApproval(JsonNode original, ObjectNode approved, Review input) {
+    private void validateApproval(String meetingId, JsonNode original, ObjectNode approved, Review input) {
         if (approved==null) return;
         if (input.changes()!=null && approved.get("changes").equals(original.get("changes")))
             throw ApiException.unprocessable("修改后接受必须改变故事内容");
         requireComplete(approved.path("changes"));
-        for (var story : jdbc.queryForList("SELECT code AS id,title FROM stories ORDER BY code FOR UPDATE"))
+        for (var story : jdbc.queryForList("SELECT code AS id,title FROM stories WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') ORDER BY code FOR UPDATE",meetingId))
             if (titleKey(story.get("title").toString()).equals(titleKey(approved.at("/changes/title").asText())))
                 throw ApiException.conflict("已有同名故事，请修改或拒绝提案");
     }

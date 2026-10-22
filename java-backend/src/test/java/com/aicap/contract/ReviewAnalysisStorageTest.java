@@ -57,8 +57,8 @@ class ReviewAnalysisStorageTest {
         service = context.getBean(ReviewAnalysisService.class);
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
-        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext,project_id varchar(20) DEFAULT 'P001')");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20) DEFAULT 'P001',code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/review-analyses.sql")) {
             ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -75,10 +75,10 @@ class ReviewAnalysisStorageTest {
                 jdbc.execute(sql);
             }
         }
-        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
-        jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "US13已验收通过。\n\nUS14 开始开发。");
+        jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "US13已验收通过。\n\nUS14 开始开发。");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',1,1,NULL)");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US14','US14','权限',0,2,NULL)");
         mvc = MockMvcBuilders.standaloneSetup(new ReviewAnalysisController(service),

@@ -76,7 +76,7 @@ class RefinementAnalysisStorageTest {
         service = context.getBean(RefinementAnalysisService.class);
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key)");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext,project_id varchar(20) DEFAULT 'P001')");
         // 新主键结构(internal_id + code)；旧 id 列按迁移后的样子保留为普通可空列并填同值，
         // 用例里若干断言仍按业务编号定位，两列都存在才不会互相打架
         jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20),code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
@@ -91,7 +91,7 @@ class RefinementAnalysisStorageTest {
         jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,project_id varchar(20),story_internal_id bigint,story_code_snapshot varchar(20),story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1)");
         jdbc.update("INSERT INTO users VALUES (2)");
-        jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "决定新增周报导出。\n\nUS14 开始开发。");
+        jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "决定新增周报导出。\n\nUS14 开始开发。");
         jdbc.update("INSERT INTO stories(project_id,code,id,title,status,sprint,owner_id) VALUES ('P001','US13','US13','登录',1,1,NULL)");
         jdbc.update("INSERT INTO stories(project_id,code,id,title,status,sprint,owner_id) VALUES ('P001','US14','US14','权限',0,2,NULL)");
         for (String column : java.util.List.of("description text", "acceptance text", "priority varchar(10)", "activity int", "created_at timestamp"))

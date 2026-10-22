@@ -97,7 +97,7 @@ public class PlanningProposalReviewService {
             int desired=approved.path("changes").path("sprint").asInt();
             if (!retargeted && input.changes()!=null && desired==original.path("changes").path("sprint").asInt())
                 throw ApiException.unprocessable("修改后接受必须改变目标Sprint或目标故事");
-            var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE id=? FOR UPDATE",targetId);
+            var stories=jdbc.queryForList("SELECT sprint FROM stories WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') AND code=? FOR UPDATE",meetingId,targetId);
             if (stories.isEmpty()) throw ApiException.conflict("目标故事不存在，请重新选择");
             int current=((Number)stories.getFirst().get("sprint")).intValue();
             if (!retargeted && current!=expected)

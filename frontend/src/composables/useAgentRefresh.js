@@ -129,8 +129,12 @@ export function useAgentRefresh() {
         }
         // 拉取失败(403 限流/超时/404/非 JSON)写进 errors[],不能因为 synced 缺失就显示成"新增 0 条"
         const errs = Array.isArray(sync?.errors) ? sync.errors : []
-        if (errs.length) notify(`智能体读取仓库未完成：${errs.length} 项事件拉取失败 — ${errs[0]}`)
-        else notify(`智能体已读取 GitHub 提交物：新增 ${sync?.synced ?? 0} 条，跳过 ${sync?.skipped ?? 0} 条`)
+        if (errs.length) {
+          notify(`智能体读取仓库未完成：${errs.length} 项事件拉取失败 — ${errs[0]}`)
+          notifyAgentUpdated() // 成功拉到的部分仍应显示，但不能据此给出完整提交评估
+          return
+        }
+        notify(`智能体已读取 GitHub 提交物：新增 ${sync?.synced ?? 0} 条，跳过 ${sync?.skipped ?? 0} 条`)
         notifyAgentUpdated()   // 同步完成先刷一次:活动列表/热力图立刻就能看到新提交
       }
       synced = true
