@@ -5,6 +5,7 @@ import { useProjectStore } from '@/stores/project'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast } from '@/api/progressForecast'
+import { getEfficiencyInsights } from '@/api/efficiencyInsights'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MAP_SPRINTS } from '@/data/seed'
 
@@ -40,6 +41,22 @@ async function refreshForecast() {
   finally { if (attempt === forecastVersion) forecastLoading.value = false }
 }
 watch(() => [projects.currentProjectId, session.online], refreshForecast, { immediate: true })
+
+const efficiency = ref(null), efficiencyError = ref(''), efficiencyLoading = ref(false)
+let efficiencyVersion = 0
+async function refreshEfficiency() {
+  const id = projects.currentProjectId
+  const attempt = ++efficiencyVersion
+  efficiency.value = null; efficiencyError.value = ''
+  if (!session.online || !id) return
+  efficiencyLoading.value = true
+  try {
+    const result = await getEfficiencyInsights(id)
+    if (attempt === efficiencyVersion) efficiency.value = result
+  } catch (error) { if (attempt === efficiencyVersion) efficiencyError.value = error.message || '效率分析读取失败' }
+  finally { if (attempt === efficiencyVersion) efficiencyLoading.value = false }
+}
+watch(() => [projects.currentProjectId, session.online], refreshEfficiency, { immediate: true })
 
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
@@ -94,6 +111,26 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         <p v-else>当前任务已全部完成。</p>
         <p>未完成 {{ forecast.tasks_open }} 项；已完成 {{ forecast.tasks_done }} 项。{{ forecast.history_start }} 至 {{ forecast.history_end }} 的有效完成记录 {{ forecast.recent_completions }} 项<span v-if="forecast.status === 'forecast'">，约 {{ forecast.completions_per_week }} 项/周</span>。</p>
         <p class="small">{{ forecast.assumptions }}</p>
+      </template>
+    </div>
+
+    <div class="h-sec">效率分析 · 任务阻塞与状态停滞</div>
+    <div class="stat" role="region" aria-label="项目效率分析">
+      <button type="button" :disabled="efficiencyLoading || !session.online" @click="refreshEfficiency">刷新分析</button>
+      <p v-if="!session.online">连接项目服务后可查看任务瓶颈。</p>
+      <p v-else-if="efficiencyLoading" role="status">正在读取任务状态…</p>
+      <p v-else-if="efficiencyError" role="alert">{{ efficiencyError }}</p>
+      <template v-else-if="efficiency">
+        <p>当前任务 {{ efficiency.open_tasks }} 项；识别到 {{ efficiency.issues.length }} 项待复核瓶颈。</p>
+        <p v-if="efficiency.missing_or_mismatched_history">其中 {{ efficiency.missing_or_mismatched_history }} 项缺少有效状态历史，无法判断是否停滞。</p>
+        <p v-if="!efficiency.issues.length">暂无基于现有记录可识别的阻塞或状态停滞。</p>
+        <ul v-else>
+          <li v-for="issue in efficiency.issues" :key="issue.task_code">
+            <strong>{{ issue.task_code }} · {{ issue.task_name }}</strong>：{{ issue.kind === 'blocked' ? '任务标记为阻塞' : `进行中状态已持续 ${issue.days_in_status} 天` }}。
+            {{ issue.suggestion }}
+          </li>
+        </ul>
+        <p class="small">{{ efficiency.limitations }}</p>
       </template>
     </div>
 
