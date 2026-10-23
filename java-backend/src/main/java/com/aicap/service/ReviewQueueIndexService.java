@@ -22,7 +22,7 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class ReviewQueueIndexService {
-    private static final Set<String> SOURCES = Set.of("daily", "planning", "review", "retro", "refinement", "assignment", "general");
+    private static final Set<String> SOURCES = Set.of("daily", "planning", "review", "retro", "refinement", "assignment", "general", "efficiency");
     private static final Set<String> STATUSES = Set.of("pending", "reviewed", "execution", "all");
     private static final int MAX_LIMIT = 100;
     private final JdbcTemplate jdbc;
@@ -62,6 +62,10 @@ public class ReviewQueueIndexService {
                 "s.status,COALESCE(r.execution_status,'not_started') AS execution_status " +
                 "FROM meeting_suggestion_records r JOIN suggestions s ON s.id=r.suggestion_id " +
                 "LEFT JOIN meetings m ON m.id=r.meeting_id");
+        parts.put("efficiency", "SELECT 'efficiency' AS source,NULL AS meeting_id,CONCAT('项目效率分析 ',p.project_id) AS meeting_title," +
+                "p.analysis_id,p.id AS proposal_id,ROW_NUMBER() OVER (PARTITION BY p.analysis_id ORDER BY p.recommendation_id)-1 AS proposal_index," +
+                "p.created_at,p.status,'not_applicable' AS execution_status " +
+                "FROM efficiency_proposals p");
         return parts;
     }
 
@@ -106,8 +110,17 @@ public class ReviewQueueIndexService {
             execution += ((Number) counts.get("execution_count")).longValue();
         }
         Map<String, String> parts = sql();
-        for (String source : List.of("assignment", "general")) {
+        for (String source : List.of("assignment", "general", "efficiency")) {
             String sourceSql = parts.get(source);
+            if ("efficiency".equals(source)) {
+                Map<String,Object> efficiencyCounts = jdbc.queryForMap("SELECT " +
+                    "COALESCE(SUM(p.status='pending'),0) AS pending_count," +
+                    "COALESCE(SUM(p.status='approved'),0) AS execution_count FROM efficiency_proposals p " +
+                    "JOIN project_members pm ON pm.project_id=p.project_id WHERE pm.user_id=?",
+                    com.aicap.security.AuthContext.currentUser().getId());
+                pending += ((Number)efficiencyCounts.get("pending_count")).longValue();
+                continue;
+            }
             Map<String, Object> counts = jdbc.queryForMap("SELECT " +
                     "COALESCE(SUM(CASE WHEN q.status='pending' THEN 1 ELSE 0 END),0) AS pending_count," +
                     "COALESCE(SUM(CASE WHEN q.status='approved' AND q.execution_status='not_started' THEN 1 ELSE 0 END),0) AS execution_count " +
@@ -125,6 +138,12 @@ public class ReviewQueueIndexService {
     @Transactional(readOnly = true)
     public Page page(String status, String source, String search, LocalDate from, LocalDate to,
                      String cursorText, Integer limitValue) {
+        return page(status,source,search,from,to,cursorText,limitValue,null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page page(String status, String source, String search, LocalDate from, LocalDate to,
+                     String cursorText, Integer limitValue, String projectId) {
         String selectedStatus = status == null || status.isBlank() ? "pending" : status;
         String selectedSource = source == null || source.isBlank() ? "all" : source;
         if (!STATUSES.contains(selectedStatus) || (!selectedSource.equals("all") && !SOURCES.contains(selectedSource)))
@@ -139,6 +158,7 @@ public class ReviewQueueIndexService {
         List<Item> items = new ArrayList<>();
         for (var entry : sql().entrySet()) {
             if (!selectedSource.equals("all") && !selectedSource.equals(entry.getKey())) continue;
+            if ("efficiency".equals(entry.getKey())) continue; // projectId is required for this source
             StringBuilder statement = new StringBuilder("SELECT q.*,CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED) AS sort_time FROM (")
                     .append(entry.getValue()).append(") q WHERE 1=1");
             List<Object> args = new ArrayList<>();
@@ -154,7 +174,7 @@ public class ReviewQueueIndexService {
             }
             if (from != null) { statement.append(" AND q.created_at>=?"); args.add(Timestamp.valueOf(from.atStartOfDay())); }
             if (to != null) { statement.append(" AND q.created_at<?"); args.add(Timestamp.valueOf(to.plusDays(1).atStartOfDay())); }
-            if (cursor != null) {
+            if (cursor != null && !"efficiency".equals(entry.getKey())) {
                 statement.append(" AND (CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED),BINARY q.source,BINARY q.analysis_id,q.proposal_index) < (?,CAST(? AS BINARY),CAST(? AS BINARY),?)");
                 args.add(cursor.sortTime()); args.add(cursor.source());
                 args.add(cursor.analysisId()); args.add(cursor.proposalIndex());
@@ -168,6 +188,27 @@ public class ReviewQueueIndexService {
                         row.get("created_at").toString().replace(' ', 'T'), ((Number)row.get("sort_time")).longValue(), row.get("status").toString(),
                         row.get("execution_status").toString()));
             }
+        }
+        if ((selectedSource.equals("all") || selectedSource.equals("efficiency")) && projectId != null && !projectId.isBlank()) {
+            StringBuilder statement = new StringBuilder("SELECT q.*,CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED) AS sort_time FROM (")
+                .append(sql().get("efficiency")).append(") q JOIN efficiency_proposals p ON p.id=q.proposal_id "
+                    + "JOIN project_members pm ON pm.project_id=p.project_id WHERE pm.user_id=? AND p.project_id=?");
+            List<Object> args = new ArrayList<>(); args.add(com.aicap.security.AuthContext.currentUser().getId());
+            args.add(ProjectAccessService.normalize(projectId));
+            if (!selectedStatus.equals("all")) statement.append(selectedStatus.equals("pending") ? " AND q.status='pending'" :
+                selectedStatus.equals("reviewed") ? " AND q.status IN ('approved','rejected')" : " AND q.status='approved'");
+            if (!query.isEmpty()) { statement.append(" AND (q.meeting_title LIKE ? OR q.proposal_id LIKE ?)"); args.add("%"+query+"%"); args.add("%"+query+"%"); }
+            if (from != null) { statement.append(" AND q.created_at>=?"); args.add(Timestamp.valueOf(from.atStartOfDay())); }
+            if (to != null) { statement.append(" AND q.created_at<?"); args.add(Timestamp.valueOf(to.plusDays(1).atStartOfDay())); }
+            if (cursor != null) {
+                statement.append(" AND (CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED),BINARY q.source,BINARY q.analysis_id,q.proposal_index) < (?,CAST(? AS BINARY),CAST(? AS BINARY),?)");
+                args.add(cursor.sortTime()); args.add(cursor.source()); args.add(cursor.analysisId()); args.add(cursor.proposalIndex());
+            }
+            statement.append(" ORDER BY sort_time DESC,BINARY q.analysis_id DESC LIMIT ?"); args.add(limit+1);
+            for (Map<String,Object> row : jdbc.queryForList(statement.toString(),args.toArray()))
+                items.add(new Item("efficiency",null,row.get("meeting_title").toString(),row.get("analysis_id").toString(),
+                    row.get("proposal_id").toString(),0,row.get("created_at").toString().replace(' ','T'),
+                    ((Number)row.get("sort_time")).longValue(),row.get("status").toString(),"not_applicable"));
         }
         items.sort(Comparator.comparingLong(Item::sortTime).thenComparing(Item::source)
                 .thenComparing(Item::analysisId).thenComparingInt(Item::proposalIndex).reversed());

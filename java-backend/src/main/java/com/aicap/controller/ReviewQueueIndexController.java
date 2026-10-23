@@ -3,6 +3,7 @@ package com.aicap.controller;
 import com.aicap.security.Roles;
 import com.aicap.service.ReviewQueueHydrationService;
 import com.aicap.service.ReviewQueueIndexService;
+import com.aicap.service.ProjectAccessService;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -21,6 +22,7 @@ import java.util.Map;
 public class ReviewQueueIndexController {
     private final ReviewQueueIndexService service;
     private final ReviewQueueHydrationService hydration;
+    private final ProjectAccessService projects;
 
     /**
      * 响应在原有字段(items / nextCursor、pendingCount / ...)之上**追加** details,
@@ -49,9 +51,14 @@ public class ReviewQueueIndexController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) String cursor,
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String projectId) {
         Roles.any();
-        var page = service.page(status, source, search, from, to, cursor, limit);
+        if (projectId != null && !projectId.isBlank()) {
+            projectId = com.aicap.service.ProjectAccessService.normalize(projectId);
+            projects.requireMember(projectId);
+        }
+        var page = service.page(status, source, search, from, to, cursor, limit, projectId);
         return new PageOut(page.items(), page.nextCursor(), hydration.hydrate(page.items()));
     }
 }

@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { agentApi } from '@/api/agent'
 import { useProjectStore } from '@/stores/project'
 import { useProjectsStore } from '@/stores/projects'
@@ -10,6 +11,7 @@ const project = useProjectStore()
 const projects = useProjectsStore()
 const { notify } = useToast()
 const session = useSessionStore()
+const route = useRoute()
 const request = ref('')
 const run = ref(null)
 const busy = ref(false)
@@ -75,6 +77,7 @@ async function cancel() {
   finally { busy.value = false }
 }
 onUnmounted(() => { mounted = false; clearTimeout(timer) })
+onMounted(() => { if (route.query.runId) refresh(String(route.query.runId)) })
 </script>
 <template>
   <section class="planning-agent-panel" aria-labelledby="planning-agent-title">

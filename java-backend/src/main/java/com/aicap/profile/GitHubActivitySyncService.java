@@ -246,7 +246,7 @@ public class GitHubActivitySyncService {
             // 服务端二次过滤:不信任 API 边界(防御时区/边界误差),只保留本地日期范围内的提交
             if (at == null || at.toLocalDate().isBefore(from) || at.toLocalDate().isAfter(to)) continue;
             pulled++;
-            ActivityRecord r = baseRecord(login, email, name, at, members);
+            ActivityRecord r = baseRecord(projectId, login, email, name, at, members);
             r.setActivityType("commit");
             r.setTitle(truncate(title, 200));
             r.setDetail(truncate("GitHub commit " + sha.substring(0, Math.min(10, sha.length())) + " · 作者 "
@@ -282,7 +282,7 @@ public class GitHubActivitySyncService {
             String title = "PR #" + number + ": " + p.path("title").asText("");
             String login = p.path("user").path("login").asText("");
             String body = p.path("body").asText("");
-            ActivityRecord r = baseRecord(login, "", "", at, members);
+            ActivityRecord r = baseRecord(projectId, login, "", "", at, members);
             r.setActivityType("pr");
             r.setTitle(truncate(title, 200));
             r.setDetail(truncate("GitHub PR 已合并 · 合并人 " + p.path("merged_by").path("login").asText("")
@@ -330,7 +330,7 @@ public class GitHubActivitySyncService {
                 String login = rv.path("user").path("login").asText("");
                 String state = rv.path("state").asText("COMMENTED");
                 String body = rv.path("body").asText("");
-                ActivityRecord r = baseRecord(login, "", "", at, members);
+                ActivityRecord r = baseRecord(projectId, login, "", "", at, members);
                 r.setActivityType("review");
                 r.setTitle(truncate("Review PR #" + number + "(" + state + ")", 200));
                 r.setDetail(truncate("GitHub Review " + state + " · PR #" + number + (body.isBlank() ? "" : " · " + firstLine(body)), 1000));
@@ -364,7 +364,7 @@ public class GitHubActivitySyncService {
             String title = i.path("title").asText("");
             String login = i.path("user").path("login").asText("");
             String body = i.path("body").asText("");
-            ActivityRecord r = baseRecord(login, "", "", at, members);
+            ActivityRecord r = baseRecord(projectId, login, "", "", at, members);
             r.setActivityType("note");
             r.setTitle(truncate("Issue #" + number + ": " + title, 200));
             r.setDetail(truncate("GitHub issue 创建 · #" + number + " · " + firstLine(body), 1000));
@@ -510,9 +510,10 @@ public class GitHubActivitySyncService {
         }
     }
 
-    private ActivityRecord baseRecord(String login, String email, String name, LocalDateTime at,
+    private ActivityRecord baseRecord(String projectId, String login, String email, String name, LocalDateTime at,
                                       Map<String, Integer> members) {
         ActivityRecord r = new ActivityRecord();
+        r.setProjectId(projectId);
         r.setUserId(resolveUserId(login, email, name, members));
         r.setHappenedAt(at == null ? LocalDateTime.now() : at);
         return r;

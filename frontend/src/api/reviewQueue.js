@@ -200,6 +200,7 @@ function generalRow(suggestion) {
 /** One server-filtered cursor page; only details for that page are read. */
 export async function loadReviewQueuePage(filters = {}, cursor = null, limit = 50) {
   const params = new URLSearchParams({ status: filters.status || 'pending', source: filters.source || 'all', limit: String(limit) })
+  if (currentProjectId()) params.set('projectId', currentProjectId())
   if (filters.search) params.set('search', filters.search)
   if (filters.fromDate) params.set('from', filters.fromDate)
   if (filters.toDate) params.set('to', filters.toDate)
@@ -238,6 +239,18 @@ async function hydrateReviewQueuePage(page) {
     const ref = refs[0]
     const detail = details ? details[groupKey(ref)] || null : null
     try {
+      if (ref.source === 'efficiency') {
+        const proposal = await read(() => api(`/api/projects/${encodeURIComponent(currentProjectId() || '')}/efficiency-analysis/proposals/${encodeURIComponent(ref.proposalId)}`))
+        entries.push({ id: `efficiency:${proposal.id}`, source: 'efficiency', sourceLabel: '项目效率分析 / US23',
+          meetingId: null, meetingTitle: ref.meetingTitle, analysisId: proposal.analysis_id, proposalId: proposal.id,
+          createdAt: proposal.created_at, status: proposal.status, executionStatus: 'not_applicable',
+          proposal: { original_proposal: proposal.proposal, decision: proposal.status, reason: proposal.reason,
+            reviewed_by: proposal.reviewed_by, reviewed_at: proposal.reviewed_at },
+          summaryText: proposal.proposal?.title || proposal.proposal?.description || '项目效率优化建议',
+          flowStage: proposal.status === 'pending' ? '效率分析完成 → 待审核' : `效率分析完成 → ${proposal.status}（不自动执行）`,
+          reviewer: proposal.reviewed_by, reviewedAt: proposal.reviewed_at, reviewReason: proposal.reason })
+        return
+      }
       if (ref.source === 'general') {
         /* general 的载荷是 SuggestionOut,索引不带,始终逐条读(每组恰好 1 个请求)。
            注意:GET /api/suggestions/{id} 把 projectId 声明成必填 @RequestParam,

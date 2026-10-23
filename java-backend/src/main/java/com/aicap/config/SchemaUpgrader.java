@@ -145,6 +145,9 @@ public class SchemaUpgrader implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
+            // Dedicated immutable evidence/result records; review decisions feed the existing review queue.
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(conn,
+                    new org.springframework.core.io.ClassPathResource("db/efficiency-analysis.sql"));
             migrateProjects(conn);
             added.addAll(migrateInternalKeys(conn));
             // 数据引用的项目必须在 projects 表里存在,否则接口一律 404「项目不存在或已归档」

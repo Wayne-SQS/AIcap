@@ -60,7 +60,7 @@ const queueRows = computed(() => [
   })))
 ])
 const allQueueSources = [
-  ['general', '通用会议建议 / 手动建议'], ['daily', 'Daily'], ['planning', 'Sprint Planning'],
+  ['general', '通用会议建议 / 手动建议'], ['efficiency', '项目效率分析 / US23'], ['daily', 'Daily'], ['planning', 'Sprint Planning'],
   ['review', 'Sprint Review'], ['retro', 'Sprint Retro'], ['refinement', 'Backlog Refinement'],
   ['assignment', 'Assignment 分配建议']
 ]
@@ -148,6 +148,10 @@ watch([queueFilter, queueSource, queueSearch, queueFrom, queueTo], () => {
 })
 
 function openSource(row) {
+  if (row.source === 'efficiency') {
+    router.push({ name: projects.currentProjectId ? 'project-agents' : 'agents', params: projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined, query: { agent: 'efficiency', analysisId: row.analysisId } })
+    return
+  }
   const routeName = projects.currentProjectId ? 'project-meetings' : 'meetings'
   const params = projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined
   if (row.source === 'general') {

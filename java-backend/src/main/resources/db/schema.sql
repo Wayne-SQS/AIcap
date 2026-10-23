@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS `projects` (
   PRIMARY KEY (`id`), KEY `ix_projects_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- US23 DDL is shared with SchemaUpgrader to keep fresh and existing databases aligned.
+-- See db/efficiency-analysis.sql (executed idempotently by SchemaUpgrader).
 CREATE TABLE IF NOT EXISTS `project_members` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `project_id` varchar(20) NOT NULL,
@@ -312,6 +314,7 @@ CREATE TABLE IF NOT EXISTS `meeting_audio` (
 -- task_id 可空:未关联任务的活动本身就是文档 4.6 中的「提交异常模式」证据
 CREATE TABLE IF NOT EXISTS `activity_records` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `project_id` varchar(20) DEFAULT NULL,
   `user_id` int NOT NULL,
   `task_id` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联任务(Txx),可空=未关联',
   `task_internal_id` bigint DEFAULT NULL COMMENT '关联任务的 internal_id(多项目改造后任务主键不再是编号)',
