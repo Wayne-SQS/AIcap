@@ -10,7 +10,7 @@ function record(body) {
 }
 const input = { story_ids: ['US13'], target_sprint: null, requirements: [{ dimension: 'tech_stack', name: 'Python', minimum_level: 3 }], client_request_id: 'r1' }
 async function setup(page, role = 'admin', preloaded = false, sharedState = null) {
-  const state = sharedState || { saved: preloaded ? record(input) : null, intent: null, saves: [], reviews: [], executes: [], loseSave: false, failBeforeSave: false, failClear: false, loseExecution: false, invalidExecution: false }
+  const state = sharedState || { saved: preloaded ? record(input) : null, intent: null, saves: [], reviews: [], executes: [], loseSave: false, failBeforeSave: false, failClear: false, loseExecution: false, invalidExecution: false, failNextList: false }
   await page.addInitScript(() => { localStorage.setItem('aiguanli_token', 'fixture-token'); localStorage.setItem('aiguanli-current-project', 'P001') })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON(); state.saves.push(body)
@@ -44,7 +44,10 @@ async function setup(page, role = 'admin', preloaded = false, sharedState = null
         data = { cleared: true }
       } else data = { intent: state.intent }
     }
-    if (path.endsWith('/assignment-suggestions')) data = path.includes('/m1/') && state.saved ? [state.saved] : []
+    if (path.endsWith('/assignment-suggestions')) {
+      if (state.failNextList) { state.failNextList = false; await route.fulfill({ status: 503, json: {} }); return }
+      data = path.includes('/m1/') && state.saved ? [state.saved] : []
+    }
     if (path.endsWith('/a1/review')) {
       const body = req.postDataJSON(); state.reviews.push(body)
       data = { input: body, reviewed_by: 1, reviewed_at: '2026-10-01', status: body.decision === 'approve' ? 'approved' : 'rejected', execution_status: body.decision === 'approve' ? 'not_started' : 'not_applicable' }
@@ -118,9 +121,9 @@ test('Assignment malformed execution cannot display success', async ({ page }) =
   await expect(history(page)).not.toContainText('分配已执行')
 })
 test('Assignment list failure does not claim empty history and permits retry', async ({ page }) => {
-  await setup(page, 'admin', true)
+  const state = await setup(page, 'admin', true)
   await expect(history(page)).toContainText('成员甲')
-  await page.route('**/assignment-suggestions', route => route.fulfill({ status: 503, json: {} }), { times: 1 })
+  state.failNextList = true
   await history(page).getByRole('button', { name: '刷新分配记录' }).click()
   await expect(history(page)).toContainText('读取建议失败')
   await expect(history(page)).not.toContainText('暂无已保存建议')

@@ -30,6 +30,7 @@ TRUNCATE TABLE meeting_agent_events;
 TRUNCATE TABLE meeting_agent_runs;
 TRUNCATE TABLE meeting_approval_payloads;
 TRUNCATE TABLE meeting_suggestion_records;
+TRUNCATE TABLE meeting_planning_save_intents;
 TRUNCATE TABLE suggestions;
 TRUNCATE TABLE meetings;
 TRUNCATE TABLE uml_layouts;
