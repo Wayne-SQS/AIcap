@@ -183,7 +183,7 @@ const analysisPaths = {
 function generalRow(suggestion) {
   const s = suggestion
   return {
-    id: `general:${s.id}`, source: 'general', sourceLabel: s.origin === 'manual' ? '手动会议建议' : '通用会议 Agent',
+    id: `general:${s.id}`, source: 'general', sourceLabel: !s.meeting_id ? '项目风险预警' : s.origin === 'manual' ? '手动会议建议' : '通用会议 Agent',
     meetingId: s.meeting_id, meetingTitle: s.meeting_title || '', analysisId: '', proposalId: s.id,
     createdAt: s.created_at || '', status: s.status,
     executionStatus: s.pool_item_id ? 'succeeded' : s.execution_status || 'not_started',

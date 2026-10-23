@@ -48,7 +48,7 @@ const serverDecisions = computed(() => meeting.suggestions.filter(s => s.reviewe
 const queueRows = computed(() => [
   ...sourceQueueRows.value,
   ...(pagedQueue.value ? [] : meeting.suggestions.map(s => ({
-    id: `general:${s.id}`, source: 'general', sourceLabel: s.origin === 'manual' ? '手动会议建议' : '通用会议 Agent',
+    id: `general:${s.id}`, source: 'general', sourceLabel: !s.meeting_id ? '项目风险预警' : s.origin === 'manual' ? '手动会议建议' : '通用会议 Agent',
     meetingId: s.meeting_id, meetingTitle: s.meeting_title, analysisId: '', proposalId: s.id,
     createdAt: s.created_at || '', status: s.status, executionStatus: s.pool_item_id ? 'succeeded' : s.status === 'approved' ? 'succeeded' : 'not_started',
     proposal: { original_proposal: { reason: s.note, evidence: [{ quote: s.evidence }], changes: s.changes }, decision: s.status, reason: s.reason, reviewed_by: s.reviewed_by, reviewed_at: s.reviewed_at },
@@ -151,6 +151,11 @@ function openSource(row) {
   const routeName = projects.currentProjectId ? 'project-meetings' : 'meetings'
   const params = projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined
   if (row.source === 'general') {
+    if (!row.meetingId) {
+      router.push({ name: projects.currentProjectId ? 'project-overview' : 'overview',
+        params: projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined })
+      return
+    }
     meeting.select(row.meetingId)
     router.push({ name: routeName, params, query: {
       meetingId: row.meetingId, fromReview: '1', sourceType: 'general', suggestionId: row.proposalId,
@@ -269,7 +274,7 @@ async function serverEdit(id) {
         <p v-if="queueErrors.length" role="alert">有 {{ queueErrors.length }} 个来源列表暂时不可用，当前结果可能不完整。{{ queueErrors.slice(0,3).map(e => `${e.meetingTitle} · ${e.source}`).join('；') }} <button @click="refreshQueue">重试</button></p>
         <article v-for="row in visibleQueue" :key="row.id" class="sug-card queue-card" :data-queue-row="row.id" :data-meeting-suggestion="row.source === 'general' ? row.proposalId : null">
           <div class="sug-head"><b>{{ row.sourceLabel }}</b><span class="sug-status" :class="row.status">{{ row.status === 'pending' ? '待审核' : row.status === 'approved' ? '已批准' : row.status === 'rejected' ? '已拒绝' : row.status }}</span><span class="small">{{ row.createdAt }}</span></div>
-          <div class="sug-row"><b>会议</b><span>{{ row.meetingTitle }}</span></div>
+          <div class="sug-row"><b>来源</b><span>{{ row.meetingId ? row.meetingTitle : '项目风险分析' }}</span></div>
           <div class="sug-row"><b>提案 / 影响</b><span>{{ row.proposalId }} · {{ row.summaryText }}</span></div>
           <div class="sug-row"><b>审核方式</b><span>{{ row.source === 'general' ? '新需求建议：在此采纳或修改后采纳，采纳时创建需求池条目。' : '现有记录变更：打开来源分析核对证据、修改批准内容；审核后另行执行。' }}</span></div>
           <div class="sug-row"><b>流程进度</b><span>{{ row.flowStage || '分析完成 · 处理状态待确认' }}</span></div>
@@ -282,7 +287,7 @@ async function serverEdit(id) {
             <button type="button" class="approve" :data-meeting-review="row.proposalId" data-decision="approve" :disabled="meeting.busy.includes(row.proposalId)" @click="serverDecide(row.proposalId, 'approve')">采纳</button>
             <button type="button" class="reject" :data-meeting-review="row.proposalId" data-decision="reject" :disabled="meeting.busy.includes(row.proposalId)" @click="serverDecide(row.proposalId, 'reject')">拒绝</button>
           </div>
-          <button type="button" :data-open-meeting="row.source === 'general' ? row.meetingId : null" @click="openSource(row)">{{ row.source === 'general' ? '查看来源会议' : row.status === 'pending' && meeting.mayReview ? '打开来源并审核' : row.status === 'approved' && row.executionStatus === 'not_started' && meeting.mayReview ? '打开来源并执行已批准变更' : '查看来源分析与处理记录' }}</button>
+          <button type="button" :data-open-meeting="row.source === 'general' ? row.meetingId : null" @click="openSource(row)">{{ row.source === 'general' ? row.meetingId ? '查看来源会议' : '查看项目风险' : row.status === 'pending' && meeting.mayReview ? '打开来源并审核' : row.status === 'approved' && row.executionStatus === 'not_started' && meeting.mayReview ? '打开来源并执行已批准变更' : '查看来源分析与处理记录' }}</button>
         </article>
         <button v-if="pagedQueue && nextCursor" type="button" :disabled="queueLoading" @click="loadMore">{{ queueLoading ? '加载中…' : '加载更多提案' }}</button>
         <p v-if="!queueLoading && !visibleQueue.length" class="empty">{{ queueErrors.length ? '当前未加载到提案；部分来源读取失败，请刷新。' : '当前筛选下没有提案记录。' }}</p>

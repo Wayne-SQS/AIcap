@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS `review_queue_proposals` (
   `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
   `analysis_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `proposal_index` int NOT NULL,
-  `meeting_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `meeting_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `proposal_id` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` datetime NOT NULL,
   `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,

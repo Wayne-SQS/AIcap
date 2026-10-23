@@ -90,6 +90,31 @@ class ProfileRiskSuggestionContractTest extends ContractTestSupport {
                 .eq("suggestion_id", hit.getId()));
         assertNotNull(record, "建议应同步建审核记录");
         assertEquals("agent", record.getOrigin(), "来源应标为 agent");
+
+        // US20 主旅程：队列可见 → 负责人采纳 → 写入需求池 → 从审核记录回读执行结果。
+        String id = ids.get(0).asText();
+        ApiResponse queue = get("/api/review-queue?status=pending&source=general&search=" + id,
+                token(USER_ADMIN));
+        assertStatus(queue, 200);
+        assertTrue(queue.json().path("items").toString().contains(id), "风险建议应在统一审核队列: " + queue.body());
+
+        String poolId = null;
+        try {
+            ApiResponse reviewed = post("/api/suggestions/" + id + "/review", token(USER_ADMIN),
+                    "{\"decision\":\"approve\",\"reason\":\"确认风险并安排跟进\"}");
+            assertStatus(reviewed, 200);
+            assertEquals("approved", reviewed.json().path("status").asText());
+            assertEquals("succeeded", reviewed.json().path("execution_status").asText());
+            poolId = reviewed.json().path("pool_item_id").asText();
+            assertFalse(poolId.isBlank(), "采纳后应创建需求池条目");
+            assertTrue(get("/api/pool", token(USER_ADMIN)).body().contains(poolId), "需求池应能回读执行结果");
+            assertEquals(poolId, get("/api/suggestions/" + id, token(USER_ADMIN))
+                    .json().path("pool_item_id").asText(), "审核记录应回流执行结果");
+        } finally {
+            if (poolId != null && !poolId.isBlank()) {
+                assertStatus(delete("/api/pool/" + poolId, token(USER_ADMIN)), 200);
+            }
+        }
     }
 
     @Test

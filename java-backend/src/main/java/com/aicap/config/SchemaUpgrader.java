@@ -145,6 +145,10 @@ public class SchemaUpgrader implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         try (Connection conn = dataSource.getConnection()) {
             Set<String> added = new HashSet<>();
+            // 项目风险建议没有所属会议。旧版队列索引列为 NOT NULL，审核时同步索引会 500。
+            if (tableExists(conn, "review_queue_proposals") && !isNullable(conn, "review_queue_proposals", "meeting_id")) {
+                execute(conn, "ALTER TABLE review_queue_proposals MODIFY COLUMN meeting_id varchar(64) NULL");
+            }
             migrateProjects(conn);
             added.addAll(migrateInternalKeys(conn));
             // 数据引用的项目必须在 projects 表里存在,否则接口一律 404「项目不存在或已归档」
@@ -971,6 +975,12 @@ public class SchemaUpgrader implements ApplicationRunner {
         DatabaseMetaData meta = conn.getMetaData();
         try (ResultSet rs = meta.getTables(conn.getCatalog(), null, table, new String[]{"TABLE"})) {
             return rs.next();
+        }
+    }
+
+    private boolean isNullable(Connection conn, String table, String column) throws SQLException {
+        try (ResultSet rs = conn.getMetaData().getColumns(conn.getCatalog(), null, table, column)) {
+            return rs.next() && "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE"));
         }
     }
 

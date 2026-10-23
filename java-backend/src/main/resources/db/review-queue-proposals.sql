@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS review_queue_proposals (
   source varchar(20) COLLATE utf8mb4_bin NOT NULL,
   analysis_id varchar(36) COLLATE utf8mb4_bin NOT NULL,
   proposal_index int NOT NULL,
-  meeting_id varchar(36) NOT NULL,
+  meeting_id varchar(36) DEFAULT NULL,
   proposal_id varchar(80) NOT NULL,
   created_at datetime(6) NOT NULL,
   status varchar(20) NOT NULL,
