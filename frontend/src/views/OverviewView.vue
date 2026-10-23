@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
-import { getProgressForecast } from '@/api/progressForecast'
+import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
 import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
 import { memberUserId } from '@/data/memberIdentity'
@@ -43,6 +43,41 @@ async function refreshForecast() {
   finally { if (attempt === forecastVersion) forecastLoading.value = false }
 }
 watch(() => [projects.currentProjectId, session.online], refreshForecast, { immediate: true })
+
+/* 预测基线(US19 人工审核与回流):先固化快照,再由负责人单独采纳/放弃,之后按任务数量对账。
+   基线只是记录,不写任务数据;对账口径与后端 reconciliation 字段一一对应。 */
+const baselines = ref([]), baselineError = ref(''), baselineLoading = ref(false), baselineSaving = ref(false)
+const VERDICT_TEXT = {
+  not_baseline: '未采纳', reached: '已完成计划范围', overdue: '已逾期', within_plan: '计划内', no_date: '无计划日期'
+}
+function baselineLabel(verdict) { return VERDICT_TEXT[verdict] || verdict }
+async function refreshBaselines() {
+  const id = projects.currentProjectId
+  if (!session.online || !id) { baselines.value = []; return }
+  baselineLoading.value = true; baselineError.value = ''
+  try {
+    const result = await getProgressForecastRecords(id)
+    if (projects.currentProjectId === id) baselines.value = result.records
+  } catch (error) { baselineError.value = error.message || '预测基线读取失败' }
+  finally { baselineLoading.value = false }
+}
+async function saveBaseline() {
+  const id = projects.currentProjectId
+  if (!id || baselineSaving.value) return
+  baselineSaving.value = true; baselineError.value = ''
+  try { await recordProgressForecast(id); await refreshBaselines() }
+  catch (error) { baselineError.value = error.message || '固化基线失败' }
+  finally { baselineSaving.value = false }
+}
+async function decideBaseline(record, decision) {
+  const id = projects.currentProjectId
+  if (!id || baselineSaving.value) return
+  baselineSaving.value = true; baselineError.value = ''
+  try { await decideProgressForecast(id, record.id, decision); await refreshBaselines() }
+  catch (error) { baselineError.value = error.message || '基线决策失败' }
+  finally { baselineSaving.value = false }
+}
+watch(() => [projects.currentProjectId, session.online], refreshBaselines, { immediate: true })
 
 const efficiency = ref(null), efficiencyError = ref(''), efficiencyLoading = ref(false)
 let efficiencyVersion = 0
@@ -201,6 +236,31 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         <p v-else>当前任务已全部完成。</p>
         <p>未完成 {{ forecast.tasks_open }} 项；已完成 {{ forecast.tasks_done }} 项。{{ forecast.history_start }} 至 {{ forecast.history_end }} 的有效完成记录 {{ forecast.recent_completions }} 项<span v-if="forecast.status === 'forecast'">，约 {{ forecast.completions_per_week }} 项/周</span>。</p>
         <p class="small">{{ forecast.assumptions }}</p>
+      </template>
+    </div>
+
+    <div class="h-sec">进度基线 · 人工确认与对账</div>
+    <div class="stat" role="region" aria-label="进度预测基线">
+      <button type="button" :disabled="baselineLoading || baselineSaving || !session.online || forecast?.status !== 'forecast' || session.isViewer"
+              :title="session.isViewer ? READONLY_TITLE : ''" @click="saveBaseline">固化当前预测</button>
+      <p v-if="!session.online">连接项目服务后可固化预测基线并查看对账。</p>
+      <p v-else-if="baselineLoading" role="status">正在读取预测基线…</p>
+      <p v-else-if="baselineError" role="alert">{{ baselineError }}</p>
+      <template v-else>
+        <p v-if="!baselines.length" class="small">尚无基线。固化当前预测后由负责人采纳，才能事后对账。</p>
+        <ul v-else>
+          <li v-for="record in baselines" :key="record.id">
+            <strong>#{{ record.id }} · {{ record.estimated_date }}</strong>
+            <span>：{{ record.requested_at }} 固化，{{ record.record_status === 'proposed' ? '待确认' : record.record_status === 'accepted' ? '已采纳' : '已放弃' }}</span>
+            <span v-if="record.record_status === 'accepted'">；此后完成 {{ record.reconciliation.completed_since }} 项，剩余 {{ record.reconciliation.open_now }} 项，{{ baselineLabel(record.reconciliation.verdict) }}<span v-if="record.reconciliation.due_in_days !== null">（距计划日期 {{ record.reconciliation.due_in_days }} 天）</span></span>
+            <span v-if="record.decision_note">；备注：{{ record.decision_note }}</span>
+            <span v-if="record.record_status === 'proposed'">
+              <button type="button" :disabled="baselineSaving || session.isViewer" @click="decideBaseline(record, 'accept')">采纳为基线</button>
+              <button type="button" :disabled="baselineSaving || session.isViewer" @click="decideBaseline(record, 'discard')">放弃</button>
+            </span>
+          </li>
+        </ul>
+        <p class="small">对账只比较任务数量与计划日期；基线不修改任务数据，也不替你做排期。</p>
       </template>
     </div>
 
