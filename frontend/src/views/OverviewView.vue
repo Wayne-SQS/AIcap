@@ -6,6 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
+import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MAP_SPRINTS } from '@/data/seed'
@@ -91,6 +92,61 @@ async function confirmImprovement() {
   finally { improvementSaving.value = false }
 }
 watch(() => projects.currentProjectId, () => { improvementIssue.value = null; improvementError.value = '' })
+
+/* US22 质量分析:只读规范缺口 + 确认后建改进任务,口径与效率分析一致 */
+const QUALITY_KINDS = {
+  story_missing_acceptance: '补齐验收条件',
+  story_missing_owner: '认领故事',
+  task_without_story: '补关联故事'
+}
+const quality = ref(null), qualityError = ref(''), qualityLoading = ref(false)
+let qualityVersion = 0
+async function refreshQuality() {
+  const id = projects.currentProjectId
+  const attempt = ++qualityVersion
+  quality.value = null; qualityError.value = ''
+  if (!session.online || !id) return
+  qualityLoading.value = true
+  try {
+    const result = await getQualityAnalysis(id)
+    if (attempt === qualityVersion) quality.value = result
+  } catch (error) { if (attempt === qualityVersion) qualityError.value = error.message || '质量分析读取失败' }
+  finally { if (attempt === qualityVersion) qualityLoading.value = false }
+}
+watch(() => [projects.currentProjectId, session.online], refreshQuality, { immediate: true })
+const qualityIssue = ref(null)
+const qualityForm = ref({ owner_id: '', hours: '', week_start: '', week_end: '' })
+const qualitySaving = ref(false), qualityFormError = ref('')
+function qualityImprovementFor(finding) {
+  return quality.value?.improvements?.find(row => row.source_code === finding.source_code && row.finding_kind === finding.kind)
+}
+function beginQuality(finding) {
+  qualityIssue.value = finding
+  qualityFormError.value = ''
+  qualityForm.value = { owner_id: String(session.currentUser?.id || ''), hours: '', week_start: '', week_end: '' }
+}
+async function confirmQuality() {
+  const finding = qualityIssue.value
+  const id = projects.currentProjectId
+  if (!finding || !id || qualitySaving.value) return
+  const payload = Object.fromEntries(Object.entries(qualityForm.value).map(([key, value]) => [key, Number(value)]))
+  if (!Number.isInteger(payload.owner_id) || payload.owner_id < 1 || !Number.isInteger(payload.hours)
+      || payload.hours < 0 || payload.hours > 999 || !Number.isInteger(payload.week_start)
+      || !Number.isInteger(payload.week_end) || payload.week_start < 1 || payload.week_end > 6
+      || payload.week_start > payload.week_end || Object.values(qualityForm.value).some(value => value === '')) {
+    qualityFormError.value = '请选择负责人并填写有效工时与第 1–6 周排期'
+    return
+  }
+  qualitySaving.value = true; qualityFormError.value = ''
+  try {
+    await createQualityImprovement(id, finding.source_code, { finding_kind: finding.kind, ...payload })
+    qualityIssue.value = null
+    const reloads = await Promise.allSettled([refreshQuality(), project.loadAll(id)])
+    if (reloads.some(result => result.status === 'rejected')) qualityFormError.value = '改进任务已创建，页面刷新失败，请手动刷新'
+  } catch (error) { qualityFormError.value = error.message || '改进任务创建失败' }
+  finally { qualitySaving.value = false }
+}
+watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
 
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
@@ -183,6 +239,43 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </li></ul>
         </div>
         <p class="small">{{ efficiency.limitations }}</p>
+      </template>
+    </div>
+
+    <div class="h-sec">质量分析 · 需求与任务规范缺口（US22）</div>
+    <div class="stat" role="region" aria-label="项目质量分析">
+      <button type="button" :disabled="qualityLoading || !session.online" @click="refreshQuality">刷新分析</button>
+      <p v-if="!session.online">连接项目服务后可查看规范缺口。</p>
+      <p v-else-if="qualityLoading" role="status">正在读取故事与任务字段…</p>
+      <p v-else-if="qualityError" role="alert">{{ qualityError }}</p>
+      <template v-else-if="quality">
+        <p>故事 {{ quality.stories_total }} 条、待办/进行中任务 {{ quality.open_tasks }} 项；识别到 {{ quality.findings.length }} 项规范缺口。</p>
+        <p v-if="!quality.findings.length">暂无基于现有记录可识别的验收条件、认领或追溯缺口。</p>
+        <ul v-else>
+          <li v-for="finding in quality.findings" :key="`${finding.kind}-${finding.source_code}`">
+            <strong>{{ finding.source_code }} · {{ finding.source_name }}</strong>：{{ finding.detail }}
+            {{ finding.suggestion }}
+            <span v-if="qualityImprovementFor(finding)">已确认，改进任务 {{ qualityImprovementFor(finding).improvement_task_code }}。</span>
+            <button v-else type="button" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginQuality(finding)">确认并创建改进任务</button>
+          </li>
+        </ul>
+        <form v-if="qualityIssue" @submit.prevent="confirmQuality">
+          <p>确认 {{ qualityIssue.source_code }} 的「{{ QUALITY_KINDS[qualityIssue.kind] }}」缺口，创建一项管理任务：</p>
+          <label>负责人 <select v-model="qualityForm.owner_id" required><option value="">请选择</option><option v-for="member in project.members" :key="member.id" :value="String(memberUserId(member.id))">{{ member.name }}</option></select></label>
+          <label>工时 <input v-model="qualityForm.hours" type="number" min="0" max="999" required></label>
+          <label>开始周 <input v-model="qualityForm.week_start" type="number" min="1" max="6" required></label>
+          <label>结束周 <input v-model="qualityForm.week_end" type="number" min="1" max="6" required></label>
+          <button type="submit" :disabled="qualitySaving">{{ qualitySaving ? '正在创建…' : '确认创建' }}</button>
+          <button type="button" @click="qualityIssue = null">取消</button>
+        </form>
+        <p v-if="qualityFormError" role="alert">{{ qualityFormError }}</p>
+        <div v-if="quality.improvements.length">
+          <p>改进任务追踪</p>
+          <ul><li v-for="record in quality.improvements" :key="`${record.source_code}-${record.finding_kind}`">
+            {{ record.source_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>
+          </li></ul>
+        </div>
+        <p class="small">{{ quality.limitations }}</p>
       </template>
     </div>
 
