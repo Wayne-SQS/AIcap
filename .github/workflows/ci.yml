@@ -67,7 +67,14 @@ jobs:
       - name: 全量契约测试
         working-directory: java-backend
         # 契约测试对 mysql / qdrant 两套向量库实现各跑一遍,缺一即失败是刻意设计
-        run: mvn -B test
+        run: mvn -B jacoco:prepare-agent test jacoco:report
+
+      - name: 打印覆盖率(JaCoCo CSV 供质量分析证据层解析)
+        working-directory: java-backend
+        run: |
+          echo "--- JACOCO_CSV ---"
+          cat target/site/jacoco/jacoco.csv
+          echo "--- JACOCO_END ---"
 
       - name: 上传失败报告
         if: failure()

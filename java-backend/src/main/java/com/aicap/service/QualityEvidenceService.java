@@ -107,6 +107,19 @@ public class QualityEvidenceService {
             String body = get(props.getApiBase() + "/repos/" + props.getRepo() + "/actions/runs?per_page=30");
             Map<String, Object> parsed = parseRuns(body);
             parsed.put("available", true);
+            // 从同一份 runs 里取最近一次成功/失败的 CI run id,分别用于覆盖率与失败测试名。
+            JsonNode root = new ObjectMapper().readTree(body);
+            long lastSuccessId = -1, lastFailedId = -1;
+            for (JsonNode run : root.path("workflow_runs")) {
+                String name = run.path("name").asText("");
+                if (name.toLowerCase().contains("pages") || name.toLowerCase().contains("deployment")) continue;
+                if (!"completed".equals(run.path("status").asText())) continue;
+                String c = run.path("conclusion").asText("");
+                if (lastSuccessId < 0 && "success".equals(c)) lastSuccessId = run.path("id").asLong();
+                if (lastFailedId < 0 && "failure".equals(c)) lastFailedId = run.path("id").asLong();
+            }
+            parsed.put("failed_tests", failedTests(lastFailedId));
+            parsed.put("coverage", coverage(lastSuccessId));
             return parsed;
         } catch (Exception e) {
             m.put("available", false);
@@ -133,6 +146,7 @@ public class QualityEvidenceService {
             if (lastConclusion == null) lastConclusion = conclusion;
             if ("failure".equals(conclusion) && lastFailed == null) {
                 lastFailed = new LinkedHashMap<>();
+                lastFailed.put("run_id", run.path("id").asLong());
                 lastFailed.put("run_name", name);
                 lastFailed.put("run_number", run.path("run_number").asInt(0));
                 lastFailed.put("html_url", run.path("html_url").asText(""));
@@ -147,6 +161,115 @@ public class QualityEvidenceService {
         m.put("last_failed", lastFailed);
         m.put("note", "仅复述 GitHub Actions 已完成的运行结论,不据此推断代码质量或测试覆盖率。");
         return m;
+    }
+
+    // ---------- 2b) CI 失败测试名与覆盖率(从 job 日志解析,降级友好) ----------
+
+    private Map<String, Object> failedTests(long runId) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        if (runId <= 0) { m.put("available", false); m.put("reason", "近 30 次运行无失败"); return m; }
+        try {
+            String jobId = backendJobId(runId);
+            String log = get(props.getApiBase() + "/repos/" + props.getRepo() + "/actions/jobs/" + jobId + "/logs");
+            m.putAll(parseFailedTests(log));
+            m.put("available", true);
+            return m;
+        } catch (Exception e) {
+            m.put("available", false);
+            m.put("reason", "无法读取失败测试日志: " + brief(e));
+            return m;
+        }
+    }
+
+    /** 纯解析,便于单测。从 surefire 控制台输出提取失败测试的类.方法名与汇总数字。 */
+    static Map<String, Object> parseFailedTests(String log) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        var tests = new java.util.ArrayList<String>();
+        var seen = new java.util.LinkedHashSet<String>();
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "\\[ERROR\\]\\s+([\\p{Alnum}_.$]+)\\s+--\\s+.*<<<\\s+(?:FAILURE|ERROR)!");
+        for (String line : log.split("\\R")) {
+            var matcher = p.matcher(line);
+            if (matcher.find()) { if (seen.add(matcher.group(1))) tests.add(matcher.group(1)); }
+        }
+        java.util.regex.Matcher total = java.util.regex.Pattern.compile(
+                "\\[ERROR\\] Tests run: (\\d+), Failures: (\\d+), Errors: (\\d+)").matcher(log);
+        if (total.find()) {
+            m.put("tests_run", Integer.parseInt(total.group(1)));
+            m.put("failures", Integer.parseInt(total.group(2)));
+            m.put("errors", Integer.parseInt(total.group(3)));
+        }
+        m.put("failed_tests_total", tests.size());
+        m.put("failed_tests", tests.size() > 20 ? tests.subList(0, 20) : tests);
+        m.put("note", "失败测试名取自 surefire 控制台输出的 <<< FAILURE!/ERROR! 行,去重后最多列 20 条。");
+        return m;
+    }
+
+    private Map<String, Object> coverage(long runId) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        if (runId <= 0) { m.put("available", false); m.put("reason", "近 30 次运行无成功记录"); return m; }
+        try {
+            String jobId = backendJobId(runId);
+            String log = get(props.getApiBase() + "/repos/" + props.getRepo() + "/actions/jobs/" + jobId + "/logs");
+            Map<String, Object> parsed = parseJacoco(log);
+            if (parsed == null) { m.put("available", false); m.put("reason", "该运行日志无 JaCoCo 输出(需合并 jacoco 步骤)"); return m; }
+            m.putAll(parsed);
+            m.put("available", true);
+            return m;
+        } catch (Exception e) {
+            m.put("available", false);
+            m.put("reason", "无法读取覆盖率: " + brief(e));
+            return m;
+        }
+    }
+
+    /** 纯解析,便于单测。从日志里 --- JACOCO_CSV --- 到 --- JACOCO_END --- 的 csv 汇总各计数列。 */
+    static Map<String, Object> parseJacoco(String log) {
+        int start = log.indexOf("--- JACOCO_CSV ---");
+        int end = log.indexOf("--- JACOCO_END ---", start);
+        if (start < 0 || end < 0 || end <= start) return null;
+        String csv = log.substring(start + "--- JACOCO_CSV ---".length(), end);
+        long im = 0, ic = 0, lm = 0, lc = 0;
+        boolean any = false;
+        for (String line : csv.split("\\R")) {
+            line = line.strip();
+            if (line.isEmpty() || line.toLowerCase().startsWith("group,package")) continue;
+            String[] cols = line.split(",", -1);
+            if (cols.length < 9) continue;
+            try {
+                im += Long.parseLong(cols[3]);
+                ic += Long.parseLong(cols[4]);
+                lm += Long.parseLong(cols[7]);
+                lc += Long.parseLong(cols[8]);
+                any = true;
+            } catch (NumberFormatException ignored) { /* 跳过非数字行 */ }
+        }
+        if (!any) return null;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("instruction_missed", im);
+        m.put("instruction_covered", ic);
+        m.put("instruction_pct", im + ic == 0 ? null : Math.round(ic * 1000.0 / (im + ic)) / 10.0);
+        m.put("line_missed", lm);
+        m.put("line_covered", lc);
+        m.put("line_pct", lm + lc == 0 ? null : Math.round(lc * 1000.0 / (lm + lc)) / 10.0);
+        m.put("note", "覆盖率取自 CI 的 JaCoCo CSV 汇总(指令/行),仅作客观数字,不推断质量。");
+        return m;
+    }
+
+    /** 找到该 run 的后端 job(名称含「Java」或结论为 failure 的第一个)。 */
+    private String backendJobId(long runId) throws Exception {
+        String body = get(props.getApiBase() + "/repos/" + props.getRepo() + "/actions/runs/" + runId + "/jobs");
+        JsonNode jobs = new ObjectMapper().readTree(body).path("jobs");
+        String fallback = null;
+        for (JsonNode job : jobs) {
+            String name = job.path("name").asText("");
+            String conclusion = job.path("conclusion").asText("");
+            if (name.contains("Java")) return String.valueOf(job.path("id").asLong());
+            if (fallback == null && "failure".equals(conclusion)) fallback = String.valueOf(job.path("id").asLong());
+            if (fallback == null) fallback = String.valueOf(job.path("id").asLong());
+        }
+        if (fallback == null) throw new IllegalStateException("该运行没有 job");
+        return fallback;
     }
 
     // ---------- 3) 仓库文件树(测试/CI/文档存在性,不评估质量) ----------

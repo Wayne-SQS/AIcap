@@ -352,6 +352,19 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
             <template v-else>CI：未接入（{{ quality.evidence.ci.reason }}）。</template>
             <span class="small">{{ quality.evidence.ci.note }}</span>
           </p>
+          <p v-if="quality.evidence.ci?.coverage">
+            <template v-if="quality.evidence.ci.coverage.available">
+              覆盖率：指令 {{ quality.evidence.ci.coverage.instruction_pct }}%（{{ quality.evidence.ci.coverage.instruction_covered }}/{{ quality.evidence.ci.coverage.instruction_covered + quality.evidence.ci.coverage.instruction_missed }}），
+              行 {{ quality.evidence.ci.coverage.line_pct }}%。
+            </template>
+            <template v-else>覆盖率：未接入（{{ quality.evidence.ci.coverage.reason }}）。</template>
+          </p>
+          <p v-if="quality.evidence.ci?.failed_tests">
+            <template v-if="quality.evidence.ci.failed_tests.available">
+              最近失败测试 {{ quality.evidence.ci.failed_tests.failed_tests_total }} 项<span v-if="quality.evidence.ci.failed_tests.failed_tests?.length">：{{ quality.evidence.ci.failed_tests.failed_tests.slice(0, 5).join('；') }}</span>。
+            </template>
+            <template v-else>失败测试：未接入（{{ quality.evidence.ci.failed_tests.reason }}）。</template>
+          </p>
           <p v-if="quality.evidence.repository">
             <template v-if="quality.evidence.repository.available">
               仓库：{{ quality.evidence.repository.repo }}（{{ quality.evidence.repository.default_branch }}）——

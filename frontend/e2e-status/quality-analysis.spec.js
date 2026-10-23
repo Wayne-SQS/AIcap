@@ -11,7 +11,12 @@ const insights = (overrides = {}) => ({
   improvements: [],
   evidence: {
     code_activity: { commits_total: 42, commits_last_14d: 6, prs_total: 3, reviews_total: 5, test_commits: 9, note: '真实事件计数' },
-    ci: { available: true, runs_total: 2, last_conclusion: 'failure', pass_rate: 50, last_failed: { run_name: 'CI', run_number: 21 }, note: '仅复述运行结论' },
+    ci: {
+      available: true, runs_total: 2, last_conclusion: 'failure', pass_rate: 50,
+      last_failed: { run_name: 'CI', run_number: 21 }, note: '仅复述运行结论',
+      coverage: { available: true, instruction_pct: 70, instruction_covered: 700, instruction_missed: 300, line_pct: 70 },
+      failed_tests: { available: true, failed_tests_total: 3, failed_tests: ['com.aicap.contract.FooTest.a', 'com.aicap.contract.FooTest.b'] }
+    },
     repository: { available: true, repo: 'Wayne-SQS/AIcap', default_branch: 'main', has_ci_workflow: true, has_tests: true, test_file_count: 137, has_docs: true }
   },
   ...overrides
@@ -38,6 +43,8 @@ test('quality card shows specification gaps with real evidence and honesty limit
   await expect(card).toContainText('T3 · 联调脚本：开发任务未关联任何故事')
   await expect(card).toContainText('不虚构覆盖率结论')
   await expect(card).toContainText('CI：最近 2 次运行，最近结论 failure，通过率 50%')
+  await expect(card).toContainText('覆盖率：指令 70%')
+  await expect(card).toContainText('最近失败测试 3 项')
   await expect(card).toContainText('有测试文件 137 个')
 })
 

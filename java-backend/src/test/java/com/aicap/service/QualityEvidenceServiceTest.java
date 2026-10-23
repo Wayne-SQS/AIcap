@@ -94,6 +94,41 @@ class QualityEvidenceServiceTest {
     }
 
     @SuppressWarnings("unchecked")
+    @Test void parseFailedTestsExtractsClassNameAndSummary() {
+        String log = "[ERROR] Tests run: 842, Failures: 0, Errors: 19, Skipped: 0\n"
+                + "[ERROR] com.aicap.contract.ReviewQueueIndexContractTest.cursorUsesBinaryOrderForMixedCaseIdsAtTheSameTimestamp -- Time elapsed: 0.028 s <<< ERROR!\n"
+                + "[ERROR] com.aicap.contract.PlatformAgentContractTest.plat02_catalog_readableByEveryRoleIncludingViewer -- Time elapsed: 0.145 s <<< ERROR!\n"
+                + "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0 -- in com.aicap.rag.RrfFuserTest\n";
+        var m = QualityEvidenceService.parseFailedTests(log);
+        assertEquals(842, m.get("tests_run"));
+        assertEquals(19, m.get("errors"));
+        assertEquals(2, m.get("failed_tests_total"));
+        var tests = (List<String>) m.get("failed_tests");
+        assertTrue(tests.contains("com.aicap.contract.ReviewQueueIndexContractTest.cursorUsesBinaryOrderForMixedCaseIdsAtTheSameTimestamp"));
+        assertTrue(tests.contains("com.aicap.contract.PlatformAgentContractTest.plat02_catalog_readableByEveryRoleIncludingViewer"));
+    }
+
+    @Test void parseJacocoReadsTotalRow() {
+        String log = "random log line\n--- JACOCO_CSV ---\n"
+                + "GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED\n"
+                + "aicap,com.aicap,com.aicap.App,100,900,10,40,20,80,0,0,0,0\n"
+                + "aicap,com.aicap.contract,com.aicap.contract.FooTest,200,700,50,100,40,60,0,0,0,0\n"
+                + "--- JACOCO_END ---\n";
+        var m = QualityEvidenceService.parseJacoco(log);
+        assertNotNull(m);
+        assertEquals(300L, m.get("instruction_missed"));
+        assertEquals(1600L, m.get("instruction_covered"));
+        assertEquals(84.2, m.get("instruction_pct"));
+        assertEquals(60L, m.get("line_missed"));
+        assertEquals(140L, m.get("line_covered"));
+        assertEquals(70.0, m.get("line_pct"));
+    }
+
+    @Test void parseJacocoReturnsNullWhenNoBlock() {
+        assertNull(QualityEvidenceService.parseJacoco("no jacoco here"));
+    }
+
+    @SuppressWarnings("unchecked")
     @Test void collectMergesAllThreeSections() {
         activity("P001", "commit", "add login", "前端", "2026-10-20");
         var evidence = service.collect("P001");
