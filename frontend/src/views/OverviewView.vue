@@ -336,6 +336,32 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </li></ul>
         </div>
         <p class="small">{{ quality.limitations }}</p>
+        <div v-if="quality.evidence" class="evi">
+          <p>真实证据（不推断质量）</p>
+          <p v-if="quality.evidence.code_activity">
+            代码活动：提交 {{ quality.evidence.code_activity.commits_total }} 次（近 14 天 {{ quality.evidence.code_activity.commits_last_14d }} 次）、
+            PR {{ quality.evidence.code_activity.prs_total }}、评审 {{ quality.evidence.code_activity.reviews_total }}、
+            测试相关提交 {{ quality.evidence.code_activity.test_commits }} 次。
+            <span class="small">{{ quality.evidence.code_activity.note }}</span>
+          </p>
+          <p v-if="quality.evidence.ci">
+            <template v-if="quality.evidence.ci.available">
+              CI：最近 {{ quality.evidence.ci.runs_total }} 次运行，最近结论 {{ quality.evidence.ci.last_conclusion }}，通过率 {{ quality.evidence.ci.pass_rate }}%。
+              <span v-if="quality.evidence.ci.last_failed">最近失败：{{ quality.evidence.ci.last_failed.run_name }} #{{ quality.evidence.ci.last_failed.run_number }}。</span>
+            </template>
+            <template v-else>CI：未接入（{{ quality.evidence.ci.reason }}）。</template>
+            <span class="small">{{ quality.evidence.ci.note }}</span>
+          </p>
+          <p v-if="quality.evidence.repository">
+            <template v-if="quality.evidence.repository.available">
+              仓库：{{ quality.evidence.repository.repo }}（{{ quality.evidence.repository.default_branch }}）——
+              {{ quality.evidence.repository.has_ci_workflow ? '有 CI 配置' : '无 CI 配置' }}、
+              {{ quality.evidence.repository.has_tests ? `有测试文件 ${quality.evidence.repository.test_file_count} 个` : '无测试文件' }}、
+              {{ quality.evidence.repository.has_docs ? '有文档' : '无文档目录' }}。
+            </template>
+            <template v-else>仓库证据：未接入（{{ quality.evidence.repository.reason }}）。</template>
+          </p>
+        </div>
       </template>
     </div>
 

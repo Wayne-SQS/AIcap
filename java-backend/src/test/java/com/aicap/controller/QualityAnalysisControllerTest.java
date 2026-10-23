@@ -7,6 +7,7 @@ import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.security.AuthContext;
 import com.aicap.service.ProjectAccessService;
+import com.aicap.service.QualityEvidenceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 class QualityAnalysisControllerTest {
@@ -31,6 +33,7 @@ class QualityAnalysisControllerTest {
     private QualityAnalysisController controller;
     private ProjectAccessService projects;
     private TaskPoolController taskController;
+    private QualityEvidenceService evidence;
 
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID()
@@ -45,7 +48,9 @@ class QualityAnalysisControllerTest {
                 + "primary key(project_id,source_code,finding_kind))");
         projects = mock(ProjectAccessService.class);
         taskController = mock(TaskPoolController.class);
-        controller = new QualityAnalysisController(projects, jdbc, taskController);
+        evidence = mock(QualityEvidenceService.class);
+        when(evidence.collect(anyString())).thenReturn(new java.util.LinkedHashMap<>());
+        controller = new QualityAnalysisController(projects, jdbc, taskController, evidence);
     }
 
     @AfterEach void clearAuth() { AuthContext.clear(); }

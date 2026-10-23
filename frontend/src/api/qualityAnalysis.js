@@ -14,6 +14,9 @@ export async function getQualityAnalysis(projectId) {
       throw new Error('质量分析结果格式无效')
     }
   }
+  if (result.evidence !== undefined && (result.evidence === null || typeof result.evidence !== 'object')) {
+    throw new Error('质量分析结果格式无效')
+  }
   return result
 }
 

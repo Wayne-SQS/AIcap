@@ -9,6 +9,11 @@ const insights = (overrides = {}) => ({
     { kind: 'task_without_story', source_code: 'T3', source_name: '联调脚本', detail: '开发任务未关联任何故事，工作量无法追溯到需求。', suggestion: '关联到具体故事。' }
   ],
   improvements: [],
+  evidence: {
+    code_activity: { commits_total: 42, commits_last_14d: 6, prs_total: 3, reviews_total: 5, test_commits: 9, note: '真实事件计数' },
+    ci: { available: true, runs_total: 2, last_conclusion: 'failure', pass_rate: 50, last_failed: { run_name: 'CI', run_number: 21 }, note: '仅复述运行结论' },
+    repository: { available: true, repo: 'Wayne-SQS/AIcap', default_branch: 'main', has_ci_workflow: true, has_tests: true, test_file_count: 137, has_docs: true }
+  },
   ...overrides
 })
 
@@ -32,6 +37,8 @@ test('quality card shows specification gaps with real evidence and honesty limit
   await expect(card).toContainText('US2 · 报表导出：故事未填写验收条件')
   await expect(card).toContainText('T3 · 联调脚本：开发任务未关联任何故事')
   await expect(card).toContainText('不虚构覆盖率结论')
+  await expect(card).toContainText('CI：最近 2 次运行，最近结论 failure，通过率 50%')
+  await expect(card).toContainText('有测试文件 137 个')
 })
 
 test('human confirmation creates a linked improvement task and tracks completion', async ({ page }) => {

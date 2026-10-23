@@ -4,6 +4,7 @@ import com.aicap.common.ApiException;
 import com.aicap.dto.TaskDtos;
 import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
+import com.aicap.service.QualityEvidenceService;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,6 +34,7 @@ public class QualityAnalysisController {
     private final ProjectAccessService projects;
     private final JdbcTemplate jdbc;
     private final TaskPoolController tasks;
+    private final QualityEvidenceService evidence;
 
     private static final Set<String> FINDING_KINDS =
             Set.of("story_missing_acceptance", "story_missing_owner", "task_without_story");
@@ -45,7 +47,9 @@ public class QualityAnalysisController {
         Roles.any();
         String scoped = ProjectAccessService.normalize(projectId);
         projects.requireMember(scoped);
-        return calculate(scoped).payload();
+        Map<String, Object> payload = calculate(scoped).payload();
+        payload.put("evidence", evidence.collect(scoped));
+        return payload;
     }
 
     /** 人工确认一条缺口,生成一项管理任务并登记追踪;同一缺口只允许一个未重复的任务。 */
