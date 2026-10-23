@@ -398,7 +398,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </p>
           <p v-if="quality.evidence.ci">
             <template v-if="quality.evidence.ci.available">
-              CI：最近 {{ quality.evidence.ci.runs_total }} 次运行，最近结论 {{ quality.evidence.ci.last_conclusion }}，通过率 {{ quality.evidence.ci.pass_rate }}%。
+              CI：最近 {{ quality.evidence.ci.runs_total }} 次已定论运行（另有 {{ quality.evidence.ci.runs_cancelled }} 次取消），最近结论 {{ quality.evidence.ci.last_conclusion }}，通过率 {{ quality.evidence.ci.pass_rate }}%。
               <span v-if="quality.evidence.ci.last_failed">最近失败：{{ quality.evidence.ci.last_failed.run_name }} #{{ quality.evidence.ci.last_failed.run_number }}。</span>
             </template>
             <template v-else>CI：未接入（{{ quality.evidence.ci.reason }}）。</template>
@@ -406,14 +406,14 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </p>
           <p v-if="quality.evidence.ci?.coverage">
             <template v-if="quality.evidence.ci.coverage.available">
-              覆盖率：指令 {{ quality.evidence.ci.coverage.instruction_pct }}%（{{ quality.evidence.ci.coverage.instruction_covered }}/{{ quality.evidence.ci.coverage.instruction_covered + quality.evidence.ci.coverage.instruction_missed }}），
+              Java 后端覆盖率（JaCoCo）：指令 {{ quality.evidence.ci.coverage.instruction_pct }}%（{{ quality.evidence.ci.coverage.instruction_covered }}/{{ quality.evidence.ci.coverage.instruction_covered + quality.evidence.ci.coverage.instruction_missed }}），
               行 {{ quality.evidence.ci.coverage.line_pct }}%。
             </template>
-            <template v-else>覆盖率：未接入（{{ quality.evidence.ci.coverage.reason }}）。</template>
+            <template v-else>Java 后端覆盖率：未接入（{{ quality.evidence.ci.coverage.reason }}）。</template>
           </p>
           <p v-if="quality.evidence.ci?.failed_tests">
             <template v-if="quality.evidence.ci.failed_tests.available">
-              最近失败测试 {{ quality.evidence.ci.failed_tests.failed_tests_total }} 项<span v-if="quality.evidence.ci.failed_tests.failed_tests?.length">：{{ quality.evidence.ci.failed_tests.failed_tests.slice(0, 5).join('；') }}</span>。
+              最近失败测试 {{ quality.evidence.ci.failed_tests.failed_tests_total }} 项<span v-if="quality.evidence.ci.failed_tests.run_number">（run #{{ quality.evidence.ci.failed_tests.run_number }}<span v-if="quality.evidence.ci.failed_tests.created_at"> · {{ quality.evidence.ci.failed_tests.created_at }}</span>）</span><span v-if="quality.evidence.ci.failed_tests.failed_tests?.length">：{{ quality.evidence.ci.failed_tests.failed_tests.slice(0, 5).join('；') }}</span>。
             </template>
             <template v-else>失败测试：未接入（{{ quality.evidence.ci.failed_tests.reason }}）。</template>
           </p>

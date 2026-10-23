@@ -48,8 +48,24 @@ public class QualityAnalysisController {
         String scoped = ProjectAccessService.normalize(projectId);
         projects.requireMember(scoped);
         Map<String, Object> payload = calculate(scoped).payload();
-        payload.put("evidence", evidence.collect(scoped));
+        Map<String, Object> ev = evidence.collect(scoped);
+        payload.put("evidence", ev);
+        // limitations 按证据实际可用性动态生成,不再硬编码「未接入」。
+        payload.put("limitations", buildLimitations(ev));
         return payload;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String buildLimitations(Map<String, Object> ev) {
+        boolean ciAvail = ev.get("ci") instanceof Map<?, ?> m && Boolean.TRUE.equals(m.get("available"));
+        boolean repoAvail = ev.get("repository") instanceof Map<?, ?> m && Boolean.TRUE.equals(m.get("available"));
+        boolean actSynced = ev.get("code_activity") instanceof Map<?, ?> m && Boolean.TRUE.equals(m.get("synced"));
+        StringBuilder sb = new StringBuilder("仅依据库内故事与任务的结构化字段定位规范缺口；");
+        if (ciAvail && repoAvail && actSynced) sb.append("已接入 CI 运行结论、仓库文件树与 GitHub 同步活动证据；");
+        else if (!ciAvail && !repoAvail && !actSynced) sb.append("尚未接入 CI/仓库/同步活动证据；");
+        else sb.append("部分外部证据不可用（见 evidence 各段 reason）；");
+        sb.append("不评估代码/文档/测试的真实质量，也不虚构覆盖率结论。建议需人工复核。");
+        return sb.toString();
     }
 
     /** 人工确认一条缺口,生成一项管理任务并登记追踪;同一缺口只允许一个未重复的任务。 */
@@ -72,7 +88,15 @@ public class QualityAnalysisController {
                 scoped, sourceCode).isEmpty()) throw ApiException.notFound("来源不存在");
         var existing = jdbc.queryForList("SELECT improvement_task_code FROM quality_improvements "
                 + "WHERE project_id=? AND source_code=? AND finding_kind=?", scoped, sourceCode, request.finding_kind());
-        if (!existing.isEmpty()) return improvement(scoped, sourceCode, request.finding_kind());
+        if (!existing.isEmpty()) {
+            String code = String.valueOf(existing.get(0).get("improvement_task_code"));
+            Integer stillThere = jdbc.queryForObject("SELECT COUNT(*) FROM tasks WHERE project_id=? AND code=?",
+                    Integer.class, scoped, code);
+            if (stillThere != null && stillThere > 0) return improvement(scoped, sourceCode, request.finding_kind());
+            // 改进任务已被删除:清掉孤儿登记,允许重新确认建新任务(此前会静默指向旧编号)。
+            jdbc.update("DELETE FROM quality_improvements WHERE project_id=? AND source_code=? AND finding_kind=?",
+                    scoped, sourceCode, request.finding_kind());
+        }
         var source = calculate(scoped).findings().stream()
                 .filter(finding -> sourceCode.equals(finding.get("source_code"))
                         && request.finding_kind().equals(finding.get("kind"))).findFirst()
@@ -141,8 +165,7 @@ public class QualityAnalysisController {
                 + "FROM quality_improvements i LEFT JOIN tasks t ON t.project_id=i.project_id "
                 + "AND t.code=i.improvement_task_code WHERE i.project_id=? "
                 + "ORDER BY i.reviewed_at DESC,i.source_code", projectId));
-        result.put("limitations", "仅依据库内故事与任务的结构化字段定位规范缺口；未接入真实代码、CI 测试结果与文档仓库前，"
-                + "不评估代码/文档/测试的真实质量，也不虚构覆盖率结论。建议需人工复核。");
+        result.put("limitations", "仅依据库内故事与任务的结构化字段定位规范缺口；不评估代码/文档/测试的真实质量，也不虚构覆盖率结论。建议需人工复核。");
         return new CalculateResult(result, findings);
     }
 

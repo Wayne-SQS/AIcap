@@ -28,4 +28,23 @@ public class ConfiguredProjectRepositoryResolver implements ProjectRepositoryRes
         }
         return projectId == null || projectId.isBlank() ? Optional.empty() : Optional.of(projectId.trim().toUpperCase());
     }
+
+    @Override
+    public Optional<String> resolveRepo(String projectId) {
+        if (projectId == null || projectId.isBlank()) return Optional.empty();
+        String pid = projectId.trim().toUpperCase();
+        Map<String, String> mappings = props.getRepositoryProjectMapping();
+        if (mappings != null) {
+            for (Map.Entry<String, String> e : mappings.entrySet()) {
+                if (e.getValue() != null && e.getValue().trim().equalsIgnoreCase(pid)) return Optional.of(e.getKey().trim());
+            }
+        }
+        // 单仓库兜底:GITHUB_PROJECT_ID 指向该仓库时才认它。
+        String configuredProject = props.getProjectId();
+        if (pid.equals(configuredProject == null ? "" : configuredProject.trim().toUpperCase())
+                && props.getRepo() != null && !props.getRepo().isBlank()) {
+            return Optional.of(props.getRepo().trim());
+        }
+        return Optional.empty();
+    }
 }
