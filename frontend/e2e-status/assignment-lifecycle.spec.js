@@ -10,7 +10,7 @@ function record(body) {
 }
 const input = { story_ids: ['US13'], target_sprint: null, requirements: [{ dimension: 'tech_stack', name: 'Python', minimum_level: 3 }], client_request_id: 'r1' }
 async function setup(page, role = 'admin', preloaded = false, sharedState = null) {
-  const state = sharedState || { saved: preloaded ? record(input) : null, intent: null, saves: [], reviews: [], executes: [], loseSave: false, failBeforeSave: false, failClear: false, loseExecution: false, invalidExecution: false, failNextList: false }
+  const state = sharedState || { saved: preloaded ? record(input) : null, intent: null, saves: [], reviews: [], executes: [], loseSave: false, failBeforeSave: false, failClear: false, loseExecution: false, invalidExecution: false, failList: false }
   await page.addInitScript(() => { localStorage.setItem('aiguanli_token', 'fixture-token'); localStorage.setItem('aiguanli-current-project', 'P001') })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON(); state.saves.push(body)
@@ -45,7 +45,7 @@ async function setup(page, role = 'admin', preloaded = false, sharedState = null
       } else data = { intent: state.intent }
     }
     if (path.endsWith('/assignment-suggestions')) {
-      if (state.failNextList) { state.failNextList = false; await route.fulfill({ status: 503, json: {} }); return }
+      if (state.failList) { await route.fulfill({ status: 503, json: {} }); return }
       data = path.includes('/m1/') && state.saved ? [state.saved] : []
     }
     if (path.endsWith('/a1/review')) {
@@ -123,10 +123,11 @@ test('Assignment malformed execution cannot display success', async ({ page }) =
 test('Assignment list failure does not claim empty history and permits retry', async ({ page }) => {
   const state = await setup(page, 'admin', true)
   await expect(history(page)).toContainText('成员甲')
-  state.failNextList = true
+  state.failList = true
   await history(page).getByRole('button', { name: '刷新分配记录' }).click()
   await expect(history(page)).toContainText('读取建议失败')
   await expect(history(page)).not.toContainText('暂无已保存建议')
+  state.failList = false
   await history(page).getByRole('button', { name: '刷新分配记录' }).click()
   await expect(history(page).getByRole('alert')).toHaveCount(0)
 })
