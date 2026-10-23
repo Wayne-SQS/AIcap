@@ -351,7 +351,8 @@ public class MeetingService {
             item.setId(poolId);
             item.setTitle((String) changes.get("title"));
             item.setDescription((String) changes.getOrDefault("description", ""));
-            item.setSource("会议 " + record.getMeetingId() + " / 建议 " + suggestionId);
+            item.setSource((record.getMeetingId() == null ? "项目风险预警" : "会议 " + record.getMeetingId())
+                    + " / 建议 " + suggestionId);
             item.setPriority((String) changes.getOrDefault("priority", "Could"));
             item.setProjectId(ProjectAccessService.normalize(projectId));
             item.setCreatedAt(LocalDateTime.now());

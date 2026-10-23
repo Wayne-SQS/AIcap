@@ -147,4 +147,26 @@ class QualityAnalysisControllerTest {
                         new QualityAnalysisController.ImprovementRequest("code_coverage", 7, 2, 5, 5))).getStatus());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM quality_improvements", Integer.class));
     }
+
+    @Test void deletedImprovementTaskCanBeReconfirmed() {
+        story("P001", "US1", null, null);
+        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
+        var t99 = new Task(); t99.setId("T99"); t99.setName("改进任务");
+        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
+            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", "T99", "改进任务", "management", null, 0, 0);
+            return TaskDtos.toOut(t99);
+        });
+        var request = new QualityAnalysisController.ImprovementRequest("story_missing_acceptance", 7, 2, 5, 5);
+        assertEquals("T99", controller.createImprovement("P001", "US1", request).get("improvement_task_code"));
+
+        // 改进任务被删后,同缺口应能重新确认建新任务,而不是返回指向已删任务的孤儿记录。
+        jdbc.update("DELETE FROM tasks WHERE project_id='P001' AND code='T99'");
+        var t98 = new Task(); t98.setId("T98"); t98.setName("改进任务2");
+        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
+            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", "T98", "改进任务2", "management", null, 0, 0);
+            return TaskDtos.toOut(t98);
+        });
+        assertEquals("T98", controller.createImprovement("P001", "US1", request).get("improvement_task_code"));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM quality_improvements WHERE source_code='US1'", Integer.class));
+    }
 }

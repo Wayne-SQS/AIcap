@@ -166,6 +166,7 @@ class GitHubSyncEndToEndContractTest {
         assertEquals("T03", c.getTaskId());
         assertEquals(1, c.getUserId());
         assertEquals("auth", c.getModule());
+        assertEquals("P001", c.getProjectId(), "同步活动必须写项目归属,否则质量证据按 project_id 查为 0");
         assertEquals("2026-09-10 11:00:00", c.getHappenedAt().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         // 越界 commit 未入库
         assertNull(byId.get("abc222"));
