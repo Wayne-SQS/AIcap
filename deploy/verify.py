@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sys
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -250,6 +251,76 @@ def verify_live(origin: str) -> None:
         raise VerificationError('meeting_ai_unhealthy')
 
 
+def us19_journey(origin: str, username: str, password: str) -> str:
+    """US19 主旅程：预测 → 固化基线 → 采纳 → 对账。
+
+    返回实际走到的分支（'forecast_accepted' 或 'insufficient_data_refused'）。
+    数据不足时"如实拒绝"也是合法归宿，但必须真的返回 422，不能被当成成功蒙混过去。
+    """
+    if not username or not password:
+        raise VerificationError('us19_credentials_missing')
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+
+    def call(path: str, method: str = 'GET', payload=None, token=None):
+        headers = {}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode()
+            headers['Content-Type'] = 'application/json'
+        if token:
+            headers['Authorization'] = 'Bearer ' + token
+        try:
+            with opener.open(Request(origin.rstrip('/') + path, data=data, headers=headers,
+                                     method=method), timeout=5) as response:
+                return response.status, json.loads(response.read(65537))
+        except HTTPError as error:
+            try:
+                return error.code, json.loads(error.read(65537))
+            except Exception:
+                return error.code, None
+        except Exception:
+            raise VerificationError('us19_journey_failed') from None
+
+    status, login = call('/api/auth/login', 'POST', {'username': username, 'password': password})
+    token = login.get('access_token') if isinstance(login, dict) else None
+    if status != 200 or not isinstance(token, str) or not token:
+        raise VerificationError('us19_journey_failed')
+
+    status, forecast = call('/api/projects/P001/progress-forecast', token=token)
+    if (status != 200 or not isinstance(forecast, dict)
+            or forecast.get('status') not in ('forecast', 'insufficient_data', 'complete', 'empty_scope')
+            or forecast.get('basis') != 'task_status_history'
+            or type(forecast.get('tasks_open')) is not int
+            or type(forecast.get('tasks_done')) is not int
+            or type(forecast.get('recent_completions')) is not int
+            or not isinstance(forecast.get('assumptions'), str)
+            or not forecast.get('assumptions')):
+        raise VerificationError('us19_journey_failed')
+
+    status, record = call('/api/projects/P001/progress-forecast/records', 'POST', token=token)
+    if forecast['status'] != 'forecast':
+        if status != 422:
+            raise VerificationError('us19_journey_failed')
+        return 'insufficient_data_refused'
+    if status != 200 or not isinstance(record, dict) or type(record.get('id')) is not int:
+        raise VerificationError('us19_journey_failed')
+
+    status, decided = call(f"/api/projects/P001/progress-forecast/records/{record['id']}/decision",
+                           'POST', {'decision': 'accept'}, token)
+    if status != 200 or not isinstance(decided, dict) or decided.get('record_status') != 'accepted':
+        raise VerificationError('us19_journey_failed')
+
+    status, listed = call('/api/projects/P001/progress-forecast/records', token=token)
+    rows = listed.get('records') if isinstance(listed, dict) else None
+    match = next((row for row in rows or [] if row.get('id') == record['id']), None)
+    verdict = (match or {}).get('reconciliation', {}).get('verdict') if isinstance(match, dict) else None
+    if (status != 200 or not isinstance(rows, list) or match is None
+            or match.get('record_status') != 'accepted'
+            or verdict not in ('reached', 'overdue', 'within_plan')):
+        raise VerificationError('us19_journey_failed')
+    return 'forecast_accepted'
+
+
 def failure_hint(error: VerificationError) -> str:
     note = STRUCTURE_HINTS.get(str(error).split(':', 1)[0])
     return f' ({note})' if note else ''
@@ -262,6 +333,8 @@ def main(argv=None) -> int:
     parser.add_argument('--live-url', help='Also verify routes exposed by the running web container.')
     parser.add_argument('--smoke-login', action='store_true',
                         help='Use AICAP_SMOKE_USERNAME/PASSWORD for an authenticated read-only smoke test.')
+    parser.add_argument('--smoke-us19', action='store_true',
+                        help='Run the US19 journey (forecast -> baseline -> accept -> reconcile). Writes baseline rows.')
     args = parser.parse_args(argv)
     try:
         gaps = verify_config(read_env(args.env_file), args.model_root)
@@ -272,6 +345,11 @@ def main(argv=None) -> int:
                 raise VerificationError('smoke_login_requires_live_url')
             authenticated_smoke(args.live_url, os.environ.get('AICAP_SMOKE_USERNAME', ''),
                                 os.environ.get('AICAP_SMOKE_PASSWORD', ''))
+        if args.smoke_us19:
+            if not args.live_url:
+                raise VerificationError('smoke_us19_requires_live_url')
+            us19_journey(args.live_url, os.environ.get('AICAP_SMOKE_USERNAME', ''),
+                         os.environ.get('AICAP_SMOKE_PASSWORD', ''))
     except VerificationError as error:
         print(f'Deployment verification failed: {error}{failure_hint(error)}', file=sys.stderr)
         return 1
@@ -282,6 +360,8 @@ def main(argv=None) -> int:
         checked += ', frontend, Java/database, meeting AI'
     if args.smoke_login:
         checked += ', authenticated read-only flow'
+    if args.smoke_us19:
+        checked += ', US19 forecast/baseline reconciliation journey'
     print(checked + '.')
     return 0
 

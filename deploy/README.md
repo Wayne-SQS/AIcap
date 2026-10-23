@@ -52,6 +52,16 @@ ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
 Remove-Item Env:AICAP_SMOKE_USERNAME,Env:AICAP_SMOKE_PASSWORD
 ```
 
+US19 进度预测的主旅程（预测 → 固化基线 → 采纳 → 对账）单列一个开关。它会**写一行预测基线**，只应对可恢复的验收数据运行；数据不足时要求服务如实返回 422，把“静默给个日期”判为失败：
+
+```powershell
+$env:AICAP_SMOKE_USERNAME='李锐铭'
+$env:AICAP_SMOKE_PASSWORD='123456'
+ai-service/.venv/Scripts/python.exe -B deploy/verify.py `
+  --env-file deploy/.env --live-url http://127.0.0.1:8088 --smoke-us19
+Remove-Item Env:AICAP_SMOKE_USERNAME,Env:AICAP_SMOKE_PASSWORD
+```
+
 ### 真实浏览器闭环（验收环境）
 
 live 用例默认仍连接 `qa/run_daily_live.py` 启动的隔离服务，也可以通过环境变量改为验证当前容器的 Nginx 同源入口。用例会创建会议并修改演示故事，因此只应对可恢复的验收数据运行；每个用例前从同一份已验证备份恢复基线。

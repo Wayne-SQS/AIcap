@@ -90,6 +90,121 @@ class DeploymentVerificationTests(unittest.TestCase):
                          [request[0] for request in seen])
         self.assertEqual('Bearer fixture-token', seen[1][2])
 
+    def test_us19_journey_records_accepts_and_reconciles(self):
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, body, status=200):
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length') or 0)
+                payload = json.loads(self.rfile.read(length)) if length else None
+                seen.append((self.path, payload))
+                if self.path.endswith('/auth/login'):
+                    return self.reply({'access_token': 'fixture-token'})
+                if self.path.endswith('/decision'):
+                    return self.reply({'id': 7, 'record_status': 'accepted'})
+                return self.reply({'id': 7, 'record_status': 'proposed'})
+
+            def do_GET(self):
+                seen.append((self.path, None))
+                if self.path.endswith('/progress-forecast'):
+                    return self.reply({'status': 'forecast', 'basis': 'task_status_history', 'tasks_open': 4, 'tasks_done': 3, 'recent_completions': 3, 'assumptions': '按最近最多42天任务完成吞吐线性外推'})
+                return self.reply({'records': [{'id': 7, 'record_status': 'accepted',
+                                                'reconciliation': {'verdict': 'within_plan'}}]})
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            outcome = verify.us19_journey(f'http://127.0.0.1:{server.server_port}', 'u', 'p')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.assertEqual('forecast_accepted', outcome)
+        self.assertEqual(['/api/auth/login', '/api/projects/P001/progress-forecast',
+                          '/api/projects/P001/progress-forecast/records',
+                          '/api/projects/P001/progress-forecast/records/7/decision',
+                          '/api/projects/P001/progress-forecast/records'],
+                         [path for path, _ in seen])
+        self.assertEqual({'decision': 'accept'}, seen[3][1])
+
+    def test_us19_journey_accepts_only_a_real_refusal_when_history_is_thin(self):
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, body, status=200):
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length') or 0)
+                if length:
+                    self.rfile.read(length)
+                if self.path.endswith('/auth/login'):
+                    return self.reply({'access_token': 'fixture-token'})
+                return self.reply({'detail': '当前预测未给出交付日期，不能固化为基线'}, status=422)
+
+            def do_GET(self):
+                return self.reply({'status': 'insufficient_data', 'basis': 'task_status_history', 'tasks_open': 4, 'tasks_done': 0, 'recent_completions': 0,
+                                   'assumptions': '按最近最多42天任务完成吞吐线性外推'})
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            outcome = verify.us19_journey(f'http://127.0.0.1:{server.server_port}', 'u', 'p')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.assertEqual('insufficient_data_refused', outcome)
+
+    def test_us19_journey_rejects_a_silent_success_when_history_is_thin(self):
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, body, status=200):
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length') or 0)
+                if length:
+                    self.rfile.read(length)
+                if self.path.endswith('/auth/login'):
+                    return self.reply({'access_token': 'fixture-token'})
+                return self.reply({'id': 1, 'record_status': 'proposed'})
+
+            def do_GET(self):
+                return self.reply({'status': 'insufficient_data', 'basis': 'task_status_history', 'tasks_open': 4, 'tasks_done': 0, 'recent_completions': 0,
+                                   'assumptions': '按最近最多42天任务完成吞吐线性外推'})
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            with self.assertRaises(verify.VerificationError):
+                verify.us19_journey(f'http://127.0.0.1:{server.server_port}', 'u', 'p')
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
 
 class ComposeStructureTests(unittest.TestCase):
     """Structural gates: deleting a healthcheck must fail verification, not pass it."""
