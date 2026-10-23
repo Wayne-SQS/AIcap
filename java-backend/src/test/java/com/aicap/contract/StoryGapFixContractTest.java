@@ -210,6 +210,51 @@ class StoryGapFixContractTest extends ContractTestSupport {
     }
 
     @Test
+    void combinedOwnerAndScheduleActionsCountTaskHoursOnceRegardlessOfOrder() {
+        var all = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", PROJECT_ID));
+        Task chosen = all.stream().filter(task -> task.getOwnerId() != null
+                && task.getOwnerId() != 1 && task.getHours() != null && task.getHours() > 0)
+                .findFirst().orElseThrow();
+        int oldOwner = chosen.getOwnerId();
+        int oldTotal = all.stream().filter(task -> Integer.valueOf(oldOwner).equals(task.getOwnerId()))
+                .mapToInt(task -> task.getHours() == null ? 0 : task.getHours()).sum();
+        int newTotal = all.stream().filter(task -> Integer.valueOf(1).equals(task.getOwnerId()))
+                .mapToInt(task -> task.getHours() == null ? 0 : task.getHours()).sum();
+        int start = chosen.getWeekStart() == 1 ? 2 : 1;
+        int end = start;
+        for (boolean ownerFirst : new boolean[] {true, false}) {
+            var plan = objectMapper.createObjectNode();
+            var actions = plan.putArray("actions");
+            var owner = objectMapper.createObjectNode().put("type", "UPDATE_TASK_OWNER")
+                    .put("task_id", chosen.getId()).put("to_owner_id", 1);
+            var schedule = objectMapper.createObjectNode().put("type", "UPDATE_TASK_SCHEDULE")
+                    .put("task_id", chosen.getId()).put("start_week", start).put("end_week", end);
+            actions.add(ownerFirst ? owner : schedule);
+            actions.add(ownerFirst ? schedule : owner);
+            JsonNode risks = impactAnalysisService.analyze(PROJECT_ID, plan).path("loadRisk");
+            String messages = risks.toString();
+            assertTrue(messages.contains("总工时 " + oldTotal + "h → " + (oldTotal - chosen.getHours()) + "h"), messages);
+            assertTrue(messages.contains("总工时 " + newTotal + "h → " + (newTotal + chosen.getHours()) + "h"), messages);
+        }
+    }
+
+    @Test
+    void multipleNewTasksReportFinalCombinedLoad() {
+        var all = taskMapper.selectList(new QueryWrapper<Task>().eq("project_id", PROJECT_ID));
+        int before = all.stream().filter(task -> Integer.valueOf(1).equals(task.getOwnerId()))
+                .mapToInt(task -> task.getHours() == null ? 0 : task.getHours()).sum();
+        var plan = objectMapper.createObjectNode();
+        var actions = plan.putArray("actions");
+        for (String name : new String[] {"容量测试甲", "容量测试乙"}) {
+            actions.addObject().put("type", "CREATE_TASK").put("name", name).put("owner_id", 1)
+                    .put("hours", 5).put("week_start", 1).put("week_end", 1);
+        }
+        String messages = impactAnalysisService.analyze(PROJECT_ID, plan).path("loadRisk").toString();
+        assertTrue(messages.contains("总工时 " + before + "h → " + (before + 10) + "h"), messages);
+        assertFalse(messages.contains("总工时 " + before + "h → " + (before + 5) + "h"), messages);
+    }
+
+    @Test
     void planningAgentReadsWeeklyCapacityBeforeProposingAnOverloadedAssignment() throws Exception {
         String admin = token(USER_ADMIN);
         JsonNode chosen = null;

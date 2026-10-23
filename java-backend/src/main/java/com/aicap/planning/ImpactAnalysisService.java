@@ -50,6 +50,8 @@ public class ImpactAnalysisService {
         ArrayNode future = mapper.createArrayNode();
         Map<Integer, int[]> beforeLoads = new HashMap<>();
         Map<Integer, int[]> afterLoads = new HashMap<>();
+        Map<String, LoadProjection> projectedTasks = new HashMap<>();
+        Set<Integer> touchedOwners = new HashSet<>();
         tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId)).forEach(task -> {
             if (task.getOwnerId() != null) {
                 int[] values = weeklyLoad(task);
@@ -70,26 +72,24 @@ public class ImpactAnalysisService {
                 int oldStart = task.getWeekStart(), oldEnd = task.getWeekEnd();
                 int newStart = intValue(action, "start_week", oldStart);
                 int newEnd = intValue(action, "end_week", oldEnd);
-                int oldOwner = task.getOwnerId() == null ? -1 : task.getOwnerId();
-                int newOwner = type.endsWith("OWNER") ? intValue(action, "to_owner_id", oldOwner) : oldOwner;
-                subtract(afterLoads.computeIfAbsent(oldOwner, ignored -> new int[6]), weeklyHours(task));
-                add(afterLoads.computeIfAbsent(newOwner, ignored -> new int[6]), weeklyHours(task, newStart, newEnd));
-                User owner = newOwner < 0 ? null : users.selectById(newOwner);
-                if (owner != null) {
-                    int[] before = beforeLoads.getOrDefault(newOwner, new int[6]);
-                    int[] after = afterLoads.getOrDefault(newOwner, new int[6]);
-                    double weeklyCapacity = projectAccess.weeklyCapacity(projectId, newOwner);
-                    for (int week = 0; week < 6; week++) {
-                        if (after[week] > weeklyCapacity) {
-                            addRisk(load, "high", taskId, owner.getDisplayName() + " W" + (week + 1)
-                                    + "：修改前 " + before[week] + "h，修改后 " + after[week]
-                                    + "h，周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
-                        }
+                if (type.endsWith("OWNER") || type.endsWith("SCHEDULE")) {
+                    LoadProjection current = projectedTasks.getOrDefault(taskId,
+                            new LoadProjection(task.getOwnerId() == null ? -1 : task.getOwnerId(),
+                                    oldStart, oldEnd));
+                    int newOwner = type.endsWith("OWNER") ? intValue(action, "to_owner_id", current.ownerId()) : current.ownerId();
+                    int projectedStart = type.endsWith("SCHEDULE") ? newStart : current.start();
+                    int projectedEnd = type.endsWith("SCHEDULE") ? newEnd : current.end();
+                    if (current.ownerId() > 0) {
+                        subtract(afterLoads.computeIfAbsent(current.ownerId(), ignored -> new int[6]),
+                                weeklyHours(task, current.start(), current.end()));
+                        touchedOwners.add(current.ownerId());
                     }
-                    if (sum(before) != sum(after)) {
-                        addRisk(load, "info", taskId, "成员 " + owner.getDisplayName() + " 总工时 "
-                                + sum(before) + "h → " + sum(after) + "h");
+                    if (newOwner > 0) {
+                        add(afterLoads.computeIfAbsent(newOwner, ignored -> new int[6]),
+                                weeklyHours(task, projectedStart, projectedEnd));
+                        touchedOwners.add(newOwner);
                     }
+                    projectedTasks.put(taskId, new LoadProjection(newOwner, projectedStart, projectedEnd));
                 }
                 if (type.endsWith("SCHEDULE")) {
                     checkDependencies(projectId, task, newStart, newEnd, dependency, future);
@@ -125,7 +125,7 @@ public class ImpactAnalysisService {
             } else if ("CREATE_MILESTONE".equals(type)) {
                 checkMilestoneTasks(projectId, csvValue(action.get("related_task_ids"), ""), intValue(action, "week", -1), delay, sprint, future);
             } else if ("CREATE_TASK".equals(type)) {
-                checkNewTask(projectId, action, load, beforeLoads, afterLoads, sprint);
+                checkNewTask(projectId, action, afterLoads, touchedOwners, sprint);
             } else if ("UPDATE_MILESTONE".equals(type)) {
                 int week = intValue(action, "after_week", -1);
                 String related = csvValue(action.get("after_related_task_ids"), "");
@@ -134,6 +134,24 @@ public class ImpactAnalysisService {
                     addRisk(delay, "medium", current.getId(), current.getId() + " 里程碑周次 W" + current.getWeek() + " → W" + week);
                 }
                 checkMilestoneTasks(projectId, related, week, delay, sprint, future);
+            }
+        }
+        for (int ownerId : touchedOwners) {
+            User owner = users.selectById(ownerId);
+            if (owner == null) continue;
+            int[] before = beforeLoads.getOrDefault(ownerId, new int[6]);
+            int[] after = afterLoads.getOrDefault(ownerId, new int[6]);
+            double weeklyCapacity = projectAccess.weeklyCapacity(projectId, ownerId);
+            for (int week = 0; week < 6; week++) {
+                if (after[week] > weeklyCapacity) {
+                    addRisk(load, "high", String.valueOf(ownerId), owner.getDisplayName() + " W" + (week + 1)
+                            + "：修改前 " + before[week] + "h，修改后 " + after[week]
+                            + "h，周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
+                }
+            }
+            if (sum(before) != sum(after)) {
+                addRisk(load, "info", String.valueOf(ownerId), "成员 " + owner.getDisplayName() + " 总工时 "
+                        + sum(before) + "h → " + sum(after) + "h");
             }
         }
         report.set("loadRisk", load);
@@ -145,9 +163,8 @@ public class ImpactAnalysisService {
     }
 
     /** 新增任务的负载与 Sprint 一致性:把新任务按周摊进负责人的 after 负载,再比周容量。 */
-    private void checkNewTask(String projectId, ObjectNode action, ArrayNode load,
-                              Map<Integer, int[]> beforeLoads, Map<Integer, int[]> afterLoads,
-                              ArrayNode sprint) {
+    private void checkNewTask(String projectId, ObjectNode action,
+                              Map<Integer, int[]> afterLoads, Set<Integer> touchedOwners, ArrayNode sprint) {
         int ownerId = intValue(action, "owner_id", -1);
         int start = intValue(action, "week_start", 1);
         int end = intValue(action, "week_end", start);
@@ -155,28 +172,13 @@ public class ImpactAnalysisService {
         String name = action.path("name").asText("新任务");
         if (start < 1 || end > 6 || start > end) return;
         if (ownerId > 0) {
-            int[] before = beforeLoads.getOrDefault(ownerId, new int[6]);
-            int[] after = afterLoads.computeIfAbsent(ownerId, ignored -> before.clone());
+            int[] after = afterLoads.computeIfAbsent(ownerId, ignored -> new int[6]);
+            touchedOwners.add(ownerId);
             int count = Math.max(1, end - start + 1);
             int base = hours / count;
             int remainder = hours % count;
             for (int week = start; week <= end; week++) {
                 after[week - 1] += base + (week - start < remainder ? 1 : 0);
-            }
-            User owner = users.selectById(ownerId);
-            if (owner != null) {
-                double weeklyCapacity = projectAccess.weeklyCapacity(projectId, ownerId);
-                for (int week = 0; week < 6; week++) {
-                    if (after[week] > weeklyCapacity) {
-                        addRisk(load, "high", name, owner.getDisplayName() + " W" + (week + 1)
-                                + "：新增后 " + after[week] + "h，周容量 "
-                                + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
-                    }
-                }
-                if (sum(before) != sum(after)) {
-                    addRisk(load, "info", name, "成员 " + owner.getDisplayName() + " 总工时 "
-                            + sum(before) + "h → " + sum(after) + "h");
-                }
             }
         }
         Set<Integer> sprints = new HashSet<>();
@@ -287,6 +289,7 @@ public class ImpactAnalysisService {
     }
 
     private int[] weeklyLoad(Task task) { return weeklyHours(task, task.getWeekStart(), task.getWeekEnd()); }
+    private record LoadProjection(int ownerId, int start, int end) {}
     private int[] weeklyHours(Task task, int start, int end) {
         int[] result = new int[6];
         int hours = task.getHours() == null ? 0 : task.getHours();

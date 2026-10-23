@@ -12,7 +12,6 @@ import com.aicap.mapper.MilestoneMapper;
 import com.aicap.mapper.ProjectMemberMapper;
 import com.aicap.entity.ProjectMember;
 import com.aicap.service.ProjectScopedResolver;
-import com.aicap.service.ProjectAccessService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +24,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /** 规划结果的确定性校验与影响分析，模型不能绕过这些规则。 */
@@ -40,7 +38,6 @@ public class PlanningAnalysisValidator {
     private final ImpactAnalysisService impactAnalysis;
     private final MilestoneMapper milestones;
     private final ProjectScopedResolver resolver;
-    private final ProjectAccessService projectAccess;
     private final ProjectMemberMapper projectMembers;
 
     public ObjectNode validate(String text) throws AgentError { throw new AgentError("project_context_missing", "projectId 必填"); }
@@ -66,14 +63,14 @@ public class PlanningAnalysisValidator {
                         action.path("field").asText(""), type, action.path("operation").asText(""), action);
                 action.put("type", type);
                 switch (type) {
-                    case "UPDATE_TASK_OWNER" -> validateOwner(projectId, action, actionKeys, warnings);
+                    case "UPDATE_TASK_OWNER" -> validateOwner(projectId, action, actionKeys);
                     case "UPDATE_TASK_SCHEDULE" -> validateSchedule(projectId, action, actionKeys, warnings, impacts);
                     case "UPDATE_STORY_SPRINT" -> validateStorySprint(projectId, action, actionKeys, warnings, impacts);
                     case "UPDATE_TASK_DEPENDENCY" -> validateDependencyChange(projectId, action, actionKeys, warnings, impacts);
                     case "UPDATE_TASK_PRIORITY" -> validatePriority(projectId, action, actionKeys, impacts);
                     case "CREATE_MILESTONE" -> validateCreateMilestone(projectId, action, actionKeys, warnings, impacts);
                     case "UPDATE_MILESTONE" -> validateUpdateMilestone(projectId, action, actionKeys, warnings, impacts);
-                    case "CREATE_TASK" -> validateCreateTask(projectId, action, actionKeys, warnings, impacts);
+                    case "CREATE_TASK" -> validateCreateTask(projectId, action, actionKeys, impacts);
                     default -> throw new AgentError("unsupported_action", "不支持的规划动作: " + type);
                 }
             }
@@ -98,7 +95,7 @@ public class PlanningAnalysisValidator {
         }
     }
 
-    private void validateOwner(String projectId, ObjectNode action, Set<String> keys, ArrayNode warnings) throws AgentError {
+    private void validateOwner(String projectId, ObjectNode action, Set<String> keys) throws AgentError {
         String taskId = taskId(action);
         if (!keys.add("task:" + taskId + ":owner")) throw new AgentError("invalid_plan", "任务负责人动作不能重复: " + taskId);
         if (!action.path("to_owner_id").isIntegralNumber()) throw new AgentError("invalid_plan", "负责人编号必须是整数");
@@ -112,7 +109,6 @@ public class PlanningAnalysisValidator {
         action.put("from_owner_id", currentOwner);
         action.put("from_owner_name", ownerName(projectId, currentOwner));
         action.put("to_owner_name", target.getDisplayName());
-        analyzeOwnerLoad(projectId, task, target, warnings);
     }
 
     private void validateSchedule(String projectId, ObjectNode action, Set<String> keys, ArrayNode warnings, ArrayNode impacts)
@@ -203,7 +199,7 @@ public class PlanningAnalysisValidator {
      * 故事 Sprint 内"——那是软约束,手工新增也不拦,这里只出 warning。
      */
     private void validateCreateTask(String projectId, ObjectNode action, Set<String> keys,
-                                    ArrayNode warnings, ArrayNode impacts) throws AgentError {
+                                    ArrayNode impacts) throws AgentError {
         String name = action.path("name").asText("").trim();
         if (name.isBlank()) throw new AgentError("invalid_plan", "新增任务必须给出名称");
         if (name.length() > 200) throw new AgentError("invalid_plan", "任务名称不能超过 200 字");
@@ -255,19 +251,7 @@ public class PlanningAnalysisValidator {
         if (!storyRef.isBlank()) action.put("story_ref", storyRef);
         if (!dependsOn.isBlank()) action.put("depends_on", dependsOn);
 
-        // 负载预警:新任务按周摊到负责人现有负载上,与调负责人时同一套容量口径
-        int[] load = weeklyLoad(projectId, ownerId);
-        double weeklyCapacity = projectAccess.weeklyCapacity(projectId, ownerId);
-        int count = Math.max(1, end - start + 1);
-        int base = hours / count;
-        int remainder = hours % count;
-        for (int week = start; week <= end; week++) {
-            int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
-            if (after > weeklyCapacity) {
-                warnings.add("成员负载：" + owner.getDisplayName() + " W" + week + " 新增后 " + after
-                        + "h / 周容量 " + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
-            }
-        }
+        // 容量预警由影响分析在合并所有动作后统一计算，避免组合动作重复计入同一任务。
         impacts.add(mapper.createObjectNode()
                 .put("entity", name)
                 .put("kind", "task_create")
@@ -306,19 +290,6 @@ public class PlanningAnalysisValidator {
         }
     }
 
-    private void analyzeOwnerLoad(String projectId, Task task, User target, ArrayNode warnings) {
-        if (task.getHours() == null || task.getHours() <= 0) return;
-        int[] load = weeklyLoad(projectId, target.getId());
-        int start = Math.max(1, task.getWeekStart()); int end = Math.min(6, task.getWeekEnd());
-        int count = Math.max(1, end - start + 1); int base = task.getHours() / count; int remainder = task.getHours() % count;
-        double weeklyCapacity = projectAccess.weeklyCapacity(projectId, target.getId());
-        for (int week = start; week <= end; week++) {
-            int after = load[week - 1] + base + (week - start < remainder ? 1 : 0);
-            if (after > weeklyCapacity) warnings.add("成员负载：" + target.getDisplayName() + " W" + week
-                    + " 调整后 " + after + "h / 周容量 "
-                    + String.format(Locale.ROOT, "%.1f", weeklyCapacity) + "h");
-        }
-    }
 
     private Task requireTask(String projectId, String id) throws AgentError { Task task = resolver.findTask(projectId, id); if (task == null) throw new AgentError("entity_not_found", "任务不存在: " + id); return task; }
     private String taskId(ObjectNode action) throws AgentError { String id = action.path("task_id").asText(action.path("taskId").asText("")).trim().toUpperCase(); if (id.isBlank()) throw new AgentError("invalid_plan", "Task 编号不能为空"); return id; }
@@ -350,5 +321,4 @@ public class PlanningAnalysisValidator {
             if (items.isArray()) items.forEach(item -> { String message = item.path("message").asText(""); if (!message.isBlank() && !containsText(warnings, message)) warnings.add(message); });
         }
     }
-    private int[] weeklyLoad(String projectId, int ownerId) { int[] result = new int[6]; for (Task task : tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId).eq("owner_id", ownerId))) { int start = Math.max(1, task.getWeekStart()); int end = Math.min(6, task.getWeekEnd()); int count = Math.max(1, end - start + 1); int base = task.getHours() / count; int remainder = task.getHours() % count; for (int week = start; week <= end; week++) result[week - 1] += base + (week - start < remainder ? 1 : 0); } return result; }
 }
