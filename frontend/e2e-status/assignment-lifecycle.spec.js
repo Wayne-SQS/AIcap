@@ -9,11 +9,12 @@ function record(body) {
       candidates: [{ member_id: 7, display_name: '成员甲', rank: 1, matched_requirements: 1, total_requirements: 1, capacity_check: 'unknown', suitability: 'requires_human_review', matches: [{ requirement: input.requirements[0], recorded_level: 3, meets_requirement: true }] }] } }
 }
 const input = { story_ids: ['US13'], target_sprint: null, requirements: [{ dimension: 'tech_stack', name: 'Python', minimum_level: 3 }], client_request_id: 'r1' }
-async function setup(page, role = 'admin', preloaded = false) {
-  const state = { saved: preloaded ? record(input) : null, saves: [], reviews: [], executes: [], loseSave: false, loseExecution: false, invalidExecution: false }
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+async function setup(page, role = 'admin', preloaded = false, sharedState = null) {
+  const state = sharedState || { saved: preloaded ? record(input) : null, intent: null, saves: [], reviews: [], executes: [], loseSave: false, failBeforeSave: false, failClear: false, loseExecution: false, invalidExecution: false }
+  await page.addInitScript(() => { localStorage.setItem('aiguanli_token', 'fixture-token'); localStorage.setItem('aiguanli-current-project', 'P001') })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON(); state.saves.push(body)
+    if (state.failBeforeSave) { await route.fulfill({ status: 503, json: { detail: 'storage unavailable' } }); return }
     state.saved ||= record(body)
     await route.fulfill(state.loseSave ? { status: 503, json: { detail: 'storage_outcome_unknown' } } : { json: state.saved })
   })
@@ -22,9 +23,27 @@ async function setup(page, role = 'admin', preloaded = false) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
+    if (path.endsWith('/projects')) data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: '分配会议' }, { id: 'm2', title: '下一会议' }]
     if (path.endsWith('/stories')) data = [{ id: 'US13', title: '登录' }]
+    if (path.endsWith('/assignment-suggestions/save-intent')) {
+      if (req.method() === 'PUT') {
+        const intent = req.postDataJSON()
+        if (state.intent && JSON.stringify(state.intent) !== JSON.stringify(intent)) {
+          await route.fulfill({ status: 409, json: { detail: '已有未确认的分配保存请求' } }); return
+        }
+        state.intent = intent
+      }
+      if (req.method() === 'DELETE') {
+        if (state.failClear) { await route.fulfill({ status: 503, json: { detail: 'cleanup unavailable' } }); return }
+        if (new URL(req.url()).searchParams.get('client_request_id') !== state.intent?.client_request_id) {
+          await route.fulfill({ status: 409, json: { detail: '待恢复请求已变化' } }); return
+        }
+        state.intent = null
+        data = { cleared: true }
+      } else data = { intent: state.intent }
+    }
     if (path.endsWith('/assignment-suggestions')) data = path.includes('/m1/') && state.saved ? [state.saved] : []
     if (path.endsWith('/a1/review')) {
       const body = req.postDataJSON(); state.reviews.push(body)
@@ -40,8 +59,8 @@ async function setup(page, role = 'admin', preloaded = false) {
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
-  await page.getByRole('button', { name: '打开分配候选' }).click()
+  await page.goto('/#/projects/P001/office?tab=meeting&type=assignment&meetingId=m1')
+  await expect(panel(page)).toBeVisible()
   return state
 }
 async function save(page) {
@@ -61,7 +80,7 @@ test('Assignment save approve execute and reload retains durable audit', async (
   await expect(history(page)).toContainText('批准负责人：#7')
   await history(page).getByRole('button', { name: '执行已批准分配' }).click()
   await expect(history(page)).toContainText('故事日志 #41')
-  await page.reload(); await page.getByRole('button', { name: '打开分配候选' }).click()
+  await page.reload()
   await expect(history(page)).toContainText('故事日志 #41')
   await expect(history(page).getByRole('button', { name: '执行已批准分配' })).toHaveCount(0)
   expect(state.saves).toHaveLength(1); expect(state.reviews).toHaveLength(1); expect(state.executes).toEqual([{}])
@@ -69,8 +88,8 @@ test('Assignment save approve execute and reload retains durable audit', async (
 test('Assignment uncertain save survives reload with exact original request', async ({ page }) => {
   const state = await setup(page); state.loseSave = true
   await save(page)
-  await expect(panel(page)).toContainText('未能确认建议保存结果')
-  await page.reload(); await page.getByRole('button', { name: '打开分配候选' }).click()
+  await expect(panel(page)).toContainText('未能完成建议保存确认')
+  await page.reload()
   state.loseSave = false
   await panel(page).getByRole('button', { name: '重试保存分配建议' }).click()
   await expect(panel(page).getByText('分配建议已保存，请在下方核对保存的快照并审核。', { exact: true })).toBeVisible()
@@ -129,10 +148,60 @@ test('Assignment committed execution with lost response is recovered from histor
   await expect(history(page).getByRole('button', { name: '执行已批准分配' })).toHaveCount(0)
   expect(state.executes).toHaveLength(1)
 })
-test('Assignment unavailable session storage blocks saving before request', async ({ page }) => {
+test('Assignment unavailable intent storage blocks suggestion request', async ({ page }) => {
   const state = await setup(page)
-  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('storage disabled') } })
+  await page.route('**/assignment-suggestions/save-intent', route => route.fulfill({ status: 503, json: { detail: 'intent unavailable' } }), { times: 1 })
   await save(page)
   await expect(panel(page)).toContainText('保存未发出')
   expect(state.saves).toEqual([])
+})
+
+test('Assignment save intent resumes in a different browser with the original request', async ({ page, browser }) => {
+  const state = await setup(page)
+  state.loseSave = true
+  await save(page)
+  await expect(panel(page)).toContainText('未能完成建议保存确认')
+  const otherContext = await browser.newContext()
+  try {
+    const otherPage = await otherContext.newPage()
+    state.loseSave = false
+    await setup(otherPage, 'admin', false, state)
+    await expect(panel(otherPage)).toContainText(`有尚未确认的保存请求（${state.saves[0].client_request_id}）`)
+    await panel(otherPage).getByRole('button', { name: '重试保存分配建议' }).click()
+    await expect(panel(otherPage).getByText('分配建议已保存，请在下方核对保存的快照并审核。', { exact: true })).toBeVisible()
+    expect(state.saves).toHaveLength(2)
+    expect(state.saves[1]).toEqual(state.saves[0])
+    expect(state.intent).toBeNull()
+  } finally { await otherContext.close() }
+})
+
+test('Assignment abandoned pending request no longer blocks a new save', async ({ page }) => {
+  const state = await setup(page)
+  state.failBeforeSave = true
+  await save(page)
+  await expect(panel(page)).toContainText('未能完成建议保存确认')
+  page.once('dialog', dialog => dialog.accept())
+  await panel(page).getByRole('button', { name: '放弃待恢复请求' }).click()
+  await expect(panel(page)).toContainText('已放弃待恢复请求')
+  expect(state.intent).toBeNull()
+  await expect(panel(page).getByRole('button', { name: '保存分配建议', exact: true })).toBeEnabled()
+  state.failBeforeSave = false
+  await panel(page).getByRole('button', { name: '保存分配建议', exact: true }).click()
+  await expect(panel(page).getByText('分配建议已保存，请在下方核对保存的快照并审核。', { exact: true })).toBeVisible()
+  expect(state.saves[1].client_request_id).not.toBe(state.saves[0].client_request_id)
+})
+
+test('Assignment save stays visibly confirmed when intent cleanup fails', async ({ page }) => {
+  const state = await setup(page)
+  state.failClear = true
+  await save(page)
+  await expect(panel(page).getByText('分配建议已保存，请在下方核对保存的快照并审核。', { exact: true })).toBeVisible()
+  await expect(panel(page)).toContainText('待恢复请求清理失败')
+  await expect(history(page)).toContainText('成员甲')
+  state.failClear = false
+  await panel(page).getByRole('button', { name: '重试保存分配建议' }).click()
+  await expect(panel(page).getByRole('button', { name: '重试保存分配建议' })).toHaveCount(0)
+  expect(state.saves).toHaveLength(2)
+  expect(state.saves[1]).toEqual(state.saves[0])
+  expect(state.intent).toBeNull()
 })

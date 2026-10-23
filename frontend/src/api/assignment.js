@@ -50,6 +50,22 @@ export function validateRecommendations(result, meetingId, payload) {
 const base = id => `/api/meetings/${encodeURIComponent(id)}/assignment-suggestions`
 const positive = n => Number.isSafeInteger(n) && n > 0
 const text = s => typeof s === 'string' && !!s.trim()
+export const assignmentSaveIntentApi = {
+  async get(meetingId) {
+    const data = await api(`${base(meetingId)}/save-intent`)
+    if (!data || !Object.hasOwn(data, 'intent')) throw new Error('待恢复请求格式无效')
+    return data.intent
+  },
+  async put(meetingId, payload) {
+    const data = await api(`${base(meetingId)}/save-intent`, { method: 'PUT', body: JSON.stringify(payload) })
+    if (JSON.stringify(data?.intent) !== JSON.stringify(payload)) throw new Error('保存意图确认与原请求不一致')
+    return data.intent
+  },
+  async clear(meetingId, key) {
+    const data = await api(`${base(meetingId)}/save-intent?client_request_id=${encodeURIComponent(key)}`, { method: 'DELETE' })
+    if (data?.cleared !== true) throw new Error('待恢复请求清理未确认')
+  }
+}
 export function validateRecord(record, meetingId) {
   if (!text(record?.id) || record.meeting_id !== meetingId || !positive(record.submitted_by)
       || !text(record.created_at) || !/^[a-z0-9-]{1,80}$/.test(record.client_request_id)

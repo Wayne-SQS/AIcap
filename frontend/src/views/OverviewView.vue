@@ -1,14 +1,17 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
+import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
+import { getProgressForecast } from '@/api/progressForecast'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MAP_SPRINTS } from '@/data/seed'
 
 /* 对齐旧版 renderOverview(L893-907) + renderRealtime(L1181-1186) + 视图结构 L447-485 */
 const router = useRouter()
 const project = useProjectStore()
+const projects = useProjectsStore()
 const session = useSessionStore()
 const go = v => router.push({ name: project.currentProjectId ? `project-${v}` : v, params: project.currentProjectId ? { projectId: project.currentProjectId } : {} })
 
@@ -22,6 +25,21 @@ const realtimePct = computed(() => project.stories.length ? Math.round(doneCount
 /** 待关注/阻塞:取真实 blocked 标记数(此前是写死的 03,与库里的 0 不符) */
 const blockedCount = computed(() => project.tasks.filter(t => t.blocked).length)
 const lastUpdate = computed(() => project.log.length ? project.log[project.log.length - 1].t : '—')
+const forecast = ref(null), forecastError = ref(''), forecastLoading = ref(false)
+let forecastVersion = 0
+async function refreshForecast() {
+  const id = projects.currentProjectId
+  const attempt = ++forecastVersion
+  forecast.value = null; forecastError.value = ''
+  if (!session.online || !id) return
+  forecastLoading.value = true
+  try {
+    const result = await getProgressForecast(id)
+    if (attempt === forecastVersion) forecast.value = result
+  } catch (error) { if (attempt === forecastVersion) forecastError.value = error.message || '进度预测读取失败' }
+  finally { if (attempt === forecastVersion) forecastLoading.value = false }
+}
+watch(() => [projects.currentProjectId, session.online], refreshForecast, { immediate: true })
 
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
@@ -61,6 +79,22 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         <div class="stat"><label>待关注 / 阻塞</label><strong>{{ String(blockedCount).padStart(2, '0') }}</strong><span class="small">个任务需确认</span></div>
         <div class="stat"><label>最近更新</label><strong class="mono" style="font-size:20px">{{ lastUpdate }}</strong><span class="small">本机变更时间</span></div>
       </div>
+    </div>
+
+    <div class="h-sec">进度预测 · 历史任务吞吐</div>
+    <div class="stat" role="region" aria-label="项目进度预测">
+      <button type="button" :disabled="forecastLoading || !session.online" @click="refreshForecast">刷新预测</button>
+      <p v-if="!session.online">连接项目服务后可查看基于真实任务状态历史的预测。</p>
+      <p v-else-if="forecastLoading" role="status">正在读取任务历史…</p>
+      <p v-else-if="forecastError" role="alert">{{ forecastError }}</p>
+      <template v-else-if="forecast">
+        <p v-if="forecast.status === 'forecast'"><strong>预计 {{ forecast.estimated_date }}</strong> 完成当前未完成任务（约 {{ forecast.estimated_remaining_days }} 天）。</p>
+        <p v-else-if="forecast.status === 'insufficient_data'">历史数据不足，暂不提供交付日期。</p>
+        <p v-else-if="forecast.status === 'empty_scope'">当前项目没有任务，暂无预测范围。</p>
+        <p v-else>当前任务已全部完成。</p>
+        <p>未完成 {{ forecast.tasks_open }} 项；已完成 {{ forecast.tasks_done }} 项。{{ forecast.history_start }} 至 {{ forecast.history_end }} 的有效完成记录 {{ forecast.recent_completions }} 项<span v-if="forecast.status === 'forecast'">，约 {{ forecast.completions_per_week }} 项/周</span>。</p>
+        <p class="small">{{ forecast.assumptions }}</p>
+      </template>
     </div>
 
     <div class="h-sec">Sprint 进度 · 4 个发布切片</div>

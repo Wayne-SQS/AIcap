@@ -1,17 +1,14 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storiesApi } from '@/api/stories'
-import { recommendAssignment, assignmentSuggestionsApi } from '@/api/assignment'
+import { recommendAssignment, assignmentSuggestionsApi, assignmentSaveIntentApi } from '@/api/assignment'
 import { useMeetingStore } from '@/stores/meeting'
-import { useSessionStore } from '@/stores/session'
 import AssignmentHistory from './AssignmentHistory.vue'
 
 const props = defineProps({ meetingId: String, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
-const session = useSessionStore()
 const saved = ref(null), pending = ref(null), saving = ref(false), saveError = ref(''), saveNotice = ref('')
-const storageKey = `aicap-assignment-save:${session.currentUser?.id}:${props.meetingId}`
-try { pending.value = JSON.parse(sessionStorage.getItem(storageKey) || 'null') } catch { saveError.value = '无法读取未完成的保存请求，请检查浏览器会话存储。' }
+const intentReady = ref(false)
 const stories = ref([]), storyId = ref(''), sprint = ref(null)
 const requirements = ref([{ dimension: 'tech_stack', name: '', minimum_level: 3 }])
 const result = ref(null), error = ref(''), storyError = ref(''), loading = ref(false), busy = ref(false)
@@ -32,7 +29,17 @@ async function loadStories() {
   } catch { if (mounted) { stories.value = []; storyId.value = ''; storyError.value = '故事目录加载失败，请重试。' } }
   finally { if (mounted) loading.value = false }
 }
-onMounted(loadStories)
+async function loadIntent() {
+  if (!props.meetingId || !meeting.maySubmit) { intentReady.value = true; return }
+  intentReady.value = false
+  try {
+    const intent = await assignmentSaveIntentApi.get(props.meetingId)
+    if (mounted) pending.value = intent
+  } catch (err) {
+    if (mounted) saveError.value = `读取待恢复请求失败：${err.message}。请重试读取后再保存。`
+  } finally { if (mounted) intentReady.value = !saveError.value }
+}
+onMounted(() => { loadStories(); loadIntent() })
 function payload() {
   const rows = requirements.value.map(r => ({ ...r, name: r.name.trim() }))
   if (!storyId.value || !rows.length || rows.some(r => !r.name || !Number.isInteger(r.minimum_level) || r.minimum_level < 1 || r.minimum_level > 5)) throw new Error('请填写故事、技能名称和最低等级。')
@@ -40,22 +47,44 @@ function payload() {
   return { story_ids: [storyId.value], target_sprint: sprint.value, requirements: rows }
 }
 async function save() {
-  if (saving.value || busy.value || !meeting.maySubmit || !props.meetingId) return
+  if (saving.value || busy.value || !intentReady.value || !meeting.maySubmit || !props.meetingId) return
   saveError.value = ''; saveNotice.value = ''
   try {
     if (!pending.value) pending.value = { ...payload(), client_request_id: crypto.randomUUID() }
-    sessionStorage.setItem(storageKey, JSON.stringify(pending.value))
-  } catch (err) { saveError.value = `保存未发出：${err.message}。需要会话存储保留重试请求。`; return }
+  } catch (err) { saveError.value = `保存未发出：${err.message}`; return }
   const request = JSON.parse(JSON.stringify(pending.value))
   saving.value = true
   try {
+    await assignmentSaveIntentApi.put(props.meetingId, request)
+  } catch (err) {
+    if (mounted) saveError.value = `保存未发出：${err.message}。待恢复请求可能已写入服务端，可重试原编号。`
+    if (mounted) saving.value = false
+    return
+  }
+  try {
     const record = await assignmentSuggestionsApi.save(props.meetingId, request)
-    // Remove only this request; a newer mount may already have created another intent.
-    try { if (JSON.parse(sessionStorage.getItem(storageKey) || 'null')?.client_request_id === request.client_request_id) sessionStorage.removeItem(storageKey) } catch { /* original key remains safe to retry */ }
     if (!mounted) return
-    pending.value = null; saved.value = record
+    saved.value = record
     saveNotice.value = '分配建议已保存，请在下方核对保存的快照并审核。'
-  } catch (err) { if (mounted) saveError.value = `未能确认建议保存结果：${err.message}。重试会沿用原条件和请求编号。` }
+    try {
+      await assignmentSaveIntentApi.clear(props.meetingId, request.client_request_id)
+      if (mounted) pending.value = null
+    } catch (err) {
+      if (mounted) saveError.value = `建议已保存，但待恢复请求清理失败：${err.message}。可重试原请求，服务端会返回同一记录。`
+    }
+  } catch (err) { if (mounted) saveError.value = `未能完成建议保存确认：${err.message}。重试会沿用服务端保存的原条件和请求编号。` }
+  finally { if (mounted) saving.value = false }
+}
+async function discardPending() {
+  if (!pending.value || saving.value || !window.confirm('放弃这次待确认的保存请求？如果请求已经由另一浏览器提交，请在下方刷新分配记录核对。')) return
+  const key = pending.value.client_request_id
+  saving.value = true; saveError.value = ''; saveNotice.value = ''
+  try {
+    await assignmentSaveIntentApi.clear(props.meetingId, key)
+    if (!mounted) return
+    pending.value = null
+    saveNotice.value = '已放弃待恢复请求。请刷新分配记录，核对是否已有已保存建议。'
+  } catch (err) { if (mounted) saveError.value = `放弃请求失败：${err.message}` }
   finally { if (mounted) saving.value = false }
 }
 async function submit() {
@@ -99,7 +128,7 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
         </fieldset>
         <button type="button" :disabled="requirements.length >= 20" @click="requirements.push({ dimension: 'tech_stack', name: '', minimum_level: 3 })">添加技能要求</button>
         <button type="submit" class="primary" :disabled="!storyId">{{ busy ? '正在查询…' : '查询分配候选' }}</button>
-        <button type="button" :disabled="!storyId || !!pending" @click="save">保存分配建议</button>
+        <button type="button" :disabled="!storyId || !!pending || !intentReady" @click="save">保存分配建议</button>
       </fieldset>
     </form>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -119,8 +148,10 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
       <p v-if="result.excluded_viewer_ids.length">只读角色不进入候选：#{{ result.excluded_viewer_ids.join('、#') }}</p>
     </div>
     <p v-if="pending">有尚未确认的保存请求（{{ pending.client_request_id }}），重试将使用原故事和技能要求。
-      <button v-if="meeting.maySubmit" type="button" :disabled="saving || busy" @click="save">重试保存分配建议</button>
+      <button v-if="meeting.maySubmit" type="button" :disabled="saving || busy || !intentReady" @click="save">重试保存分配建议</button>
+      <button v-if="meeting.maySubmit" type="button" :disabled="saving || busy || !intentReady" @click="discardPending">放弃待恢复请求</button>
     </p>
+    <button v-if="meeting.maySubmit && !intentReady && !saving" type="button" @click="saveError = ''; loadIntent()">重试读取待恢复请求</button>
     <p v-if="saveError" role="alert">{{ saveError }}</p>
     <p v-if="saveNotice" role="status">{{ saveNotice }}</p>
     <AssignmentHistory :meeting-id="meetingId" :saved="saved" :initial-analysis-id="initialAnalysisId" />

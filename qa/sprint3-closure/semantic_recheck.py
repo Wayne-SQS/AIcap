@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""会议语义固定样例复验（2026-10-22）。
+"""会议语义固定样例复验。
 
 对四类会议各建一场固定样例会议，调用 ai-service 分析端点，记录模型输出。
 不执行审核/执行：结果只作为复验证据，人工审核门禁保持不变。
@@ -9,10 +9,13 @@ import os
 import sys
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone
+from pathlib import Path
 
-JAVA = "http://127.0.0.1:8080"
-AI = "http://127.0.0.1:8090"
-OUT = r"E:\桌面\课程-作业\软件项目管理实验\qa\sprint3-closure\evidence\semantic-recheck-2026-10-22.json"
+JAVA = os.environ.get("AICAP_QA_JAVA_URL", "http://127.0.0.1:8080").rstrip("/")
+AI = os.environ.get("AICAP_QA_AI_URL", "http://127.0.0.1:8090").rstrip("/")
+OUT = Path(os.environ.get("AICAP_QA_SEMANTIC_OUTPUT", str(
+    Path(__file__).resolve().parent / "evidence" / "semantic-recheck-latest.json")))
 
 CASES = [
     {
@@ -86,8 +89,12 @@ def req(method, url, body=None, token=None, timeout=180):
 
 
 def main():
-    results = {"generated_at": "2026-10-22", "note": "模型输出仅作复验证据，未审核、未执行", "cases": []}
-    status, body = req("POST", JAVA + "/api/auth/login", {"username": "李锐铭", "password": "123456"})
+    results = {"generated_at": datetime.now(timezone.utc).isoformat(),
+               "note": "模型输出仅作复验证据，未审核、未执行", "cases": []}
+    status, body = req("POST", JAVA + "/api/auth/login", {
+        "username": os.environ.get("AICAP_QA_USERNAME", "李锐铭"),
+        "password": os.environ.get("AICAP_QA_PASSWORD", "123456"),
+    })
     if status != 200:
         print("login failed", status, body)
         return 1
@@ -129,11 +136,12 @@ def main():
         results["cases"].append(record)
         print("  analysis", astatus, summary)
 
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as f:
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    with OUT.open("w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print("written", OUT)
-    return 0
+    return 0 if len(results["cases"]) == len(CASES) and all(
+        case.get("analysis_status") == 200 for case in results["cases"]) else 1
 
 
 if __name__ == "__main__":
