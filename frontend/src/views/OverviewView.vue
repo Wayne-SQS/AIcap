@@ -5,7 +5,8 @@ import { useProjectStore } from '@/stores/project'
 import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast } from '@/api/progressForecast'
-import { getEfficiencyInsights } from '@/api/efficiencyInsights'
+import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
+import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MAP_SPRINTS } from '@/data/seed'
 
@@ -57,6 +58,39 @@ async function refreshEfficiency() {
   finally { if (attempt === efficiencyVersion) efficiencyLoading.value = false }
 }
 watch(() => [projects.currentProjectId, session.online], refreshEfficiency, { immediate: true })
+const improvementIssue = ref(null)
+const improvementForm = ref({ owner_id: '', hours: '', week_start: '', week_end: '' })
+const improvementSaving = ref(false), improvementError = ref('')
+function improvementFor(issue) {
+  return efficiency.value?.improvements?.find(row => row.source_task_code === issue.task_code && row.issue_kind === issue.kind)
+}
+function beginImprovement(issue) {
+  improvementIssue.value = issue
+  improvementError.value = ''
+  improvementForm.value = { owner_id: String(session.currentUser?.id || ''), hours: '', week_start: '', week_end: '' }
+}
+async function confirmImprovement() {
+  const issue = improvementIssue.value
+  const id = projects.currentProjectId
+  if (!issue || !id || improvementSaving.value) return
+  const payload = Object.fromEntries(Object.entries(improvementForm.value).map(([key, value]) => [key, Number(value)]))
+  if (!Number.isInteger(payload.owner_id) || payload.owner_id < 1 || !Number.isInteger(payload.hours)
+      || payload.hours < 0 || payload.hours > 999 || !Number.isInteger(payload.week_start)
+      || !Number.isInteger(payload.week_end) || payload.week_start < 1 || payload.week_end > 6
+      || payload.week_start > payload.week_end || Object.values(improvementForm.value).some(value => value === '')) {
+    improvementError.value = '请选择负责人并填写有效工时与第 1–6 周排期'
+    return
+  }
+  improvementSaving.value = true; improvementError.value = ''
+  try {
+    await createEfficiencyImprovement(id, issue.task_code, { issue_kind: issue.kind, ...payload })
+    improvementIssue.value = null
+    const reloads = await Promise.allSettled([refreshEfficiency(), project.loadAll(id)])
+    if (reloads.some(result => result.status === 'rejected')) improvementError.value = '改进任务已创建，页面刷新失败，请手动刷新'
+  } catch (error) { improvementError.value = error.message || '改进任务创建失败' }
+  finally { improvementSaving.value = false }
+}
+watch(() => projects.currentProjectId, () => { improvementIssue.value = null; improvementError.value = '' })
 
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
@@ -128,8 +162,26 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           <li v-for="issue in efficiency.issues" :key="issue.task_code">
             <strong>{{ issue.task_code }} · {{ issue.task_name }}</strong>：{{ issue.kind === 'blocked' ? '任务标记为阻塞' : `进行中状态已持续 ${issue.days_in_status} 天` }}。
             {{ issue.suggestion }}
+            <span v-if="improvementFor(issue)">已确认，改进任务 {{ improvementFor(issue).improvement_task_code }}。</span>
+            <button v-else type="button" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginImprovement(issue)">确认并创建改进任务</button>
           </li>
         </ul>
+        <form v-if="improvementIssue" @submit.prevent="confirmImprovement">
+          <p>确认 {{ improvementIssue.task_code }} 的{{ improvementIssue.kind === 'blocked' ? '阻塞' : '状态停滞' }}提示，创建一项管理任务：</p>
+          <label>负责人 <select v-model="improvementForm.owner_id" required><option value="">请选择</option><option v-for="member in project.members" :key="member.id" :value="String(memberUserId(member.id))">{{ member.name }}</option></select></label>
+          <label>工时 <input v-model="improvementForm.hours" type="number" min="0" max="999" required></label>
+          <label>开始周 <input v-model="improvementForm.week_start" type="number" min="1" max="6" required></label>
+          <label>结束周 <input v-model="improvementForm.week_end" type="number" min="1" max="6" required></label>
+          <button type="submit" :disabled="improvementSaving">{{ improvementSaving ? '正在创建…' : '确认创建' }}</button>
+          <button type="button" @click="improvementIssue = null">取消</button>
+        </form>
+        <p v-if="improvementError" role="alert">{{ improvementError }}</p>
+        <div v-if="efficiency.improvements.length">
+          <p>改进任务追踪</p>
+          <ul><li v-for="record in efficiency.improvements" :key="`${record.source_task_code}-${record.issue_kind}`">
+            {{ record.source_task_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>
+          </li></ul>
+        </div>
         <p class="small">{{ efficiency.limitations }}</p>
       </template>
     </div>

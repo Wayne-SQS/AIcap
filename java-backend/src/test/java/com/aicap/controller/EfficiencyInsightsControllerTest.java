@@ -3,6 +3,8 @@ package com.aicap.controller;
 import com.aicap.common.ApiException;
 import com.aicap.common.GlobalExceptionHandler;
 import com.aicap.entity.User;
+import com.aicap.entity.Task;
+import com.aicap.dto.TaskDtos;
 import com.aicap.security.AuthContext;
 import com.aicap.service.ProjectAccessService;
 import org.junit.jupiter.api.AfterEach;
@@ -20,29 +22,37 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 class EfficiencyInsightsControllerTest {
     private JdbcTemplate jdbc;
     private EfficiencyInsightsController controller;
     private ProjectAccessService projects;
+    private TaskPoolController taskController;
     private final LocalDate today = LocalDate.of(2026, 10, 23);
 
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID()
                 + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(ds);
-        jdbc.execute("CREATE TABLE tasks(project_id varchar(20),code varchar(20),name varchar(200),status int,blocked int)");
+        jdbc.execute("CREATE TABLE tasks(project_id varchar(20),code varchar(20),name varchar(200),status int,blocked int,progress int)");
         jdbc.execute("CREATE TABLE task_logs(id bigint auto_increment primary key,project_id varchar(20),"
                 + "task_id varchar(20),new_status int,created_at timestamp)");
+        jdbc.execute("CREATE TABLE efficiency_improvements(project_id varchar(20),source_task_code varchar(20),"
+                + "issue_kind varchar(20),improvement_task_code varchar(20),reviewed_by int,reviewed_at timestamp,"
+                + "primary key(project_id,source_task_code,issue_kind))");
         projects = mock(ProjectAccessService.class);
-        controller = new EfficiencyInsightsController(projects, jdbc);
+        taskController = mock(TaskPoolController.class);
+        controller = new EfficiencyInsightsController(projects, jdbc, taskController);
     }
 
     @AfterEach void clearAuth() { AuthContext.clear(); }
 
     private void task(String project, String code, int status, int blocked) {
-        jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?)", project, code, code, status, blocked);
+        jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?)", project, code, code, status, blocked, 0);
     }
 
     private void log(String project, String code, int status, String date) {
@@ -98,5 +108,38 @@ class EfficiencyInsightsControllerTest {
         doThrow(ApiException.forbidden("无权访问该项目")).when(projects).requireMember("P002");
         assertEquals(403, mvc.perform(get("/api/projects/P002/efficiency-insights"))
                 .andReturn().getResponse().getStatus());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void confirmedIssueCreatesOneTraceableTaskAndReadsItsOutcome() {
+        task("P001", "SOURCE", 0, 1);
+        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
+        var newTask = new Task(); newTask.setId("T99"); newTask.setName("改进任务");
+        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
+            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?)", "P001", "T99", "改进任务", 0, 0, 0);
+            return TaskDtos.toOut(newTask);
+        });
+        var request = new EfficiencyInsightsController.ImprovementRequest("blocked", 7, 2, 5, 5);
+        var first = controller.createImprovement("P001", "SOURCE", request);
+        var again = controller.createImprovement("P001", "SOURCE", request);
+        assertEquals("T99", first.get("improvement_task_code"));
+        assertEquals("T99", again.get("improvement_task_code"));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM efficiency_improvements", Integer.class));
+        jdbc.update("UPDATE tasks SET status=2,progress=100 WHERE project_id='P001' AND code='T99'");
+        var records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
+        assertEquals(2, records.get(0).get("improvement_status"));
+        assertEquals(100, records.get(0).get("improvement_progress"));
+    }
+
+    @Test void staleOrCrossProjectIssueCannotCreateAnImprovement() {
+        task("P001", "SOURCE", 1, 0);
+        log("P001", "SOURCE", 1, "2026-10-20");
+        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
+        var request = new EfficiencyInsightsController.ImprovementRequest("stalled", 7, 2, 5, 5);
+        assertEquals(409, assertThrows(ApiException.class,
+                () -> controller.createImprovement("P001", "SOURCE", request)).getStatus());
+        assertEquals(404, assertThrows(ApiException.class,
+                () -> controller.createImprovement("P002", "SOURCE", request)).getStatus());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM efficiency_improvements", Integer.class));
     }
 }
