@@ -7,6 +7,7 @@ import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
 import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
+import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
 import { MAP_SPRINTS } from '@/data/seed'
@@ -183,6 +184,38 @@ async function confirmQuality() {
 }
 watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
 
+/* US20 快速入口：按需读取现有团队风险，不在总览加载时触发整包画像分析。 */
+const teamRisks = ref(null), riskError = ref(''), riskLoading = ref(false), riskSubmitting = ref(false), riskNotice = ref('')
+let riskVersion = 0
+let riskRange = null
+const localDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+async function refreshRisks() {
+  const id = projects.currentProjectId
+  if (!session.online || !id || riskLoading.value) return
+  const attempt = ++riskVersion
+  const now = new Date()
+  const range = { start: localDate(new Date(now.getFullYear(), now.getMonth(), 1)), end: localDate(now) }
+  riskLoading.value = true; riskError.value = ''; riskNotice.value = ''; teamRisks.value = null; riskRange = null
+  try {
+    const result = await profileAgentApi.analysis(range.start, range.end, id)
+    if (!Array.isArray(result?.team_risks)) throw new Error('风险分析结果格式无效')
+    if (attempt === riskVersion) { teamRisks.value = result.team_risks; riskRange = range }
+  } catch (error) { if (attempt === riskVersion) riskError.value = error.message || '风险分析读取失败' }
+  finally { if (attempt === riskVersion) riskLoading.value = false }
+}
+async function submitRisks() {
+  const id = projects.currentProjectId
+  if (!id || !riskRange || !teamRisks.value?.length || riskSubmitting.value || session.isViewer) return
+  riskSubmitting.value = true; riskError.value = ''; riskNotice.value = ''
+  try {
+    const ids = await profileAgentApi.submitRiskSuggestions(riskRange.start, riskRange.end, '风险预警', id)
+    if (!Array.isArray(ids)) throw new Error('风险建议送审结果格式无效')
+    if (id === projects.currentProjectId) riskNotice.value = `已送审 ${ids.length} 条风险建议，请到提案审核中心处理。`
+  } catch (error) { if (id === projects.currentProjectId) riskError.value = error.message || '风险建议送审失败' }
+  finally { riskSubmitting.value = false }
+}
+watch(() => projects.currentProjectId, () => { ++riskVersion; teamRisks.value = null; riskRange = null; riskError.value = ''; riskNotice.value = ''; riskLoading.value = false })
+
 /* Sprint 分片口径统一到 MAP_SPRINTS(4 片,含 Sprint 4+):与故事地图切片、看板筛选下拉、
    后端 /api/dashboard.by_sprint 的 4 个桶一致。此前这里用的是 SPRINTS(仅 3 片)+ 按 i+1 过滤,
    导致 Sprint 4+ 的故事(sprint>=4)不在任何卡片里 —— 卡片故事数之和 34 ≠ 故事总数 37,
@@ -262,6 +295,25 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         </ul>
         <p class="small">对账只比较任务数量与计划日期；基线不修改任务数据，也不替你做排期。</p>
       </template>
+    </div>
+
+    <div class="h-sec">风险预警 · 团队事实与建议（US20）</div>
+    <div class="stat" role="region" aria-label="项目风险预警">
+      <button type="button" :disabled="riskLoading || !session.online" @click="refreshRisks">{{ riskLoading ? '正在分析…' : '查看本月风险' }}</button>
+      <p v-if="!session.online">连接项目服务后可分析本月团队风险。</p>
+      <p v-if="riskError" role="alert">{{ riskError }}</p>
+      <p v-if="teamRisks && !teamRisks.length">本月未识别到团队风险；仅代表当前数据与规则的结果。</p>
+      <template v-if="teamRisks?.length">
+        <p>识别到 {{ teamRisks.length }} 项团队风险，提交后仍需在提案审核中心确认。</p>
+        <ul><li v-for="(item, index) in teamRisks" :key="`${item.kind}-${index}`">
+          <strong>{{ item.member || item.task_id || item.kind }}</strong>：{{ item.inference }}
+          <span>证据：{{ item.evidence }}；影响：{{ item.impact }}；建议：{{ item.suggested_action }}</span>
+        </li></ul>
+        <button type="button" :disabled="riskLoading || riskSubmitting || session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="submitRisks">{{ riskSubmitting ? '正在送审…' : '将风险建议送审' }}</button>
+        <button type="button" @click="go('review')">打开提案审核中心</button>
+      </template>
+      <p v-if="riskNotice" role="status">{{ riskNotice }}</p>
+      <p class="small">仅根据当前项目数据提出预警；送审不会直接修改任务。</p>
     </div>
 
     <div class="h-sec">效率分析 · 任务阻塞与状态停滞</div>
