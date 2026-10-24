@@ -571,67 +571,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </template>
         </section>
 
-                <section class="qa-sem">
-          <header class="qa-score-head">
-            <div>
-              <h4>语义评审 <span class="qa-llm">LLM</span></h4>
-              <p>判断「读者能否照着做」——静态规则分不出完整与空话，这一层可以</p>
-            </div>
-            <div class="qa-sem-actions">
-              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('readme')">{{ semanticLoading && semanticScope === 'readme' ? '评审中…' : '评 README' }}</button>
-              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('tests')">{{ semanticLoading && semanticScope === 'tests' ? '评审中…' : '评测试代码' }}</button>
-            </div>
-          </header>
-
-          <p v-if="semanticError" class="qa-note err" role="alert">{{ semanticError }}</p>
-
-          <template v-if="semantic && semantic.available">
-            <div class="qa-score-body">
-              <div class="qa-ring" :class="gradeClass(semantic.grade)" :style="{ '--p': (semantic.score || 0) + '%' }">
-                <b>{{ semantic.score }}</b><span>分</span>
-              </div>
-              <div class="qa-score-info">
-                <div class="qa-badges">
-                  <span class="qa-grade" :class="gradeClass(semantic.grade)">{{ semantic.grade }}</span>
-                  <span class="qa-risk">置信 {{ riskLabel(semantic.confidence) }}</span>
-                  <span class="qa-risk">{{ semantic.scope === 'readme' ? 'README' : '测试代码' }}</span>
-                  <span v-if="semantic.cached" class="qa-risk">缓存</span>
-                </div>
-                <p class="qa-verdict">{{ semantic.verdict }}</p>
-                <p class="qa-sample">
-                  可照做：<b>{{ semantic.reader_can_act ? '是' : '否' }}</b>
-                  <span v-if="semantic.unverified_quotes">　未在原文核实的引用：{{ semantic.unverified_quotes }} 条</span>
-                  <span v-if="semantic.input_truncated">　文本已截断</span>
-                </p>
-              </div>
-            </div>
-
-            <ul v-if="semantic.issues && semantic.issues.length" class="qa-issues">
-              <li v-for="(item, i) in semantic.issues" :key="'si' + i" class="qa-issue">
-                <span class="qa-sev" :class="item.verified ? 'sev-medium' : 'sev-low'">{{ item.verified ? '原文' : '未核实' }}</span>
-                <div class="qa-issue-body">
-                  <p class="qa-issue-quote">「{{ item.quote }}」</p>
-                  <p class="qa-issue-line"><em>问题</em>{{ item.problem }}</p>
-                  <p class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
-                </div>
-              </li>
-            </ul>
-
-            <div v-if="semantic.missing && semantic.missing.length" class="qa-missing">
-              <p class="qa-sub">读者需要但文中没有</p>
-              <ul class="qa-chips">
-                <li v-for="(m, i) in semantic.missing" :key="'sm' + i">{{ m }}</li>
-              </ul>
-            </div>
-
-            <p v-if="semantic.strengths && semantic.strengths.length" class="qa-strong">
-              可保留：{{ semantic.strengths[0].why }}
-            </p>
-            <p class="qa-fine">{{ semantic.limitations }}</p>
-          </template>
-        </section>
-
-        <div v-if="quality.evidence" class="evi">
+                        <div v-if="quality.evidence" class="evi">
           <p>真实证据（不推断质量）</p>
           <p v-if="quality.evidence.code_activity">
             代码活动：提交 {{ quality.evidence.code_activity.commits_total }} 次（近 14 天 {{ quality.evidence.code_activity.commits_last_14d }} 次）、
