@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
-import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
+import { getQualityAnalysis, createQualityImprovement, evaluateCodeQuality } from '@/api/qualityAnalysis'
 import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -183,6 +183,24 @@ async function confirmQuality() {
   finally { qualitySaving.value = false }
 }
 watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
+
+/* 代码质量评估：按需触发，首次约数秒（抽样拉取仓库文件），之后走 10 分钟缓存 */
+const codeQuality = ref(null), cqLoading = ref(false), cqError = ref('')
+async function runCodeQuality() {
+  const id = projects.currentProjectId
+  if (!id || cqLoading.value) return
+  cqLoading.value = true; cqError.value = ''
+  try {
+    const result = await evaluateCodeQuality(id)
+    codeQuality.value = result
+    if (result && result.available === false && result.reason) cqError.value = result.reason
+  } catch (error) {
+    cqError.value = error.message || '代码质量评估失败'
+  } finally {
+    cqLoading.value = false
+  }
+}
+watch(() => projects.currentProjectId, () => { codeQuality.value = null; cqError.value = '' })
 
 /* US20 快速入口：按需读取现有团队风险，不在总览加载时触发整包画像分析。 */
 const teamRisks = ref(null), riskError = ref(''), riskLoading = ref(false), riskSubmitting = ref(false), riskNotice = ref('')
@@ -386,6 +404,60 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           <ul><li v-for="record in quality.improvements" :key="`${record.source_code}-${record.finding_kind}`">
             {{ record.source_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>
           </li></ul>
+        </div>
+        <div class="cq">
+          <p>
+            <strong>代码质量评估</strong>
+            <button type="button" :disabled="cqLoading || !session.online" @click="runCodeQuality">
+              {{ cqLoading ? '正在拉取仓库…' : (codeQuality && codeQuality.available ? '重新评估' : '评估代码质量') }}
+            </button>
+          </p>
+          <p v-if="cqError && !codeQuality" role="alert">{{ cqError }}</p>
+          <template v-if="codeQuality && codeQuality.available">
+            <p>
+              得分 <strong>{{ codeQuality.total }}</strong> / 100（{{ codeQuality.grade }}），
+              风险级别 <strong>{{ codeQuality.risk_level }}</strong>；
+              {{ codeQuality.sample_note }}
+            </p>
+            <p>{{ codeQuality.verdict }}</p>
+            <ul>
+              <li v-for="f in (codeQuality.findings || []).slice(0, 4)" :key="f.category">
+                <strong>[{{ f.severity }}] {{ f.title }}</strong>——{{ f.impact }}
+                <br />改法：{{ f.action }}（可回收 {{ f.recoverable_points }} 分）
+              </li>
+            </ul>
+            <p v-if="codeQuality.strengths && codeQuality.strengths.length">
+              达标维度：{{ codeQuality.strengths.join('、') }}。
+            </p>
+            <p class="small">{{ codeQuality.limitations }}</p>
+          </template>
+        </div>
+        <div class="cq">
+          <p>
+            <strong>代码质量评估</strong>
+            <button type="button" :disabled="cqLoading || !session.online" @click="runCodeQuality">
+              {{ cqLoading ? '正在拉取仓库…' : (codeQuality && codeQuality.available ? '重新评估' : '评估代码质量') }}
+            </button>
+          </p>
+          <p v-if="cqError && !codeQuality" role="alert">{{ cqError }}</p>
+          <template v-if="codeQuality && codeQuality.available">
+            <p>
+              得分 <strong>{{ codeQuality.total }}</strong> / 100（{{ codeQuality.grade }}），
+              风险级别 <strong>{{ codeQuality.risk_level }}</strong>；
+              {{ codeQuality.sample_note }}
+            </p>
+            <p>{{ codeQuality.verdict }}</p>
+            <ul>
+              <li v-for="f in (codeQuality.findings || []).slice(0, 4)" :key="f.category">
+                <strong>[{{ f.severity }}] {{ f.title }}</strong>——{{ f.impact }}
+                <br />改法：{{ f.action }}（可回收 {{ f.recoverable_points }} 分）
+              </li>
+            </ul>
+            <p v-if="codeQuality.strengths && codeQuality.strengths.length">
+              达标维度：{{ codeQuality.strengths.join('、') }}。
+            </p>
+            <p class="small">{{ codeQuality.limitations }}</p>
+          </template>
         </div>
         <p class="small">{{ quality.limitations }}</p>
         <div v-if="quality.evidence" class="evi">

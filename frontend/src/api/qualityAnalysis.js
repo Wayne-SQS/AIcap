@@ -25,3 +25,8 @@ export function createQualityImprovement(projectId, sourceCode, payload) {
     method: 'POST', body: JSON.stringify(payload)
   })
 }
+
+/** 代码质量评估（抽样静态分析，首次约数秒，之后 10 分钟内走缓存） */
+export function evaluateCodeQuality(projectId) {
+  return api(`/api/projects/${encodeURIComponent(projectId)}/quality-analysis/code-quality`)
+}
