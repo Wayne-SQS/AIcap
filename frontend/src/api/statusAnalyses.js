@@ -14,6 +14,7 @@ async function execute(meetingId, analysisId, proposalId) {
       || result.execution_status !== 'succeeded'
       || typeof result.story_id !== 'string' || !/^US[0-9]+$/.test(result.story_id)
       || !status(result.previous_status) || !status(result.new_status)
+      || result.previous_status === result.new_status
       || !positiveId(result.story_log_id) || !positiveId(result.executed_by)
       || typeof result.executed_at !== 'string' || !result.executed_at.trim()) {
     // A 2xx response is not proof of a persisted execution. Keep the same proposal

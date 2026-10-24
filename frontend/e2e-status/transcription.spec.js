@@ -4,7 +4,10 @@ function draft() { return { audio: { meeting_id: 'm1', audio_id: 'a1', sha256: '
   words:[{word_id:'S1W1',start_ms:100,end_ms:800,text:'负责人'},{word_id:'S1W2',start_ms:800,end_ms:1800,text:'待确认。'}] }], text: '负责人待确认。' } }
 async function setup(page, role='admin') {
   const requests=[]
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token','fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token','fixture-token')
+    localStorage.setItem('aiguanli-current-project','P001')
+  })
   await page.route('**/meeting-ai/api/**', async route => {
     requests.push(route.request().postDataJSON()); await route.fulfill({ json: draft() })
   })
@@ -14,11 +17,13 @@ async function setup(page, role='admin') {
     if(path.endsWith('/health')) data={status:'ok'}
     if(path.endsWith('/auth/me')) data={id:1,role,display_name:role}
     if(path.endsWith('/agent/config')) data={configured:false}
+    if(path.endsWith('/projects')) data=[{id:'P001',name:'测试项目',can_write:role!=='viewer',can_manage:role==='admin'}]
     if(path.endsWith('/meetings')) data=[{id:'m1',title:'会议',transcript:'原有会议文本'},{id:'m2',title:'其他会议',transcript:'另一段文本'}]
     if(path.endsWith('/meetings/m1/audio')) data=[{id:'a1',meeting_id:'m1',filename:'meeting.mp3',sha256:'a'.repeat(64),byte_size:123,source:'upload'}]
     await route.fulfill({json:data})
   })
-  await page.goto('/#/ai')
+  await page.goto('/#/projects/P001/office?tab=meeting&workflow=audio&meetingId=m1')
+  await expect(region(page)).toBeVisible()
   return requests
 }
 test('transcription displays timed draft and unknown speaker without overwriting original',async({page})=>{

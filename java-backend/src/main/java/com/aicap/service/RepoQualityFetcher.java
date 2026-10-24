@@ -274,7 +274,8 @@ public class RepoQualityFetcher {
                 .header("Authorization", "Bearer " + props.getToken())
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "aicap-quality-analysis")
-                .timeout(Duration.ofSeconds(10))
+                // 与 QualityEvidenceService 同口径：树 260KB 实测 19s，给 60s 余量。
+                .timeout(Duration.ofSeconds(url.contains("/git/trees/") ? 60 : 40))
                 .GET().build();
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() >= 400) throw new IllegalStateException("HTTP " + resp.statusCode());

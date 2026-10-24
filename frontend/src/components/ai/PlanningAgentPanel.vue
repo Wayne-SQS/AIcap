@@ -62,6 +62,11 @@ async function submit() {
   catch (e) { notify('画图分析失败：' + e.message) }
   finally { busy.value = false }
 }
+const scheduleRequest = '请为当前项目未完成任务生成智能排期建议：读取真实任务的优先级与依赖、成员每周容量及现有负载、Sprint 周范围；优先考虑高优先级和阻塞后续工作的任务，最多提出 5 项有依据的排期调整。说明依赖、容量、取舍和不确定性。仅生成待确认草案，不直接执行；数据不足时说明缺口，不猜测。'
+async function suggestSchedule() {
+  request.value = scheduleRequest
+  await submit()
+}
 async function confirm() {
   if (!run.value || busy.value) return
   busy.value = true
@@ -88,6 +93,7 @@ onMounted(() => { if (route.query.runId) refresh(String(route.query.runId)) })
     <form class="planning-agent-form" @submit.prevent="submit">
       <textarea v-model="request" rows="2" maxlength="2000" placeholder="例如：把 T08 改给孙秋实；T08 现在是谁负责？" aria-label="画图智能体请求"></textarea>
       <button class="primary" type="submit" :disabled="busy || !request.trim() || ['queued', 'running', 'executing', 'waiting_confirmation'].includes(run?.status)">{{ busy ? '分析中…' : '生成规划' }}</button>
+      <button type="button" :disabled="busy || ['queued', 'running', 'executing', 'waiting_confirmation'].includes(run?.status)" @click="suggestSchedule">智能排期建议（US18）</button>
     </form>
     <div v-if="run" class="planning-agent-run">
       <p v-if="refreshError" class="planning-error" role="alert">{{ refreshError }} <button type="button" @click="refresh()">重试读取结果</button></p>

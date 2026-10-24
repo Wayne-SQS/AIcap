@@ -382,12 +382,16 @@ public class GitHubActivitySyncService {
 
     // ---------- 通用拉取与写入 ----------
 
-    /** 按页拉取 GET 列表;per_page=100,最多 maxPages 页 */
+    /** 按页拉取 GET 列表;每页 PAGE_SIZE 条,最多 maxPages 页。
+     *  per_page 原为 100:commits 一页 444KB,本机到 GitHub 约 12-16KB/s,实测 27s 以上,
+     *  在 60s 超时内仍会被链路中途掐断(BUFFER_UNDERFLOW)。降到 50(207KB/17s)更稳。 */
+    private static final int PAGE_SIZE = 50;
+
     private List<JsonNode> getPages(String path, Map<String, String> query, String idKey) throws Exception {
         List<JsonNode> out = new ArrayList<>();
         for (int page = 1; page <= props.getMaxPages(); page++) {
             Map<String, String> q = new LinkedHashMap<>(query);
-            q.put("per_page", "100");
+            q.put("per_page", String.valueOf(PAGE_SIZE));
             q.put("page", String.valueOf(page));
             String url = props.getApiBase() + path.replace("{repo}", props.getRepo()) + "?" + qs(q);
             JsonNode body = getJson(url);
@@ -397,14 +401,16 @@ public class GitHubActivitySyncService {
                 if (v.isMissingNode() || v.isNull() || v.asText("").isBlank()) continue;
                 out.add(n);
             }
-            if (body.size() < 100) break;   // 不满一页即结束
+            if (body.size() < PAGE_SIZE) break;   // 不满一页即结束
         }
         return out;
     }
 
     private JsonNode getJson(String url) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
+                // 列表分页 per_page=100:commits 一页实测 300-500KB,本机到 GitHub 约 12KB/s,
+                // 30s 会稳定超时(报「commits 拉取失败: request timed out」),故放到 60s。
+                .timeout(Duration.ofSeconds(60))
                 .header("Authorization", "Bearer " + props.getToken())
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")

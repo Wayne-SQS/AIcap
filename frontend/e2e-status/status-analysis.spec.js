@@ -6,7 +6,10 @@ const review = (status = 'pending', execution_status = 'not_started') => ({ prop
 
 async function setup(page, resolve, role = 'viewer') {
   const requests = []
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('http://127.0.0.1:8080/api/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -19,10 +22,13 @@ async function setup(page, resolve, role = 'viewer') {
     if (path === '/api/health') data = { status: 'ok' }
     if (path === '/api/auth/me') data = { id: 1, role, display_name: '只读用户' }
     if (path === '/api/agent/config') data = { configured: false }
+    if (path === '/api/projects') data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
+    if (path === '/api/stories') data = [{ id: 'US13', title: '登录', description: '账号登录', acceptance: '可登录', priority: 'Must', sprint: 2, activity: 1, owner_id: null }]
     if (path === '/api/meetings') data = [{ id: 'm1', title: '站会一', transcript: '目前会议原文' }, { id: 'm2', title: '站会二', transcript: '第二场' }]
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
+  await page.goto('/#/projects/P001/office?tab=meeting&type=daily&meetingId=m1')
+  await expect(page.getByRole('region', { name: '故事状态提案' })).toBeVisible()
   return requests
 }
 
@@ -55,7 +61,7 @@ test('switches batches and distinguishes pending, rejected and no changes', asyn
   const panel = page.getByRole('region', { name: '故事状态提案' })
   await expect(panel).toContainText('部分已审核')
   await expect(panel).toContainText('待审核 · 未执行')
-  await expect(panel).toContainText('已拒绝 · 不适用')
+  await expect(panel).toContainText('已拒绝 · 无需执行')
   await page.getByLabel('状态分析记录').selectOption('a2')
   await expect(panel).toContainText('无状态变更提案')
   await expect(panel.locator('article')).toHaveCount(0)
@@ -105,7 +111,8 @@ test('late results from previous meeting cannot replace current empty state', as
   await expect(panel.locator('article')).toHaveCount(0)
   await expect(panel).not.toContainText('分析摘要 a1')
   await page.locator('#meeting-select').selectOption('')
-  await expect(panel).toContainText('请先选择已保存会议')
+  await expect(panel).toHaveCount(0)
+  await expect(page.getByText('先创建或选择会议，再开始分析。')).toBeVisible()
 })
 
 for (const role of ['viewer', 'member']) {
@@ -137,11 +144,11 @@ for (const decision of ['approve', 'modify_and_approve', 'reject']) {
     const form = page.getByRole('form', { name: '审核状态提案' })
     await form.getByLabel('审核决定').selectOption(decision)
     if (decision === 'modify_and_approve') {
-      await expect(form.getByLabel('批准后的目标状态').locator('option')).toHaveText(['请选择目标状态', '待办'])
+      await expect(form.getByLabel('批准后的目标状态').locator('option')).toHaveText(['请选择目标状态', '待办', '进行中', '已完成'])
       await form.getByLabel('批准后的目标状态').selectOption('0')
       await form.getByLabel('修改原因（必填）').fill('   ')
       await form.getByRole('button', { name: '提交审核决定' }).click()
-      await expect(form).toContainText('请选择新的目标状态并填写修改原因')
+      await expect(form).toContainText('请加载目录，填写目标故事及批准内容，并说明修改原因')
       expect(posted).toHaveLength(0)
       await form.getByLabel('修改原因（必填）').fill('补充回归')
     }
@@ -150,7 +157,7 @@ for (const decision of ['approve', 'modify_and_approve', 'reject']) {
     await expect(panel).toContainText('审核决定已保存')
     await expect(panel).toContainText('全部已审核')
     await expect(form).toHaveCount(0)
-    expect(posted).toEqual([{ proposal_id: 'p1', decision, reason: decision === 'modify_and_approve' ? '补充回归' : '', ...(decision === 'modify_and_approve' ? { changes: { status: 0 } } : {}) }])
+    expect(posted).toEqual([{ proposal_id: 'p1', decision, reason: decision === 'modify_and_approve' ? '补充回归' : '', ...(decision === 'modify_and_approve' ? { story_id: 'US13', changes: { status: 0 } } : {}) }])
     expect(requests.filter(request => request.method === 'POST')).toHaveLength(1)
     expect(requests.every(request => request.authorization === 'Bearer fixture-token')).toBeTruthy()
     await expect(panel.locator('article')).not.toContainText('执行成功')
@@ -198,7 +205,7 @@ test('conflict refresh loads another reviewer decision instead of overwriting it
   await expect(form).toContainText('未能确认审核结果')
   await form.getByRole('button', { name: '刷新处理状态' }).click()
   await expect(form).toHaveCount(0)
-  await expect(page.getByRole('region', { name: '故事状态提案' })).toContainText('已拒绝 · 不适用')
+  await expect(page.getByRole('region', { name: '故事状态提案' })).toContainText('已拒绝 · 无需执行')
 })
 
 test('late review completion after meeting switch does not refresh or notify the new meeting', async ({ page }) => {
@@ -426,7 +433,8 @@ test('late analysis save does not update another meeting and missing selection d
   await expect(form.getByRole('status')).toHaveCount(0)
   await expect(page.getByRole('region', { name: '故事状态提案' })).toContainText('此会议暂无已保存的状态分析')
   await page.locator('#meeting-select').selectOption('')
-  await expect(form.getByRole('button', { name: '分析每日站会', exact: true })).toBeDisabled()
+  await expect(form).toHaveCount(0)
+  await expect(page.getByText('先创建或选择会议，再开始分析。')).toBeVisible()
 })
 
 test('saved analysis remains confirmed when proposal listing fails', async ({ page }) => {
@@ -469,7 +477,7 @@ test('confirmed execution survives board refresh failure and allows read-only re
     if (path.endsWith('proposal-reviews')) return { review_status: 'reviewed', proposals: [review('approved', executed ? 'succeeded' : 'not_started')] }
     return path.endsWith('proposal-executions') ? (executed ? [executionResult()] : []) : [analysis()]
   }, 'admin')
-  await page.route('http://127.0.0.1:8080/api/stories', async route => {
+  await page.route('**/api/stories**', async route => {
     if (executed && failRead) return route.fulfill({ status: 503, json: { detail: 'unavailable' } })
     await route.fallback()
   })

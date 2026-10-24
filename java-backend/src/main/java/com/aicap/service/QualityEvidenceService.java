@@ -17,6 +17,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * US22 质量分析的真实证据层:把「库内 GitHub 同步活动」「GitHub Actions 运行结论」
@@ -41,10 +44,17 @@ public class QualityEvidenceService {
             .build();
 
     private static final long CACHE_TTL_MS = 5 * 60_000L;
+    /** 失败结果只缓存 20s：网络抖动/超时不该让前端连续 5 分钟都看到「不可用」。 */
+    private static final long FAIL_TTL_MS = 20_000L;
+    /** 复述"最近 N 次运行"的窗口。GitHub 的 workflow_run 单条约 14KB，30 条=430KB/23s，
+     *  已逼近超时；10 条足够判断近期是否稳定，且体积降到 1/3。 */
+    private static final int RUNS_WINDOW = 10;
     private final ConcurrentHashMap<String, CacheEntry> ciCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CacheEntry> repoCache = new ConcurrentHashMap<>();
 
-    private record CacheEntry(Map<String, Object> value, long at) {}
+    private record CacheEntry(Map<String, Object> value, long at, long ttl) {
+        boolean fresh(long now) { return now - at < ttl; }
+    }
 
     public QualityEvidenceService(GitHubProperties props, JdbcTemplate jdbc, ProjectRepositoryResolver resolver) {
         this.props = props;
@@ -52,13 +62,32 @@ public class QualityEvidenceService {
         this.resolver = resolver;
     }
 
-    /** 汇总三类证据。code_activity 查库,ci 与 repository 按项目反查仓库后走 GitHub(带 5 分钟缓存)。 */
+    /** 汇总三类证据。code_activity 查库,ci 与 repository 按项目反查仓库后走 GitHub(带 5 分钟缓存)。
+     *  ci 与 repository 各自要一次 GitHub 往返(树 260KB≈19s、runs 150KB≈13s),串行会把延迟相加,
+     *  这里并行拉取,首次加载从 ~32s 压到两者较慢的那一个。 */
     public Map<String, Object> collect(String projectId) {
         Map<String, Object> evidence = new LinkedHashMap<>();
-        evidence.put("code_activity", codeActivity(projectId));
-        evidence.put("ci", ciEvidence(projectId));
-        evidence.put("repository", repositoryEvidence(projectId));
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<Map<String, Object>> ci = pool.submit(() -> ciEvidence(projectId));
+            Future<Map<String, Object>> repo = pool.submit(() -> repositoryEvidence(projectId));
+            // 按 代码活动 → CI → 仓库 的固定顺序拼装，前端契约不变。
+            evidence.put("code_activity", codeActivity(projectId));
+            evidence.put("ci", await(ci, "无法读取 CI 运行记录"));
+            evidence.put("repository", await(repo, "无法读取仓库文件树"));
+        }
         return evidence;
+    }
+
+    /** 取并发结果;子任务抛异常时降级成 available=false,不让整块证据 500。 */
+    private static Map<String, Object> await(Future<Map<String, Object>> f, String what) {
+        try {
+            return f.get(120, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("available", false);
+            m.put("reason", what + ": " + brief(e));
+            return m;
+        }
     }
 
     // ---------- 1) 库内 GitHub 同步活动(真实落库,不推断质量) ----------
@@ -105,10 +134,15 @@ public class QualityEvidenceService {
     Map<String, Object> ciEvidence(String projectId) {
         long now = System.currentTimeMillis();
         CacheEntry cached = ciCache.get(projectId);
-        if (cached != null && now - cached.at() < CACHE_TTL_MS) return cached.value();
+        if (cached != null && cached.fresh(now)) return cached.value();
         Map<String, Object> m = buildCiEvidence(projectId);
-        ciCache.put(projectId, new CacheEntry(m, now));
+        ciCache.put(projectId, new CacheEntry(m, now, ttlOf(m)));
         return m;
+    }
+
+    /** 可用结果缓存 5 分钟；不可用（超时/限流/未映射）只缓存 20 秒，方便用户点刷新立即重试。 */
+    private static long ttlOf(Map<String, Object> m) {
+        return Boolean.TRUE.equals(m.get("available")) ? CACHE_TTL_MS : FAIL_TTL_MS;
     }
 
     Map<String, Object> buildCiEvidence(String projectId) {
@@ -117,7 +151,7 @@ public class QualityEvidenceService {
         if (repo == null || repo.isBlank()) { m.put("available", false); m.put("reason", "项目未映射 GitHub 仓库"); return m; }
         if (props.getToken().isBlank()) { m.put("available", false); m.put("reason", "未配置 GITHUB_TOKEN"); return m; }
         try {
-            String body = get(props.getApiBase() + "/repos/" + repo + "/actions/runs?per_page=30");
+            String body = get(props.getApiBase() + "/repos/" + repo + "/actions/runs?per_page=" + RUNS_WINDOW);
             Map<String, Object> parsed = parseRuns(body);
             parsed.put("available", true);
             parsed.put("repo", repo);
@@ -132,7 +166,15 @@ public class QualityEvidenceService {
                 if (lastSuccessId < 0 && "success".equals(c)) lastSuccessId = run.path("id").asLong();
                 if (lastFailedId < 0 && "failure".equals(c)) lastFailedId = run.path("id").asLong();
             }
-            Map<String, Object> ft = failedTests(lastFailedId, repo);
+            // 两份 job 日志各 400KB+,串行要 35s+;并行后只等较慢的那一份。
+            final long successRunId = lastSuccessId, failedRunId = lastFailedId;
+            Map<String, Object> ft, cov;
+            try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+                Future<Map<String, Object>> fFt = pool.submit(() -> failedTests(failedRunId, repo));
+                Future<Map<String, Object>> fCov = pool.submit(() -> coverage(successRunId, repo));
+                ft = await(fFt, "无法读取失败测试日志");
+                cov = await(fCov, "无法读取覆盖率");
+            }
             // 附上失败 run 的编号/时间/提交,避免"失败测试 19 项"过期且无来源。
             if (parsed.get("last_failed") instanceof Map<?, ?> lf) {
                 ft.put("run_number", lf.get("run_number"));
@@ -140,7 +182,7 @@ public class QualityEvidenceService {
                 ft.put("head_sha", lf.get("head_sha"));
             }
             parsed.put("failed_tests", ft);
-            parsed.put("coverage", coverage(lastSuccessId, repo));
+            parsed.put("coverage", cov);
             return parsed;
         } catch (Exception e) {
             m.put("available", false);
@@ -206,7 +248,7 @@ public class QualityEvidenceService {
 
     private Map<String, Object> failedTests(long runId, String repo) {
         Map<String, Object> m = new LinkedHashMap<>();
-        if (runId <= 0) { m.put("available", false); m.put("reason", "近 30 次运行无失败"); return m; }
+        if (runId <= 0) { m.put("available", false); m.put("reason", "近 " + RUNS_WINDOW + " 次运行无失败"); return m; }
         try {
             String jobId = backendJobId(runId, repo);
             String log = get(props.getApiBase() + "/repos/" + repo + "/actions/jobs/" + jobId + "/logs");
@@ -254,7 +296,7 @@ public class QualityEvidenceService {
 
     private Map<String, Object> coverage(long runId, String repo) {
         Map<String, Object> m = new LinkedHashMap<>();
-        if (runId <= 0) { m.put("available", false); m.put("reason", "近 30 次运行无成功记录"); return m; }
+        if (runId <= 0) { m.put("available", false); m.put("reason", "近 " + RUNS_WINDOW + " 次运行无成功记录"); return m; }
         try {
             String jobId = backendJobId(runId, repo);
             String log = get(props.getApiBase() + "/repos/" + repo + "/actions/jobs/" + jobId + "/logs");
@@ -327,9 +369,9 @@ public class QualityEvidenceService {
     Map<String, Object> repositoryEvidence(String projectId) {
         long now = System.currentTimeMillis();
         CacheEntry cached = repoCache.get(projectId);
-        if (cached != null && now - cached.at() < CACHE_TTL_MS) return cached.value();
+        if (cached != null && cached.fresh(now)) return cached.value();
         Map<String, Object> m = buildRepositoryEvidence(projectId);
-        repoCache.put(projectId, new CacheEntry(m, now));
+        repoCache.put(projectId, new CacheEntry(m, now, ttlOf(m)));
         return m;
     }
 
@@ -394,7 +436,9 @@ public class QualityEvidenceService {
             HttpRequest.Builder builder = HttpRequest.newBuilder(current)
                     .header("Accept", "application/vnd.github+json")
                     .header("User-Agent", "aicap-quality-analysis")
-                    .timeout(Duration.ofSeconds(12))
+                    // 实测本机到 GitHub 约 12KB/s：树 260KB≈19s、job 日志 460KB≈17s、runs 10 条约 13s。
+                    // 25s 会把「23.5s 的 runs」卡在边缘，故普通请求给 40s、树给 60s。
+                    .timeout(Duration.ofSeconds(url.contains("/git/trees/") ? 60 : 40))
                     .GET();
             // Actions 日志会 302 到 Azure Blob(带 SAS)。跨域重定向不能再带我们的 Bearer,
             // 否则 Blob 直接 401 —— 覆盖率与失败测试名会整段变成「token 无效」。

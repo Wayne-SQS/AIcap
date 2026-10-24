@@ -1,6 +1,7 @@
 package com.aicap.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.util.List;
@@ -16,11 +17,16 @@ public final class RefinementAnalysisDtos {
                           @Pattern(regexp="Must|Should|Could") @JsonProperty(required=true) String priority,
                           @Min(1) @Max(4) @JsonProperty(required=true) Integer sprint,
                           @Min(1) @Max(5) @JsonProperty(required=true) Integer activity) {}
+    public record EffortEstimate(@NotNull @Min(1) @Max(1000) @JsonProperty("min_hours") Integer minHours,
+                                 @NotNull @Min(1) @Max(1000) @JsonProperty("max_hours") Integer maxHours,
+                                 @NotBlank @Size(max=500) String basis,
+                                 @NotBlank @Size(max=500) String uncertainty) {}
     public record Proposal(@NotBlank @Size(max=80) @JsonProperty("proposal_id") String proposalId,
                            @NotNull @Pattern(regexp="create_story") String action,
                            @NotNull @Valid Changes changes,
                            @NotBlank @Size(max=1000) String reason,
-                           @NotNull @Size(min=1,max=10) List<@NotNull @Valid Evidence> evidence) {}
+                           @NotNull @Size(min=1,max=10) List<@NotNull @Valid Evidence> evidence,
+                           @Valid @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("effort_estimate") EffortEstimate effortEstimate) {}
     public record Result(@NotNull @Pattern(regexp="1\\.0") @JsonProperty("schema_version") String schemaVersion,
                          @NotBlank @Size(max=36) @JsonProperty("meeting_id") String meetingId,
                          @NotNull @Pattern(regexp="backlog_refinement") @JsonProperty("meeting_type") String meetingType,

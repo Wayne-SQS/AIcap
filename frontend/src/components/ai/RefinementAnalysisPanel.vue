@@ -35,6 +35,7 @@ const reviewName = value => ({ pending: '待审核', approved: '已批准', reje
 const progressName = value => ({ pending: '待审核', partially_reviewed: '部分已审核', reviewed: '全部已审核', no_changes: '无新故事提案' })[value] ?? '未知状态'
 const executionName = executionStatusName
 const decisionName = value => ({ approve: '接受', modify_and_approve: '修改后接受', reject: '拒绝' })[value] ?? value
+const reasonName = value => ({ approve: '采纳理由', modify_and_approve: '修改原因', reject: '拒绝理由' })[value] ?? '审核意见'
 const execution = proposalId => confirmedExecutions.value.find(item => item.proposal_id === proposalId) || executions.value.find(item => item.proposal_id === proposalId)
 
 async function loadDetails() {
@@ -132,6 +133,12 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
           <summary>分析保存时的会议原文</summary>
           <pre class="source">{{ analysis.transcript }}</pre>
         </details>
+        <details v-if="analysis.story_snapshots?.length">
+          <summary>分析保存时的故事目录（{{ analysis.story_snapshots.length }} 条，用于判断新故事编号与重名）</summary>
+          <ul class="source">
+            <li v-for="item in analysis.story_snapshots" :key="item.id">{{ item.id }} · {{ item.title }}（Sprint {{ item.sprint ?? '未定' }}）</li>
+          </ul>
+        </details>
         <div v-if="analysis.result.open_questions?.length">
           <h4>待确认问题</h4>
           <ul><li v-for="(question, index) in analysis.result.open_questions" :key="index">{{ question }}</li></ul>
@@ -149,13 +156,14 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
             <h4>{{ item.original_proposal.changes.title }}</h4>
             <p class="small">提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(execution(item.proposal_id) ? 'succeeded' : item.execution_status) }}</p>
             <h5>原始提案</h5><RefinementStoryFields :changes="item.original_proposal.changes" />
+            <p v-if="item.original_proposal.effort_estimate" class="preserve">AI 工作量粗估：{{ item.original_proposal.effort_estimate.min_hours }}–{{ item.original_proposal.effort_estimate.max_hours }} 计划工时<br>依据与假设：{{ item.original_proposal.effort_estimate.basis }}<br>不确定性：{{ item.original_proposal.effort_estimate.uncertainty }}<br>仅供审核参考，不是工时承诺；修改故事范围后需重新估算。</p>
             <template v-if="item.approved_proposal"><h5>批准后的故事</h5><RefinementStoryFields :changes="item.approved_proposal.changes" /></template>
             <p class="preserve">提案原因：{{ item.original_proposal.reason }}</p>
             <div class="evidence">
               <b>原文证据</b>
               <blockquote v-for="(evidence, index) in item.original_proposal.evidence" :key="index"><span class="small">{{ evidence.segment_id }}</span> {{ evidence.quote }}</blockquote>
             </div>
-            <p v-if="item.decision" class="preserve">{{ decisionName(item.decision) }} · 审核人 #{{ item.reviewed_by }} · {{ item.reviewed_at }}<br>审核意见：{{ item.reason || '未填写' }}</p>
+            <p v-if="item.decision" class="preserve">{{ decisionName(item.decision) }} · 审核人 #{{ item.reviewed_by }} · {{ item.reviewed_at }}<br>{{ reasonName(item.decision) }}：{{ item.reason || '未填写' }}</p>
             <p v-if="execution(item.proposal_id)" class="preserve">已创建故事：{{ execution(item.proposal_id).story_id }}（初始待办、未分配负责人）<br>执行人 #{{ execution(item.proposal_id).executed_by }} · {{ execution(item.proposal_id).executed_at }} · 故事日志 #{{ execution(item.proposal_id).story_log_id }}</p>
             <RefinementProposalReviewForm
               v-if="meeting.mayReview && item.status === 'pending'"

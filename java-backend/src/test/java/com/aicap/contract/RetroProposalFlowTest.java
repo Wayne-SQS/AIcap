@@ -111,7 +111,7 @@ class RetroProposalFlowTest extends RetroAnalysisStorageTest {
         String items="/api/meetings/m1/action-items";String logs=items+"/"+result.path("action_item_id").asText()+"/logs";
         role("viewer");assertEquals(200,mvc.perform(get(items)).andReturn().getResponse().getStatus());
         assertEquals(1,mapper.readTree(mvc.perform(get(logs)).andReturn().getResponse().getContentAsByteArray()).size());
-        jdbc.update("INSERT INTO meetings VALUES ('m2','另一会议')");
+        jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m2','另一会议')");
         assertEquals(404,mvc.perform(get(logs.replace("/m1/","/m2/"))).andReturn().getResponse().getStatus());
         assertEquals(404,mvc.perform(get(path.replace("/m1/","/m2/")+"/"+id+"/proposal-executions")).andReturn().getResponse().getStatus());
         AuthContext.clear();assertEquals(401,mvc.perform(get(items)).andReturn().getResponse().getStatus());

@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
-import { getQualityAnalysis, createQualityImprovement, evaluateCodeQuality, reviewSemantics } from '@/api/qualityAnalysis'
+import { getQualityAnalysis, createQualityImprovement, createQualityTestSet, evaluateCodeQuality, reviewSemantics } from '@/api/qualityAnalysis'
 import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -129,12 +129,28 @@ async function confirmImprovement() {
 }
 watch(() => projects.currentProjectId, () => { improvementIssue.value = null; improvementError.value = '' })
 
-/* US22 质量分析:只读规范缺口 + 确认后建改进任务,口径与效率分析一致 */
+/* US22 质量分析:三路输入(故事/任务字段、测试集、CI/仓库证据)定位缺口 + 人工确认后建改进任务 */
 const QUALITY_KINDS = {
   story_missing_acceptance: '补齐验收条件',
   story_missing_owner: '认领故事',
-  task_without_story: '补关联故事'
+  task_without_story: '补关联故事',
+  test_missing_boundary_cases: '补齐边界用例',
+  ci_pipeline_failing: '修复 CI 流水线',
+  failed_tests_unresolved: '处理失败测试',
+  coverage_below_threshold: '补充测试覆盖',
+  repository_missing_tests: '补齐测试文件',
+  repository_missing_docs: '补齐文档',
+  repository_missing_ci: '接入 CI 流水线',
+  code_missing_reviews: '建立代码评审',
+  code_quality_dimension_gap: '修复代码质量维度',
+  readme_not_actionable: '提升 README 可操作性',
+  tests_not_effective: '提升测试有效性'
 }
+const QUALITY_SOURCES = [
+  { value: 'test_case', label: '测试用例' },
+  { value: 'test_code', label: '测试代码' },
+  { value: 'test_report', label: '执行报告' }
+]
 const quality = ref(null), qualityError = ref(''), qualityLoading = ref(false)
 let qualityVersion = 0
 async function refreshQuality() {
@@ -145,7 +161,15 @@ async function refreshQuality() {
   qualityLoading.value = true
   try {
     const result = await getQualityAnalysis(id)
-    if (attempt === qualityVersion) quality.value = result
+    if (attempt === qualityVersion) {
+      quality.value = result
+      /* 首屏优先回放最近一次留档结论，避免刷新后代码质量/语义评审卡片空白 */
+      if (result?.code_quality?.available) codeQuality.value = result.code_quality
+      const reviews = result?.semantic_reviews || {}
+      if (!semantic.value && (reviews.readme || reviews.tests)) {
+        semantic.value = reviews.readme || reviews.tests
+      }
+    }
   } catch (error) { if (attempt === qualityVersion) qualityError.value = error.message || '质量分析读取失败' }
   finally { if (attempt === qualityVersion) qualityLoading.value = false }
 }
@@ -160,6 +184,30 @@ function beginQuality(finding) {
   qualityIssue.value = finding
   qualityFormError.value = ''
   qualityForm.value = { owner_id: String(session.currentUser?.id || ''), hours: '', week_start: '', week_end: '' }
+}
+/* 代码质量卡 / 语义评审卡的结论与主缺口列表同源：用同一个 source_code 让「已确认」状态互通 */
+const CODE_GAP = { kind: 'code_quality_dimension_gap' }
+const README_GAP = { kind: 'readme_not_actionable', source_code: 'SEM:readme' }
+const TESTS_GAP = { kind: 'tests_not_effective', source_code: 'SEM:tests' }
+const ACTIONABLE_SEVERITIES = ['blocking', 'high', 'medium']
+const codeGap = finding => ({ ...CODE_GAP, source_code: `CQ:${finding.category}` })
+const semanticGap = () => (semantic.value?.scope === 'tests' ? TESTS_GAP : README_GAP)
+const semanticGapApplies = review =>
+  Boolean(review?.available) && (review.reader_can_act === false || Number(review.score) < 70)
+function beginDimensionGap(finding) {
+  if (!finding?.category) return
+  beginQuality({
+    ...codeGap(finding),
+    location: (codeQuality.value?.repo ? `仓库 ${codeQuality.value.repo}` : '代码质量') + ` · ${finding.title}`
+  })
+}
+function beginSemanticGap() {
+  if (!semanticGapApplies(semantic.value)) return
+  const readme = semantic.value.scope !== 'tests'
+  beginQuality({
+    ...semanticGap(),
+    location: `${readme ? 'README' : '测试代码'} · 语义评审 ${semantic.value.score} 分`
+  })
 }
 async function confirmQuality() {
   const finding = qualityIssue.value
@@ -182,7 +230,36 @@ async function confirmQuality() {
   } catch (error) { qualityFormError.value = error.message || '改进任务创建失败' }
   finally { qualitySaving.value = false }
 }
-watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
+const qualitySetForm = ref({ name: '', source: 'test_case', cases: '' })
+const qualitySetSaving = ref(false), qualitySetError = ref(''), qualitySetNotice = ref('')
+async function submitQualitySet() {
+  const id = projects.currentProjectId
+  if (!id || qualitySetSaving.value) return
+  const name = qualitySetForm.value.name.trim()
+  const cases = qualitySetForm.value.cases.split('\n').map(value => value.trim()).filter(Boolean)
+  if (!name || !cases.length) {
+    qualitySetError.value = '请填写测试集名称，并至少提交 1 条用例（每行一条）'
+    return
+  }
+  qualitySetSaving.value = true; qualitySetError.value = ''; qualitySetNotice.value = ''
+  try {
+    const result = await createQualityTestSet(id, {
+      name, source: qualitySetForm.value.source, cases: cases.map(value => ({ name: value }))
+    })
+    qualitySetNotice.value = `已提交 ${result.code}：覆盖 ${result.covered_boundaries.length} 类边界场景，`
+      + (result.missing_boundaries.length
+        ? `遗漏 ${result.missing_boundaries.length} 类（${result.missing_boundaries.join('、')}）。`
+        : '未发现遗漏的边界类别。')
+    qualitySetForm.value = { name: '', source: 'test_case', cases: '' }
+    await refreshQuality()
+  } catch (error) { qualitySetError.value = error.message || '测试集提交失败' }
+  finally { qualitySetSaving.value = false }
+}
+watch(() => projects.currentProjectId, () => {
+  qualityIssue.value = null; qualityError.value = ''
+  qualitySetError.value = ''; qualitySetNotice.value = ''
+  qualitySetForm.value = { name: '', source: 'test_case', cases: '' }
+})
 
 /* 代码质量评估：按需触发，首次约数秒（抽样拉取仓库文件），之后走 10 分钟缓存 */
 const codeQuality = ref(null), cqLoading = ref(false), cqError = ref('')
@@ -194,6 +271,7 @@ async function runCodeQuality() {
     const result = await evaluateCodeQuality(id)
     codeQuality.value = result
     if (result && result.available === false && result.reason) cqError.value = result.reason
+    else await refreshQuality()
   } catch (error) {
     cqError.value = error.message || '代码质量评估失败'
   } finally {
@@ -212,6 +290,7 @@ async function runSemantic(scope) {
     const result = await reviewSemantics(id, { scope })
     semantic.value = result
     if (result && result.available === false) semanticError.value = result.reason || '语义评审未返回结果'
+    else await refreshQuality()
   } catch (error) {
     semanticError.value = error.message || '语义评审失败'
   } finally {
@@ -403,43 +482,59 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       </template>
     </div>
 
-    <div class="h-sec">质量分析 · 需求与任务规范缺口（US22）</div>
+    <div class="h-sec">质量分析 · 代码/文档/测试质量（US22）</div>
     <div class="qa" role="region" aria-label="项目质量分析">
       <header class="qa-head">
         <div class="qa-head-l">
           <span class="qa-chip">US22</span>
           <div>
             <h3>质量分析</h3>
-            <p>规范缺口定位 · 代码质量诊断</p>
+            <p>规范缺口定位 · 代码/文档/测试质量诊断</p>
           </div>
         </div>
         <button type="button" class="qa-btn" :disabled="qualityLoading || !session.online" @click="refreshQuality">{{ qualityLoading ? '读取中…' : '刷新分析' }}</button>
       </header>
 
       <p v-if="!session.online" class="qa-note">连接项目服务后可查看规范缺口。</p>
-      <p v-else-if="qualityLoading" class="qa-note" role="status">正在读取故事与任务字段…</p>
+      <p v-else-if="qualityLoading" class="qa-note" role="status">正在读取库内字段与 GitHub 证据（CI 运行记录与仓库文件树，首次约 20–40 秒，5 分钟内走缓存）…</p>
       <p v-else-if="qualityError" class="qa-note err" role="alert">{{ qualityError }}</p>
 
       <template v-else-if="quality">
         <div class="qa-metrics">
           <div class="qa-metric"><b>{{ quality.stories_total }}</b><span>故事</span></div>
           <div class="qa-metric"><b>{{ quality.open_tasks }}</b><span>待办 / 进行中任务</span></div>
-          <div class="qa-metric" :class="{ alert: quality.findings.length }"><b>{{ quality.findings.length }}</b><span>规范缺口</span></div>
+          <div class="qa-metric" :class="{ alert: quality.findings.length }"><b>{{ quality.findings.length }}</b><span>质量缺口</span></div>
         </div>
-        <p class="qa-lead">识别到 <b>{{ quality.findings.length }}</b> 项规范缺口。</p>
+        <p class="qa-lead">识别到 <b>{{ quality.findings.length }}</b> 项质量缺口（规范、测试集与代码/文档/测试内容质量）。</p>
 
         <ul v-if="quality.findings.length" class="qa-findings">
           <li v-for="finding in quality.findings" :key="finding.kind + finding.source_code" class="qa-finding">
             <span class="qa-tag" :class="kindClass(finding.kind)">{{ QUALITY_KINDS[finding.kind] }}</span>
             <div class="qa-finding-body">
-              <p class="qa-finding-title"><b>{{ finding.source_code }} · {{ finding.source_name }}</b>：{{ finding.detail }}</p>
+              <p class="qa-finding-title"><span v-if="finding.category">［{{ finding.category }}］</span><b>{{ finding.location || `${finding.source_code} · ${finding.source_name}` }}</b>：{{ finding.detail }}</p>
               <p class="qa-finding-tip">{{ finding.suggestion }}</p>
             </div>
             <span v-if="qualityImprovementFor(finding)" class="qa-done">已确认 · {{ qualityImprovementFor(finding).improvement_task_code }}</span>
             <button v-else type="button" class="qa-btn ghost" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginQuality(finding)">确认并创建改进任务</button>
           </li>
         </ul>
-        <p v-else class="qa-note">暂无基于现有记录可识别的验收条件、认领或追溯缺口。</p>
+        <p v-else class="qa-note">暂无基于现有记录、测试集与证据可识别的质量缺口。</p>
+
+        <form class="qa-form" @submit.prevent="submitQualitySet">
+          <p class="qa-form-title">提交测试集（测试用例/测试代码/执行报告），检查遗漏的边界场景</p>
+          <label>测试集名称 <input v-model="qualitySetForm.name" type="text" maxlength="200" required placeholder="例如：登录接口回归用例"></label>
+          <label>来源 <select v-model="qualitySetForm.source"><option v-for="item in QUALITY_SOURCES" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+          <label>用例（每行一条）<textarea v-model="qualitySetForm.cases" rows="4" required placeholder="空密码登录应被拒绝&#10;连续 5 次失败登录应锁定账号"></textarea></label>
+          <button type="submit" class="qa-btn" :disabled="qualitySetSaving || session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">{{ qualitySetSaving ? '正在分析…' : '提交并分析' }}</button>
+        </form>
+        <p v-if="qualitySetError" class="qa-note err" role="alert">{{ qualitySetError }}</p>
+        <p v-if="qualitySetNotice" class="qa-note" role="status">{{ qualitySetNotice }}</p>
+        <div v-if="quality.test_quality?.sets_total" class="qa-track">
+          <p class="qa-sub">已提交测试集 {{ quality.test_quality.sets_total }} 份、用例 {{ quality.test_quality.cases_total }} 条；边界类别共 {{ quality.test_quality.boundaries_total }} 类。</p>
+          <ul><li v-for="set in quality.test_quality.sets" :key="set.code">
+            {{ set.code }} · {{ set.name }}：{{ set.total }} 条用例，覆盖 {{ set.covered_boundaries.length }}/{{ quality.test_quality.boundaries_total }} 类边界<span v-if="set.missing_boundaries.length">，遗漏 {{ set.missing_boundaries.join('、') }}</span><span v-else>，边界场景完整</span>。
+          </li></ul>
+        </div>
 
         <form v-if="qualityIssue" class="qa-form" @submit.prevent="confirmQuality">
           <p class="qa-form-title">确认 {{ qualityIssue.source_code }} 的「{{ QUALITY_KINDS[qualityIssue.kind] }}」缺口，创建管理任务</p>
@@ -481,6 +576,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
                 <div class="qa-badges">
                   <span class="qa-grade" :class="gradeClass(codeQuality.grade)">{{ codeQuality.grade }}</span>
                   <span class="qa-risk" :class="'risk-' + codeQuality.risk_level">风险 {{ riskLabel(codeQuality.risk_level) }}</span>
+                  <span v-if="codeQuality.persisted" class="qa-risk">已留档</span>
                 </div>
                 <p class="qa-verdict">{{ codeQuality.verdict }}</p>
                 <p class="qa-sample">{{ codeQuality.sample_note }}</p>
@@ -496,12 +592,16 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
             </div>
 
             <ul v-if="codeQuality.findings && codeQuality.findings.length" class="qa-issues">
-              <li v-for="f in codeQuality.findings.slice(0, 4)" :key="f.category" class="qa-issue">
+              <li v-for="f in codeQuality.findings.slice(0, 4)" :key="f.category + '|' + f.title" class="qa-issue">
                 <span class="qa-sev" :class="'sev-' + f.severity">{{ sevLabel(f.severity) }}</span>
                 <div class="qa-issue-body">
                   <p class="qa-issue-title">{{ f.title }}</p>
                   <p class="qa-issue-line"><em>影响</em>{{ f.impact }}</p>
                   <p class="qa-issue-line"><em>改法</em>{{ f.action }}<span class="qa-gain">+{{ f.recoverable_points }} 分</span></p>
+                  <p class="qa-issue-act">
+                    <span v-if="f.category && qualityImprovementFor(codeGap(f))" class="qa-done">已确认 · {{ qualityImprovementFor(codeGap(f)).improvement_task_code }}</span>
+                    <button v-else-if="f.category && ACTIONABLE_SEVERITIES.includes(f.severity)" type="button" class="qa-btn ghost" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginDimensionGap(f)">确认并创建改进任务</button>
+                  </p>
                 </div>
               </li>
             </ul>
@@ -511,7 +611,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </template>
         </section>
 
-                <section class="qa-sem">
+        <section class="qa-sem">
           <header class="qa-score-head">
             <div>
               <h4>语义评审 <span class="qa-llm">LLM</span></h4>
@@ -536,6 +636,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
                   <span class="qa-risk">置信 {{ riskLabel(semantic.confidence) }}</span>
                   <span class="qa-risk">{{ semantic.scope === 'readme' ? 'README' : '测试代码' }}</span>
                   <span v-if="semantic.cached" class="qa-risk">缓存</span>
+                  <span v-if="semantic.persisted" class="qa-risk">已留档</span>
                 </div>
                 <p class="qa-verdict">{{ semantic.verdict }}</p>
                 <p class="qa-sample">
@@ -552,7 +653,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
                 <div class="qa-issue-body">
                   <p class="qa-issue-quote">「{{ item.quote }}」</p>
                   <p class="qa-issue-line"><em>问题</em>{{ item.problem }}</p>
-                  <p class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
+                  <p v-if="item.suggestion" class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
                 </div>
               </li>
             </ul>
@@ -567,11 +668,15 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
             <p v-if="semantic.strengths && semantic.strengths.length" class="qa-strong">
               可保留：{{ semantic.strengths[0].why }}
             </p>
+            <p v-if="semanticGapApplies(semantic)" class="qa-issue-act">
+              <span v-if="qualityImprovementFor(semanticGap())" class="qa-done">已确认 · {{ qualityImprovementFor(semanticGap()).improvement_task_code }}</span>
+              <button v-else type="button" class="qa-btn ghost" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginSemanticGap">确认并创建改进任务</button>
+            </p>
             <p class="qa-fine">{{ semantic.limitations }}</p>
           </template>
         </section>
 
-                        <div v-if="quality.evidence" class="evi">
+        <div v-if="quality.evidence" class="evi">
           <p>真实证据（不推断质量）</p>
           <p v-if="quality.evidence.code_activity">
             代码活动：提交 {{ quality.evidence.code_activity.commits_total }} 次（近 14 天 {{ quality.evidence.code_activity.commits_last_14d }} 次）、
@@ -774,12 +879,5 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
 .qa-missing { padding: 0 12px 12px; }
 .qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
-
-.qa-sem { margin-top: 16px; border: 2px solid var(--ink); background: #fff; }
-.qa-llm { font-family: var(--mono); font-size: 9px; border: 1.5px solid var(--ink); background: var(--lilac); padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
-.qa-sem-actions { display: flex; gap: 8px; }
-.qa-issue-quote { margin: 0 0 4px; font-size: 12px; color: var(--ink); background: var(--paper-2); border-left: 3px solid var(--orange-2); padding: 3px 8px; }
-.qa-missing { padding: 0 12px 12px; }
-.qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
+.qa-issue-act { margin: 6px 0 0; display: flex; }
 </style>

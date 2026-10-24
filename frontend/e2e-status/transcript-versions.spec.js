@@ -7,6 +7,7 @@ async function setup(page, { role='member', loseConfirmation=false }={}) {
   let version=null, target=null; const saves=[], confirms=[]
   await page.addInitScript(()=>{
     localStorage.setItem('aiguanli_token','fixture-token')
+    localStorage.setItem('aiguanli-current-project','P001')
     HTMLMediaElement.prototype.play=function(){ this.dataset.playCount=String(Number(this.dataset.playCount || 0)+1); return Promise.resolve() }
     HTMLMediaElement.prototype.pause=function(){ this.dataset.pauseCount=String(Number(this.dataset.pauseCount || 0)+1) }
   })
@@ -16,6 +17,7 @@ async function setup(page, { role='member', loseConfirmation=false }={}) {
     if(path.endsWith('/health')) data={status:'ok'}
     if(path.endsWith('/auth/me')) data={id:1,role,display_name:role}
     if(path.endsWith('/agent/config')) data={configured:false}
+    if(path.endsWith('/projects')) data=[{id:'P001',name:'测试项目',can_write:role!=='viewer',can_manage:role==='admin'}]
     if(path.endsWith('/meetings')) data=[{id:'m1',title:'来源会议',transcript:'原文保留'},{id:'m2',title:'另一会议',transcript:'另一原文'},...(target?[target]:[])]
     if(path.endsWith('/meetings/m1/audio')) data=[{id:'a1',meeting_id:'m1',filename:'meeting.mp3',sha256:'a'.repeat(64),byte_size:123,source:'upload'}]
     if(path.endsWith('/transcript-versions')) {
@@ -30,7 +32,7 @@ async function setup(page, { role='member', loseConfirmation=false }={}) {
     }
     await route.fulfill({json:data})
   })
-  await page.goto('/#/ai')
+  await page.goto('/#/projects/P001/office?tab=meeting&workflow=audio&meetingId=m1')
   return { saves, confirms }
 }
 async function save(page) {

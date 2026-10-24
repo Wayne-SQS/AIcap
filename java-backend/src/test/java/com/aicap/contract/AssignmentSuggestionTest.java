@@ -40,17 +40,20 @@ class AssignmentSuggestionTest {
         context=new AnnotationConfigApplicationContext(Config.class);
         jdbc=context.getBean(JdbcTemplate.class); mapper=context.getBean(ObjectMapper.class); service=context.getBean(AssignmentSuggestionService.class);
         jdbc.execute("CREATE TABLE users(id int primary key,role varchar(20))");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key)");
-        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(10),title varchar(200),status int,sprint int,owner_id int)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,project_id varchar(20) DEFAULT 'P001')");
+        jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,project_id varchar(20) DEFAULT 'P001',code varchar(20),id varchar(10),title varchar(200),status int,sprint int,owner_id int)");
         jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         try(var in=getClass().getResourceAsStream("/db/assignment-analyses.sql")) {
             var sql=new String(in.readAllBytes(),StandardCharsets.UTF_8).replace(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci","");
             jdbc.execute(sql); jdbc.execute(sql);
         }
         jdbc.update("INSERT INTO users VALUES (1,'admin'),(7,'member'),(8,'viewer')");
-        jdbc.update("INSERT INTO meetings VALUES ('m1'),('m2')");
+        jdbc.update("INSERT INTO meetings(id) VALUES ('m1'),('m2')");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',0,2,NULL)");
-        mvc=MockMvcBuilders.standaloneSetup(new AssignmentSuggestionController(service)).setControllerAdvice(new GlobalExceptionHandler()).build();
+        // 本类测提案流转,权限桩掉;守卫只负责把 meetingId 反解成所属项目
+        var guard = new com.aicap.service.MeetingAccessGuard(jdbc,
+                org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class));
+        mvc=MockMvcBuilders.standaloneSetup(new AssignmentSuggestionController(service, guard)).setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }
     @AfterEach void close() { AuthContext.clear(); jdbc.execute("SHUTDOWN"); context.close(); }
