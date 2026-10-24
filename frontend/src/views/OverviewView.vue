@@ -347,7 +347,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         <div v-if="efficiency.improvements.length">
           <p>改进任务追踪</p>
           <ul><li v-for="record in efficiency.improvements" :key="`${record.source_task_code}-${record.issue_kind}`">
-            {{ record.source_task_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>
+            {{ record.source_task_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>；源瓶颈对账：{{ record.source_outcome === 'signal_cleared' ? '信号已消失（1 → 0）' : record.source_outcome === 'still_present' ? '仍存在（1 → 1）' : '数据不足，暂不判断' }}
           </li></ul>
         </div>
         <p class="small">{{ efficiency.limitations }}</p>

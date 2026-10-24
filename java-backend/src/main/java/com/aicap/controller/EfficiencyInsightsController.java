@@ -86,11 +86,10 @@ public class EfficiencyInsightsController {
     }
 
     private Map<String, Object> improvement(String projectId, String taskCode, String kind) {
-        return jdbc.queryForMap("SELECT i.source_task_code,i.issue_kind,i.improvement_task_code,"
-                + "i.reviewed_by,i.reviewed_at,t.status AS improvement_status,t.progress AS improvement_progress "
-                + "FROM efficiency_improvements i LEFT JOIN tasks t ON t.project_id=i.project_id "
-                + "AND t.code=i.improvement_task_code WHERE i.project_id=? AND i.source_task_code=? "
-                + "AND i.issue_kind=?", projectId, taskCode, kind);
+        @SuppressWarnings("unchecked")
+        var records = (List<Map<String, Object>>) calculate(projectId, LocalDate.now()).get("improvements");
+        return records.stream().filter(row -> taskCode.equals(row.get("source_task_code"))
+                && kind.equals(row.get("issue_kind"))).findFirst().orElseThrow();
     }
 
     Map<String, Object> calculate(String projectId, LocalDate today) {
@@ -103,13 +102,18 @@ public class EfficiencyInsightsController {
                 + "WHERE t.project_id=? AND t.status IN (0,1) ORDER BY t.code",
                 projectId, Timestamp.valueOf(today.plusDays(1).atStartOfDay()), projectId);
         var issues = new ArrayList<Map<String, Object>>();
+        var activeIssueKeys = new java.util.HashSet<String>();
+        var uncertainTaskCodes = new java.util.HashSet<String>();
         int missingHistory = 0;
         for (var row : rows) {
             int status = ((Number) row.get("status")).intValue();
             boolean blocked = ((Number) row.get("blocked")).intValue() != 0;
             Timestamp transition = (Timestamp) row.get("created_at");
             if (transition == null || row.get("new_status") == null
-                    || ((Number) row.get("new_status")).intValue() != status) missingHistory++;
+                    || ((Number) row.get("new_status")).intValue() != status) {
+                missingHistory++;
+                uncertainTaskCodes.add(String.valueOf(row.get("code")));
+            }
             String kind;
             String suggestion;
             if (blocked) {
@@ -133,6 +137,7 @@ public class EfficiencyInsightsController {
                     ? null : ChronoUnit.DAYS.between(transition.toLocalDateTime().toLocalDate(), today));
             issue.put("suggestion", suggestion);
             issues.add(issue);
+            activeIssueKeys.add(row.get("code") + ":" + kind);
         }
         var result = new LinkedHashMap<String, Object>();
         result.put("project_id", projectId);
@@ -142,13 +147,29 @@ public class EfficiencyInsightsController {
         result.put("missing_or_mismatched_history", missingHistory);
         result.put("stalled_threshold_days", 14);
         result.put("issues", issues);
-        result.put("improvements", jdbc.queryForList("SELECT i.source_task_code,i.issue_kind,"
+        var improvements = jdbc.queryForList("SELECT i.source_task_code,i.issue_kind,"
                 + "i.improvement_task_code,i.reviewed_by,i.reviewed_at,"
-                + "t.status AS improvement_status,t.progress AS improvement_progress "
+                + "t.status AS improvement_status,t.progress AS improvement_progress,"
+                + "src.status AS source_status "
                 + "FROM efficiency_improvements i LEFT JOIN tasks t ON t.project_id=i.project_id "
-                + "AND t.code=i.improvement_task_code WHERE i.project_id=? "
-                + "ORDER BY i.reviewed_at DESC,i.source_task_code", projectId));
-        result.put("limitations", "阻塞依据任务标记；停滞仅依据连续14天未变更的进行中状态，不能证明实际工作停滞。建议需人工复核。无有效状态历史时不推断停滞。");
+                + "AND t.code=i.improvement_task_code LEFT JOIN tasks src ON src.project_id=i.project_id "
+                + "AND src.code=i.source_task_code WHERE i.project_id=? "
+                + "ORDER BY i.reviewed_at DESC,i.source_task_code", projectId);
+        for (var record : improvements) {
+            String code = String.valueOf(record.get("source_task_code"));
+            String kind = String.valueOf(record.get("issue_kind"));
+            Number status = (Number) record.remove("source_status");
+            String outcome;
+            if (status == null || ("stalled".equals(kind) && status.intValue() == 1
+                    && uncertainTaskCodes.contains(code))) outcome = "insufficient_data";
+            else if (activeIssueKeys.contains(code + ":" + kind)) outcome = "still_present";
+            else outcome = "signal_cleared";
+            record.put("source_outcome", outcome);
+            record.put("before_issue", 1);
+            record.put("after_issue", "insufficient_data".equals(outcome) ? null : "still_present".equals(outcome) ? 1 : 0);
+        }
+        result.put("improvements", improvements);
+        result.put("limitations", "阻塞依据任务标记；停滞仅依据连续14天未变更的进行中状态。对账只衡量源瓶颈信号是否消失，不证明改进任务导致效率提升；源任务缺失或历史无效时不下结论。");
         return result;
     }
 }

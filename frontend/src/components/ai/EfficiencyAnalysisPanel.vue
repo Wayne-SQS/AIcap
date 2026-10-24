@@ -19,7 +19,14 @@ async function load() {
   error.value = ''
   try { result.value = route.query.analysisId
     ? await efficiencyAnalysisApi.get(projects.currentProjectId, String(route.query.analysisId))
-    : await efficiencyAnalysisApi.latest(projects.currentProjectId) }
+    : await efficiencyAnalysisApi.latest(projects.currentProjectId)
+    const submitted = new Set((result.value.proposals || []).map(item => item.recommendation_id))
+    for (const bottleneck of result.value.bottlenecks || []) {
+      for (const recommendation of bottleneck.recommendations || []) {
+        if (submitted.has(recommendation.id)) recommendation.status = 'submitted'
+      }
+    }
+  }
   catch (e) { error.value = e.message || '效率分析读取失败' }
 }
 async function run() {
@@ -33,17 +40,18 @@ async function submit(recommendation) {
   submitError.value = ''
   try {
     await efficiencyAnalysisApi.submit(projects.currentProjectId, result.value.analysisId, recommendation.id)
-    recommendation.status = 'submitted'
+    await load()
   } catch (e) { submitError.value = e.message || '建议提交失败' }
 }
 async function review(item, decision) {
-  const reason = reviewReason.value[item.proposalId]?.trim()
+  const reason = reviewReason.value[item.id]?.trim()
   if (!reason) { reviewNotice.value = '审核请填写理由'; return }
   try {
-    const res = await api(`/api/projects/${encodeURIComponent(projects.currentProjectId)}/efficiency-analysis/proposals/${encodeURIComponent(item.proposalId)}/review`,
+    const res = await api(`/api/projects/${encodeURIComponent(projects.currentProjectId)}/efficiency-analysis/proposals/${encodeURIComponent(item.id)}/review`,
       { method: 'POST', body: JSON.stringify({ decision, reason }) })
     item.status = res.status
     reviewNotice.value = decision === 'approve' ? '建议已批准，仍未执行任何项目变更。' : '建议已拒绝，未修改项目数据。'
+    await load()
   } catch (e) { reviewNotice.value = e.message || '审核失败' }
 }
 async function planApproved(item) {

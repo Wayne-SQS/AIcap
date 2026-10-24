@@ -129,6 +129,12 @@ class EfficiencyInsightsControllerTest {
         var records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
         assertEquals(2, records.get(0).get("improvement_status"));
         assertEquals(100, records.get(0).get("improvement_progress"));
+        assertEquals("still_present", records.get(0).get("source_outcome"));
+        assertEquals(1, records.get(0).get("after_issue"));
+        jdbc.update("UPDATE tasks SET blocked=0 WHERE project_id='P001' AND code='SOURCE'");
+        records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
+        assertEquals("signal_cleared", records.get(0).get("source_outcome"));
+        assertEquals(0, records.get(0).get("after_issue"));
     }
 
     @Test void staleOrCrossProjectIssueCannotCreateAnImprovement() {
@@ -141,5 +147,19 @@ class EfficiencyInsightsControllerTest {
         assertEquals(404, assertThrows(ApiException.class,
                 () -> controller.createImprovement("P002", "SOURCE", request)).getStatus());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM efficiency_improvements", Integer.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void stalledOutcomeDoesNotClaimSuccessWhenHistoryIsMissing() {
+        task("P001", "SOURCE", 1, 0);
+        task("P001", "FIX", 0, 0);
+        jdbc.update("INSERT INTO efficiency_improvements VALUES ('P001','SOURCE','stalled','FIX',7,CURRENT_TIMESTAMP)");
+        var records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
+        assertEquals("insufficient_data", records.get(0).get("source_outcome"));
+        assertNull(records.get(0).get("after_issue"));
+        jdbc.update("UPDATE tasks SET status=2 WHERE project_id='P001' AND code='SOURCE'");
+        records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
+        assertEquals("signal_cleared", records.get(0).get("source_outcome"));
+        assertEquals(0, records.get(0).get("after_issue"));
     }
 }

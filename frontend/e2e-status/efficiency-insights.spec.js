@@ -52,7 +52,7 @@ test('human confirmation creates a linked improvement task and tracks completion
       open_tasks: 1, missing_or_mismatched_history: 0, stalled_threshold_days: 14,
       limitations: '需人工复核。',
       issues: [{ task_code: 'T1', task_name: '接口联调', kind: 'blocked', days_in_status: 2, suggestion: '确认阻塞原因。' }],
-      improvements: created ? [{ source_task_code: 'T1', issue_kind: 'blocked', improvement_task_code: 'T99', improvement_status: finished ? 2 : 0, improvement_progress: finished ? 100 : 0 }] : []
+      improvements: created ? [{ source_task_code: 'T1', issue_kind: 'blocked', improvement_task_code: 'T99', improvement_status: finished ? 2 : 0, improvement_progress: finished ? 100 : 0, source_outcome: finished ? 'signal_cleared' : 'still_present', before_issue: 1, after_issue: finished ? 0 : 1 }] : []
     }
     if (path.endsWith('/T1/improvements')) {
       posted = route.request().postDataJSON()
@@ -73,4 +73,5 @@ test('human confirmation creates a linked improvement task and tracks completion
   finished = true
   await card.getByRole('button', { name: '刷新分析' }).click()
   await expect(card).toContainText('T1 → T99：已完成')
+  await expect(card).toContainText('源瓶颈对账：信号已消失（1 → 0）')
 })
