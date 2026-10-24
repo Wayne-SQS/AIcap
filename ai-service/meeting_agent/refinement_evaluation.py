@@ -22,18 +22,24 @@ def assess(case, payload):
     failures = []
     if len(result.proposed_actions) != len(case['expected_actions']):
         failures.append('unexpected_action_count')
-    if len(result.proposed_actions) == len(case['expected_actions']) == 1:
-        action, expected = result.proposed_actions[0], case['expected_actions'][0]
-        actual = action.changes.model_dump()
-        for field, value in expected['changes'].items():
-            # Text paraphrases need manual review; null and business selections are exact.
-            if value is None or field in ('priority', 'sprint', 'activity'):
-                if actual[field] != value:
-                    failures.append('unexpected_' + field)
-            elif actual[field] is None:
-                failures.append('missing_' + field)
-        if not any(e.segment_id in expected['supporting_segments'] for e in action.evidence):
-            failures.append('missing_supporting_evidence')
+    if len(result.proposed_actions) == len(case['expected_actions']):
+        for action, expected in zip(result.proposed_actions, case['expected_actions']):
+            if len(case['expected_actions']) > 1 and action.changes.title != expected['changes']['title']:
+                failures.append('unexpected_title')
+            actual = action.changes.model_dump()
+            for field, value in expected['changes'].items():
+                # Text paraphrases need manual review; null and business selections are exact.
+                if value is None or field in ('priority', 'sprint', 'activity'):
+                    if actual[field] != value:
+                        failures.append('unexpected_' + field)
+                elif actual[field] is None:
+                    failures.append('missing_' + field)
+            if not any(e.segment_id in expected['supporting_segments'] for e in action.evidence):
+                failures.append('missing_supporting_evidence')
+            if expected.get('estimate') == 'required' and action.effort_estimate is None:
+                failures.append('missing_effort_estimate')
+            if expected.get('estimate') == 'absent' and action.effort_estimate is not None:
+                failures.append('unexpected_effort_estimate')
     if case['needs_question'] and not result.open_questions:
         failures.append('missing_follow_up_question')
     return failures, result.model_dump()
@@ -52,18 +58,21 @@ def validate_cases(cases):
         if not isinstance(case.get('rubric'), str) or not case['rubric'].strip() or type(case.get('needs_question')) is not bool:
             raise ValueError('invalid_rubric')
         expected = case['expected_actions']
-        if not isinstance(expected, list) or len(expected) > 1:
+        if not isinstance(expected, list) or len(expected) > 20:
             raise ValueError('invalid_action_oracle')
         if expected:
-            action = expected[0]
             segments = {s.segment_id: s.text for s in context.transcript_segments}
-            support = action['supporting_segments']
-            if not isinstance(support, list) or not support or any(s not in segments for s in support):
-                raise ValueError('invalid_evidence_oracle')
+            for action in expected:
+                support = action['supporting_segments']
+                if not isinstance(support, list) or not support or any(s not in segments for s in support):
+                    raise ValueError('invalid_evidence_oracle')
+                if action.get('estimate') not in (None, 'required', 'absent'):
+                    raise ValueError('invalid_estimate_oracle')
             validate_refinement_result(context, dict(meeting_id=case['id'], summary='离线预期校验',
-                open_questions=[], proposed_actions=[dict(proposal_id='oracle', action='create_story',
+                open_questions=[], proposed_actions=[dict(proposal_id=f'oracle-{index}', action='create_story',
                     reason='离线预期校验', changes=action['changes'],
-                    evidence=[dict(segment_id=s, quote=segments[s]) for s in support])]))
+                    evidence=[dict(segment_id=s, quote=segments[s]) for s in action['supporting_segments']])
+                    for index, action in enumerate(expected)]))
 
 
 def main():

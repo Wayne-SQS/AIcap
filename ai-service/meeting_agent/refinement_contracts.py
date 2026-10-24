@@ -1,6 +1,6 @@
 """Refinement new-story candidates, never executable without human completion/review."""
 from typing import Annotated, Literal
-from pydantic import Field
+from pydantic import Field, model_validator
 from .contracts import (Contract, DailyScrumInput, Evidence, Identifier, NonBlank, ResultContractError,
                         require_quoted_evidence, require_segment_coverage)
 from .story_tool import PlanningStorySnapshot
@@ -20,12 +20,26 @@ class NewStoryChanges(Contract):
     activity: Annotated[int, Field(ge=1, le=5)] | None
 
 
+class EffortEstimate(Contract):
+    min_hours: Annotated[int, Field(ge=1, le=1000)]
+    max_hours: Annotated[int, Field(ge=1, le=1000)]
+    basis: Annotated[NonBlank, Field(max_length=500)]
+    uncertainty: Annotated[NonBlank, Field(max_length=500)]
+
+    @model_validator(mode='after')
+    def ordered_range(self):
+        if self.max_hours < self.min_hours:
+            raise ValueError('estimate_range_reversed')
+        return self
+
+
 class NewStoryProposal(Contract):
     proposal_id: Identifier
     action: Literal['create_story']
     changes: NewStoryChanges
     reason: Annotated[NonBlank, Field(max_length=1000)]
     evidence: Annotated[list[Evidence], Field(min_length=1, max_length=10)]
+    effort_estimate: EffortEstimate | None = None
 
 
 class BacklogRefinementOutput(Contract):
