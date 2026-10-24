@@ -105,9 +105,9 @@ class RefinementAnalysisStorageTest {
         var guard = new com.aicap.service.MeetingAccessGuard(jdbc, context.getBean(com.aicap.service.ProjectAccessService.class));
         mvc = MockMvcBuilders.standaloneSetup(new RefinementAnalysisController(service, guard),
                 new com.aicap.controller.RefinementProposalReviewController(context.getBean(com.aicap.service.RefinementProposalReviewService.class),
-                        context.getBean(com.aicap.service.ProjectAccessService.class)),
+                        guard),
                 new com.aicap.controller.RefinementProposalExecutionController(context.getBean(com.aicap.service.RefinementProposalExecutionService.class),
-                        context.getBean(com.aicap.service.ProjectAccessService.class)))
+                        guard))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }
@@ -163,6 +163,17 @@ class RefinementAnalysisStorageTest {
         assertEquals(403, write.getStatus(), write.getContentAsString());
         assertEquals(0, count());
         assertEquals(403, mvc.perform(get("/api/meetings/m2/refinement-analyses")).andReturn().getResponse().getStatus());
+        String reviews = "/api/meetings/m2/refinement-analyses/unknown/proposal-reviews";
+        String executions = "/api/meetings/m2/refinement-analyses/unknown/proposal-executions";
+        assertEquals(403, mvc.perform(get(reviews).param("projectId", "P001")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(post(reviews).param("projectId", "P001")
+                .contentType("application/json").content("{}")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(get(executions).param("projectId", "P001")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(post(executions).param("projectId", "P001")
+                .contentType("application/json").content("{}")).andReturn().getResponse().getStatus());
+        // Even a user with access to both projects cannot redirect this meeting to the other project.
+        assertEquals(403, mvc.perform(get("/api/meetings/m1/refinement-analyses/unknown/proposal-reviews")
+                .param("projectId", "P002")).andReturn().getResponse().getStatus());
         // 会议不存在时是 404,不能与"存在但无权"混同
         assertEquals(404, mvc.perform(get("/api/meetings/nope/refinement-analyses")).andReturn().getResponse().getStatus());
     }

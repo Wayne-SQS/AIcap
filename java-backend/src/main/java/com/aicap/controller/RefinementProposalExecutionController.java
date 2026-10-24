@@ -2,6 +2,7 @@ package com.aicap.controller;
 
 import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
+import com.aicap.service.MeetingAccessGuard;
 import com.aicap.service.RefinementProposalExecutionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/meetings/{meetingId}/refinement-analyses/{analysisId}/proposal-executions")
 public class RefinementProposalExecutionController {
     private final RefinementProposalExecutionService service;
-    private final ProjectAccessService projectAccess;
+    private final MeetingAccessGuard guard;
 
     /**
      * 执行(建故事)必须带项目:故事编号是"项目内唯一",落到别的项目上就是写脏数据。
@@ -21,7 +22,8 @@ public class RefinementProposalExecutionController {
     @PostMapping
     public JsonNode execute(@PathVariable String meetingId, @PathVariable String analysisId,
                             @RequestParam String projectId, @RequestBody JsonNode body) {
-        projectAccess.requireWriter(projectId);
+        guard.requireSameProject(meetingId, projectId);
+        guard.requireWriter(meetingId);
         return service.execute(ProjectAccessService.normalize(projectId), meetingId, analysisId, body,
                 Roles.reviewer().getId());
     }
@@ -29,7 +31,8 @@ public class RefinementProposalExecutionController {
     @GetMapping
     public JsonNode list(@PathVariable String meetingId, @PathVariable String analysisId,
                          @RequestParam String projectId) {
-        projectAccess.requireMember(projectId);
+        guard.requireSameProject(meetingId, projectId);
+        guard.requireMember(meetingId);
         return service.list(meetingId, analysisId);
     }
 }

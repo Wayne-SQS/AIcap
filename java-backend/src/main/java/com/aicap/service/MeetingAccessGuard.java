@@ -34,4 +34,11 @@ public class MeetingAccessGuard {
     public void requireWriter(String meetingId) {
         projectAccess.requireWriter(projectIdOf(meetingId));
     }
+
+    /** A caller-supplied projectId must never redirect a meeting proposal to another project. */
+    public void requireSameProject(String meetingId, String requestedProjectId) {
+        if (!projectIdOf(meetingId).equals(ProjectAccessService.normalize(requestedProjectId))) {
+            throw ApiException.forbidden("会议不属于指定项目");
+        }
+    }
 }

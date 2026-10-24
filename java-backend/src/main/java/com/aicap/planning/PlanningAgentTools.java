@@ -11,6 +11,8 @@ import com.aicap.mapper.TaskMapper;
 import com.aicap.mapper.UserMapper;
 import com.aicap.mapper.ProjectMemberMapper;
 import com.aicap.entity.ProjectMember;
+import com.aicap.entity.Project;
+import com.aicap.mapper.ProjectMapper;
 import com.aicap.service.ProjectScopedResolver;
 import com.aicap.service.ProjectCapacityPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -32,6 +34,7 @@ public class PlanningAgentTools {
     private final StoryMapper stories;
     private final UserMapper users;
     private final ProjectMemberMapper projectMembers;
+    private final ProjectMapper projects;
     private final MilestoneMapper milestones;
     private final ObjectMapper mapper;
     private final ProjectScopedResolver resolver;
@@ -96,8 +99,9 @@ public class PlanningAgentTools {
         node.put("task_count", tasks.selectCount(new QueryWrapper<Task>().eq("project_id", projectId)));
         node.put("story_count", stories.selectCount(new QueryWrapper<Story>().eq("project_id", projectId)));
         node.put("member_count", members(projectId).path("items").size());
-        node.put("sprint_count", 4);
-        node.put("week_count", 6);
+        int weeks = projectWeeks(projectId);
+        node.put("sprint_count", (weeks + 1) / 2);
+        node.put("week_count", weeks);
         node.put("data_source", "database");
         return node;
     }
@@ -257,11 +261,12 @@ public class PlanningAgentTools {
 
     private ObjectNode sprints(String projectId) {
         ArrayNode items = mapper.createArrayNode();
-        for (int sprint = 1; sprint <= 4; sprint++) {
+        int weeks = projectWeeks(projectId);
+        for (int sprint = 1; sprint <= (weeks + 1) / 2; sprint++) {
             ObjectNode node = mapper.createObjectNode();
             node.put("sprint", sprint);
             node.put("week_start", (sprint - 1) * 2 + 1);
-            node.put("week_end", sprint * 2);
+            node.put("week_end", Math.min(sprint * 2, weeks));
             items.add(node);
         }
         ObjectNode result = mapper.createObjectNode();
@@ -275,10 +280,10 @@ public class PlanningAgentTools {
         ProjectMember link = projectMembers.selectOne(new QueryWrapper<ProjectMember>()
                 .eq("project_id", projectId).eq("user_id", ownerId).last("LIMIT 1"));
         if (link == null) return missing("member", String.valueOf(ownerId));
-        int[] weekly = new int[6];
+        int[] weekly = new int[projectWeeks(projectId)];
         for (Task task : tasks.selectList(new QueryWrapper<Task>().eq("project_id", projectId).eq("owner_id", ownerId))) {
             int start = Math.max(1, task.getWeekStart());
-            int end = Math.min(6, task.getWeekEnd());
+            int end = Math.min(weekly.length, task.getWeekEnd());
             int count = Math.max(1, end - start + 1);
             int hours = task.getHours() == null ? 0 : task.getHours();
             int base = hours / count;
@@ -302,6 +307,11 @@ public class PlanningAgentTools {
         node.put("entity", entity);
         node.put("requested_id", requestedId);
         return node;
+    }
+
+    private int projectWeeks(String projectId) {
+        Project project = projects.selectById(projectId);
+        return ProjectCapacityPolicy.projectWeeks(project);
     }
 
     private ObjectNode empty() {
