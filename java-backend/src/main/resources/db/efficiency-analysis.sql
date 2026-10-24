@@ -24,3 +24,14 @@ CREATE TABLE IF NOT EXISTS efficiency_proposals (
  UNIQUE KEY uq_efficiency_recommendation (project_id,analysis_id,recommendation_id),
  KEY ix_efficiency_proposals_project (project_id,status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS efficiency_proposal_checks (
+ id varchar(36) NOT NULL PRIMARY KEY,
+ project_id varchar(20) NOT NULL,
+ proposal_id varchar(36) NOT NULL,
+ metric_json longtext NOT NULL,
+ measured_value decimal(12,4) DEFAULT NULL,
+ outcome varchar(30) NOT NULL,
+ checked_by int NOT NULL,
+ checked_at datetime NOT NULL,
+ KEY ix_efficiency_checks_proposal (project_id,proposal_id,checked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

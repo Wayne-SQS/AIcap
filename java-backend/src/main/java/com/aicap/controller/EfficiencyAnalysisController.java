@@ -72,6 +72,12 @@ public class EfficiencyAnalysisController {
         if (request.length() > 2000) throw ApiException.unprocessable("建议内容超过规划输入限制");
         return planning.create(scoped,request,Roles.any());
     }
+    @PostMapping("/proposals/{id}/checks")
+    public Map<String,Object> check(@PathVariable String projectId,@PathVariable String id) {
+        String scoped=scope(projectId,true);
+        access.requireOwner(scoped);
+        return service.recordReviewCheck(scoped,id,Roles.writer().getId());
+    }
     private static String compact(JsonNode node, int max) {
         String value = node.asText("");
         return value.length() <= max ? value : value.substring(0, max) + "…";

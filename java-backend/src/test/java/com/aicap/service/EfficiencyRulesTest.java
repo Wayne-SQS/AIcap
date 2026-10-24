@@ -64,4 +64,45 @@ class EfficiencyRulesTest {
         assertEquals("PROCESS_DELAY",issue.get("type"));
         assertTrue(issue.get("possibleCauses").toString().contains("不能证明"));
     }
+    @Test void missingActualHoursNeverInventsVariance() {
+        assertEquals(false, EfficiencyRules.actualVariance(10, null).get("available"));
+    }
+    @Test void actualHoursVarianceUsesRealValues() {
+        var result = EfficiencyRules.actualVariance(40, 48);
+        assertEquals(true, result.get("available"));
+        assertEquals(8, result.get("varianceHours"));
+        assertEquals(.2, (Double) result.get("varianceRate"), .0001);
+    }
+    @Test void blockedTaskQuantifiesEntireOpenDependencyChain() {
+        var out=run(List.of(
+            new EfficiencyRules.TaskFact("T01","API","US01",1,1,40,8,true,List.of(),null,null,0),
+            new EfficiencyRules.TaskFact("T02","UI","US01",2,0,0,5,false,List.of("T01"),null,null,0),
+            new EfficiencyRules.TaskFact("T03","Test","US01",2,0,0,3,false,List.of("T02"),null,null,0)),List.of(),List.of());
+        var issue=out.stream().filter(x -> x.get("type").equals("TASK_BLOCKING")).findFirst().orElseThrow();
+        assertEquals(2, issue.get("impactChainLength"));
+        assertEquals(List.of("T01","T02","T03"), issue.get("affectedTaskCodes"));
+        assertTrue(issue.containsKey("reasoning"));
+        assertEquals(true, issue.get("requiresHumanConfirmation"));
+    }
+    @Test void reviewWaitUsesRecordedCreationAndReviewTimes() {
+        var process=List.of(new EfficiencyRules.ProcessFact("P1","efficiency_proposal","approved",
+            java.time.LocalDateTime.parse("2026-10-01T10:00:00"),java.time.LocalDateTime.parse("2026-10-03T22:00:00")));
+        var issue=EfficiencyRules.analyze(List.of(),List.of(),List.of(),process,TODAY).getFirst();
+        assertEquals("PROCESS_REVIEW_CYCLE",issue.get("type"));
+        var impact=(Map<?,?>)issue.get("quantifiedImpact");
+        assertEquals(2.5,(Double)impact.get("averageWaitDays"),.0001);
+    }
+    @Test void allInsightsExposeAcceptanceContractFields() {
+        var issue=run(List.of(new EfficiencyRules.TaskFact("T01","blocked","US01",1,0,0,8,true,List.of(),null,null,0)),List.of(),List.of()).getFirst();
+        for(String key:List.of("type","severity","title","summary","evidence","reasoning","recommendations","confidence","quantifiedImpact","requiresHumanConfirmation"))
+            assertTrue(issue.containsKey(key), "missing field "+key);
+        assertTrue(((Map<?,?>)((List<?>)issue.get("recommendations")).getFirst()).containsKey("recheckMetric"));
+    }
+    @Test void growingHistoricalBacklogProducesQuantifiedInsightAndRecheckTarget() {
+        var issue=EfficiencyRules.backlogGrowth(4,9,LocalDate.of(2026,9,25),LocalDate.of(2026,10,23),.9,List.of("T09"));
+        assertEquals("TASK_BACKLOG_GROWTH",issue.get("type"));
+        assertEquals(5,((Map<?,?>)issue.get("quantifiedImpact")).get("backlogIncrease"));
+        assertEquals(0,((Map<?,?>)issue.get("recheckMetric")).get("target"));
+        assertEquals(List.of("T09"),issue.get("affectedTaskCodes"));
+    }
 }
