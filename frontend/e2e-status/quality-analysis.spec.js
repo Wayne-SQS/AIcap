@@ -12,7 +12,8 @@ const insights = (overrides = {}) => ({
   evidence: {
     code_activity: { commits_total: 42, commits_last_14d: 6, prs_total: 3, reviews_total: 5, test_commits: 9, note: '真实事件计数' },
     ci: {
-      available: true, runs_total: 2, runs_cancelled: 0, last_conclusion: 'failure', pass_rate: 50,
+      available: true, runs_total: 2, runs_cancelled: 0, last_conclusion: 'success', pass_rate: 50,
+      last_run: { run_number: 22, head_sha: 'abcdef123456', conclusion: 'success', html_url: 'https://github.com/Wayne-SQS/AIcap/actions/runs/22' },
       last_failed: { run_name: 'CI', run_number: 21 }, note: '仅复述运行结论',
       coverage: { available: true, instruction_pct: 70, instruction_covered: 700, instruction_missed: 300, line_pct: 70 },
       failed_tests: { available: true, failed_tests_total: 3, run_number: 21, created_at: '2026-10-23', failed_tests: ['com.aicap.contract.FooTest.a', 'com.aicap.contract.FooTest.b'] }
@@ -42,10 +43,37 @@ test('quality card shows specification gaps with real evidence and honesty limit
   await expect(card).toContainText('US2 · 报表导出：故事未填写验收条件')
   await expect(card).toContainText('T3 · 联调脚本：开发任务未关联任何故事')
   await expect(card).toContainText('不虚构覆盖率结论')
-  await expect(card).toContainText('CI：最近 2 次已定论运行（另有 0 次取消），最近结论 failure，通过率 50%')
+  await expect(card).toContainText('CI：最近 2 次已定论运行（另有 0 次取消），最近结论 success，通过率 50%')
+  await expect(card).toContainText('最新运行 #22（abcdef1，success）')
+  await expect(card).toContainText('历史最近失败：CI #21')
   await expect(card).toContainText('Java 后端覆盖率（JaCoCo）：指令 70%')
-  await expect(card).toContainText('最近失败测试 3 项（run #21')
-  await expect(card).toContainText('有测试文件 137 个')
+  await expect(card).toContainText('历史最近失败运行的测试 3 项（run #21')
+  await expect(card).toContainText('已发现测试文件 137 个')
+})
+
+test('truncated repository tree keeps absent evidence unknown', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
+  await page.route('http://127.0.0.1:8080/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    let body = []
+    if (path === '/api/health') body = { status: 'ok' }
+    if (path === '/api/auth/me') body = { id: 1, role: 'owner', display_name: '负责人' }
+    if (path === '/api/projects') body = [{ id: 'P001', name: '测试项目', can_write: true, can_manage: true }]
+    if (path.endsWith('/quality-analysis')) body = insights({ evidence: {
+      repository: { available: true, repo: 'Wayne-SQS/AIcap', default_branch: 'main',
+        truncated: true, has_ci_workflow: null, has_tests: true, test_file_count: 3, has_docs: null }
+    } })
+    await route.fulfill({ json: body })
+  })
+  await page.goto('/#/projects/P001/overview')
+  const card = page.getByRole('region', { name: '项目质量分析' })
+  await expect(card).toContainText('已发现测试文件 3 个')
+  await expect(card).toContainText('CI 配置未在已返回的文件树中找到')
+  await expect(card).toContainText('文档未在已返回的文件树中找到')
+  await expect(card).toContainText('GitHub 文件树已截断，数量只是下界')
 })
 
 test('human confirmation creates a linked improvement task and tracks completion', async ({ page }) => {

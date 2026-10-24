@@ -156,12 +156,21 @@ public class QualityEvidenceService {
         JsonNode runs = root.path("workflow_runs");
         int success = 0, failure = 0, cancelled = 0;
         String lastConclusion = null;
+        Map<String, Object> lastRun = null;
         Map<String, Object> lastFailed = null;
         for (JsonNode run : runs) {
             String name = run.path("name").asText("");
             if (name.toLowerCase().contains("pages") || name.toLowerCase().contains("deployment")) continue;
             if (!"completed".equals(run.path("status").asText())) continue;
             String conclusion = run.path("conclusion").asText("");
+            if (lastRun == null) {
+                lastRun = new LinkedHashMap<>();
+                lastRun.put("run_number", run.path("run_number").asInt(0));
+                lastRun.put("html_url", run.path("html_url").asText(""));
+                lastRun.put("created_at", run.path("created_at").asText(""));
+                lastRun.put("head_sha", run.path("head_sha").asText(""));
+                lastRun.put("conclusion", conclusion);
+            }
             if ("success".equals(conclusion)) {
                 success++;
                 if (lastConclusion == null) lastConclusion = "success";
@@ -186,6 +195,7 @@ public class QualityEvidenceService {
         m.put("runs_total", settled);
         m.put("runs_cancelled", cancelled);
         m.put("last_conclusion", lastConclusion == null ? "unknown" : lastConclusion);
+        m.put("last_run", lastRun);
         m.put("pass_rate", settled == 0 ? null : Math.round(success * 1000.0 / settled) / 10.0);
         m.put("last_failed", lastFailed);
         m.put("note", "仅复述 GitHub Actions 已完成的运行结论,通过率=成功/(成功+失败),取消不计入,不据此推断代码质量或测试覆盖率。");
@@ -363,12 +373,15 @@ public class QualityEvidenceService {
             if (testFile) { hasTests = true; testFiles++; }
         }
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("truncated", root.path("truncated").asBoolean(false));
-        m.put("has_ci_workflow", hasCi);
-        m.put("has_tests", hasTests);
+        boolean truncated = root.path("truncated").asBoolean(false);
+        m.put("truncated", truncated);
+        m.put("has_ci_workflow", hasCi ? Boolean.TRUE : truncated ? null : Boolean.FALSE);
+        m.put("has_tests", hasTests ? Boolean.TRUE : truncated ? null : Boolean.FALSE);
         m.put("test_file_count", testFiles);
-        m.put("has_docs", hasDocs);
-        m.put("note", "仅报告测试文件/CI 配置/文档目录是否存在,不评估其质量。");
+        m.put("has_docs", hasDocs ? Boolean.TRUE : truncated ? null : Boolean.FALSE);
+        m.put("note", truncated
+                ? "GitHub 文件树已截断：已发现的文件数只是下界；未找到的类型为未知，不代表不存在。"
+                : "仅报告测试文件/CI 配置/文档目录是否存在,不评估其质量。");
         return m;
     }
 

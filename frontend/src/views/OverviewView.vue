@@ -399,7 +399,8 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           <p v-if="quality.evidence.ci">
             <template v-if="quality.evidence.ci.available">
               CI：最近 {{ quality.evidence.ci.runs_total }} 次已定论运行（另有 {{ quality.evidence.ci.runs_cancelled }} 次取消），最近结论 {{ quality.evidence.ci.last_conclusion }}，通过率 {{ quality.evidence.ci.pass_rate }}%。
-              <span v-if="quality.evidence.ci.last_failed">最近失败：{{ quality.evidence.ci.last_failed.run_name }} #{{ quality.evidence.ci.last_failed.run_number }}。</span>
+              <span v-if="quality.evidence.ci.last_run">最新运行 #{{ quality.evidence.ci.last_run.run_number }}（{{ quality.evidence.ci.last_run.head_sha?.slice(0, 7) }}，{{ quality.evidence.ci.last_run.conclusion }}）<a v-if="quality.evidence.ci.last_run.html_url" :href="quality.evidence.ci.last_run.html_url" target="_blank" rel="noopener noreferrer">查看 CI</a>。</span>
+              <span v-if="quality.evidence.ci.last_failed">历史最近失败：{{ quality.evidence.ci.last_failed.run_name }} #{{ quality.evidence.ci.last_failed.run_number }}。</span>
             </template>
             <template v-else>CI：未接入（{{ quality.evidence.ci.reason }}）。</template>
             <span class="small">{{ quality.evidence.ci.note }}</span>
@@ -413,16 +414,16 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </p>
           <p v-if="quality.evidence.ci?.failed_tests">
             <template v-if="quality.evidence.ci.failed_tests.available">
-              最近失败测试 {{ quality.evidence.ci.failed_tests.failed_tests_total }} 项<span v-if="quality.evidence.ci.failed_tests.run_number">（run #{{ quality.evidence.ci.failed_tests.run_number }}<span v-if="quality.evidence.ci.failed_tests.created_at"> · {{ quality.evidence.ci.failed_tests.created_at }}</span>）</span><span v-if="quality.evidence.ci.failed_tests.failed_tests?.length">：{{ quality.evidence.ci.failed_tests.failed_tests.slice(0, 5).join('；') }}</span>。
+              历史最近失败运行的测试 {{ quality.evidence.ci.failed_tests.failed_tests_total }} 项<span v-if="quality.evidence.ci.failed_tests.run_number">（run #{{ quality.evidence.ci.failed_tests.run_number }}<span v-if="quality.evidence.ci.failed_tests.created_at"> · {{ quality.evidence.ci.failed_tests.created_at }}</span>）</span><span v-if="quality.evidence.ci.failed_tests.failed_tests?.length">：{{ quality.evidence.ci.failed_tests.failed_tests.slice(0, 5).join('；') }}</span>。
             </template>
             <template v-else>失败测试：未接入（{{ quality.evidence.ci.failed_tests.reason }}）。</template>
           </p>
           <p v-if="quality.evidence.repository">
             <template v-if="quality.evidence.repository.available">
               仓库：{{ quality.evidence.repository.repo }}（{{ quality.evidence.repository.default_branch }}）——
-              {{ quality.evidence.repository.has_ci_workflow ? '有 CI 配置' : '无 CI 配置' }}、
-              {{ quality.evidence.repository.has_tests ? `有测试文件 ${quality.evidence.repository.test_file_count} 个` : '无测试文件' }}、
-              {{ quality.evidence.repository.has_docs ? '有文档' : '无文档目录' }}。
+              {{ quality.evidence.repository.has_ci_workflow ? '有 CI 配置' : quality.evidence.repository.truncated ? 'CI 配置未在已返回的文件树中找到' : '无 CI 配置' }}、
+              {{ quality.evidence.repository.has_tests ? `已发现测试文件 ${quality.evidence.repository.test_file_count} 个` : quality.evidence.repository.truncated ? '测试文件未在已返回的文件树中找到' : '无测试文件' }}、
+              {{ quality.evidence.repository.has_docs ? '有文档' : quality.evidence.repository.truncated ? '文档未在已返回的文件树中找到' : '无文档目录' }}<span v-if="quality.evidence.repository.truncated">（GitHub 文件树已截断，数量只是下界）</span>。
             </template>
             <template v-else>仓库证据：未接入（{{ quality.evidence.repository.reason }}）。</template>
           </p>

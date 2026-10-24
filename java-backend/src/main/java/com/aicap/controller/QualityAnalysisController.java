@@ -25,7 +25,7 @@ import java.util.Set;
 
 /**
  * US22 质量分析 MVP:项目级只读规范缺口定位 + 人工确认后生成可追踪改进任务。
- * 证据只来自库内故事/任务的结构化字段,不读取代码、CI 或文档仓库,不虚构覆盖率结论。
+ * 规范缺口来自库内故事/任务字段；外部 CI 与仓库文件树作为独立证据展示，不据此推断质量。
  */
 @RestController
 @RequiredArgsConstructor

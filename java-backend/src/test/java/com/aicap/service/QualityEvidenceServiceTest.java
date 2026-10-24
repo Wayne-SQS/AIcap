@@ -79,6 +79,10 @@ class QualityEvidenceServiceTest {
         assertEquals("failure", m.get("last_conclusion"));
         assertEquals(50.0, m.get("pass_rate"));
         @SuppressWarnings("unchecked")
+        Map<String, Object> lastRun = (Map<String, Object>) m.get("last_run");
+        assertEquals(19, lastRun.get("run_number"));
+        assertEquals("cancelled", lastRun.get("conclusion"));
+        @SuppressWarnings("unchecked")
         Map<String, Object> lastFailed = (Map<String, Object>) m.get("last_failed");
         assertEquals(21, lastFailed.get("run_number"));
         assertEquals("abcdef1", lastFailed.get("head_sha"));
@@ -99,6 +103,16 @@ class QualityEvidenceServiceTest {
         assertEquals(true, m.get("has_docs"));
         assertEquals(2, m.get("test_file_count"));  // latest.java 不应被误判为测试文件
         assertEquals(false, m.get("truncated"));
+    }
+
+    @Test void truncatedTreeLeavesAbsentFileTypesUnknown() throws Exception {
+        var m = QualityEvidenceService.scanTree("{\"truncated\":true,\"tree\":["
+                + "{\"path\":\"java-backend/src/test/java/com/aicap/FooTest.java\"}]}");
+        assertEquals(true, m.get("truncated"));
+        assertEquals(true, m.get("has_tests"));
+        assertEquals(1, m.get("test_file_count"));
+        assertNull(m.get("has_ci_workflow"));
+        assertNull(m.get("has_docs"));
     }
 
     @SuppressWarnings("unchecked")
