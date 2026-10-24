@@ -43,6 +43,7 @@ public class RepoQualityFetcher {
     private static final Logger log = LoggerFactory.getLogger(RepoQualityFetcher.class);
 
     private static final int MAX_FILES = 24;
+    private static final int MAX_TEST_FILES = 12;
     private static final long MAX_FILE_BYTES = 200_000L;
     private static final long TTL_MS = 10 * 60_000L;
 
@@ -106,11 +107,24 @@ public class RepoQualityFetcher {
                 if (content == null || content.length() > MAX_FILE_BYTES) continue;
                 files.add(new RepoQualityScorer.SourceFile(path, content));
             }
-            // 测试文件：只登记路径（不拉内容），保证测试密度按真实比例算，且不把测试夹具当生产代码扣分
-            int testRegistered = 0;
+            // README 正文：文档内容质量要用
+            for (String path : pools.get("readme")) {
+                String content = fetchContent(repo, branch, path);
+                if (content != null && content.length() <= MAX_FILE_BYTES) {
+                    files.add(new RepoQualityScorer.SourceFile(path, content));
+                    break;
+                }
+            }
+            // 测试文件：全部登记路径（保证密度按真实比例），前 MAX_TEST_FILES 个拉正文（供断言质量分析）
+            int testRegistered = 0, testWithContent = 0;
             for (String path : testPaths) {
                 if (testRegistered >= 40) break;
-                files.add(new RepoQualityScorer.SourceFile(path, ""));
+                String content = "";
+                if (testWithContent < MAX_TEST_FILES) {
+                    String c = fetchContent(repo, branch, path);
+                    if (c != null && c.length() <= MAX_FILE_BYTES) { content = c; testWithContent++; }
+                }
+                files.add(new RepoQualityScorer.SourceFile(path, content));
                 testRegistered++;
             }
             Map<String, Object> scored = scorer.score(files);
@@ -123,8 +137,8 @@ public class RepoQualityFetcher {
             out.put("main_files", mainCount);
             out.put("test_files_in_repo", testCount);
             out.put("sample_note", "主代码抽样 " + Math.min(files.size(), MAX_FILES) + "/" + mainCount
-                    + " 个（上限 " + MAX_FILES + "）；测试文件按路径全量计数 " + Math.min(testCount, 40)
-                    + " 个，非全仓审计");
+                    + " 个（上限 " + MAX_FILES + "）；测试文件计数 " + Math.min(testCount, 40)
+                    + " 个、其中 " + testWithContent + " 个读取正文做断言分析；非全仓审计");
             out.putAll(scored);
         } catch (Exception e) {
             log.warn("[quality] 代码质量评估失败 project={} repo={}: {}", projectId, repo, e.toString());
@@ -146,9 +160,16 @@ public class RepoQualityFetcher {
                 get(props.getApiBase() + "/repos/" + repo + "/git/trees/" + branch + "?recursive=1")).path("tree");
         List<String> main = new ArrayList<>();
         List<String> test = new ArrayList<>();
+        List<String> readme = new ArrayList<>();
         for (JsonNode node : tree) {
             if (!"blob".equals(node.path("type").asText(""))) continue;
             String p = node.path("path").asText("");
+            String lp = p.toLowerCase();
+            // README 单独收：文档内容质量需要正文
+            if (lp.matches("(^|.*/)readme\\.(md|txt|rst)$") && p.split("/").length <= 2) {
+                readme.add(p);
+                continue;
+            }
             int dot = p.lastIndexOf('.');
             if (dot < 0 || !SOURCE_EXT.contains(p.substring(dot + 1).toLowerCase())) continue;
             String lower = p.toLowerCase();
@@ -165,6 +186,7 @@ public class RepoQualityFetcher {
         Map<String, List<String>> out = new LinkedHashMap<>();
         out.put("main", main);
         out.put("test", test);
+        out.put("readme", readme);
         return out;
     }
 

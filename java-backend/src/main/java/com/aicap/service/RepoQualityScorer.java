@@ -31,18 +31,37 @@ public class RepoQualityScorer {
     /** 一个待评分的源文件。path 用于识别测试文件与输出证据,content 为完整文本。 */
     public record SourceFile(String path, String content) {}
 
-    private static final int WEIGHT_TEST = 25;
-    private static final int WEIGHT_DOC = 15;
-    private static final int WEIGHT_NAMING = 15;
-    private static final int WEIGHT_COMPLEXITY = 15;
-    private static final int WEIGHT_FUNCTION_LEN = 10;
-    private static final int WEIGHT_DUPLICATION = 10;
+    // 10 维；合计 100。「密度」看有没有，「内容质量」看写得怎么样，两者分开避免用数量掩盖质量
+    private static final int WEIGHT_TEST = 20;            // 测试密度（有没有）
+    private static final int WEIGHT_TEST_QUALITY = 10;    // 测试内容质量（断言/空测试/异常路径/flaky）
+    private static final int WEIGHT_DOC = 10;             // 文档完备度（README 有无 + 注释密度）
+    private static final int WEIGHT_DOC_QUALITY = 8;      // 文档内容质量（必需章节/结构）
+    private static final int WEIGHT_NAMING = 12;
+    private static final int WEIGHT_COMPLEXITY = 13;
+    private static final int WEIGHT_FUNCTION_LEN = 9;
+    private static final int WEIGHT_DUPLICATION = 8;
     private static final int WEIGHT_ERROR_HANDLING = 5;
     private static final int WEIGHT_SECURITY = 5;
 
     /** 源文件扩展名 → 语言 */
     private static final Map<String, String> EXT_LANG = Map.of(
             "java", "java", "js", "js", "jsx", "js", "ts", "ts", "tsx", "ts", "mjs", "js", "py", "py");
+
+    /** 测试方法：JUnit / pytest / jest 三类写法 */
+    private static final Pattern TEST_METHOD = Pattern.compile(
+            "@Test\\b|\\bdef\\s+test_|\\bit\\s*\\(|\\btest\\s*\\(");
+    /** 断言调用：JUnit 断言 + Hamcrest + MockMvc 的 andExpect(status().isOk()) + 前端 expect */
+    private static final Pattern ASSERT_CALL = Pattern.compile(
+            "\\bassert[A-Z]?\\w*\\s*\\(|\\bassertThat\\s*\\(|\\.should\\b|\\bexpect\\s*\\("
+                    + "|\\bandExpect\\s*\\(|\\bstatus\\(\\)\\.is\\w+");
+    /** 空测试体：@Test 后紧跟空块 */
+    private static final Pattern EMPTY_TEST = Pattern.compile(
+            "@Test\\b[^\\{]*\\{\\s*\\}");
+    /** 异常/错误路径断言 */
+    private static final Pattern ERROR_PATH = Pattern.compile(
+            "assertThrows|expectThrows|toThrow|pytest\\.raises|assertRaises|should\\s*\\(\\s*throw");
+    /** 测试里的固定等待，flaky 风险 */
+    private static final Pattern SLEEP_CALL = Pattern.compile("Thread\\.sleep|time\\.sleep|setTimeout\\s*\\(");
 
     private static final Pattern TEST_PATH = Pattern.compile(
             "(^|/)(test|tests|__tests__|spec)/|(Test|Tests|Spec|Specs)\\.(java|js|jsx|ts|tsx)$|" +
@@ -122,7 +141,9 @@ public class RepoQualityScorer {
 
         List<Map<String, Object>> dims = new ArrayList<>();
         dims.add(dimTest(sourceFiles, testFiles));
+        dims.add(dimTestQuality(testFiles));
         dims.add(dimDoc(files, sourceFiles));
+        dims.add(dimDocQuality(files));
         dims.add(dimNaming(sourceFiles));
         dims.add(dimComplexity(sourceFiles));
         dims.add(dimFunctionLength(sourceFiles));
@@ -265,6 +286,95 @@ public class RepoQualityScorer {
         }
         return dim("test_density", "测试密度", WEIGHT_TEST, score, pct(ratio) + "（测试/源）",
                 ratio >= 0.5 ? "达到满分线" : "测试文件相对源文件偏少", ev);
+    }
+
+    /** 测试内容质量：断言密度、空测试、异常路径覆盖、固定等待（flaky） */
+    private Map<String, Object> dimTestQuality(List<SourceFile> test) {
+        List<Map<String, Object>> ev = new ArrayList<>();
+        if (test.isEmpty()) {
+            // 「没有测试」本身就是结论，也要给证据，不能让扣分项空着
+            ev.add(ev(null, 0, "仓库内未发现任何测试文件"));
+            return dim("test_quality", "测试内容质量", WEIGHT_TEST_QUALITY, 0, "无测试文件",
+                    "没有测试文件，无从评估测试质量", ev);
+        }
+        int methods = 0, asserts = 0, empty = 0, errorPath = 0, sleeps = 0;
+        boolean anyContent = false;
+        for (SourceFile f : test) {
+            if (f.content() == null || f.content().isBlank()) continue;
+            anyContent = true;
+            methods += count(f.content(), TEST_METHOD);
+            asserts += count(f.content(), ASSERT_CALL);
+            empty += count(f.content(), EMPTY_TEST);
+            errorPath += count(f.content(), ERROR_PATH);
+            sleeps += count(f.content(), SLEEP_CALL);
+            Matcher m = SLEEP_CALL.matcher(f.content());
+            while (m.find() && ev.size() < 2) {
+                int line = f.content().substring(0, m.start()).split("\\R", -1).length;
+                ev.add(ev(f.path(), line, "测试里使用固定等待：" + truncate(m.group().trim(), 40)));
+            }
+        }
+        if (!anyContent) {
+            // 只登记了路径、没拉到正文：按中性计分，不能因为没取到内容就判差
+            return dim("test_quality", "测试内容质量", WEIGHT_TEST_QUALITY, 60, "未取到测试文件正文",
+                    "测试文件正文未拉取，本维度按中性计分", ev);
+        }
+        if (methods == 0) {
+            return dim("test_quality", "测试内容质量", WEIGHT_TEST_QUALITY, 20, "有测试文件但未识别到测试方法",
+                    "测试文件里没有 @Test / def test_ / it() 等用例声明", ev);
+        }
+        double assertPerTest = (double) asserts / methods;
+        int base = clamp((int) Math.round(Math.min(1.0, assertPerTest / 2.0) * 100));
+        int emptyPenalty = (int) Math.round(Math.min(40, (double) empty / methods * 200));
+        int sleepPenalty = Math.min(20, sleeps * 10);
+        int errorBonus = ((double) errorPath / methods >= 0.10) ? 5 : 0;
+        int score = clamp(base - emptyPenalty - sleepPenalty + errorBonus);
+
+        if (assertPerTest < 2) {
+            ev.add(ev(null, 0, "断言 " + asserts + " / 用例 " + methods + " = " + pct(assertPerTest) + "（满分线 2 断言/用例）"));
+        }
+        if (empty > 0) ev.add(ev(null, 0, "空测试体 " + empty + " 个（只有空块，没有断言）"));
+        return dim("test_quality", "测试内容质量", WEIGHT_TEST_QUALITY, score,
+                "断言 " + asserts + "/" + methods + " 用例；空测试 " + empty + "；异常路径 " + errorPath + "；固定等待 " + sleeps,
+                score >= 85 ? "断言密度与异常路径覆盖达标"
+                        : (assertPerTest < 2 ? "断言密度不足，存在只跑不断言的用例" : "存在空测试或固定等待，测试可信度打折"), ev);
+    }
+
+    /** 文档内容质量：README 必需章节覆盖率 + 结构（标题/代码块），不评文笔 */
+    private Map<String, Object> dimDocQuality(List<SourceFile> all) {
+        List<Map<String, Object>> ev = new ArrayList<>();
+        SourceFile readme = all.stream()
+                .filter(f -> f.path().toLowerCase().matches("(^|.*/)readme\\.(md|txt|rst)$"))
+                .findFirst().orElse(null);
+        if (readme == null || readme.content() == null || readme.content().isBlank()) {
+            ev.add(ev(null, 0, "仓库内未发现 README（或正文为空）"));
+            return dim("doc_quality", "文档内容质量", WEIGHT_DOC_QUALITY, 0, "无 README 正文",
+                    "缺少 README，无法评估文档内容", ev);
+        }
+        String[] patterns = {"install|安装|getting started|quick start|快速开始",
+                "run|运行|启动|start", "config|配置|env|环境变量",
+                "example|示例|usage|使用", "module|模块|结构|architecture|架构"};
+        String[] names = {"安装 / 快速开始", "运行 / 启动", "配置 / 环境变量", "使用示例", "模块 / 架构说明"};
+        int covered = 0;
+        List<String> missing = new ArrayList<>();
+        for (int i = 0; i < patterns.length; i++) {
+            if (Pattern.compile(patterns[i], Pattern.CASE_INSENSITIVE).matcher(readme.content()).find()) covered++;
+            else missing.add(names[i]);
+        }
+        int headings = count(readme.content(), Pattern.compile("(?m)^#{1,3} "));
+        int codeBlocks = count(readme.content(), Pattern.compile("```")) / 2;
+        double structure = Math.min(1.0, (Math.min(headings, 6) / 6.0) * 0.5 + (Math.min(codeBlocks, 4) / 4.0) * 0.5);
+        int score = clamp((int) Math.round((covered / (double) patterns.length) * 70 + structure * 30));
+        if (!missing.isEmpty()) ev.add(ev(readme.path(), 0, "缺少章节：" + String.join("、", missing)));
+        return dim("doc_quality", "文档内容质量", WEIGHT_DOC_QUALITY, score,
+                "必需章节 " + covered + "/" + patterns.length + "；标题 " + headings + "；代码块 " + codeBlocks,
+                missing.isEmpty() ? "README 覆盖安装/运行/配置/示例/架构" : "README 缺少关键章节", ev);
+    }
+
+    private static int count(String text, Pattern p) {
+        Matcher m = p.matcher(text);
+        int n = 0;
+        while (m.find()) n++;
+        return n;
     }
 
     private Map<String, Object> dimDoc(List<SourceFile> all, List<SourceFile> src) {

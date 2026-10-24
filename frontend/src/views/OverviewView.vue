@@ -447,7 +447,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           <header class="qa-score-head">
             <div>
               <h4>代码质量评估</h4>
-              <p>8 维度静态扫描 · 抽样排查，非全仓审计</p>
+              <p>10 维度静态扫描 · 抽样排查，非全仓审计</p>
             </div>
             <button type="button" class="qa-btn" :disabled="cqLoading || !session.online" @click="runCodeQuality">{{ cqLoading ? '正在拉取仓库…' : (codeQuality && codeQuality.available ? '重新评估' : '评估代码质量') }}</button>
           </header>

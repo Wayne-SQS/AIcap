@@ -89,12 +89,43 @@ class RepoQualityScorerTest {
             }
             """;
 
+    private static final String GOOD_README = """
+            # demo
+
+            订单服务示例，含单元测试。
+
+            ## 安装
+            ```
+            mvn -q -DskipTests package
+            ```
+
+            ## 运行
+            ```
+            java -jar target/demo.jar
+            ```
+
+            ## 配置
+            | 变量 | 说明 |
+            | --- | --- |
+            | DB_HOST | 数据库地址 |
+
+            ## 使用示例
+            ```
+            curl http://localhost:8080/orders/US1
+            ```
+
+            ## 模块结构
+            - service：业务编排
+            - repository：数据访问
+            """;
+
     private static final String GOOD_TEST = """
             package demo;
 
             import org.junit.jupiter.api.Test;
 
             import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
             import static org.junit.jupiter.api.Assertions.assertNull;
 
             /** OrderService 的单元测试，覆盖命中与边界。 */
@@ -110,6 +141,12 @@ class RepoQualityScorerTest {
                 @Test
                 void countsZeroWhenStatusUnknown() {
                     assertEquals(0, service.countByStatus("UNKNOWN"));
+                    assertEquals(0, service.countByStatus(null));
+                }
+
+                @Test
+                void rejectsNullStatusInStrictMode() {
+                    assertThrows(IllegalArgumentException.class, () -> service.findByCode(null));
                 }
             }
             """;
@@ -117,7 +154,7 @@ class RepoQualityScorerTest {
     @Test
     void wellStructuredProjectScoresHigh() {
         List<RepoQualityScorer.SourceFile> files = List.of(
-                new RepoQualityScorer.SourceFile("README.md", "# demo\n订单服务示例，含单元测试。"),
+                new RepoQualityScorer.SourceFile("README.md", GOOD_README),
                 new RepoQualityScorer.SourceFile("src/main/java/demo/OrderService.java", GOOD_SERVICE),
                 new RepoQualityScorer.SourceFile("src/main/java/demo/OrderRepository.java", GOOD_REPOSITORY),
                 new RepoQualityScorer.SourceFile("src/main/java/demo/OrderView.java", GOOD_VIEW),
