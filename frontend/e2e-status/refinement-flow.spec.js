@@ -19,7 +19,7 @@ async function setup(page, role = 'admin', malformed = false) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
-    if (path === '/api/projects') data = [{ id: 'P001', name: '测试项目', can_write: true, can_manage: true }]
+    if (path.endsWith('/projects')) data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: 'Refinement', transcript: '决定完善发布检查表' }]
     if (path.endsWith('/members/profiles')) data = [{ user_id: 2, display_name: '李明' }]
@@ -43,7 +43,8 @@ async function setup(page, role = 'admin', malformed = false) {
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/projects/P001/agents?agent=meeting&type=refinement')
+  await page.goto('/#/projects/P001/office?tab=meeting&type=refinement&meetingId=m1')
+  await expect(panelOf(page)).toBeVisible()
   return posts
 }
 const panelOf = page => page.getByRole('region', { name: 'Refinement新故事提案', exact: true })
@@ -71,7 +72,7 @@ test('meeting deletion conflict preserves selected transcript and analysis', asy
   await setup(page)
   const panel = panelOf(page)
   await analyze(panel)
-  await page.route('**/api/meetings/m1*', async route => {
+  await page.route(/\/api\/meetings\/m1\?/, async route => {
     expect(route.request().method()).toBe('DELETE')
     await route.fulfill({ status: 409, json: { detail: '此会议已有五类会议分析记录，需保留原文及审核执行审计，不能删除。' } })
   })
@@ -118,6 +119,7 @@ test('Refinement incomplete approval blocked, rejection needs no invented fields
   const posts = await setup(page), panel = panelOf(page)
   await analyze(panel)
   await panel.getByLabel('审核决定').selectOption('approve')
+  await panel.getByLabel('采纳理由（必填）').fill('确认采纳')
   await panel.getByRole('button', { name: '提交审核决定' }).click()
   await expect(panel).toContainText('请通过修改后接受补齐')
   expect(posts).toHaveLength(1)

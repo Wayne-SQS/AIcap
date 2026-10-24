@@ -57,6 +57,7 @@ async function setup(page, resolveStatus, {
   const statusRequests = []
   await page.addInitScript(({ block }) => {
     localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
     if (!block) return
     const original = Storage.prototype.setItem
     Storage.prototype.setItem = function (key, value) {
@@ -82,6 +83,7 @@ async function setup(page, resolveStatus, {
     if (path === '/api/health') data = { status: 'ok' }
     if (path === '/api/auth/me') data = { id: 1, role, display_name: role }
     if (path === '/api/agent/config') data = { configured: false }
+    if (path === '/api/projects') data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path === '/api/meetings') data = [
       { id: 'm1', title: '站会一', transcript: '原文一' },
       { id: 'm2', title: '站会二', transcript: '原文二' }
@@ -89,7 +91,8 @@ async function setup(page, resolveStatus, {
     if (path === '/api/stories' || path === '/api/stories/logs') data = []
     return route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
+  await page.goto('/#/projects/P001/office?tab=meeting&type=daily&meetingId=m1')
+  await expect(page.getByRole('region', { name: '故事状态提案' })).toBeVisible()
   return statusRequests
 }
 

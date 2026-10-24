@@ -11,9 +11,12 @@ function response(body, meetingId = 'm1') {
       matches: body.requirements.map(requirement => ({ requirement, recorded_level: index ? 5 : 3, meets_requirement: true })) }))
   }
 }
-async function setup(page, role = 'admin', open = true) {
+async function setup(page, role = 'admin', failStoryOnce = false) {
   const posts = [], writes = []
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON()
     posts.push(body)
@@ -26,13 +29,23 @@ async function setup(page, role = 'admin', open = true) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
+    if (path.endsWith('/projects')) data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
+    if (path.endsWith('/save-intent')) data = { intent: null }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: '会议一' }, { id: 'm2', title: '会议二' }]
-    if (path.endsWith('/stories')) data = [{ id: 'US13', title: '发布检查' }, { id: 'US14', title: '接口测试' }]
+    if (path.endsWith('/stories')) {
+      const scoped = new URL(req.url()).searchParams.has('projectId')
+      if (failStoryOnce && !scoped) {
+        failStoryOnce = false
+        await route.fulfill({ status: 503, json: {} })
+        return
+      }
+      data = [{ id: 'US13', title: '发布检查' }, { id: 'US14', title: '接口测试' }]
+    }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
-  if (open) await page.getByRole('button', { name: '打开分配候选' }).click()
+  await page.goto('/#/projects/P001/office?tab=meeting&type=assignment&meetingId=m1')
+  await expect(panelOf(page)).toBeVisible()
   return { posts, writes }
 }
 async function fill(page) {
@@ -113,10 +126,7 @@ test('Assignment late result cannot cross meeting selection', async ({ page }) =
   await expect(panelOf(page).getByRole('region', { name: '候选结果' })).toHaveCount(0)
 })
 test('Assignment failed story directory can be reloaded', async ({ page }) => {
-  await setup(page, 'admin', false)
-  await expect(page.getByRole('button', { name: '打开分配候选' })).toBeVisible()
-  await page.route('**/api/stories', route => route.fulfill({ status: 503, json: {} }), { times: 1 })
-  await page.getByRole('button', { name: '打开分配候选' }).click()
+  await setup(page, 'admin', true)
   await expect(panelOf(page).getByRole('alert')).toContainText('故事目录加载失败')
   await panelOf(page).getByRole('button', { name: '重试故事目录' }).click()
   await fill(page); await query(page)

@@ -4,18 +4,24 @@ const result = () => ({ audio:{meeting_id:'m1',audio_id:'a1',sha256:'a'.repeat(6
   turns:[{start_ms:100,end_ms:1700,speaker_id:'SPK1'},{start_ms:1400,end_ms:2900,speaker_id:'SPK2'}] })
 async function setup(page,role='member') {
   const requests=[]
-  await page.addInitScript(()=>localStorage.setItem('aiguanli_token','fixture-token'))
+  await page.addInitScript(()=>{
+    localStorage.setItem('aiguanli_token','fixture-token')
+    localStorage.setItem('aiguanli-current-project','P001')
+  })
   await page.route('**/meeting-ai/api/**',async route=>{ requests.push(route.request().postDataJSON()); await route.fulfill({json:result()}) })
   await page.route('http://127.0.0.1:8080/api/**',async route=>{
     const path=new URL(route.request().url()).pathname; let data=[]
     if(path.endsWith('/health')) data={status:'ok'}
     if(path.endsWith('/auth/me')) data={id:1,role,display_name:role}
     if(path.endsWith('/agent/config')) data={configured:false}
+    if(path.endsWith('/projects')) data=[{id:'P001',name:'测试项目',can_write:role!=='viewer',can_manage:role==='admin'}]
     if(path.endsWith('/meetings')) data=[{id:'m1',title:'会议',transcript:'原文'},{id:'m2',title:'其他',transcript:'其他原文'}]
     if(path.endsWith('/meetings/m1/audio')) data=[{id:'a1',meeting_id:'m1',filename:'meeting.mp3',sha256:'a'.repeat(64),byte_size:123,source:'upload'}]
     await route.fulfill({json:data})
   })
-  await page.goto('/#/ai'); return requests
+  await page.goto('/#/projects/P001/office?tab=meeting&workflow=audio&meetingId=m1')
+  await expect(panel(page)).toBeVisible()
+  return requests
 }
 test('anonymous overlapping turns and speaker hint are displayed without identity claims',async({page})=>{
   const requests=await setup(page)
