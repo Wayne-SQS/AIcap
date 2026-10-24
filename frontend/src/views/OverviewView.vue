@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
-import { getQualityAnalysis, createQualityImprovement, evaluateCodeQuality } from '@/api/qualityAnalysis'
+import { getQualityAnalysis, createQualityImprovement, evaluateCodeQuality, reviewSemantics } from '@/api/qualityAnalysis'
 import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -201,6 +201,24 @@ async function runCodeQuality() {
   }
 }
 watch(() => projects.currentProjectId, () => { codeQuality.value = null; cqError.value = '' })
+
+/* 语义评审：按需触发，单次约 10 秒（LLM），同文本 2 小时内走缓存 */
+const semantic = ref(null), semanticLoading = ref(false), semanticError = ref(''), semanticScope = ref('')
+async function runSemantic(scope) {
+  const id = projects.currentProjectId
+  if (!id || semanticLoading.value) return
+  semanticLoading.value = true; semanticError.value = ''; semanticScope.value = scope
+  try {
+    const result = await reviewSemantics(id, { scope })
+    semantic.value = result
+    if (result && result.available === false) semanticError.value = result.reason || '语义评审未返回结果'
+  } catch (error) {
+    semanticError.value = error.message || '语义评审失败'
+  } finally {
+    semanticLoading.value = false; semanticScope.value = ''
+  }
+}
+watch(() => projects.currentProjectId, () => { semantic.value = null; semanticError.value = '' })
 
 /* 质量卡展示用的映射：只影响样式，不改判定逻辑 */
 const QUALITY_KIND_CLASS = {
@@ -493,6 +511,126 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           </template>
         </section>
 
+                <section class="qa-sem">
+          <header class="qa-score-head">
+            <div>
+              <h4>语义评审 <span class="qa-llm">LLM</span></h4>
+              <p>判断「读者能否照着做」——静态规则分不出完整与空话，这一层可以</p>
+            </div>
+            <div class="qa-sem-actions">
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('readme')">{{ semanticLoading && semanticScope === 'readme' ? '评审中…' : '评 README' }}</button>
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('tests')">{{ semanticLoading && semanticScope === 'tests' ? '评审中…' : '评测试代码' }}</button>
+            </div>
+          </header>
+
+          <p v-if="semanticError" class="qa-note err" role="alert">{{ semanticError }}</p>
+
+          <template v-if="semantic && semantic.available">
+            <div class="qa-score-body">
+              <div class="qa-ring" :class="gradeClass(semantic.grade)" :style="{ '--p': (semantic.score || 0) + '%' }">
+                <b>{{ semantic.score }}</b><span>分</span>
+              </div>
+              <div class="qa-score-info">
+                <div class="qa-badges">
+                  <span class="qa-grade" :class="gradeClass(semantic.grade)">{{ semantic.grade }}</span>
+                  <span class="qa-risk">置信 {{ riskLabel(semantic.confidence) }}</span>
+                  <span class="qa-risk">{{ semantic.scope === 'readme' ? 'README' : '测试代码' }}</span>
+                  <span v-if="semantic.cached" class="qa-risk">缓存</span>
+                </div>
+                <p class="qa-verdict">{{ semantic.verdict }}</p>
+                <p class="qa-sample">
+                  可照做：<b>{{ semantic.reader_can_act ? '是' : '否' }}</b>
+                  <span v-if="semantic.unverified_quotes">　未在原文核实的引用：{{ semantic.unverified_quotes }} 条</span>
+                  <span v-if="semantic.input_truncated">　文本已截断</span>
+                </p>
+              </div>
+            </div>
+
+            <ul v-if="semantic.issues && semantic.issues.length" class="qa-issues">
+              <li v-for="(item, i) in semantic.issues" :key="'si' + i" class="qa-issue">
+                <span class="qa-sev" :class="item.verified ? 'sev-medium' : 'sev-low'">{{ item.verified ? '原文' : '未核实' }}</span>
+                <div class="qa-issue-body">
+                  <p class="qa-issue-quote">「{{ item.quote }}」</p>
+                  <p class="qa-issue-line"><em>问题</em>{{ item.problem }}</p>
+                  <p class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <div v-if="semantic.missing && semantic.missing.length" class="qa-missing">
+              <p class="qa-sub">读者需要但文中没有</p>
+              <ul class="qa-chips">
+                <li v-for="(m, i) in semantic.missing" :key="'sm' + i">{{ m }}</li>
+              </ul>
+            </div>
+
+            <p v-if="semantic.strengths && semantic.strengths.length" class="qa-strong">
+              可保留：{{ semantic.strengths[0].why }}
+            </p>
+            <p class="qa-fine">{{ semantic.limitations }}</p>
+          </template>
+        </section>
+
+                <section class="qa-sem">
+          <header class="qa-score-head">
+            <div>
+              <h4>语义评审 <span class="qa-llm">LLM</span></h4>
+              <p>判断「读者能否照着做」——静态规则分不出完整与空话，这一层可以</p>
+            </div>
+            <div class="qa-sem-actions">
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('readme')">{{ semanticLoading && semanticScope === 'readme' ? '评审中…' : '评 README' }}</button>
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('tests')">{{ semanticLoading && semanticScope === 'tests' ? '评审中…' : '评测试代码' }}</button>
+            </div>
+          </header>
+
+          <p v-if="semanticError" class="qa-note err" role="alert">{{ semanticError }}</p>
+
+          <template v-if="semantic && semantic.available">
+            <div class="qa-score-body">
+              <div class="qa-ring" :class="gradeClass(semantic.grade)" :style="{ '--p': (semantic.score || 0) + '%' }">
+                <b>{{ semantic.score }}</b><span>分</span>
+              </div>
+              <div class="qa-score-info">
+                <div class="qa-badges">
+                  <span class="qa-grade" :class="gradeClass(semantic.grade)">{{ semantic.grade }}</span>
+                  <span class="qa-risk">置信 {{ riskLabel(semantic.confidence) }}</span>
+                  <span class="qa-risk">{{ semantic.scope === 'readme' ? 'README' : '测试代码' }}</span>
+                  <span v-if="semantic.cached" class="qa-risk">缓存</span>
+                </div>
+                <p class="qa-verdict">{{ semantic.verdict }}</p>
+                <p class="qa-sample">
+                  可照做：<b>{{ semantic.reader_can_act ? '是' : '否' }}</b>
+                  <span v-if="semantic.unverified_quotes">　未在原文核实的引用：{{ semantic.unverified_quotes }} 条</span>
+                  <span v-if="semantic.input_truncated">　文本已截断</span>
+                </p>
+              </div>
+            </div>
+
+            <ul v-if="semantic.issues && semantic.issues.length" class="qa-issues">
+              <li v-for="(item, i) in semantic.issues" :key="'si' + i" class="qa-issue">
+                <span class="qa-sev" :class="item.verified ? 'sev-medium' : 'sev-low'">{{ item.verified ? '原文' : '未核实' }}</span>
+                <div class="qa-issue-body">
+                  <p class="qa-issue-quote">「{{ item.quote }}」</p>
+                  <p class="qa-issue-line"><em>问题</em>{{ item.problem }}</p>
+                  <p class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <div v-if="semantic.missing && semantic.missing.length" class="qa-missing">
+              <p class="qa-sub">读者需要但文中没有</p>
+              <ul class="qa-chips">
+                <li v-for="(m, i) in semantic.missing" :key="'sm' + i">{{ m }}</li>
+              </ul>
+            </div>
+
+            <p v-if="semantic.strengths && semantic.strengths.length" class="qa-strong">
+              可保留：{{ semantic.strengths[0].why }}
+            </p>
+            <p class="qa-fine">{{ semantic.limitations }}</p>
+          </template>
+        </section>
+
         <div v-if="quality.evidence" class="evi">
           <p>真实证据（不推断质量）</p>
           <p v-if="quality.evidence.code_activity">
@@ -688,4 +826,20 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
 .evi > p:first-child { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
 .evi .small { font-size: 10.5px; color: var(--muted); }
 .evi a { color: #2f6f4f; border-bottom: 1px dashed currentColor; margin-left: 4px; }
+
+.qa-sem { margin-top: 16px; border: 2px solid var(--ink); background: #fff; }
+.qa-llm { font-family: var(--mono); font-size: 9px; border: 1.5px solid var(--ink); background: var(--lilac); padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+.qa-sem-actions { display: flex; gap: 8px; }
+.qa-issue-quote { margin: 0 0 4px; font-size: 12px; color: var(--ink); background: var(--paper-2); border-left: 3px solid var(--orange-2); padding: 3px 8px; }
+.qa-missing { padding: 0 12px 12px; }
+.qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
+
+.qa-sem { margin-top: 16px; border: 2px solid var(--ink); background: #fff; }
+.qa-llm { font-family: var(--mono); font-size: 9px; border: 1.5px solid var(--ink); background: var(--lilac); padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+.qa-sem-actions { display: flex; gap: 8px; }
+.qa-issue-quote { margin: 0 0 4px; font-size: 12px; color: var(--ink); background: var(--paper-2); border-left: 3px solid var(--orange-2); padding: 3px 8px; }
+.qa-missing { padding: 0 12px 12px; }
+.qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
 </style>

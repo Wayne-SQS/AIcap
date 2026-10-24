@@ -69,6 +69,67 @@ public class RepoQualityFetcher {
         this.scorer = scorer;
     }
 
+    /**
+     * 取语义评审要用的正文：readme 取根 README；tests 取前 4 个测试文件并按文件拼接。
+     * 返回 available=false + reason 时调用方直接降级，不要编。
+     */
+    public Map<String, Object> sampleText(String projectId, String scope) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        String repo = resolver.resolveRepo(projectId).orElse(null);
+        if (repo == null || repo.isBlank()) {
+            out.put("available", false);
+            out.put("reason", "项目未映射 GitHub 仓库");
+            return out;
+        }
+        if (props.getToken().isBlank()) {
+            out.put("available", false);
+            out.put("reason", "未配置 GITHUB_TOKEN");
+            return out;
+        }
+        try {
+            String branch = defaultBranch(repo);
+            Map<String, List<String>> pools = candidatePools(repo, branch);
+            if ("readme".equals(scope)) {
+                for (String path : pools.get("readme")) {
+                    String content = fetchContent(repo, branch, path);
+                    if (content != null && !content.isBlank()) {
+                        out.put("available", true);
+                        out.put("text", content);
+                        out.put("source", path);
+                        out.put("context", "仓库 " + repo + "，分支 " + branch);
+                        return out;
+                    }
+                }
+                out.put("available", false);
+                out.put("reason", "仓库里没找到 README");
+                return out;
+            }
+            StringBuilder sb = new StringBuilder();
+            int files = 0;
+            for (String path : pools.get("test")) {
+                if (files >= 4 || sb.length() > 10_000) break;
+                String content = fetchContent(repo, branch, path);
+                if (content == null || content.isBlank()) continue;
+                sb.append("// ==== ").append(path).append(" ====\n").append(content).append("\n\n");
+                files++;
+            }
+            if (files == 0) {
+                out.put("available", false);
+                out.put("reason", "仓库里没找到测试文件");
+                return out;
+            }
+            out.put("available", true);
+            out.put("text", sb.toString());
+            out.put("source", files + " 个测试文件");
+            out.put("context", "仓库 " + repo + "，分支 " + branch + "，语言按扩展名判断");
+            return out;
+        } catch (Exception e) {
+            out.put("available", false);
+            out.put("reason", "拉取仓库失败: " + brief(e));
+            return out;
+        }
+    }
+
     /** 只读缓存,不触发网络:主接口用它判断"是否已评估过",避免页面加载时被拉取拖慢。 */
     public Map<String, Object> peek(String projectId) {
         CacheEntry e = cache.get(projectId);
