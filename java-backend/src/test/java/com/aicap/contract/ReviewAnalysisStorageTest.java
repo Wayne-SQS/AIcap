@@ -81,7 +81,9 @@ class ReviewAnalysisStorageTest {
         jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "US13已验收通过。\n\nUS14 开始开发。");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',1,1,NULL)");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US14','US14','权限',0,2,NULL)");
-        mvc = MockMvcBuilders.standaloneSetup(new ReviewAnalysisController(service),
+        var guard = new com.aicap.service.MeetingAccessGuard(jdbc,
+                org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class));
+        mvc = MockMvcBuilders.standaloneSetup(new ReviewAnalysisController(service, guard),
                 new ReviewProposalReviewController(context.getBean(ReviewProposalReviewService.class)),
                 new ReviewProposalExecutionController(context.getBean(ReviewProposalExecutionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();

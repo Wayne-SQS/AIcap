@@ -56,6 +56,20 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         assertEquals(200,review(id,decision("approve")).getStatus()); assertEquals(200,execute(id).getStatus());
     }
 
+    @Test void editingStoryScopeInvalidatesOriginalEffortEstimate() throws Exception {
+        var input=body();
+        ((ObjectNode)input.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":8,"max_hours":20,"basis":"按原范围粗估","uncertainty":"字段待确认"}
+            """));
+        String id=mapper.readTree(submit(input).getContentAsByteArray()).path("id").asText();
+        role("owner");
+        var response=review(id,amended());
+        assertEquals(200,response.getStatus(),response.getContentAsString());
+        var result=mapper.readTree(response.getContentAsByteArray());
+        assertEquals(8,result.at("/original_proposal/effort_estimate/min_hours").asInt());
+        assertTrue(result.at("/approved_proposal/effort_estimate").isMissingNode());
+    }
+
     @Test void pendingRejectedAndUnauthorizedCannotCreateStories() throws Exception {
         String id=saved();
         for(String role:java.util.List.of("member","viewer")) {
@@ -108,6 +122,47 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
             assertEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
             assertEquals(3,rows("stories")); assertEquals(1,rows("story_logs")); assertEquals(1,rows("meeting_refinement_proposal_executions"));
         } finally { pool.shutdownNow(); }
+    }
+
+    /** US17: 采纳理由属于被采纳版本的一部分,必须留档;拒绝是本轮唯一允许不写理由的决定。 */
+    @Test void approvalRequiresRecordedReasonButRejectionDoesNot() throws Exception {
+        var input=body(); ((ObjectNode)input.at("/result/proposed_actions/0")).set("changes",amended().get("changes"));
+        String id=mapper.readTree(submit(input).getContentAsByteArray()).path("id").asText(); role("admin");
+        for(String blank:java.util.List.of("","   ")) {
+            var approve=decision("approve"); approve.put("reason",blank);
+            assertEquals(422,review(id,approve).getStatus());
+        }
+        var missing=decision("approve"); missing.remove("reason");
+        assertEquals(422,review(id,missing).getStatus());
+        assertEquals(0,rows("meeting_refinement_proposal_reviews"));
+        assertEquals(200,review(id,decision("approve")).getStatus());
+        assertEquals("人工确认",jdbc.queryForObject("SELECT reason FROM meeting_refinement_proposal_reviews WHERE analysis_id=?",String.class,id));
+        assertEquals(409,review(id,decision("reject")).getStatus());
+        var second=body(); second.put("client_request_id","request-2");
+        ((ObjectNode)second.at("/result/proposed_actions/0")).set("changes",amended().get("changes"));
+        String other=mapper.readTree(submit(second).getContentAsByteArray()).path("id").asText();
+        var reject=decision("reject"); reject.put("reason","");
+        var response=review(other,reject); assertEquals(200,response.getStatus(),response.getContentAsString());
+        assertEquals("",jdbc.queryForObject("SELECT reason FROM meeting_refinement_proposal_reviews WHERE analysis_id=?",String.class,other));
+    }
+
+    /** US17: 故事日志要能自证来源,整份批准内容不能因列宽被截断,重试也不得重复建故事。 */
+    @Test void approvedContentIsTraceableAndNotTruncatedAcrossRetries() throws Exception {
+        String id=saved(); role("admin");
+        String description="导出本周全部已完成故事，包含负责人与验收人。"+"明细".repeat(600);
+        var input=amended();
+        ((ObjectNode)input.get("changes")).put("title","导出周报归档").put("description",description);
+        var response=review(id,input); assertEquals(200,response.getStatus(),response.getContentAsString());
+        var execution=execute(id); assertEquals(200,execution.getStatus(),execution.getContentAsString());
+        var first=mapper.readTree(execution.getContentAsByteArray());
+        var ledger=mapper.readTree(jdbc.queryForMap("SELECT detail FROM story_logs WHERE story_id='US15'").get("detail").toString());
+        assertEquals("m1",ledger.path("source_meeting_id").asText());
+        assertEquals(id,ledger.path("source_analysis_id").asText());
+        assertEquals("p1",ledger.path("source_proposal_id").asText());
+        assertEquals(description,ledger.at("/changes/description").asText());
+        assertEquals(1,jdbc.queryForObject("SELECT executed_by FROM meeting_refinement_proposal_executions WHERE analysis_id=?",Integer.class,id));
+        assertEquals(first,mapper.readTree(execute(id).getContentAsByteArray()));
+        assertEquals(1,rows("story_logs")); assertEquals(3,rows("stories"));
     }
 
     @Test void queriesAreReadOnlyAndBoundToMeeting() throws Exception {

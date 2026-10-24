@@ -83,7 +83,9 @@ class StatusAnalysisStorageTest {
         jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "US13 已验收完成。\n\nUS14 开始开发。");
         jdbc.update("INSERT INTO stories(code,id,title,description,acceptance,priority,status,sprint,activity,owner_id) VALUES ('US13','US13','登录','登录故事','通过验收','Must',1,2,2,NULL)");
         jdbc.update("INSERT INTO stories(code,id,title,description,acceptance,priority,status,sprint,activity,owner_id) VALUES ('US14','US14','权限','权限故事','通过验收','Should',0,2,2,NULL)");
-        mvc = MockMvcBuilders.standaloneSetup(new StatusAnalysisController(service), new StatusProposalReviewController(context.getBean(StatusProposalReviewService.class)), new StatusProposalExecutionController(context.getBean(StatusProposalExecutionService.class)))
+        var guard = new com.aicap.service.MeetingAccessGuard(jdbc,
+                org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class));
+        mvc = MockMvcBuilders.standaloneSetup(new StatusAnalysisController(service, guard), new StatusProposalReviewController(context.getBean(StatusProposalReviewService.class)), new StatusProposalExecutionController(context.getBean(StatusProposalExecutionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }

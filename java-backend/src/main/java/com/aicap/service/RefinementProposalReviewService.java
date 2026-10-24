@@ -37,9 +37,11 @@ public class RefinementProposalReviewService {
             var input = strict.treeToValue(body, Review.class);
             if (input == null || !validator.validate(input).isEmpty()) throw new IllegalArgumentException();
             boolean edit = input.decision().equals("modify_and_approve");
-            if (edit != (input.changes() != null) || (edit && input.reason().isBlank())) throw new IllegalArgumentException();
+            // US17: 采纳理由是被采纳版本的一部分,必须随决定一起留档;只有拒绝允许不写理由。
+            boolean rejected = input.decision().equals("reject");
+            if (edit != (input.changes() != null) || (!rejected && input.reason().isBlank())) throw new IllegalArgumentException();
             return input;
-        } catch (Exception e) { throw ApiException.unprocessable("审核载荷无效；仅修改后接受可带 changes，且必须说明修改原因"); }
+        } catch (Exception e) { throw ApiException.unprocessable("审核载荷无效；仅修改后接受可带 changes，采纳与修改后接受都必须填写采纳理由"); }
     }
 
     private JsonNode json(Object text) {
@@ -77,7 +79,11 @@ public class RefinementProposalReviewService {
         if (index < 0) throw ApiException.notFound("提案不存在");
         var original = proposals.get(index);
         ObjectNode approved = input.decision().equals("reject") ? null : original.deepCopy();
-        if (input.changes()!=null) approved.set("changes",mapper.valueToTree(input.changes()));
+        if (input.changes()!=null) {
+            approved.set("changes",mapper.valueToTree(input.changes()));
+            // An estimate for the original scope is stale after an editor changes that scope.
+            approved.remove("effort_estimate");
+        }
         var existing = jdbc.queryForList("SELECT * FROM meeting_refinement_proposal_reviews WHERE analysis_id=? AND proposal_index=?", analysisId,index);
         if (!existing.isEmpty()) {
             var previous = existing.getFirst();

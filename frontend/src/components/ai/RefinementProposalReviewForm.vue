@@ -29,8 +29,12 @@ async function submit() {
       error.value = '请通过修改后接受补齐标题、描述、验收标准、优先级、Sprint和活动。'
       return
     }
+    if (!reason.value.trim()) {
+      error.value = '请填写采纳理由。'
+      return
+    }
     if (decision.value === 'modify_and_approve') {
-      if (!reason.value.trim() || Object.keys(labels).every(key => value[key] === props.proposal.changes[key])) {
+      if (Object.keys(labels).every(key => value[key] === props.proposal.changes[key])) {
         error.value = '请实际修改内容并填写修改原因。'
         return
       }
@@ -44,7 +48,7 @@ async function submit() {
 }
 </script>
 <template>
-  <form aria-label="审核Refinement提案" @submit.prevent="submit">
+  <form aria-label="审核Refinement提案" novalidate @submit.prevent="submit">
     <fieldset :disabled="busy || !meeting.mayReview">
       <legend>人工审核</legend>
       <p v-if="originalMissing.length">原提案待补齐：{{ originalMissing.map(key => labels[key]).join('、') }}。</p>
@@ -58,7 +62,7 @@ async function submit() {
         <label class="field">批准后的Sprint<select v-model="changes.sprint" required><option :value="null" disabled>待确认</option><option v-for="s in 4" :key="s" :value="s">Sprint {{ s }}</option></select></label>
         <label class="field">批准后的活动<select v-model="changes.activity" required><option :value="null" disabled>待确认</option><option v-for="(activity, index) in activities" :key="index" :value="index + 1">{{ activity }}</option></select></label>
       </template>
-      <label class="field">{{ decision === 'modify_and_approve' ? '修改原因（必填）' : '审核意见（可选）' }}<textarea v-model="reason" :required="decision === 'modify_and_approve'" maxlength="1000"></textarea></label>
+      <label class="field">{{ decision === 'reject' ? '拒绝理由（可选）' : decision === 'modify_and_approve' ? '修改原因（必填）' : '采纳理由（必填）' }}<textarea v-model="reason" :required="decision !== 'reject'" maxlength="1000"></textarea></label>
       <p class="small">决定提交后不可覆盖。批准后单独执行，新故事初始为待办、未分配负责人。</p>
       <button type="submit" class="primary">{{ busy ? '正在提交审核…' : '提交审核决定' }}</button>
     </fieldset>

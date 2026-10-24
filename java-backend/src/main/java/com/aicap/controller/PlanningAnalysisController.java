@@ -1,5 +1,6 @@
 package com.aicap.controller;
 
+import com.aicap.service.MeetingAccessGuard;
 import com.aicap.service.PlanningAnalysisService;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -11,7 +12,8 @@ public class PlanningAnalysisController extends AbstractMeetingAnalysisControlle
 
     private final PlanningAnalysisService delegate;
 
-    public PlanningAnalysisController(PlanningAnalysisService delegate) {
+    public PlanningAnalysisController(PlanningAnalysisService delegate, MeetingAccessGuard guard) {
+        super(guard);
         this.delegate = delegate;
     }
 

@@ -1,5 +1,6 @@
 package com.aicap.controller;
 
+import com.aicap.service.MeetingAccessGuard;
 import com.aicap.service.RetroAnalysisService;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -11,7 +12,8 @@ public class RetroAnalysisController extends AbstractMeetingAnalysisController {
 
     private final RetroAnalysisService delegate;
 
-    public RetroAnalysisController(RetroAnalysisService delegate) {
+    public RetroAnalysisController(RetroAnalysisService delegate, MeetingAccessGuard guard) {
+        super(guard);
         this.delegate = delegate;
     }
 

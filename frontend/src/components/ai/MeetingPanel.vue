@@ -13,7 +13,7 @@ import ReviewAnalysisPanel from './ReviewAnalysisPanel.vue'
 import RetroAnalysisPanel from './RetroAnalysisPanel.vue'
 import RefinementAnalysisPanel from './RefinementAnalysisPanel.vue'
 import AssignmentPanel from './AssignmentPanel.vue'
-const workflowNames = ['text', 'audio', 'manual']
+const workflowNames = ['text', 'prd', 'audio', 'manual']
 const route = useRoute()
 const router = useRouter()
 const workflow = ref(workflowNames.includes(String(route.query.workflow)) ? String(route.query.workflow) : 'text')
@@ -22,11 +22,15 @@ const analysisType = ref(String(route.query.type || 'daily'))
 /* 会议智能体面板:离线=演示转写+生成建议;在线=保存会议/选择/手动录入待审建议
    对齐旧版 renderMeeting + meeting-review.js */
 const meeting = useMeetingStore()
+watch(() => meeting.selectedMeeting?.transcript, value => {
+  if (value?.startsWith('PRD正文：\n')) analysisType.value = 'refinement'
+})
 watch(() => route.query.type, value => { analysisType.value = String(value || 'daily') })
 watch(() => route.query.workflow, value => { workflow.value = workflowNames.includes(String(value)) ? String(value) : 'text' })
 function selectWorkflow(value) {
   if (!workflowNames.includes(value)) return
   workflow.value = value
+  if (value === 'prd') analysisType.value = 'refinement'
   const query = { ...route.query }
   if (value === 'text') delete query.workflow
   else query.workflow = value
@@ -103,11 +107,12 @@ async function saveMeeting() {
   saving.value = true
   let saved = false
   try {
-    await meeting.saveMeeting({ title: saveForm.title, transcript: saveForm.transcript })
+    await meeting.saveMeeting({ title: saveForm.title,
+      transcript: workflow.value === 'prd' ? `PRD正文：\n${saveForm.transcript}` : saveForm.transcript })
     saved = true
     saveForm.title = ''
     saveForm.transcript = ''
-    notify('会议已保存到服务器')
+    notify(workflow.value === 'prd' ? 'PRD 已保存，请运行 Backlog Refinement 拆解并审核估算' : '会议已保存到服务器')
   } catch (err) { notify('保存失败：' + err.message) }
   finally { if (!saved) saving.value = false; else saving.value = false }
 }
@@ -178,16 +183,17 @@ function genDemoSuggestion() {
     <div class="sum-card" style="margin-bottom:16px"><b>当前模式：在线服务</b><p class="small">{{ meeting.selectedMeeting ? `当前会议：${meeting.selectedMeeting.title}` : '请选择已保存会议或创建会议。' }} · 分析完成后仍需审核，批准不会自动执行业务变更。</p><span class="sug-status">{{ meeting.selectedMeeting ? '已选择会议' : '等待选择会议' }}</span></div>
     <div role="tablist" aria-label="会议工作流" class="meeting-workflow-tabs">
       <button id="meeting-workflow-tab-text" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'text' ? 0 : -1" :aria-selected="workflow === 'text'" @click="selectWorkflow('text')" @keydown="handleWorkflowKeydown">文本会议</button>
+      <button id="meeting-workflow-tab-prd" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'prd' ? 0 : -1" :aria-selected="workflow === 'prd'" @click="selectWorkflow('prd')" @keydown="handleWorkflowKeydown">PRD 拆解与估算</button>
       <button id="meeting-workflow-tab-audio" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'audio' ? 0 : -1" :aria-selected="workflow === 'audio'" @click="selectWorkflow('audio')" @keydown="handleWorkflowKeydown">语音会议</button>
       <button id="meeting-workflow-tab-manual" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'manual' ? 0 : -1" :aria-selected="workflow === 'manual'" @click="selectWorkflow('manual')" @keydown="handleWorkflowKeydown">手动录入一条待审核建议</button>
     </div>
     <div id="meeting-workflow-panel" role="tabpanel" :aria-labelledby="`meeting-workflow-tab-${workflow}`" tabindex="0">
     <div v-if="workflow !== 'manual'" class="meeting-shared">
-      <p class="pool-note">{{ workflow === 'text' ? '创建或选择会议，录入文本后选择分析类型。' : '录音和转写草稿需要人工核对并保存版本；确认文本后创建分析会议，再选择分析类型。匿名说话人标签不代表成员身份。' }}</p>
-      <form v-if="workflow === 'text'" id="meeting-save-form" @submit.prevent="saveMeeting">
-      <label class="field">会议标题<input name="title" v-model="saveForm.title" required maxlength="200"></label>
-      <label class="field">会议转写<textarea name="transcript" v-model="saveForm.transcript" required maxlength="16000" rows="5"></textarea></label>
-      <button class="primary" type="submit" :disabled="!meeting.maySubmit || saving" :title="readonlyTitle">保存会议</button>
+      <p class="pool-note">{{ workflow === 'prd' ? '粘贴 PRD 正文；明确的独立功能可拆成待审故事，工作量仅是粗估，审核与执行分开。' : workflow === 'text' ? '创建或选择会议，录入文本后选择分析类型。' : '录音和转写草稿需要人工核对并保存版本；确认文本后创建分析会议，再选择分析类型。匿名说话人标签不代表成员身份。' }}</p>
+      <form v-if="workflow === 'text' || workflow === 'prd'" id="meeting-save-form" @submit.prevent="saveMeeting">
+      <label class="field">{{ workflow === 'prd' ? 'PRD 标题' : '会议标题' }}<input name="title" v-model="saveForm.title" required maxlength="200"></label>
+      <label class="field">{{ workflow === 'prd' ? 'PRD 正文' : '会议转写' }}<textarea name="transcript" v-model="saveForm.transcript" required :maxlength="workflow === 'prd' ? 15990 : 16000" rows="5"></textarea></label>
+      <button class="primary" type="submit" :disabled="!meeting.maySubmit || saving" :title="readonlyTitle">{{ workflow === 'prd' ? '保存 PRD' : '保存会议' }}</button>
       </form>
       <template v-if="workflow === 'audio'">
         <div class="h-sec">语音输入与转写</div>

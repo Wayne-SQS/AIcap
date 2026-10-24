@@ -79,7 +79,9 @@ class PlanningAnalysisStorageTest {
         jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "决定US13移至Sprint 2。\n\nUS14 开始开发。");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',1,1,NULL)");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US14','US14','权限',0,2,NULL)");
-        mvc = MockMvcBuilders.standaloneSetup(new PlanningAnalysisController(service),
+        var guard = new com.aicap.service.MeetingAccessGuard(jdbc,
+                org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class));
+        mvc = MockMvcBuilders.standaloneSetup(new PlanningAnalysisController(service, guard),
                 new PlanningProposalReviewController(context.getBean(PlanningProposalReviewService.class)),
                 new PlanningProposalExecutionController(context.getBean(PlanningProposalExecutionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
