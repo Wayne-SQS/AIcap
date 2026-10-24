@@ -14,7 +14,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -161,5 +163,12 @@ class EfficiencyInsightsControllerTest {
         records = (List<Map<String, Object>>) controller.calculate("P001", today).get("improvements");
         assertEquals("signal_cleared", records.get(0).get("source_outcome"));
         assertEquals(0, records.get(0).get("after_issue"));
+    }
+
+    @Test void acceptsLocalDateTimeFromRealMySqlDriver() {
+        var at = LocalDateTime.of(2026, 10, 9, 12, 0);
+        assertEquals(at, EfficiencyInsightsController.transitionOf(at));
+        assertEquals(at, EfficiencyInsightsController.transitionOf(Timestamp.valueOf(at)));
+        assertNull(EfficiencyInsightsController.transitionOf(null));
     }
 }

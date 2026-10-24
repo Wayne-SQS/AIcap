@@ -168,8 +168,9 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   // 负载档位:李锐铭 已分配 72h / 总容量 120h(周容量 15h × 8 周)= 0.6 → 正常
   await expect(cards.first().locator('.loadflag')).toHaveText('正常')
 
-  // 点成员卡片 → 抽屉(任务明细)
-  await cards.first().click()
+  // 点成员卡片 → 抽屉(任务明细)。必须点标题栏 .head:卡片中心会落在「当前任务」按钮上,
+  // 那会打开任务详情抽屉而非成员抽屉。
+  await cards.first().locator('.head').click()
   const drawer = page.locator('#member-drawer')
   await expect(drawer).toBeVisible()
   await expect(page.locator('#drawer-title')).toContainText('李锐铭')

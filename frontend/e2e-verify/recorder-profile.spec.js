@@ -84,15 +84,22 @@ test('成员画像:真实后端数据 + 编辑弹窗', async ({ page }) => {
 test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) => {
   await login(page)
 
-  // 保存一个新会议,承载本次录音
-  await page.goto('/#/ai')
+  // 保存一个新会议,承载本次录音。会议工作区已收进 AI 办公室的同事工作台:
+  // 直接进 /ai 只会落到办公室首页(抽屉关闭,表单不在 DOM),必须用 ?tab=meeting 展开工作台。
+  await page.goto('/#/office?tab=meeting')
+  await expect(page.locator('#meeting-save-form')).toBeVisible()
   const stamp = Date.now()
   const title = `录音验收会议 ${stamp}`
   await page.locator('#meeting-save-form input[name=title]').fill(title)
   await page.locator('#meeting-save-form textarea[name=transcript]').fill('本次会议用于验收网页麦克风录音与 mp3 提交。')
   await page.locator('#meeting-save-form button[type=submit]').click()
-  await expect(page.locator('#meeting-select')).toHaveValue(/.+/, { timeout: 20000 })
-  const meetingId = await page.locator('#meeting-select').inputValue()
+  /* 保存前下拉框可能已选中上一轮遗留会议, `toHaveValue(/.+/)` 会立刻通过并读到旧 id,
+     导致后面删的是旧会议、本轮新会议留在库里。改为等「本次标题」的选项出现并被选中。 */
+  const option = page.locator('#meeting-select option', { hasText: title })
+  await expect(option).toHaveCount(1, { timeout: 20000 })
+  const meetingId = await option.getAttribute('value')
+  expect(meetingId, '新会议应有 id').toBeTruthy()
+  await expect(page.locator('#meeting-select')).toHaveValue(meetingId)
 
   // RecorderPanel(#meeting-recorder)只在「语音会议」工作流下挂载:保存会议走的是
   // 默认的文本工作流,这里必须切到 audio 工位才拿得到录音区。
@@ -147,6 +154,6 @@ test('录音:麦克风 → MP3 → 提交会议 → 回放', async ({ page }) =>
   const gone = await page.request.delete(`http://127.0.0.1:8080/api/meetings/${meetingId}?projectId=P001`, {
     headers: { Authorization: 'Bearer ' + token }
   })
-  expect([200, 404], '验收会议应被删除清理,实际 ' + gone.status()).toContain(gone.status())
+  expect([200, 404], '验收会议应被删除清理,实际 ' + gone.status() + ' ' + (await gone.text().catch(() => ''))).toContain(gone.status())
   console.log('[recorder] meeting cleaned up: ' + meetingId)
 })

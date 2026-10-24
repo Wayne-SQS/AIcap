@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -108,7 +109,7 @@ public class EfficiencyInsightsController {
         for (var row : rows) {
             int status = ((Number) row.get("status")).intValue();
             boolean blocked = ((Number) row.get("blocked")).intValue() != 0;
-            Timestamp transition = (Timestamp) row.get("created_at");
+            LocalDateTime transition = transitionOf(row.get("created_at"));
             if (transition == null || row.get("new_status") == null
                     || ((Number) row.get("new_status")).intValue() != status) {
                 missingHistory++;
@@ -121,7 +122,7 @@ public class EfficiencyInsightsController {
                 suggestion = "确认阻塞原因、责任人与解除条件，再更新任务状态。";
             } else if (status == 1 && transition != null
                     && ((Number) row.get("new_status")).intValue() == status
-                    && ChronoUnit.DAYS.between(transition.toLocalDateTime().toLocalDate(), today) >= 14) {
+                    && ChronoUnit.DAYS.between(transition.toLocalDate(), today) >= 14) {
                 kind = "stalled";
                 suggestion = "与负责人复核进度，必要时拆分任务或调整排期。";
             } else continue;
@@ -131,10 +132,10 @@ public class EfficiencyInsightsController {
             issue.put("kind", kind);
             issue.put("current_status", status);
             issue.put("blocked", blocked);
-            issue.put("last_status_change", transition == null ? null : transition.toLocalDateTime().toString());
+            issue.put("last_status_change", transition == null ? null : transition.toString());
             issue.put("days_in_status", transition == null || row.get("new_status") == null
                     || ((Number) row.get("new_status")).intValue() != status
-                    ? null : ChronoUnit.DAYS.between(transition.toLocalDateTime().toLocalDate(), today));
+                    ? null : ChronoUnit.DAYS.between(transition.toLocalDate(), today));
             issue.put("suggestion", suggestion);
             issues.add(issue);
             activeIssueKeys.add(row.get("code") + ":" + kind);
@@ -171,5 +172,12 @@ public class EfficiencyInsightsController {
         result.put("improvements", improvements);
         result.put("limitations", "阻塞依据任务标记；停滞仅依据连续14天未变更的进行中状态。对账只衡量源瓶颈信号是否消失，不证明改进任务导致效率提升；源任务缺失或历史无效时不下结论。");
         return result;
+    }
+
+    /** 真实 MySQL 驱动返回 LocalDateTime，H2 返回 Timestamp：两种都要接受。 */
+    static LocalDateTime transitionOf(Object value) {
+        if (value instanceof Timestamp ts) return ts.toLocalDateTime();
+        if (value instanceof LocalDateTime ldt) return ldt;
+        return null;
     }
 }
