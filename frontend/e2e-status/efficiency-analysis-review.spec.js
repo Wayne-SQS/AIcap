@@ -3,6 +3,8 @@ import { test, expect } from '@playwright/test'
 test('efficiency recommendation appears for review and owner can approve it', async ({ page }) => {
   let submitted = false
   let decision = null
+  let planningRequested = false
+  let executionRequested = false
   await page.addInitScript(() => {
     localStorage.setItem('aiguanli_token', 'fixture-token')
     localStorage.setItem('aiguanli-current-project', 'P001')
@@ -25,6 +27,15 @@ test('efficiency recommendation appears for review and owner can approve it', as
       decision = route.request().postDataJSON()
       body = { id: 'proposal-1', status: 'approved' }
     }
+    if (path.endsWith('/proposals/proposal-1/planning-run')) {
+      planningRequested = true
+      body = { id: 'plan-1', status: 'queued' }
+    }
+    if (path === '/api/planning-agent/runs/plan-1') body = {
+      id: 'plan-1', status: 'waiting_confirmation', request_text: '复核阻塞并形成规划草案',
+      result: { summary: '待确认的优化规划', actions: [], impact_analysis: {}, warnings: [] }
+    }
+    if (path.endsWith('/plan-1/confirm')) executionRequested = true
     await route.fulfill({ json: body })
   })
   await page.goto('/#/projects/P001/agents?agent=efficiency')
@@ -36,4 +47,10 @@ test('efficiency recommendation appears for review and owner can approve it', as
   await panel.getByRole('button', { name: '批准（不执行）' }).click()
   await expect(panel).toContainText('建议已批准')
   expect(decision).toEqual({ decision: 'approve', reason: '确认需要复核' })
+  await panel.getByRole('button', { name: '生成正式规划草案' }).click()
+  await expect(page).toHaveURL(/agent=planning.*runId=plan-1/)
+  await expect(page.getByLabel('项目规划智能体操作区')).toContainText('待确认的优化规划')
+  await expect(page.getByRole('button', { name: '确认执行' })).toBeVisible()
+  expect(planningRequested).toBe(true)
+  expect(executionRequested).toBe(false)
 })
