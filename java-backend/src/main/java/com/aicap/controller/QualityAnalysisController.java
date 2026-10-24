@@ -69,9 +69,19 @@ public class QualityAnalysisController {
         boolean repoAvail = ev.get("repository") instanceof Map<?, ?> m && Boolean.TRUE.equals(m.get("available"));
         boolean actSynced = ev.get("code_activity") instanceof Map<?, ?> m && Boolean.TRUE.equals(m.get("synced"));
         StringBuilder sb = new StringBuilder("仅依据库内故事与任务的结构化字段定位规范缺口；");
-        if (ciAvail && repoAvail && actSynced) sb.append("已接入 CI 运行结论、仓库文件树与 GitHub 同步活动证据；");
-        else if (!ciAvail && !repoAvail && !actSynced) sb.append("尚未接入 CI/仓库/同步活动证据；");
-        else sb.append("部分外部证据不可用（见 evidence 各段 reason）；");
+        if (ciAvail && repoAvail && actSynced) {
+            sb.append("已接入 CI 运行结论、仓库文件树与 GitHub 同步活动证据；");
+        } else if (!ciAvail && !repoAvail && !actSynced) {
+            sb.append("尚未接入 CI/仓库/同步活动证据；");
+        } else {
+            // 点名缺哪一段，别让用户对着"部分不可用"猜（缺同步活动就去跑一次同步即可）。
+            java.util.List<String> missing = new java.util.ArrayList<>();
+            if (!ciAvail) missing.add("CI 运行结论");
+            if (!repoAvail) missing.add("仓库文件树");
+            if (!actSynced) missing.add("GitHub 同步活动（执行一次同步即可补齐）");
+            sb.append("当前不可用的外部证据：").append(String.join("、", missing))
+              .append("；其余已在 evidence 中给出。");
+        }
         sb.append("不评估代码/文档/测试的真实质量，也不虚构覆盖率结论。建议需人工复核。");
         return sb.toString();
     }

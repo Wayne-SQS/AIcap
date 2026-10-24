@@ -417,7 +417,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       </header>
 
       <p v-if="!session.online" class="qa-note">连接项目服务后可查看规范缺口。</p>
-      <p v-else-if="qualityLoading" class="qa-note" role="status">正在读取故事与任务字段…</p>
+      <p v-else-if="qualityLoading" class="qa-note" role="status">正在读取库内字段与 GitHub 证据（CI 运行记录与仓库文件树，首次约 20–40 秒，5 分钟内走缓存）…</p>
       <p v-else-if="qualityError" class="qa-note err" role="alert">{{ qualityError }}</p>
 
       <template v-else-if="quality">
