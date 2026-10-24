@@ -245,24 +245,25 @@ async def test_current_turn_dispatch_is_visible_to_the_model_but_not_in_the_chec
     platform = FakePlatform()
     session_id = platform.make_session()
     run_id = str(uuid.uuid4())
+    analysis_id = "checkpoint-isolation-analysis-9e6702"
     platform.add_event(session_id, run_id, "agent.dispatched", {
         "agent": "start_meeting_analysis", "mode": "trigger",
         "job_id": None, "status": None, "deduplicated": False,
-        "result": {"analysis_id": "a-9", "meeting_id": "m-9", "storage_status": "pending"},
+        "result": {"analysis_id": analysis_id, "meeting_id": "m-9", "storage_status": "pending"},
     })
 
     model = RecordingModel()
     await _run_turn(platform, session_id, "让会议智能体分析这场会", model, run_id=run_id)
 
     systems = [m for m in (model.first_messages or []) if m.get("role") == "system"]
-    assert any("a-9" in str(m.get("content")) for m in systems), systems
+    assert any(analysis_id in str(m.get("content")) for m in systems), systems
     assert any("已经发生的事实" in str(m.get("content")) for m in systems), systems
 
     # 收尾那一次也必须带同一份回执（2026-10-18 真机实测：只给非 final 拼，模型在
     # 写结论的最后一步看不见"已派活"，于是派活成功后答复"我无法新增任务"）
     final_systems = [m for m in (model.final_messages or []) if m.get("role") == "system"]
-    assert any("a-9" in str(m.get("content")) for m in final_systems), final_systems
+    assert any(analysis_id in str(m.get("content")) for m in final_systems), final_systems
 
     blob = json.dumps(platform.checkpoint_state(run_id), ensure_ascii=False)
     assert "start_meeting_analysis" not in blob, "规划相的事实不得进检查点"
-    assert "a-9" not in blob, "派活回执不得进检查点"
+    assert analysis_id not in blob, "派活回执不得进检查点"
