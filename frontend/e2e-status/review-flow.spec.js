@@ -4,7 +4,10 @@ async function setup(page, role = 'admin', malformed = false) {
   let saved = null, review = null, execution = null
   const posts = []
   const proposal = { proposal_id: 'p1', story_id: 'US13', expected: { status: 1 }, changes: { status: 2 }, reason: '会议决定', evidence: [{ segment_id: 'S1', quote: 'US13已验收通过' }] }
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON()
     posts.push(body)
@@ -16,6 +19,8 @@ async function setup(page, role = 'admin', malformed = false) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
+    if (path === '/api/projects') data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
+    if (path === '/api/stories') data = [{ id: 'US13', title: '登录' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: 'Review', transcript: 'US13已验收通过' }]
     if (path.includes('review-analyses')) {
@@ -39,8 +44,8 @@ async function setup(page, role = 'admin', malformed = false) {
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
-  await page.getByRole('button', { name: '打开会议 Sprint Review' }).click()
+  await page.goto('/#/projects/P001/office?tab=meeting&meetingId=m1&type=review')
+  await expect(page.getByRole('region', { name: 'Review完成提案', exact: true })).toBeVisible()
   return posts
 }
 
@@ -58,7 +63,7 @@ test('Review analyze modify approve execute and refresh persists audit display',
   await panel.getByRole('button', { name: '执行已批准变更' }).click()
   await expect(panel).toContainText('执行结果：进行中 → 已完成')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Review' }).click()
+  await expect(panel).toBeVisible()
   await expect(panel).toContainText('故事日志 #42')
   expect(posts).toHaveLength(3)
   expect(posts[0]).toMatchObject({ meeting_type: 'sprint_review', current_sprint: null })
@@ -92,7 +97,7 @@ test('Review rejects unchanged amendment and rejected proposal cannot execute', 
   await panel.getByLabel('审核决定').selectOption('modify_and_approve')
   await panel.getByLabel('修改原因（必填）').fill('核对')
   await panel.getByRole('button', { name: '提交审核决定' }).click()
-  await expect(panel).toContainText('请修订提案理由并填写修改原因')
+  await expect(panel).toContainText('请选择有效的目标故事，修订故事或提案理由，并填写修改原因')
   expect(posts).toHaveLength(1)
   await panel.getByLabel('审核决定').selectOption('reject')
   await panel.getByRole('button', { name: '提交审核决定' }).click()
@@ -119,7 +124,7 @@ test('Review uncertain analysis retries same request after reload', async ({ pag
   await panel.getByRole('button', { name: '分析Sprint Review', exact: true }).click()
   await expect(panel).toContainText('未能确认分析保存结果')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Review' }).click()
+  await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: '重试本次分析', exact: true }).click()
   await expect(panel).toContainText('未能确认分析保存结果')
   expect(attempts).toHaveLength(2)
