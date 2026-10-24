@@ -718,6 +718,10 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         </div>
 <p class="qa-fine">{{ quality.limitations }}</p>
       </template>
+      <!-- 既没在线、也没在加载、也没报错，却还没有结果：给出可执行的下一步，别让卡片只剩标题 -->
+      <p v-else class="qa-note">
+        {{ projects.currentProjectId ? '尚未读取分析结果，点右上角「刷新分析」开始（首次需拉取 GitHub 证据，约 20–40 秒）。' : '请先在左上角选择项目，再点「刷新分析」。' }}
+      </p>
     </div>
 
     <div class="h-sec">Sprint 进度 · 4 个发布切片</div>
