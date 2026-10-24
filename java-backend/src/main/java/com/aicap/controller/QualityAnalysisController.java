@@ -4,6 +4,7 @@ import com.aicap.common.ApiException;
 import com.aicap.dto.TaskDtos;
 import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
+import com.aicap.service.QualityContentService;
 import com.aicap.service.QualityEvidenceService;
 import com.aicap.service.QualityTestSetService;
 import com.aicap.service.RepoQualityFetcher;
@@ -46,6 +47,7 @@ public class QualityAnalysisController {
     private final QualityTestSetService testSets;
     private final RepoQualityFetcher codeQualityFetcher;
     private final SemanticReviewService semanticReviewer;
+    private final QualityContentService content;
 
     private static final String BASIS = "story_task_specification_and_quality_evidence";
     /** 行覆盖率低于该阈值时定位为测试缺口。 */
@@ -55,7 +57,9 @@ public class QualityAnalysisController {
             "story_missing_acceptance", "story_missing_owner", "task_without_story",
             QualityTestSetService.FINDING_KIND, "ci_pipeline_failing", "failed_tests_unresolved",
             "coverage_below_threshold", "repository_missing_tests", "repository_missing_docs",
-            "repository_missing_ci", "code_missing_reviews");
+            "repository_missing_ci", "code_missing_reviews",
+            QualityContentService.CODE_KIND, QualityContentService.README_KIND,
+            QualityContentService.TESTS_KIND);
 
     public record ImprovementRequest(String finding_kind, Integer owner_id, Integer hours,
                                      Integer week_start, Integer week_end) {}
@@ -68,10 +72,13 @@ public class QualityAnalysisController {
         Map<String, Object> ev = evidence.collect(scoped);
         Map<String, Object> payload = calculate(scoped, ev).payload();
         payload.put("evidence", ev);
-        // 代码质量评估较慢(要拉仓库文件),这里只回已有缓存;没评估过就提示可触发,不拖慢页面加载。
+        // 代码质量评估较慢(要拉仓库文件),这里只回缓存或最近一次留档;都没有就提示可触发,不拖慢页面加载。
         Map<String, Object> cq = codeQualityFetcher.peek(scoped);
+        if (cq == null || cq.isEmpty()) cq = content.latestCodeSnapshot(scoped);
         payload.put("code_quality", cq != null ? cq : Map.of(
                 "available", false, "reason", "尚未评估，可调用 /code-quality 触发"));
+        // 语义评审同样优先展示最近一次留档结果,重启后仍可审计。
+        payload.put("semantic_reviews", content.latestSemanticReviews(scoped));
         // limitations 按证据实际可用性动态生成,不再硬编码「未接入」。
         payload.put("limitations", buildLimitations(ev));
         return payload;
@@ -109,7 +116,9 @@ public class QualityAnalysisController {
         Roles.any();
         String scoped = ProjectAccessService.normalize(projectId);
         projects.requireMember(scoped);
-        return codeQualityFetcher.evaluate(scoped);
+        Map<String, Object> result = codeQualityFetcher.evaluate(scoped);
+        content.saveCodeSnapshot(scoped, result);
+        return result;
     }
 
     /**
@@ -128,13 +137,18 @@ public class QualityAnalysisController {
             throw ApiException.unprocessable("scope 只能是 readme 或 tests");
         String text = body == null ? null : body.get("text");
         String context = body == null ? null : body.get("context");
+        String source = null;
         if (text == null || text.isBlank()) {
             Map<String, Object> sample = codeQualityFetcher.sampleText(scoped, scope);
             if (!Boolean.TRUE.equals(sample.get("available"))) return sample;
             text = String.valueOf(sample.get("text"));
             context = sample.get("context") == null ? context : String.valueOf(sample.get("context"));
+            source = sample.get("source") == null ? null : String.valueOf(sample.get("source"));
         }
-        return semanticReviewer.review(scope, text, context);
+        Map<String, Object> result = semanticReviewer.review(scope, text, context);
+        // 结论留档,重启后仍可审计;content_sha 只记输入指纹,不存正文。
+        content.saveSemanticReview(scoped, source, result, text);
+        return result;
     }
 
     /** 人工确认一条缺口,生成一项管理任务并登记追踪;同一缺口只允许一个未重复的任务。 */
@@ -188,6 +202,9 @@ public class QualityAnalysisController {
             case "repository_missing_docs" -> "补齐文档";
             case "repository_missing_ci" -> "接入 CI 流水线";
             case "code_missing_reviews" -> "建立代码评审";
+            case QualityContentService.CODE_KIND -> "修复代码质量维度";
+            case QualityContentService.README_KIND -> "提升 README 可操作性";
+            case QualityContentService.TESTS_KIND -> "提升测试有效性";
             default -> "补齐质量缺口";
         };
         String name = "改进：" + label + " · " + source.get("source_code");
@@ -245,6 +262,7 @@ public class QualityAnalysisController {
                     "开发任务未关联任何故事，工作量无法追溯到需求。", "关联到具体故事，或改判为管理任务。"));
         }
         findings.addAll(testSets.findings(projectId));
+        findings.addAll(content.findings(projectId));
         addEvidenceFindings(evidenceMap, findings);
 
         var result = new LinkedHashMap<String, Object>();

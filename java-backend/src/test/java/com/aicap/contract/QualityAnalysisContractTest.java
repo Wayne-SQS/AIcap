@@ -52,6 +52,14 @@ class QualityAnalysisContractTest extends ContractTestSupport {
                 + "WHERE project_id='P001' AND source_code LIKE 'TS%')");
         jdbc.update("DELETE FROM quality_improvements WHERE project_id='P001' AND source_code LIKE 'TS%'");
         jdbc.update("DELETE FROM quality_test_sets WHERE project_id='P001'");
+        // 代码质量/语义评审留档契约用例的残留。
+        jdbc.update("DELETE FROM tasks WHERE project_id='P001' AND code IN ("
+                + "SELECT improvement_task_code FROM quality_improvements WHERE project_id='P001' "
+                + "AND (source_code LIKE 'CQ:%' OR source_code LIKE 'SEM:%'))");
+        jdbc.update("DELETE FROM quality_improvements WHERE project_id='P001' "
+                + "AND (source_code LIKE 'CQ:%' OR source_code LIKE 'SEM:%')");
+        jdbc.update("DELETE FROM quality_code_snapshots WHERE project_id='P001'");
+        jdbc.update("DELETE FROM quality_semantic_reviews WHERE project_id='P001'");
     }
 
     @Test
@@ -176,6 +184,81 @@ class QualityAnalysisContractTest extends ContractTestSupport {
         // viewer 只能读,不能提交测试集。
         ApiResponse forbidden = post("/api/projects/P001/quality-analysis/test-sets", token(USER_VIEWER), payload);
         assertStatus(forbidden, 403);
+    }
+
+    @Test
+    void persistedContentQualityBecomesConfirmableGaps() {
+        String codePayload = json(map(
+                "available", true, "sufficient", true, "repo", "aicap/demo", "branch", "main",
+                "total", 68, "grade", "待改进", "risk_level", "high",
+                "dimensions", List.of(map("key", "test_density", "name", "测试密度")),
+                "findings", List.of(map(
+                        "severity", "blocking", "category", "test_density",
+                        "title", "测试密度：测试文件占比 0%", "metric", "0%",
+                        "impact", "改动没有自动化回归保护", "action", "为关键模块补充单元测试",
+                        "recoverable_points", 20.0,
+                        "evidence", List.of(map("path", "src/main/java/Demo.java", "line", 42))))));
+        jdbc.update("INSERT INTO quality_code_snapshots(project_id,repo,branch,total,grade,risk_level,"
+                + "payload_json,created_at) VALUES ('P001','aicap/demo','main',68,'待改进','high',?,NOW())", codePayload);
+
+        String semanticPayload = json(map(
+                "scope", "readme", "available", true, "score", 55, "grade", "待改进",
+                "verdict", "缺少安装步骤", "reader_can_act", false, "unverified_quotes", 0,
+                "issues", List.of(map("quote", "npm start", "problem", "未说明依赖安装", "verified", true)),
+                "missing", List.of("运行命令")));
+        jdbc.update("INSERT INTO quality_semantic_reviews(project_id,scope,source,score,grade,"
+                + "reader_can_act,payload_json,content_sha,created_at) "
+                + "VALUES ('P001','readme','README.md',55,'待改进',0,?,?,NOW())", semanticPayload, "sha-readme");
+
+        ApiResponse analyzed = get("/api/projects/P001/quality-analysis", token(USER_VIEWER));
+        assertStatus(analyzed, 200);
+        // 缓存为空时应回放最近一次留档结论,重启后仍可审计。
+        assertTrue(analyzed.json().path("code_quality").path("persisted").asBoolean(false),
+                "应回放落库的代码质量结论 -> " + analyzed.body());
+        assertEquals(55, analyzed.json().path("semantic_reviews").path("readme").path("score").asInt(),
+                "应回放落库的语义评审 -> " + analyzed.body());
+
+        JsonNode codeGap = null;
+        JsonNode semanticGap = null;
+        for (JsonNode finding : analyzed.json().path("findings")) {
+            if ("code_quality_dimension_gap".equals(finding.path("kind").asText())) codeGap = finding;
+            if ("readme_not_actionable".equals(finding.path("kind").asText())) semanticGap = finding;
+        }
+        assertNotNull(codeGap, "代码质量维度应转成可确认缺口 -> " + analyzed.body());
+        assertEquals("CQ:test_density", codeGap.path("source_code").asText());
+        assertEquals("测试质量", codeGap.path("category").asText());
+        assertTrue(codeGap.path("location").asText().contains("仓库 aicap/demo"),
+                "缺口应带仓库定位 -> " + codeGap);
+        assertTrue(codeGap.path("suggestion").asText().contains("补充单元测试"),
+                "缺口应带修复建议 -> " + codeGap);
+
+        assertNotNull(semanticGap, "语义评审结论应转成可确认缺口 -> " + analyzed.body());
+        assertEquals("SEM:readme", semanticGap.path("source_code").asText());
+        assertEquals("文档质量", semanticGap.path("category").asText());
+        assertTrue(semanticGap.path("detail").asText().contains("读者无法照做"), "应说明不可照做 -> " + semanticGap);
+
+        // 人工确认两条新缺口,均生成可追踪任务,重复确认幂等。
+        String codeBody = json(map("finding_kind", "code_quality_dimension_gap",
+                "owner_id", 1, "hours", 3, "week_start", 5, "week_end", 5));
+        ApiResponse codeConfirmed = post("/api/projects/P001/quality-analysis/CQ:test_density/improvements",
+                token(USER_OWNER), codeBody);
+        assertStatus(codeConfirmed, 200);
+        String codeTask = codeConfirmed.json().path("improvement_task_code").asText("");
+        assertTrue(codeTask.startsWith("T"), "应创建改进任务 -> " + codeConfirmed.body());
+        ApiResponse codeAgain = post("/api/projects/P001/quality-analysis/CQ:test_density/improvements",
+                token(USER_OWNER), codeBody);
+        assertStatus(codeAgain, 200);
+        assertEquals(codeTask, codeAgain.json().path("improvement_task_code").asText(), "同缺口重复确认应幂等");
+
+        String semanticBody = json(map("finding_kind", "readme_not_actionable",
+                "owner_id", 1, "hours", 2, "week_start", 5, "week_end", 5));
+        ApiResponse semanticConfirmed = post("/api/projects/P001/quality-analysis/SEM:readme/improvements",
+                token(USER_OWNER), semanticBody);
+        assertStatus(semanticConfirmed, 200);
+        assertTrue(semanticConfirmed.json().path("improvement_task_code").asText("").startsWith("T"),
+                "应创建改进任务 -> " + semanticConfirmed.body());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM quality_improvements "
+                + "WHERE project_id='P001' AND source_code='SEM:readme'", Integer.class));
     }
 
     @Test

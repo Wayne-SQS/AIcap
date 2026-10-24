@@ -38,6 +38,8 @@ TRUNCATE TABLE task_logs;
 TRUNCATE TABLE efficiency_improvements;
 TRUNCATE TABLE quality_improvements;
 TRUNCATE TABLE quality_test_sets;
+TRUNCATE TABLE quality_semantic_reviews;
+TRUNCATE TABLE quality_code_snapshots;
 TRUNCATE TABLE progress_forecasts;
 TRUNCATE TABLE story_logs;
 TRUNCATE TABLE task_story_relations;

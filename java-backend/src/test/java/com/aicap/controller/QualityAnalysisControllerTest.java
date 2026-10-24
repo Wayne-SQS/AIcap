@@ -7,6 +7,7 @@ import com.aicap.entity.Task;
 import com.aicap.entity.User;
 import com.aicap.security.AuthContext;
 import com.aicap.service.ProjectAccessService;
+import com.aicap.service.QualityContentService;
 import com.aicap.service.QualityEvidenceService;
 import com.aicap.service.QualityTestSetService;
 import com.aicap.service.RepoQualityFetcher;
@@ -41,6 +42,7 @@ class QualityAnalysisControllerTest {
     private QualityTestSetService testSets;
     private RepoQualityFetcher codeQualityFetcher;
     private SemanticReviewService semanticReviewer;
+    private QualityContentService content;
 
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID()
@@ -57,15 +59,25 @@ class QualityAnalysisControllerTest {
                 + "code varchar(20) NOT NULL,name varchar(200) NOT NULL,source varchar(20) NOT NULL,"
                 + "cases_json varchar(10000) NOT NULL,created_by int NOT NULL,created_at timestamp NOT NULL,"
                 + "primary key(id),unique(project_id,code))");
+        jdbc.execute("CREATE TABLE quality_code_snapshots(id bigint NOT NULL AUTO_INCREMENT,"
+                + "project_id varchar(20) NOT NULL,repo varchar(200) NOT NULL,branch varchar(100) NOT NULL,"
+                + "total int NOT NULL,grade varchar(10) NOT NULL,risk_level varchar(20) NOT NULL,"
+                + "payload_json varchar(100000) NOT NULL,created_at timestamp NOT NULL,primary key(id))");
+        jdbc.execute("CREATE TABLE quality_semantic_reviews(id bigint NOT NULL AUTO_INCREMENT,"
+                + "project_id varchar(20) NOT NULL,scope varchar(20) NOT NULL,source varchar(300) NULL,"
+                + "score int NULL,grade varchar(10) NULL,reader_can_act int NOT NULL DEFAULT 0,"
+                + "payload_json varchar(100000) NOT NULL,content_sha varchar(64) NULL,"
+                + "created_at timestamp NOT NULL,primary key(id))");
         projects = mock(ProjectAccessService.class);
         taskController = mock(TaskPoolController.class);
         evidence = mock(QualityEvidenceService.class);
         testSets = new QualityTestSetService(jdbc);
         codeQualityFetcher = mock(RepoQualityFetcher.class);
         semanticReviewer = mock(SemanticReviewService.class);
+        content = new QualityContentService(jdbc);
         when(evidence.collect(anyString())).thenReturn(new java.util.LinkedHashMap<>());
         controller = new QualityAnalysisController(projects, jdbc, taskController, evidence,
-                testSets, codeQualityFetcher, semanticReviewer);
+                testSets, codeQualityFetcher, semanticReviewer, content);
     }
 
     @AfterEach void clearAuth() { AuthContext.clear(); }
@@ -328,5 +340,142 @@ class QualityAnalysisControllerTest {
         var result = controller.calculate("P001", ev);
         assertTrue(result.findings().isEmpty(), "未知证据不应被推断成缺口");
         assertFalse(String.valueOf(result.payload().get("limitations")).contains("已接入 CI"));
+    }
+
+    private Map<String, Object> codeQualityPayload(boolean sufficient) {
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("available", true);
+        payload.put("repo", "aicap/demo");
+        payload.put("branch", "main");
+        payload.put("sufficient", sufficient);
+        payload.put("total", 68);
+        payload.put("grade", "待改进");
+        payload.put("risk_level", "high");
+        payload.put("dimensions", List.of(
+                Map.of("key", "test_density", "name", "测试密度"),
+                Map.of("key", "naming", "name", "命名规范")));
+        payload.put("findings", List.of(
+                Map.of("severity", "blocking", "category", "test_density",
+                        "title", "测试密度：测试文件占比 0%", "metric", "0%",
+                        "impact", "改动没有自动化回归保护", "action", "为关键模块补充单元测试",
+                        "recoverable_points", 20.0,
+                        "evidence", List.of(Map.of("path", "src/main/java/Demo.java", "line", 42,
+                                "snippet", "public void run()"))),
+                // low 只留页面展示,不该占用人工确认队列
+                Map.of("severity", "low", "category", "naming",
+                        "title", "命名规范：少量缩写", "metric", "2 处",
+                        "impact", "可读性", "action", "重命名变量",
+                        "recoverable_points", 1.0, "evidence", List.of())));
+        return payload;
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void codeQualitySnapshotBecomesLocatedFindingAndCanBeConfirmed() {
+        asOwner(7);
+        when(codeQualityFetcher.evaluate("P001")).thenReturn(codeQualityPayload(true));
+        controller.evaluateCodeQuality("P001");
+
+        var snapshot = content.latestCodeSnapshot("P001");
+        assertNotNull(snapshot);
+        assertEquals(68, snapshot.get("total"));
+        assertEquals(true, snapshot.get("persisted"));
+
+        var findings = controller.calculate("P001").findings();
+        assertEquals(1, findings.size(), "只把 blocking/high/medium 维度转成可确认缺口");
+        var gap = findings.get(0);
+        assertEquals(QualityContentService.CODE_KIND, gap.get("kind"));
+        assertEquals("测试质量", gap.get("category"));
+        assertEquals("CQ:test_density", gap.get("source_code"));
+        assertTrue(String.valueOf(gap.get("location")).contains("仓库 aicap/demo（main）"));
+        assertTrue(String.valueOf(gap.get("location")).contains("测试密度"));
+        assertTrue(String.valueOf(gap.get("detail")).contains("src/main/java/Demo.java:42"));
+        assertTrue(String.valueOf(gap.get("suggestion")).contains("补充单元测试"));
+        assertTrue(String.valueOf(gap.get("suggestion")).contains("20 分"));
+
+        var analysis = controller.analyze("P001");
+        var cq = (Map<String, Object>) analysis.get("code_quality");
+        assertEquals(true, cq.get("persisted"), "缓存过期后仍应回放最近一次留档结论");
+
+        improvementTask("T66");
+        var saved = controller.createImprovement("P001", "CQ:test_density",
+                new QualityAnalysisController.ImprovementRequest(QualityContentService.CODE_KIND, 7, 3, 5, 5));
+        assertEquals("T66", saved.get("improvement_task_code"));
+        assertEquals("改进：修复代码质量维度 · CQ:test_density", jdbc.queryForObject(
+                "SELECT name FROM tasks WHERE project_id='P001' AND code='T66'", String.class));
+    }
+
+    @Test void insufficientCodeQualitySampleIsNeitherPersistedNorReported() {
+        asOwner(7);
+        when(codeQualityFetcher.evaluate("P001")).thenReturn(codeQualityPayload(false));
+        controller.evaluateCodeQuality("P001");
+        assertNull(content.latestCodeSnapshot("P001"));
+        assertTrue(controller.calculate("P001").findings().isEmpty());
+        assertEquals(409, assertThrows(ApiException.class, () -> controller.createImprovement("P001",
+                "CQ:test_density", new QualityAnalysisController.ImprovementRequest(
+                        QualityContentService.CODE_KIND, 7, 3, 5, 5))).getStatus());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void semanticReviewIsPersistedAndBecomesActionableFinding() {
+        asOwner(7);
+        var review = new LinkedHashMap<String, Object>();
+        review.put("scope", "readme");
+        review.put("available", true);
+        review.put("score", 55);
+        review.put("grade", "待改进");
+        review.put("verdict", "缺少安装步骤");
+        review.put("reader_can_act", false);
+        review.put("unverified_quotes", 1);
+        review.put("issues", List.of(Map.of("quote", "npm start", "problem", "未说明依赖安装", "verified", true)));
+        review.put("missing", List.of("运行命令"));
+        when(semanticReviewer.review(eq("readme"), anyString(), any())).thenReturn(review);
+
+        var body = new LinkedHashMap<String, String>();
+        body.put("scope", "readme");
+        body.put("text", "# Demo");
+        body.put("context", "仓库 aicap/demo");
+        assertEquals(55, controller.reviewSemantics("P001", body).get("score"));
+        assertNotNull(jdbc.queryForObject("SELECT content_sha FROM quality_semantic_reviews", String.class));
+
+        var findings = controller.calculate("P001").findings();
+        assertEquals(1, findings.size());
+        var gap = findings.get(0);
+        assertEquals(QualityContentService.README_KIND, gap.get("kind"));
+        assertEquals("文档质量", gap.get("category"));
+        assertEquals("SEM:readme", gap.get("source_code"));
+        assertTrue(String.valueOf(gap.get("detail")).contains("读者无法照做"));
+        assertTrue(String.valueOf(gap.get("detail")).contains("1 条未能在原文核实"));
+        assertTrue(String.valueOf(gap.get("suggestion")).contains("运行命令"));
+
+        assertEquals(1, ((Map<?, ?>) controller.analyze("P001").get("semantic_reviews")).size());
+
+        improvementTask("T55");
+        var saved = controller.createImprovement("P001", "SEM:readme",
+                new QualityAnalysisController.ImprovementRequest(QualityContentService.README_KIND, 7, 2, 5, 5));
+        assertEquals("T55", saved.get("improvement_task_code"));
+        assertEquals("改进：提升 README 可操作性 · SEM:readme", jdbc.queryForObject(
+                "SELECT name FROM tasks WHERE project_id='P001' AND code='T55'", String.class));
+    }
+
+    @Test void actionableSemanticReviewLeavesNoGap() {
+        asOwner(7);
+        var review = new LinkedHashMap<String, Object>();
+        review.put("scope", "tests");
+        review.put("available", true);
+        review.put("score", 88);
+        review.put("grade", "良");
+        review.put("verdict", "断言清晰，可按说明执行");
+        review.put("reader_can_act", true);
+        review.put("unverified_quotes", 0);
+        review.put("issues", List.of());
+        review.put("missing", List.of());
+        when(semanticReviewer.review(eq("tests"), anyString(), any())).thenReturn(review);
+
+        var body = new LinkedHashMap<String, String>();
+        body.put("scope", "tests");
+        body.put("text", "@Test void works() {}");
+        controller.reviewSemantics("P001", body);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM quality_semantic_reviews", Integer.class));
+        assertTrue(controller.calculate("P001").findings().isEmpty());
     }
 }
