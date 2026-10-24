@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
 
-test('efficiency recommendation appears for review and owner can approve it', async ({ page }) => {
+test('approved efficiency recommendation requires a second confirmation before execution', async ({ page }) => {
   let submitted = false
   let decision = null
   let planningRequested = false
   let executionRequested = false
+  let executionProjectId = null
   await page.addInitScript(() => {
     localStorage.setItem('aiguanli_token', 'fixture-token')
     localStorage.setItem('aiguanli-current-project', 'P001')
@@ -33,9 +34,17 @@ test('efficiency recommendation appears for review and owner can approve it', as
     }
     if (path === '/api/planning-agent/runs/plan-1') body = {
       id: 'plan-1', status: 'waiting_confirmation', request_text: '复核阻塞并形成规划草案',
-      result: { summary: '待确认的优化规划', actions: [], impact_analysis: {}, warnings: [] }
+      result: { summary: '待确认的优化规划', actions: [
+        { type: 'UPDATE_TASK_PRIORITY', task_id: 'T1', before_priority: 'Should', after_priority: 'Must' }
+      ], impact_analysis: {}, warnings: [] }
     }
-    if (path.endsWith('/plan-1/confirm')) executionRequested = true
+    if (path.endsWith('/plan-1/confirm')) {
+      executionRequested = true
+      executionProjectId = new URL(route.request().url()).searchParams.get('projectId')
+      body = { id: 'plan-1', status: 'completed', result: { summary: '优化规划已执行', actions: [
+        { type: 'UPDATE_TASK_PRIORITY', task_id: 'T1', before_priority: 'Should', after_priority: 'Must' }
+      ] } }
+    }
     await route.fulfill({ json: body })
   })
   await page.goto('/#/projects/P001/agents?agent=efficiency')
@@ -53,4 +62,8 @@ test('efficiency recommendation appears for review and owner can approve it', as
   await expect(page.getByRole('button', { name: '确认执行' })).toBeVisible()
   expect(planningRequested).toBe(true)
   expect(executionRequested).toBe(false)
+  await page.getByRole('button', { name: '确认执行' }).click()
+  await expect(page.getByLabel('项目规划智能体操作区')).toContainText('已完成')
+  expect(executionRequested).toBe(true)
+  expect(executionProjectId).toBe('P001')
 })
