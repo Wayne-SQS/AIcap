@@ -1,0 +1,81 @@
+{
+  "created_at": "2026-10-24T07:40:53.391286+00:00",
+  "skill_version": "refinement-create-v3",
+  "model": "deepseek-v4-flash",
+  "data": "synthetic_only",
+  "planned": 1,
+  "cases": [
+    {
+      "id": "refinement-correction",
+      "rubric": "只保留最后确认的站内提醒，引用更正结论。",
+      "candidate": {
+        "schema_version": "1.0",
+        "meeting_id": "refinement-correction",
+        "summary": "会议先提出新增“邮件通知”，随后由主持人明确更正为取消，最终决定仅新增“站内提醒”，其他字段待确认。没有已存在的故事可供重复核对。",
+        "proposed_actions": [
+          {
+            "proposal_id": "proposal-1",
+            "action": "create_story",
+            "changes": {
+              "title": "站内提醒",
+              "description": null,
+              "acceptance": null,
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "主持人明确更正并最终决定仅新增“站内提醒”；未给出功能行为、范围及其他字段依据。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "主持人：更正，邮件通知取消，最终决定仅新增“站内提醒”，其他字段待确认。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "“站内提醒”的具体功能行为和范围是什么？",
+          "“站内提醒”的验收标准是什么？",
+          "“站内提醒”的优先级、目标Sprint和业务活动编号分别是什么？"
+        ]
+      },
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "refinement-correction",
+        "meeting_type": "backlog_refinement",
+        "summary": "会议先提出新增“邮件通知”，随后由主持人明确更正为取消，最终决定仅新增“站内提醒”，其他字段待确认。没有已存在的故事可供重复核对。",
+        "proposed_actions": [
+          {
+            "proposal_id": "proposal-1",
+            "action": "create_story",
+            "changes": {
+              "title": "站内提醒",
+              "description": null,
+              "acceptance": null,
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "主持人明确更正并最终决定仅新增“站内提醒”；未给出功能行为、范围及其他字段依据。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "主持人：更正，邮件通知取消，最终决定仅新增“站内提醒”，其他字段待确认。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "“站内提醒”的具体功能行为和范围是什么？",
+          "“站内提醒”的验收标准是什么？",
+          "“站内提醒”的优先级、目标Sprint和业务活动编号分别是什么？"
+        ]
+      }
+    }
+  ],
+  "manual_review_required": true,
+  "passed": 1,
+  "automated_acceptance_passed": true
+}

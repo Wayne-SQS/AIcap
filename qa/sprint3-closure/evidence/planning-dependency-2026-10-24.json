@@ -1,0 +1,117 @@
+{
+  "created_at": "2026-10-24T07:38:06.004622+00:00",
+  "skill_version": "planning-sprint-v3",
+  "model": "deepseek-v4-flash",
+  "data": "synthetic_only",
+  "repeat": 1,
+  "cases": [
+    {
+      "id": "unspecified-dependency",
+      "repetition": 1,
+      "rubric": "只称依赖，不能加外部/内部；未说明负责人不等于负责人未定，允许不带预设地询问。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "unspecified-dependency",
+        "meeting_type": "sprint_planning",
+        "summary": "会议讨论 US61：其依赖尚未满足，因此暂不调整该故事的 Sprint，待条件满足后再讨论。本次未形成 US61 的 Sprint 调整决定。",
+        "proposed_actions": [],
+        "open_questions": [
+          "请说明 US61 所依赖的内容及条件满足的确认方式；会议提到条件满足后再讨论调整。"
+        ]
+      }
+    },
+    {
+      "id": "explicit-external-provider",
+      "repetition": 1,
+      "rubric": "保留明确外部属性及已知提供方/联系人；仅交付时间待确认，不能扩大为身份或责任不明。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "explicit-external-provider",
+        "meeting_type": "sprint_planning",
+        "summary": "会议提到 US61 依赖外部供应商华东平台的文档，提供方已确定为华东平台，联系人是李工，目前只需确认交付时间；在时间确认前不调整该故事的 Sprint。会议未就任何故事作出 Sprint 调整决定，因此没有生成调整提案。",
+        "proposed_actions": [],
+        "open_questions": [
+          "请说明 US61 所依赖文档的交付时间及确认方式。"
+        ]
+      }
+    },
+    {
+      "id": "internal-dependency-resolved",
+      "repetition": 1,
+      "rubric": "内部依赖已解决且明确决定迁移，应提2到3；不得因曾有依赖全弃权，不编造外部供应商。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "internal-dependency-resolved",
+        "meeting_type": "sprint_planning",
+        "summary": "会议确认US61依赖的内部测试环境已恢复，负责人王工确认条件已满足；据此决定将US61从Sprint 2移至Sprint 3。该调整为待人工审核的Sprint计划建议，不代表工作已开始或已执行。",
+        "proposed_actions": [
+          {
+            "proposal_id": "PA-US61-S2-to-S3",
+            "action": "update_story_sprint",
+            "story_id": "US61",
+            "expected": {
+              "sprint": 2
+            },
+            "changes": {
+              "sprint": 3
+            },
+            "reason": "原文明确决定将US61从Sprint 2移至Sprint 3，前提的内部测试环境已恢复且由王工确认条件满足。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "US61依赖的内部测试环境已恢复，负责人王工确认条件已满足。决定将US61从Sprint 2移至Sprint 3。"
+              }
+            ]
+          }
+        ],
+        "open_questions": [
+          "若US61移至Sprint 3的提案获批，请说明任务T61的排期确认方式。"
+        ]
+      }
+    },
+    {
+      "id": "external-dependency-resolved",
+      "repetition": 1,
+      "rubric": "保留明确外部来源及已交付，提2到4；不得写成交付时间或提供方仍未知。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "external-dependency-resolved",
+        "meeting_type": "sprint_planning",
+        "summary": "会议确认外部供应商华东平台已交付US61所需文档，李工确认依赖已满足；决定将US61从Sprint 2移至Sprint 4。该调整为待人工审核的提案，不代表工作已开始或变更已执行。",
+        "proposed_actions": [
+          {
+            "proposal_id": "PA-US61-001",
+            "action": "update_story_sprint",
+            "story_id": "US61",
+            "expected": {
+              "sprint": 2
+            },
+            "changes": {
+              "sprint": 4
+            },
+            "reason": "会议决定将US61从Sprint 2移至Sprint 4。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "决定将US61从Sprint 2移至Sprint 4。"
+              }
+            ]
+          }
+        ],
+        "open_questions": []
+      }
+    }
+  ],
+  "manual_review_required": true,
+  "passed": 4,
+  "planned": 4,
+  "automated_acceptance_passed": true
+}

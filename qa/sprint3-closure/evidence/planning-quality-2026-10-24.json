@@ -1,0 +1,199 @@
+{
+  "created_at": "2026-10-24T07:37:39.208657+00:00",
+  "skill_version": "planning-sprint-v3",
+  "model": "deepseek-v4-flash",
+  "data": "synthetic_only",
+  "repeat": 1,
+  "cases": [
+    {
+      "id": "explicit-number",
+      "repetition": 1,
+      "rubric": "明确数字决定可提案，无需猜当前Sprint；不得声称已执行。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "explicit-number",
+        "meeting_type": "sprint_planning",
+        "summary": "会议决定将US61从Sprint 2调整到Sprint 3。当前快照中该故事位于Sprint 2；现有任务T61的Story.sprint=2与Task.sprints=[2]一致，其week_start=3、week_end=4为周排期，不是Sprint编号。若该提案获批，需核对任务排期。未提供Sprint Goal、日期、故事估时或剩余容量信息。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1",
+            "action": "update_story_sprint",
+            "story_id": "US61",
+            "expected": {
+              "sprint": 2
+            },
+            "changes": {
+              "sprint": 3
+            },
+            "reason": "会议原文明确决定将US61从Sprint 2调整到Sprint 3；快照中该故事当前为Sprint 2，目标为Sprint 3。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "决定将US61从Sprint 2调整到Sprint 3。"
+              }
+            ]
+          }
+        ],
+        "open_questions": []
+      }
+    },
+    {
+      "id": "unknown-relative",
+      "repetition": 1,
+      "rubric": "本Sprint未知，不能从故事Sprint 2猜测；应询问明确范围。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "unknown-relative",
+        "meeting_type": "sprint_planning",
+        "summary": "会议提出将US61挪到本Sprint，但未确认具体是哪个Sprint；当前Sprint与目标Sprint在输入中均未知，因此该调整尚不构成可提交的Sprint变更。US61现有快照Sprint为2，关联任务T61的sprints为[2]，现有故事与任务快照一致；本阶段不做任务排期或成员分配调整。",
+        "proposed_actions": [],
+        "open_questions": [
+          "请说明US61要挪到哪个Sprint，并明确“本Sprint”对应的具体Sprint编号。"
+        ]
+      }
+    },
+    {
+      "id": "known-relative",
+      "repetition": 1,
+      "rubric": "显式current_sprint=3可解析本Sprint；不能改变故事状态。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "known-relative",
+        "meeting_type": "sprint_planning",
+        "summary": "会议决定将已有故事US61调入本Sprint（当前Sprint为3）。未提及Sprint目标、日期、故事估时或剩余容量，也未说明依赖、负责人等变更。该决定为待人工审核的Sprint计划提案，不表示工作已开始或业务变更已获批准。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1-US61-3",
+            "action": "update_story_sprint",
+            "story_id": "US61",
+            "expected": {
+              "sprint": 2
+            },
+            "changes": {
+              "sprint": 3
+            },
+            "reason": "会议明确决定将US61调入本Sprint，当前Sprint为3，故建议将故事Sprint从2调整为3。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "决定将US61调入本Sprint。"
+              }
+            ]
+          }
+        ],
+        "open_questions": []
+      }
+    },
+    {
+      "id": "unresolved-conflict",
+      "repetition": 1,
+      "rubric": "未解决冲突不得只截取第一句决定；需确认最终安排。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "unresolved-conflict",
+        "meeting_type": "sprint_planning",
+        "summary": "会上产品提出将US61移到Sprint 3，研发不同意，指出依赖还未明确，主张先不要调整，会上尚未达成一致。因此本次未形成关于US61的Sprint调整决定。",
+        "proposed_actions": [],
+        "open_questions": [
+          "US61的依赖内容、确认方式及负责方是什么？",
+          "US61是否调整到Sprint 3尚未达成一致，需在依赖明确后再讨论并确认？"
+        ]
+      }
+    },
+    {
+      "id": "conditional-negative",
+      "repetition": 1,
+      "rubric": "条件未满足且明确否定，不生成迁移；不把依赖自动称为阻塞。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "conditional-negative",
+        "meeting_type": "sprint_planning",
+        "summary": "会议讨论了故事US61：是否转到Sprint 3的前提是依赖先得到解决；目前该条件尚未满足，会议明确表示不要调整，因此本次没有形成US61的Sprint变更决定。会议未说明依赖的具体内容，也未说明如何确认依赖是否解决。",
+        "proposed_actions": [],
+        "open_questions": [
+          "请说明US61所涉依赖的具体内容，以及依赖是否解决的确认方式。"
+        ]
+      }
+    },
+    {
+      "id": "move-out-of-target",
+      "repetition": 1,
+      "rubric": "目的地4与target_sprint=3不同也应忠实提案，不能强制改成3。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "move-out-of-target",
+        "meeting_type": "sprint_planning",
+        "summary": "会议决定将US61从Sprint 2移到Sprint 4，本次目标Sprint 3不纳入该故事。该决定待人工审核，不代表工作已开始或变更已执行。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1",
+            "action": "update_story_sprint",
+            "story_id": "US61",
+            "expected": {
+              "sprint": 2
+            },
+            "changes": {
+              "sprint": 4
+            },
+            "reason": "会议原文明确定下将US61从Sprint 2移到Sprint 4，并说明目标Sprint 3不纳入该故事。",
+            "evidence": [
+              {
+                "segment_id": "S1",
+                "quote": "决定把US61从Sprint 2移到Sprint 4，本次目标Sprint 3不纳入它。"
+              }
+            ]
+          }
+        ],
+        "open_questions": []
+      }
+    },
+    {
+      "id": "unchanged",
+      "repetition": 1,
+      "rubric": "保持原Sprint不产生2到2占位动作。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "unchanged",
+        "meeting_type": "sprint_planning",
+        "summary": "会议确认US61继续留在Sprint 2，不调整。",
+        "proposed_actions": [],
+        "open_questions": []
+      }
+    },
+    {
+      "id": "capacity-unknown",
+      "repetition": 1,
+      "rubric": "六周容量60不能换算Sprint剩余容量；任务hours=8和estimated_hours=13不能当故事估时或剩余工时。不得声称容量检查通过。",
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "capacity-unknown",
+        "meeting_type": "sprint_planning",
+        "summary": "会议仅讨论了US61能否排入Sprint 3，原文明确尚未做决定，需核对剩余容量和估时；本次未形成已确定的Sprint调整。US61当前快照为Sprint 2，任务T61的sprints为[2]，现有快照中故事与任务排期一致。",
+        "proposed_actions": [],
+        "open_questions": [
+          "US61能否排到Sprint 3尚未决定，请说明需要核对剩余容量和估时的结果及确认方式。"
+        ]
+      }
+    }
+  ],
+  "manual_review_required": true,
+  "passed": 8,
+  "planned": 8,
+  "automated_acceptance_passed": true
+}

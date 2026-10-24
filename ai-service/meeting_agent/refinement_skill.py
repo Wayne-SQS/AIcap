@@ -7,7 +7,7 @@ from .refinement_contracts import BacklogRefinementInput, BacklogRefinementOutpu
 @dataclass(frozen=True)
 class BacklogRefinementSkill:
     name: str = 'BacklogRefinementSkill'
-    version: str = 'refinement-create-v2'
+    version: str = 'refinement-create-v3'
     meeting_type: str = 'backlog_refinement'
     required_context: tuple[str, ...] = ('transcript_segments', 'stories')
     allowed_tools: tuple[str, ...] = ('get_stories',)
@@ -28,6 +28,7 @@ class BacklogRefinementSkill:
 changes仅含title、description、acceptance、priority、sprint、activity。后五个字段缺少明确依据时必须显式null；不套用业务API默认值，不猜Must、Sprint1或活动2。
 priority仅Must/Should/Could；sprint仅1至4；activity仅1至5且须原文明确给出业务活动编号，不用会议议题或自然语言猜编号。current_sprint即使已知也不代表新需求被排入该Sprint。
 title和description保持原文明示的对象、动作及范围，不添加默认发布/部署/通知等步骤。acceptance仅保留明确确认的验收要求，不补造指标、性能阈值、角色或边界条件，不把开发任务当验收已完成。
+如果原文只给出新故事名称，没有单独说明功能行为或范围，description必须为null；不要把标题改写为“新增某某”充当描述。后续通过open_questions询问具体行为。
 明确决定新增但字段缺失仍可生成待审候选，同时在open_questions询问缺失信息；不声称已创建或已批准。模型不得生成故事ID、负责人、状态或估时；后续由业务服务和人工审核处理。
 每条候选有唯一proposal_id、理由及segment_id/quote连续原文证据，引用真正确认新增的结论；不能只引用被否决或更正前的话。摘要保留来源、条件和争议，不把未提及写成现实中不存在。
 当某位发言人认为成本高、风险大或需求不合理时，摘要明确这是该发言人的判断，不改写成客观结论。区分会议已经明确的业务决定、系统不支持自动处理的动作和人工执行尚未完成；已有故事修改超出工具范围，不代表会议未决定修改。
