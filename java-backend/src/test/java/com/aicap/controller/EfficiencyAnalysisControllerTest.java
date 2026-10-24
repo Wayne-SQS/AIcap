@@ -6,6 +6,7 @@ import com.aicap.planning.PlanningAgentService;
 import com.aicap.security.AuthContext;
 import com.aicap.service.EfficiencyAnalysisService;
 import com.aicap.service.ProjectAccessService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EfficiencyAnalysisControllerTest {
+    private final ObjectMapper mapper = new ObjectMapper();
     private ProjectAccessService access;
     private EfficiencyAnalysisService service;
     private PlanningAgentService planning;
@@ -42,15 +44,44 @@ class EfficiencyAnalysisControllerTest {
 
     @Test void approvedProposalOnlyCreatesAPlanningDraftForTheSameProject() {
         when(service.proposal("P001", "proposal-1"))
-                .thenReturn(Map.of("status", "approved", "proposal", Map.of("title", "复核阻塞")));
+                .thenReturn(Map.of("status", "approved", "recommendation_id", "R1", "proposal",
+                        mapper.valueToTree(Map.of("title", "复核阻塞", "recommendations", java.util.List.of(Map.of("id", "R1", "description", "复核阻塞原因"))))));
         when(planning.create(eq("P001"), any(), any())).thenReturn(Map.of("id", "plan-1", "status", "queued"));
 
         var result = controller.planApproved("p001", "proposal-1");
 
         assertEquals("plan-1", result.get("id"));
         verify(access).requireOwner("P001");
-        verify(planning).create(eq("P001"), startsWith("基于已审核的US23项目效率建议生成一份正式规划草案"), any());
+        verify(planning).create(eq("P001"), startsWith("基于已批准的US23效率建议生成规划草案"), any());
         assertTrue(result.containsKey("status"));
+    }
+
+    @Test void longEvidenceIsBoundedBeforeSavingPlanningRequest() {
+        var source = mapper.createObjectNode();
+        source.put("type", "WORKLOAD_IMBALANCE");
+        source.put("title", "计划负载".repeat(500));
+        var affected = source.putArray("affectedTaskCodes");
+        var evidence = source.putArray("evidence");
+        var recommendation = source.putArray("recommendations")
+                .addObject().put("id", "R1").put("description", "复核容量并调整排期".repeat(500));
+        var targets = recommendation.putArray("targetTaskIds");
+        var members = recommendation.putArray("targetMemberIds");
+        for (int i = 0; i < 50; i++) {
+            affected.add("T01" + i); targets.add("T01" + i); members.add(i);
+            evidence.add("容量证据".repeat(1000));
+        }
+        when(service.proposal("P001", "proposal-1"))
+                .thenReturn(Map.of("status", "approved", "recommendation_id", "R1", "proposal", source));
+        when(planning.create(eq("P001"), any(), any())).thenReturn(Map.of("id", "plan-1"));
+
+        controller.planApproved("P001", "proposal-1");
+
+        var request = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(planning).create(eq("P001"), request.capture(), any());
+        assertTrue(request.getValue().length() <= 2000);
+        assertTrue(request.getValue().contains("T010"));
+        assertTrue(request.getValue().contains("还有42项"));
+        assertTrue(request.getValue().contains("查询项目实时数据"));
     }
 
     @Test void pendingProposalCannotCreateAPlanningRun() {

@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -52,9 +54,36 @@ public class EfficiencyAnalysisController {
         access.requireOwner(scoped);
         Map<String,Object> proposal=service.proposal(scoped,id);
         if (!"approved".equals(proposal.get("status"))) throw ApiException.conflict("仅已批准的效率建议可以交给规划智能体");
-        String request="基于已审核的US23项目效率建议生成一份正式规划草案。只能读取项目 "+scoped+" 的当前真实数据，"+
-            "不得直接执行修改；仅提出与该建议对应且有数据依据的变更，列出目标任务/成员与影响，等待项目经理在规划界面再次确认。"+
-            "已批准的建议JSON: "+proposal.get("proposal").toString();
+        JsonNode source = (JsonNode) proposal.get("proposal");
+        JsonNode selected = null;
+        for (JsonNode item : source.path("recommendations"))
+            if (String.valueOf(proposal.get("recommendation_id")).equals(item.path("id").asText())) { selected = item; break; }
+        if (selected == null) throw ApiException.conflict("已批准的建议内容已失效，请重新分析");
+        String request = "基于已批准的US23效率建议生成规划草案。只读取项目" + scoped + "当前真实数据，不得直接执行；"+
+            "仅提出有依据的变更，列明目标和影响，等待项目经理再次确认。提案" + id +
+            "；瓶颈类型=" + compact(source.path("type"), 40) +
+            "；标题=" + compact(source.path("title"), 80) +
+            "；建议=" + compact(selected.path("description"), 280) +
+            "；目标任务=" + compactList(selected.path("targetTaskIds"), 8, 20) +
+            "；目标成员=" + compactList(selected.path("targetMemberIds"), 8, 12) +
+            "；受影响任务=" + compactList(source.path("affectedTaskCodes"), 8, 20) +
+            "；证据=" + compactList(source.path("evidence"), 3, 100) +
+            "。以上为有界摘要，必要时查询项目实时数据核实，不能从省略内容推断事实。";
+        if (request.length() > 2000) throw ApiException.unprocessable("建议内容超过规划输入限制");
         return planning.create(scoped,request,Roles.any());
+    }
+    private static String compact(JsonNode node, int max) {
+        String value = node.asText("");
+        return value.length() <= max ? value : value.substring(0, max) + "…";
+    }
+    private static String compactList(JsonNode node, int maxItems, int maxLength) {
+        if (!node.isArray()) return "[]";
+        List<String> values = new ArrayList<>();
+        int count = 0;
+        for (JsonNode item : node) {
+            if (count++ >= maxItems) break;
+            values.add(compact(item, maxLength));
+        }
+        return values + (node.size() > maxItems ? "（还有" + (node.size() - maxItems) + "项，需查询项目数据）" : "");
     }
 }
