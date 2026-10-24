@@ -59,6 +59,12 @@ public class RefinementProposalExecutionService {
         if(!"not_started".equals(review.get("execution_status"))) throw ApiException.conflict("执行状态无效");
         var approved=json(review.get("approved_json"));
         if(!approved.path("action").asText().equals("create_story")) throw ApiException.conflict("批准动作无效");
+        // US17: 故事日志必须能自证来源。只写批准内容时,"这条故事来自哪次会议/哪次分析/哪个提案"
+        // 只剩执行表一处线索;故事日志被单独导出或审阅时就追溯不回去了。
+        ObjectNode ledger=approved.deepCopy();
+        ledger.put("source_meeting_id",meetingId);
+        ledger.put("source_analysis_id",analysisId);
+        ledger.put("source_proposal_id",id);
         var changes=approved.path("changes");
         RefinementProposalReviewService.requireComplete(changes);
         // 同名检查与编号分配都必须限定在项目内:编号在不同项目里可以重复(US01 各项目都有)
@@ -88,7 +94,7 @@ public class RefinementProposalExecutionService {
             statement.setString(1,projectId);
             if (storyInternalId==null) statement.setNull(2,java.sql.Types.BIGINT); else statement.setLong(2,storyInternalId);
             statement.setString(3,storyId);
-            statement.setString(4,storyId);statement.setString(5,approved.toString());statement.setInt(6,executorId);return statement;
+            statement.setString(4,storyId);statement.setString(5,ledger.toString());statement.setInt(6,executorId);return statement;
         },key);
         int logId=Objects.requireNonNull(key.getKey()).intValue();
         jdbc.update("INSERT INTO meeting_refinement_proposal_executions(analysis_id,proposal_index,proposal_id,story_id,story_log_id,executed_by) VALUES (?,?,?,?,?,?)",

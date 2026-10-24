@@ -72,7 +72,8 @@ public class RefinementAnalysisService extends AbstractMeetingAnalysisService {
         Set<String> ids = new HashSet<>(), titles = new HashSet<>();
         var snapshots = mapper.createArrayNode();
         // New stories have no target ID. Preserve the basic catalog used for duplicate checking.
-        var catalog = jdbc.queryForList("SELECT code AS id,title,status,sprint,owner_id FROM stories ORDER BY code FOR UPDATE");
+        // US16: 快照按会议所属项目取故事目录,不能把全库故事带进别的项目的分析记录。
+        var catalog = jdbc.queryForList("SELECT code AS id,title,status,sprint,owner_id FROM stories WHERE project_id=COALESCE((SELECT project_id FROM meetings WHERE id=?),'P001') ORDER BY code FOR UPDATE", meetingId);
         if (catalog.size()>1000) throw ApiException.conflict("故事目录过大，无法保存分析快照");
         for (var story : catalog) {
             titles.add(story.get("title").toString().strip().toLowerCase(Locale.ROOT));

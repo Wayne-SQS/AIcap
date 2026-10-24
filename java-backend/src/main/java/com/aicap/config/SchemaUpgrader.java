@@ -37,6 +37,7 @@ public class SchemaUpgrader implements ApplicationRunner {
     private final DataSource dataSource;
     private static final String PROJECT_GENERATION_REQUEST_TEXT_MIGRATION =
             "V12_PROJECT_GENERATION_REQUEST_TEXT_TO_TEXT";
+    private static final String STORY_LOG_DETAIL_TEXT_MIGRATION = "V15_STORY_LOG_DETAIL_TO_TEXT";
     private static final String LEGACY_PROJECT_RECOVERY = "V13_LEGACY_PROJECT_RECOVERY";
     private static final String LEGACY_RELATIONS = "V14_LEGACY_RELATIONS";
 
@@ -159,6 +160,9 @@ public class SchemaUpgrader implements ApplicationRunner {
             // story_logs 补 internal-key 审计列(story_internal_id / story_code_snapshot),
             // 与 stories 的 id→code 迁移配套,否则改名后的历史记录追溯不到
             added.addAll(migrateStoryLogs(conn));
+            // 采纳建议时整份批准内容会写进 story_logs.detail;老库这一列是 varchar(500),
+            // MySQL 严格模式下超长直接报 "Data too long",表现为「执行已批准提案」500。
+            added.addAll(migrateStoryLogDetailText(conn));
             // 队友变更:自定义角色与史诗两张表只对全新库由 schema.sql 建,老库不会重跑它,靠这里补建
             execute(conn, "CREATE TABLE IF NOT EXISTS roles (name varchar(50) NOT NULL, can_write tinyint(1) NOT NULL DEFAULT 0, can_manage tinyint(1) NOT NULL DEFAULT 0, PRIMARY KEY(name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             execute(conn, "CREATE TABLE IF NOT EXISTS epics (id bigint NOT NULL AUTO_INCREMENT, project_id varchar(20) NOT NULL, name varchar(100) NOT NULL, description varchar(500) NOT NULL DEFAULT '', created_at datetime NOT NULL, PRIMARY KEY(id), KEY ix_epics_project(project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -293,6 +297,43 @@ public class SchemaUpgrader implements ApplicationRunner {
             ps.setString(1, PROJECT_GENERATION_REQUEST_TEXT_MIGRATION);
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * 存量库 {@code story_logs.detail} 由 varchar(500) 扩为 text。
+     *
+     * <p>判定与 {@link #migrateProjectGenerationRequestText} 同形:查数据库实际列类型,
+     * 已经是 TEXT 家族就不动 DDL,只补迁移标记,保证每次启动都可重复执行。
+     */
+    Set<String> migrateStoryLogDetailText(Connection conn) throws SQLException {
+        if (!tableExists(conn, "story_logs")) return Set.of();
+        String type = null;
+        int size = 0;
+        try (ResultSet rs = conn.getMetaData().getColumns(
+                conn.getCatalog(), null, "story_logs", "detail")) {
+            if (rs.next()) {
+                type = rs.getString("TYPE_NAME");
+                size = rs.getInt("COLUMN_SIZE");
+            }
+        }
+        // H2(MySQL 模式)把 TEXT 报成 CHARACTER VARYING / size=1000000000,MySQL 报成 TEXT / size=65535;
+        // 两种都要认,否则 H2 下每次启动都会重复 ALTER。真老库的 varchar(500) size 恰好是 500。
+        boolean alreadyText = type != null && (Set.of("TEXT", "MEDIUMTEXT", "LONGTEXT", "CLOB", "CHARACTER LARGE OBJECT")
+                .contains(type.toUpperCase(java.util.Locale.ROOT))
+                || (Set.of("VARCHAR", "VARCHAR2", "CHARACTER VARYING")
+                .contains(type.toUpperCase(java.util.Locale.ROOT)) && size > 500));
+        Set<String> added = new HashSet<>();
+        if (!alreadyText) {
+            execute(conn, "ALTER TABLE story_logs MODIFY COLUMN detail TEXT NOT NULL");
+            added.add("story_logs.detail");
+            log.info("story_logs.detail 已从 {} 升级为 TEXT", type);
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT IGNORE INTO app_migrations(name, applied_at) VALUES (?, NOW())")) {
+            ps.setString(1, STORY_LOG_DETAIL_TEXT_MIGRATION);
+            ps.executeUpdate();
+        }
+        return added;
     }
 
     private void migrateScopedBusinessTable(Connection conn, String table, String uniqueName) throws SQLException {

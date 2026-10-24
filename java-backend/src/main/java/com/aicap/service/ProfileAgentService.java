@@ -1525,8 +1525,12 @@ public class ProfileAgentService {
         return a == null ? 0 : a;
     }
 
-    public List<ProfileAgentDtos.RunOut> listRuns() {
-        return runMapper.selectList(new QueryWrapper<ProfileAgentRun>().orderByDesc("created_at").last("LIMIT 20"))
+    /** 只返回给定项目内的运行记录;无可见项目时返回空,不能退化成"全库最近 20 条"。 */
+    public List<ProfileAgentDtos.RunOut> listRuns(java.util.Collection<String> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) return List.of();
+        return runMapper.selectList(new QueryWrapper<ProfileAgentRun>()
+                        .in("project_id", projectIds)
+                        .orderByDesc("created_at").last("LIMIT 20"))
                 .stream().map(r -> new ProfileAgentDtos.RunOut(r.getId(), r.getRangeStart(), r.getRangeEnd(),
                         r.getStatus(), r.getAttempt(), r.getErrorMessage(),
                         r.getCreatedAt() == null ? null : r.getCreatedAt().format(TS)))

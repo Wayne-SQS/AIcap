@@ -5,6 +5,7 @@ import com.aicap.entity.User;
 import com.aicap.profile.GitHubActivitySyncService;
 import com.aicap.security.Roles;
 import com.aicap.service.ProfileAgentService;
+import com.aicap.service.ProjectAccessService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,7 +25,8 @@ import java.util.Map;
 /**
  * AI 任务提交与成员能力画像智能体接口。
  *
- * 读:任何登录用户;录入活动/修正难度:登录成员;触发分析:admin/owner(member 可看本人分析)。
+ * 读:项目成员;录入活动/修正难度:项目内可写成员;触发分析:admin/owner 且为项目成员。
+ * 所有带 projectId 的端点都先过 {@link ProjectAccessService},避免借画像智能体读别的项目的活动事实(US16)。
  * 与会议智能体一致的 REST 风格;失败留痕于 profile_agent_runs。
  */
 @RestController
@@ -34,12 +36,14 @@ public class ProfileAgentController {
 
     private final ProfileAgentService service;
     private final GitHubActivitySyncService githubSync;
+    private final ProjectAccessService projectAccess;
 
     /** 录入一条活动事实(commit/pr/review/bugfix/task_done/note) */
     @PostMapping("/activities")
     public ProfileAgentDtos.ActivityOut addActivity(@RequestParam String projectId,
                                                     @Valid @RequestBody ProfileAgentDtos.ActivityIn in) {
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
         return service.addActivity(projectId, in, actor);
     }
 
@@ -49,6 +53,7 @@ public class ProfileAgentController {
             @RequestParam String projectId,
             @Valid @RequestBody List<ProfileAgentDtos.ActivityIn> items) {
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
         return service.importActivities(projectId, items, actor);
     }
 
@@ -60,6 +65,7 @@ public class ProfileAgentController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.heatmap(projectId, userId, start, end);
     }
 
@@ -71,6 +77,7 @@ public class ProfileAgentController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.listActivities(projectId, userId, start, end);
     }
 
@@ -78,6 +85,7 @@ public class ProfileAgentController {
     @GetMapping("/difficulty")
     public List<ProfileAgentDtos.DifficultyOut> difficulty(@RequestParam String projectId) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.assessDifficulty(projectId, null, null, false);
     }
 
@@ -87,6 +95,7 @@ public class ProfileAgentController {
                                                              @RequestParam String projectId,
                                                              @Valid @RequestBody ProfileAgentDtos.DifficultyIn in) {
         Roles.reviewer();
+        projectAccess.requireWriter(projectId);
         return service.overrideDifficulty(projectId, taskId, in);
     }
 
@@ -98,6 +107,7 @@ public class ProfileAgentController {
                                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
                                        @RequestParam String projectId) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.comparePeriods(projectId, prevStart, prevEnd, start, end);
     }
 
@@ -107,6 +117,7 @@ public class ProfileAgentController {
                                         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
                                         @RequestParam String projectId) {
         Roles.any();
+        projectAccess.requireMember(projectId);
         return service.analyze(projectId, start, end, false, null);
     }
 
@@ -126,14 +137,17 @@ public class ProfileAgentController {
         // 触发分析会落库(运行记录/画像快照)并消耗 LLM 额度 → 只读角色 viewer 必须拒绝。
         // 此前 Roles.any() 允许 viewer,与本类注释"触发分析:admin/owner(member 可看本人分析)"及 US02 只读约束冲突。
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
         return service.runAnalysis(projectId, start, end, actor, userId);
     }
 
-    /** 分析运行记录(最近 20 条,失败留痕) */
+    /** 分析运行记录(最近 20 条,失败留痕);只返回当前用户可访问项目内的记录 */
     @GetMapping("/runs")
     public List<ProfileAgentDtos.RunOut> runs() {
         Roles.any();
-        return service.listRuns();
+        List<String> projectIds = projectAccess.listAccessible().stream()
+                .map(row -> String.valueOf(row.get("id"))).toList();
+        return service.listRuns(projectIds);
     }
 
     /** 把团队风险提交为待审建议(进统一 AI 建议审核中心,admin/owner 审核后才执行) */
@@ -144,6 +158,7 @@ public class ProfileAgentController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
             @RequestParam(required = false) String agent) {
         User actor = Roles.writer();
+        projectAccess.requireWriter(projectId);
         return service.submitRiskSuggestions(projectId, start, end, agent, actor);
     }
 
