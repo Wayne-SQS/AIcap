@@ -48,7 +48,7 @@ async function submit() {
 }
 </script>
 <template>
-  <form aria-label="审核Refinement提案" @submit.prevent="submit">
+  <form aria-label="审核Refinement提案" novalidate @submit.prevent="submit">
     <fieldset :disabled="busy || !meeting.mayReview">
       <legend>人工审核</legend>
       <p v-if="originalMissing.length">原提案待补齐：{{ originalMissing.map(key => labels[key]).join('、') }}。</p>
