@@ -8,6 +8,7 @@ import com.aicap.entity.User;
 import com.aicap.security.AuthContext;
 import com.aicap.service.ProjectAccessService;
 import com.aicap.service.QualityEvidenceService;
+import com.aicap.service.QualityTestSetService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,6 +36,7 @@ class QualityAnalysisControllerTest {
     private ProjectAccessService projects;
     private TaskPoolController taskController;
     private QualityEvidenceService evidence;
+    private QualityTestSetService testSets;
 
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID()
@@ -46,11 +49,16 @@ class QualityAnalysisControllerTest {
         jdbc.execute("CREATE TABLE quality_improvements(project_id varchar(20),source_code varchar(20),"
                 + "finding_kind varchar(30),improvement_task_code varchar(20),reviewed_by int,reviewed_at timestamp,"
                 + "primary key(project_id,source_code,finding_kind))");
+        jdbc.execute("CREATE TABLE quality_test_sets(id bigint NOT NULL AUTO_INCREMENT,project_id varchar(20) NOT NULL,"
+                + "code varchar(20) NOT NULL,name varchar(200) NOT NULL,source varchar(20) NOT NULL,"
+                + "cases_json varchar(10000) NOT NULL,created_by int NOT NULL,created_at timestamp NOT NULL,"
+                + "primary key(id),unique(project_id,code))");
         projects = mock(ProjectAccessService.class);
         taskController = mock(TaskPoolController.class);
         evidence = mock(QualityEvidenceService.class);
-        when(evidence.collect(anyString())).thenReturn(new java.util.LinkedHashMap<>());
-        controller = new QualityAnalysisController(projects, jdbc, taskController, evidence);
+        when(evidence.collect(anyString())).thenReturn(new LinkedHashMap<>());
+        testSets = new QualityTestSetService(jdbc);
+        controller = new QualityAnalysisController(projects, jdbc, taskController, evidence, testSets);
     }
 
     @AfterEach void clearAuth() { AuthContext.clear(); }
@@ -61,6 +69,20 @@ class QualityAnalysisControllerTest {
 
     private void task(String project, String code, String type, Long storyId, int status) {
         jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", project, code, code, type, storyId, status, 0);
+    }
+
+    private void asOwner(int id) {
+        var user = new User(); user.setId(id); user.setRole("owner"); AuthContext.set(user);
+    }
+
+    private void improvementTask(String code) {
+        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
+            var body = (com.fasterxml.jackson.databind.JsonNode) invocation.getArgument(0);
+            String name = body.path("name").asText("改进任务");
+            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", code, name, "management", null, 0, 0);
+            var created = new Task(); created.setId(code); created.setName(name);
+            return TaskDtos.toOut(created);
+        });
     }
 
     @SuppressWarnings("unchecked")
@@ -81,6 +103,8 @@ class QualityAnalysisControllerTest {
         var findings = result.findings();
         assertEquals(4, findings.size());
         assertEquals("story_missing_acceptance", findings.get(0).get("kind"));
+        assertEquals("需求规范", findings.get(0).get("category"));
+        assertEquals("故事 US1 · US1", findings.get(0).get("location"));
         assertEquals("US1", findings.get(0).get("source_code"));
         assertEquals("story_missing_owner", findings.get(1).get("kind"));
         assertEquals("story_missing_acceptance", findings.get(2).get("kind"));
@@ -116,12 +140,8 @@ class QualityAnalysisControllerTest {
     @SuppressWarnings("unchecked")
     @Test void confirmedFindingCreatesOneTraceableTaskAndReadsItsOutcome() {
         story("P001", "US1", null, null);
-        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
-        var newTask = new Task(); newTask.setId("T99"); newTask.setName("改进任务");
-        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
-            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", "T99", "改进任务", "management", null, 0, 0);
-            return TaskDtos.toOut(newTask);
-        });
+        asOwner(7);
+        improvementTask("T99");
         var request = new QualityAnalysisController.ImprovementRequest("story_missing_acceptance", 7, 2, 5, 5);
         var first = controller.createImprovement("P001", "US1", request);
         var again = controller.createImprovement("P001", "US1", request);
@@ -136,7 +156,7 @@ class QualityAnalysisControllerTest {
 
     @Test void staleOrCrossProjectFindingCannotCreateAnImprovement() {
         story("P001", "US1", "已有验收", 7); // 该故事不再缺验收
-        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
+        asOwner(7);
         var request = new QualityAnalysisController.ImprovementRequest("story_missing_acceptance", 7, 2, 5, 5);
         assertEquals(409, assertThrows(ApiException.class,
                 () -> controller.createImprovement("P001", "US1", request)).getStatus());
@@ -150,23 +170,156 @@ class QualityAnalysisControllerTest {
 
     @Test void deletedImprovementTaskCanBeReconfirmed() {
         story("P001", "US1", null, null);
-        var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
-        var t99 = new Task(); t99.setId("T99"); t99.setName("改进任务");
-        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
-            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", "T99", "改进任务", "management", null, 0, 0);
-            return TaskDtos.toOut(t99);
-        });
+        asOwner(7);
+        improvementTask("T99");
         var request = new QualityAnalysisController.ImprovementRequest("story_missing_acceptance", 7, 2, 5, 5);
         assertEquals("T99", controller.createImprovement("P001", "US1", request).get("improvement_task_code"));
 
         // 改进任务被删后,同缺口应能重新确认建新任务,而不是返回指向已删任务的孤儿记录。
         jdbc.update("DELETE FROM tasks WHERE project_id='P001' AND code='T99'");
-        var t98 = new Task(); t98.setId("T98"); t98.setName("改进任务2");
-        when(taskController.createTask(any(), eq("P001"))).thenAnswer(invocation -> {
-            jdbc.update("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)", "P001", "T98", "改进任务2", "management", null, 0, 0);
-            return TaskDtos.toOut(t98);
-        });
+        improvementTask("T98");
         assertEquals("T98", controller.createImprovement("P001", "US1", request).get("improvement_task_code"));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM quality_improvements WHERE source_code='US1'", Integer.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void submittedTestSetLocatesMissingBoundaryCasesAndCanCreateTraceableTask() {
+        asOwner(7);
+        var created = testSets.create("P001", 7, new QualityTestSetService.CreateRequest(
+                "登录边界测试集", "test_case", List.of(
+                new QualityTestSetService.CaseIn("用户名为空时登录失败", null),
+                new QualityTestSetService.CaseIn("无权限用户访问返回 403", null))));
+        assertEquals("TS1", created.get("code"));
+        assertEquals(2, created.get("total"));
+        assertEquals(List.of("empty_value", "permission"), created.get("covered_boundaries"));
+        assertEquals(6, ((List<?>) created.get("missing_boundaries")).size());
+
+        var result = controller.calculate("P001");
+        var gap = result.findings().stream()
+                .filter(f -> QualityTestSetService.FINDING_KIND.equals(f.get("kind"))).findFirst().orElseThrow();
+        assertEquals("测试质量", gap.get("category"));
+        assertEquals("TS1", gap.get("source_code"));
+        assertTrue(String.valueOf(gap.get("location")).contains("测试集 TS1"));
+        assertTrue(String.valueOf(gap.get("detail")).contains("2/8"));
+        assertTrue(String.valueOf(gap.get("suggestion")).contains("边界用例"));
+
+        var quality = (Map<String, Object>) result.payload().get("test_quality");
+        assertEquals(1, quality.get("sets_total"));
+        assertEquals(2, quality.get("cases_total"));
+        assertEquals(8, quality.get("boundaries_total"));
+        assertEquals("仅按用例名称/显式边界类别判断覆盖，不执行测试，也不推断测试代码质量。", quality.get("note"));
+
+        improvementTask("T77");
+        var saved = controller.createImprovement("P001", "TS1",
+                new QualityAnalysisController.ImprovementRequest(QualityTestSetService.FINDING_KIND, 7, 3, 5, 5));
+        assertEquals("T77", saved.get("improvement_task_code"));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM quality_improvements WHERE source_code='TS1'", Integer.class));
+    }
+
+    @Test void fullyCoveredTestSetLeavesNoGapAndCannotBeConfirmed() {
+        asOwner(7);
+        var all = QualityTestSetService.BOUNDARIES.keySet().stream()
+                .map(kind -> new QualityTestSetService.CaseIn("用例-" + kind, kind)).toList();
+        var created = testSets.create("P001", 7,
+                new QualityTestSetService.CreateRequest("全覆盖测试集", "test_code", all));
+        assertEquals(0, ((List<?>) created.get("missing_boundaries")).size());
+        assertTrue(controller.calculate("P001").findings().isEmpty());
+        assertEquals(409, assertThrows(ApiException.class, () -> controller.createImprovement("P001", "TS1",
+                new QualityAnalysisController.ImprovementRequest(QualityTestSetService.FINDING_KIND, 7, 2, 5, 5)))
+                .getStatus());
+    }
+
+    @Test void invalidOrUnknownTestSetCannotBeConfirmed() {
+        asOwner(7);
+        var request = new QualityAnalysisController.ImprovementRequest(QualityTestSetService.FINDING_KIND, 7, 2, 5, 5);
+        assertEquals(404, assertThrows(ApiException.class,
+                () -> controller.createImprovement("P001", "TS9", request)).getStatus());
+        assertEquals(422, assertThrows(ApiException.class,
+                () -> testSets.create("P001", 7, new QualityTestSetService.CreateRequest(
+                        "", "test_case", List.of(new QualityTestSetService.CaseIn("空名", null))))).getStatus());
+        assertEquals(422, assertThrows(ApiException.class,
+                () -> testSets.create("P001", 7, new QualityTestSetService.CreateRequest(
+                        "来源无效", "unknown", List.of(new QualityTestSetService.CaseIn("用例", null))))).getStatus());
+        assertEquals(422, assertThrows(ApiException.class,
+                () -> testSets.create("P001", 7, new QualityTestSetService.CreateRequest(
+                        "空用例", "test_case", List.of()))).getStatus());
+        assertEquals(422, assertThrows(ApiException.class,
+                () -> testSets.create("P001", 7, new QualityTestSetService.CreateRequest(
+                        "类别无效", "test_report", List.of(new QualityTestSetService.CaseIn("用例", "not_a_kind")))))
+                .getStatus());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM quality_test_sets", Integer.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void externalEvidenceIsTurnedIntoLocatedFindingsAndCanBeConfirmed() {
+        var repo = new LinkedHashMap<String, Object>();
+        repo.put("available", true);
+        repo.put("repo", "aicap/demo");
+        repo.put("default_branch", "main");
+        repo.put("has_tests", false);
+        repo.put("has_docs", false);
+        repo.put("has_ci_workflow", false);
+        var ci = new LinkedHashMap<String, Object>();
+        ci.put("available", true);
+        ci.put("repo", "aicap/demo");
+        ci.put("last_conclusion", "failure");
+        ci.put("last_failed", Map.of("run_number", 42, "head_sha", "abc1234"));
+        ci.put("failed_tests", Map.of("available", true, "failed_tests_total", 2, "run_number", 41,
+                "failed_tests", List.of("LoginTest.empty", "TaskTest.duplicate")));
+        ci.put("coverage", Map.of("available", true, "line_pct", 41.5, "instruction_pct", 55.0));
+        var ev = new LinkedHashMap<String, Object>();
+        ev.put("code_activity", Map.of("synced", true, "prs_total", 4, "reviews_total", 0));
+        ev.put("ci", ci);
+        ev.put("repository", repo);
+        when(evidence.collect(anyString())).thenReturn(ev);
+
+        var findings = controller.calculate("P001", ev).findings();
+        var kinds = findings.stream().map(f -> String.valueOf(f.get("kind"))).toList();
+        assertTrue(kinds.containsAll(List.of("code_missing_reviews", "ci_pipeline_failing",
+                "failed_tests_unresolved", "coverage_below_threshold", "repository_missing_tests",
+                "repository_missing_docs", "repository_missing_ci")));
+        for (var finding : findings) {
+            assertFalse(String.valueOf(finding.get("category")).isBlank());
+            assertFalse(String.valueOf(finding.get("location")).isBlank());
+            assertFalse(String.valueOf(finding.get("suggestion")).isBlank());
+        }
+        var coverage = findings.stream().filter(f -> "coverage_below_threshold".equals(f.get("kind")))
+                .findFirst().orElseThrow();
+        assertEquals("测试质量", coverage.get("category"));
+        assertTrue(String.valueOf(coverage.get("detail")).contains("41.5%"));
+        var failed = findings.stream().filter(f -> "failed_tests_unresolved".equals(f.get("kind")))
+                .findFirst().orElseThrow();
+        assertTrue(String.valueOf(failed.get("location")).contains("run #41"));
+        assertTrue(String.valueOf(failed.get("detail")).contains("LoginTest.empty"));
+
+        asOwner(7);
+        improvementTask("T88");
+        var saved = controller.createImprovement("P001", "CI",
+                new QualityAnalysisController.ImprovementRequest("ci_pipeline_failing", 7, 4, 5, 5));
+        assertEquals("T88", saved.get("improvement_task_code"));
+        var taskName = jdbc.queryForObject("SELECT name FROM tasks WHERE project_id='P001' AND code='T88'", String.class);
+        assertEquals("改进：修复 CI 流水线 · CI", taskName);
+    }
+
+    @Test void unknownEvidenceDoesNotFabricateFindings() {
+        var repo = new LinkedHashMap<String, Object>();
+        repo.put("available", true);
+        repo.put("repo", "aicap/demo");
+        repo.put("default_branch", "main");
+        repo.put("has_tests", null); // 截断/未知:不推断
+        repo.put("has_docs", null);
+        repo.put("has_ci_workflow", null);
+        var ci = new LinkedHashMap<String, Object>();
+        ci.put("available", false);
+        ci.put("reason", "未配置 GitHub Token");
+        var ev = new LinkedHashMap<String, Object>();
+        ev.put("code_activity", Map.of("synced", false));
+        ev.put("ci", ci);
+        ev.put("repository", repo);
+
+        var result = controller.calculate("P001", ev);
+        assertTrue(result.findings().isEmpty(), "未知证据不应被推断成缺口");
+        assertFalse(String.valueOf(result.payload().get("limitations")).contains("已接入 CI"));
     }
 }

@@ -4,7 +4,10 @@ async function setup(page, role = 'admin', malformed = false) {
   let saved = null, review = null, execution = null
   const posts = []
   const proposal = { proposal_id: 'p1', action: 'create_story', changes: { title: '完善发布检查表', description: null, acceptance: null, priority: null, sprint: null, activity: null }, reason: '会议决定', evidence: [{ segment_id: 'S1', quote: '决定完善发布检查表' }] }
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON(); posts.push(body)
     saved = { id: 'a1', client_request_id: body.client_request_id, submitted_by: 1, created_at: '2026-09-28', transcript: '决定完善发布检查表', member_snapshots: [], result: { summary: '改进发布流程', decisions: [{ text: '完善发布检查表', evidence: proposal.evidence }], open_questions: ['负责人和时间待确认'], proposed_actions: [proposal] } }
@@ -15,6 +18,7 @@ async function setup(page, role = 'admin', malformed = false) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
+    if (path.endsWith('/projects')) data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: 'Refinement', transcript: '决定完善发布检查表' }]
     if (path.endsWith('/members/profiles')) data = [{ user_id: 2, display_name: '李明' }]
@@ -38,8 +42,8 @@ async function setup(page, role = 'admin', malformed = false) {
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
-  await page.getByRole('button', { name: '打开会议 Backlog Refinement' }).click()
+  await page.goto('/#/projects/P001/office?tab=meeting&type=refinement&meetingId=m1')
+  await expect(panelOf(page)).toBeVisible()
   return posts
 }
 const panelOf = page => page.getByRole('region', { name: 'Refinement新故事提案', exact: true })
@@ -47,7 +51,7 @@ test('meeting deletion conflict preserves selected transcript and analysis', asy
   await setup(page)
   const panel = panelOf(page)
   await analyze(panel)
-  await page.route('**/api/meetings/m1', async route => {
+  await page.route(/\/api\/meetings\/m1\?/, async route => {
     expect(route.request().method()).toBe('DELETE')
     await route.fulfill({ status: 409, json: { detail: '此会议已有五类会议分析记录，需保留原文及审核执行审计，不能删除。' } })
   })
@@ -83,7 +87,6 @@ test('Refinement missing fields require completion and execution has durable aud
   await panel.getByRole('button', { name: '执行已批准变更' }).click()
   await expect(panel).toContainText('已创建故事：US38')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Backlog Refinement' }).click()
   await expect(panel).toContainText('故事日志 #42')
   await expect(panel.getByRole('button', { name: '执行已批准变更' })).toHaveCount(0)
   expect(posts).toHaveLength(3)
@@ -95,6 +98,7 @@ test('Refinement incomplete approval blocked, rejection needs no invented fields
   const posts = await setup(page), panel = panelOf(page)
   await analyze(panel)
   await panel.getByLabel('审核决定').selectOption('approve')
+  await panel.getByLabel('采纳理由（必填）').fill('确认采纳')
   await panel.getByRole('button', { name: '提交审核决定' }).click()
   await expect(panel).toContainText('请通过修改后接受补齐')
   expect(posts).toHaveLength(1)
@@ -131,7 +135,6 @@ test('Refinement uncertain request survives reload', async ({ page }) => {
   await analyze(panel)
   await expect(panel).toContainText('未能确认分析保存结果')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Backlog Refinement' }).click()
   await panel.getByRole('button', { name: '重试本次分析', exact: true }).click()
   await expect(panel).toContainText('未能确认分析保存结果')
   expect(attempts).toHaveLength(2)

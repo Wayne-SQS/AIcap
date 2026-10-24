@@ -4,7 +4,10 @@ async function setup(page, role = 'admin', malformed = false) {
   let saved = null, review = null, execution = null
   const posts = []
   const proposal = { proposal_id: 'p1', action: 'create_action_item', changes: { title: '完善发布检查表', description: '补充检查步骤', owner_id: null, deadline_text: null }, reason: '会议决定', evidence: [{ segment_id: 'S1', quote: '决定完善发布检查表' }] }
-  await page.addInitScript(() => localStorage.setItem('aiguanli_token', 'fixture-token'))
+  await page.addInitScript(() => {
+    localStorage.setItem('aiguanli_token', 'fixture-token')
+    localStorage.setItem('aiguanli-current-project', 'P001')
+  })
   await page.route('**/meeting-ai/api/**', async route => {
     const body = route.request().postDataJSON(); posts.push(body)
     saved = { id: 'a1', client_request_id: body.client_request_id, submitted_by: 1, created_at: '2026-09-28', transcript: '决定完善发布检查表', member_snapshots: [], result: { summary: '改进发布流程', decisions: [{ text: '完善发布检查表', evidence: proposal.evidence }], open_questions: ['负责人和时间待确认'], proposed_actions: [proposal] } }
@@ -15,6 +18,7 @@ async function setup(page, role = 'admin', malformed = false) {
     let data = []
     if (path.endsWith('/health')) data = { status: 'ok' }
     if (path.endsWith('/auth/me')) data = { id: 1, role, display_name: role }
+    if (path.endsWith('/projects')) data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
     if (path.endsWith('/agent/config')) data = { configured: false }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: 'Retro', transcript: '决定完善发布检查表' }]
     if (path.endsWith('/members/profiles')) data = [{ user_id: 2, display_name: '李明' }]
@@ -40,8 +44,8 @@ async function setup(page, role = 'admin', malformed = false) {
     if (path.endsWith('/action-items/action-1/logs')) data = [{ id: 42, log_type: 'create', user_id: 1, created_at: '2026-09-28', approved_proposal_json: JSON.stringify(review.approved_proposal) }]
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/ai')
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
+  await page.goto('/#/projects/P001/office?tab=meeting&type=retro&meetingId=m1')
+  await expect(panelOf(page)).toBeVisible()
   return posts
 }
 const panelOf = page => page.getByRole('region', { name: 'Retro行动提案', exact: true })
@@ -64,7 +68,6 @@ test('Retro edit approve execute and reload business action audit', async ({ pag
   await expect(panel).toContainText('执行结果已确认')
   await expect(panel.getByRole('region', { name: '已创建行动项' })).toContainText('补充发布回滚清单')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
   await panel.getByRole('button', { name: '查看行动项审计' }).click()
   await expect(panel.getByRole('region', { name: '已创建行动项' })).toContainText('审计 #42')
   await expect(panel.getByRole('button', { name: '执行已批准变更' })).toHaveCount(0)
@@ -120,7 +123,6 @@ test('Retro uncertain analysis survives reload with same request', async ({ page
   await analyze(panel)
   await expect(panel).toContainText('未能确认分析保存结果')
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
   await panel.getByRole('button', { name: '重试本次分析', exact: true }).click()
   await expect(panel).toContainText('未能确认分析保存结果')
   expect(attempts).toHaveLength(2)
@@ -140,7 +142,6 @@ test('Retro failed member directory blocks edits and allows retry', async ({ pag
   const posts = await setup(page), panel = panelOf(page)
   await page.route('**/api/members/profiles', route => route.fulfill({ status: 503, json: { detail: 'unavailable' } }))
   await page.reload()
-  await page.getByRole('button', { name: '打开会议 Sprint Retro' }).click()
   await analyze(panel)
   await expect(panel).toContainText('成员目录加载失败')
   await panel.getByLabel('审核决定').selectOption('modify_and_approve')

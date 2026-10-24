@@ -58,7 +58,7 @@ class RetroAnalysisStorageTest {
         service = context.getBean(RetroAnalysisService.class);
         mapper = context.getBean(ObjectMapper.class);
         jdbc.execute("CREATE TABLE users(id int primary key,display_name varchar(50))");
-        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext)");
+        jdbc.execute("CREATE TABLE meetings(id varchar(36) primary key,transcript longtext,project_id varchar(20) DEFAULT 'P001')");
         jdbc.execute("CREATE TABLE stories(internal_id bigint auto_increment primary key,code varchar(20),id varchar(20),title varchar(200),status int,sprint int,owner_id int)");
         String ddl;
         try (var in = getClass().getResourceAsStream("/db/retro-analyses.sql")) {
@@ -78,10 +78,12 @@ class RetroAnalysisStorageTest {
         jdbc.execute("CREATE TABLE story_logs(id int auto_increment primary key,story_id varchar(10),log_type varchar(20),detail text,user_id int,created_at timestamp)");
         jdbc.update("INSERT INTO users VALUES (1,'张敏')");
         jdbc.update("INSERT INTO users VALUES (2,'李明')");
-        jdbc.update("INSERT INTO meetings VALUES ('m1',?)", "复盘发布过程。\n\n决定由张敏下周五前补充发布检查表。");
+        jdbc.update("INSERT INTO meetings(id,transcript) VALUES ('m1',?)", "复盘发布过程。\n\n决定由张敏下周五前补充发布检查表。");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US13','US13','登录',1,1,NULL)");
         jdbc.update("INSERT INTO stories(code,id,title,status,sprint,owner_id) VALUES ('US14','US14','权限',0,2,NULL)");
-        mvc = MockMvcBuilders.standaloneSetup(new RetroAnalysisController(service),
+        var guard = new com.aicap.service.MeetingAccessGuard(jdbc,
+                org.mockito.Mockito.mock(com.aicap.service.ProjectAccessService.class));
+        mvc = MockMvcBuilders.standaloneSetup(new RetroAnalysisController(service, guard),
                 new RetroProposalReviewController(context.getBean(RetroProposalReviewService.class)),
                 new RetroProposalExecutionController(context.getBean(RetroProposalExecutionService.class)),
                 new ActionItemController(jdbc))

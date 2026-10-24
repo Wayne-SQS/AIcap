@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS `story_logs` (
   `story_code_snapshot` varchar(20) DEFAULT NULL,
   `story_id` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
   `log_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `detail` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `detail` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `user_id` int DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)

@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,6 +46,12 @@ class QualityAnalysisContractTest extends ContractTestSupport {
         jdbc.update("DELETE FROM quality_improvements WHERE project_id='P001' AND source_code=?", SOURCE);
         jdbc.update("DELETE FROM tasks WHERE project_id='P001' AND name LIKE ?", "%" + SOURCE + "%");
         jdbc.update("DELETE FROM stories WHERE project_id='P001' AND code=?", SOURCE);
+        // 测试集契约用例的残留:先删改进任务,再删登记与测试集。
+        jdbc.update("DELETE FROM tasks WHERE project_id='P001' AND code IN ("
+                + "SELECT improvement_task_code FROM quality_improvements "
+                + "WHERE project_id='P001' AND source_code LIKE 'TS%')");
+        jdbc.update("DELETE FROM quality_improvements WHERE project_id='P001' AND source_code LIKE 'TS%'");
+        jdbc.update("DELETE FROM quality_test_sets WHERE project_id='P001'");
     }
 
     @Test
@@ -113,5 +121,75 @@ class QualityAnalysisContractTest extends ContractTestSupport {
                         "owner_id", 1, "hours", 2, "week_start", 5, "week_end", 5)));
         assertStatus(r, 409);
         assertNotNull(r.json(), "409 应有可读错误");
+    }
+
+    @Test
+    void testSetInput_locatesMissingBoundaryCases_andOwnerCanConfirm() {
+        String payload = json(map(
+                "name", "契约边界测试集",
+                "source", "test_case",
+                "cases", List.of(
+                        map("name", "用户名为空时登录失败"),
+                        map("name", "无权限用户访问返回 403"))));
+        ApiResponse created = post("/api/projects/P001/quality-analysis/test-sets", token(USER_OWNER), payload);
+        assertStatus(created, 200);
+        String code = created.json().path("code").asText("");
+        assertTrue(code.startsWith("TS"), "测试集来源码应以 TS 开头 -> " + created.body());
+        assertEquals(2, created.json().path("total").asInt(), "应接收 2 条用例 -> " + created.body());
+        assertEquals(6, created.json().path("missing_boundaries").size(), "应定位 6 类遗漏边界 -> " + created.body());
+
+        // 分析结果必须能定位到该测试集,并给出类别/位置/建议。
+        ApiResponse analyzed = get("/api/projects/P001/quality-analysis", token(USER_VIEWER));
+        assertStatus(analyzed, 200);
+        JsonNode quality = analyzed.json().path("test_quality");
+        assertTrue(quality.path("sets_total").asInt() >= 1, "test_quality 应含已提交测试集 -> " + analyzed.body());
+        assertTrue(quality.path("cases_total").asInt() >= 2, "test_quality 应统计用例数 -> " + analyzed.body());
+        assertEquals(8, quality.path("boundaries_total").asInt(), "边界类别总数固定 8 -> " + analyzed.body());
+        JsonNode gap = null;
+        for (JsonNode finding : analyzed.json().path("findings")) {
+            if ("test_missing_boundary_cases".equals(finding.path("kind").asText())
+                    && code.equals(finding.path("source_code").asText())) {
+                gap = finding;
+            }
+        }
+        assertNotNull(gap, "应定位到测试集 " + code + " 的遗漏边界缺口 -> " + analyzed.body());
+        assertEquals("测试质量", gap.path("category").asText());
+        assertTrue(gap.path("location").asText().contains("测试集 " + code), "缺口应带定位 -> " + gap);
+        assertTrue(gap.path("suggestion").asText().contains("边界用例"), "缺口应带补测建议 -> " + gap);
+
+        // 人工确认 → 生成可追踪改进任务,重复确认幂等。
+        String body = json(map("finding_kind", "test_missing_boundary_cases",
+                "owner_id", 1, "hours", 2, "week_start", 5, "week_end", 5));
+        ApiResponse confirmed = post("/api/projects/P001/quality-analysis/" + code + "/improvements",
+                token(USER_OWNER), body);
+        assertStatus(confirmed, 200);
+        String taskCode = confirmed.json().path("improvement_task_code").asText("");
+        assertTrue(taskCode.startsWith("T"), "应创建改进任务 -> " + confirmed.body());
+        ApiResponse again = post("/api/projects/P001/quality-analysis/" + code + "/improvements",
+                token(USER_OWNER), body);
+        assertStatus(again, 200);
+        assertEquals(taskCode, again.json().path("improvement_task_code").asText(), "同缺口重复确认应幂等");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM quality_improvements "
+                + "WHERE project_id='P001' AND source_code=? AND finding_kind='test_missing_boundary_cases'",
+                Integer.class, code));
+
+        // viewer 只能读,不能提交测试集。
+        ApiResponse forbidden = post("/api/projects/P001/quality-analysis/test-sets", token(USER_VIEWER), payload);
+        assertStatus(forbidden, 403);
+    }
+
+    @Test
+    void invalidTestSetInput_returns422() {
+        ApiResponse emptyCases = post("/api/projects/P001/quality-analysis/test-sets", token(USER_OWNER),
+                json(map("name", "空测试集", "source", "test_case", "cases", List.of())));
+        assertStatus(emptyCases, 422);
+        ApiResponse badSource = post("/api/projects/P001/quality-analysis/test-sets", token(USER_OWNER),
+                json(map("name", "来源无效", "source", "unknown",
+                        "cases", List.of(map("name", "用例一")))));
+        assertStatus(badSource, 422);
+        ApiResponse badKind = post("/api/projects/P001/quality-analysis/test-sets", token(USER_OWNER),
+                json(map("name", "类别无效", "source", "test_report",
+                        "cases", List.of(map("name", "用例一", "boundary_kind", "not_a_kind")))));
+        assertStatus(badKind, 422);
     }
 }

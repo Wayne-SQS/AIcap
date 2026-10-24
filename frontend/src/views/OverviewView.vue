@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
-import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
+import { getQualityAnalysis, createQualityImprovement, createQualityTestSet } from '@/api/qualityAnalysis'
 import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -129,12 +129,25 @@ async function confirmImprovement() {
 }
 watch(() => projects.currentProjectId, () => { improvementIssue.value = null; improvementError.value = '' })
 
-/* US22 质量分析:只读规范缺口 + 确认后建改进任务,口径与效率分析一致 */
+/* US22 质量分析:三路输入(故事/任务字段、测试集、CI/仓库证据)定位缺口 + 人工确认后建改进任务 */
 const QUALITY_KINDS = {
   story_missing_acceptance: '补齐验收条件',
   story_missing_owner: '认领故事',
-  task_without_story: '补关联故事'
+  task_without_story: '补关联故事',
+  test_missing_boundary_cases: '补齐边界用例',
+  ci_pipeline_failing: '修复 CI 流水线',
+  failed_tests_unresolved: '处理失败测试',
+  coverage_below_threshold: '补充测试覆盖',
+  repository_missing_tests: '补齐测试文件',
+  repository_missing_docs: '补齐文档',
+  repository_missing_ci: '接入 CI 流水线',
+  code_missing_reviews: '建立代码评审'
 }
+const QUALITY_SOURCES = [
+  { value: 'test_case', label: '测试用例' },
+  { value: 'test_code', label: '测试代码' },
+  { value: 'test_report', label: '执行报告' }
+]
 const quality = ref(null), qualityError = ref(''), qualityLoading = ref(false)
 let qualityVersion = 0
 async function refreshQuality() {
@@ -182,7 +195,36 @@ async function confirmQuality() {
   } catch (error) { qualityFormError.value = error.message || '改进任务创建失败' }
   finally { qualitySaving.value = false }
 }
-watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
+const qualitySetForm = ref({ name: '', source: 'test_case', cases: '' })
+const qualitySetSaving = ref(false), qualitySetError = ref(''), qualitySetNotice = ref('')
+async function submitQualitySet() {
+  const id = projects.currentProjectId
+  if (!id || qualitySetSaving.value) return
+  const name = qualitySetForm.value.name.trim()
+  const cases = qualitySetForm.value.cases.split('\n').map(value => value.trim()).filter(Boolean)
+  if (!name || !cases.length) {
+    qualitySetError.value = '请填写测试集名称，并至少提交 1 条用例（每行一条）'
+    return
+  }
+  qualitySetSaving.value = true; qualitySetError.value = ''; qualitySetNotice.value = ''
+  try {
+    const result = await createQualityTestSet(id, {
+      name, source: qualitySetForm.value.source, cases: cases.map(value => ({ name: value }))
+    })
+    qualitySetNotice.value = `已提交 ${result.code}：覆盖 ${result.covered_boundaries.length} 类边界场景，`
+      + (result.missing_boundaries.length
+        ? `遗漏 ${result.missing_boundaries.length} 类（${result.missing_boundaries.join('、')}）。`
+        : '未发现遗漏的边界类别。')
+    qualitySetForm.value = { name: '', source: 'test_case', cases: '' }
+    await refreshQuality()
+  } catch (error) { qualitySetError.value = error.message || '测试集提交失败' }
+  finally { qualitySetSaving.value = false }
+}
+watch(() => projects.currentProjectId, () => {
+  qualityIssue.value = null; qualityError.value = ''
+  qualitySetError.value = ''; qualitySetNotice.value = ''
+  qualitySetForm.value = { name: '', source: 'test_case', cases: '' }
+})
 
 /* US20 快速入口：按需读取现有团队风险，不在总览加载时触发整包画像分析。 */
 const teamRisks = ref(null), riskError = ref(''), riskLoading = ref(false), riskSubmitting = ref(false), riskNotice = ref('')
@@ -354,23 +396,39 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       </template>
     </div>
 
-    <div class="h-sec">质量分析 · 需求与任务规范缺口（US22）</div>
+    <div class="h-sec">质量分析 · 规范与测试质量缺口（US22）</div>
     <div class="stat" role="region" aria-label="项目质量分析">
       <button type="button" :disabled="qualityLoading || !session.online" @click="refreshQuality">刷新分析</button>
-      <p v-if="!session.online">连接项目服务后可查看规范缺口。</p>
-      <p v-else-if="qualityLoading" role="status">正在读取故事与任务字段…</p>
+      <p v-if="!session.online">连接项目服务后可查看质量缺口。</p>
+      <p v-else-if="qualityLoading" role="status">正在读取故事、任务与测试集…</p>
       <p v-else-if="qualityError" role="alert">{{ qualityError }}</p>
       <template v-else-if="quality">
-        <p>故事 {{ quality.stories_total }} 条、待办/进行中任务 {{ quality.open_tasks }} 项；识别到 {{ quality.findings.length }} 项规范缺口。</p>
-        <p v-if="!quality.findings.length">暂无基于现有记录可识别的验收条件、认领或追溯缺口。</p>
+        <p>故事 {{ quality.stories_total }} 条、待办/进行中任务 {{ quality.open_tasks }} 项；识别到 {{ quality.findings.length }} 项质量缺口。</p>
+        <p v-if="!quality.findings.length">暂无基于现有记录、测试集与证据可识别的质量缺口。</p>
         <ul v-else>
           <li v-for="finding in quality.findings" :key="`${finding.kind}-${finding.source_code}`">
-            <strong>{{ finding.source_code }} · {{ finding.source_name }}</strong>：{{ finding.detail }}
+            <strong>{{ finding.source_code }} · {{ finding.source_name }}</strong>
+            <span class="small">［{{ finding.category }}］{{ finding.location }}</span>：{{ finding.detail }}
             {{ finding.suggestion }}
             <span v-if="qualityImprovementFor(finding)">已确认，改进任务 {{ qualityImprovementFor(finding).improvement_task_code }}。</span>
             <button v-else type="button" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginQuality(finding)">确认并创建改进任务</button>
           </li>
         </ul>
+        <form @submit.prevent="submitQualitySet">
+          <p>提交测试集（测试用例/测试代码/执行报告），检查遗漏的边界场景：</p>
+          <label>测试集名称 <input v-model="qualitySetForm.name" type="text" maxlength="200" required placeholder="例如：登录接口回归用例"></label>
+          <label>来源 <select v-model="qualitySetForm.source"><option v-for="item in QUALITY_SOURCES" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+          <label>用例（每行一条）<textarea v-model="qualitySetForm.cases" rows="4" required placeholder="空密码登录应被拒绝&#10;连续 5 次失败登录应锁定账号"></textarea></label>
+          <button type="submit" :disabled="qualitySetSaving || session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''">{{ qualitySetSaving ? '正在分析…' : '提交并分析' }}</button>
+        </form>
+        <p v-if="qualitySetError" role="alert">{{ qualitySetError }}</p>
+        <p v-if="qualitySetNotice" role="status">{{ qualitySetNotice }}</p>
+        <div v-if="quality.test_quality?.sets_total">
+          <p>已提交测试集 {{ quality.test_quality.sets_total }} 份、用例 {{ quality.test_quality.cases_total }} 条；边界类别共 {{ quality.test_quality.boundaries_total }} 类。</p>
+          <ul><li v-for="set in quality.test_quality.sets" :key="set.code">
+            {{ set.code }} · {{ set.name }}：{{ set.total }} 条用例，覆盖 {{ set.covered_boundaries.length }}/{{ quality.test_quality.boundaries_total }} 类边界<span v-if="set.missing_boundaries.length">，遗漏 {{ set.missing_boundaries.join('、') }}</span><span v-else>，边界场景完整</span>。
+          </li></ul>
+        </div>
         <form v-if="qualityIssue" @submit.prevent="confirmQuality">
           <p>确认 {{ qualityIssue.source_code }} 的「{{ QUALITY_KINDS[qualityIssue.kind] }}」缺口，创建一项管理任务：</p>
           <label>负责人 <select v-model="qualityForm.owner_id" required><option value="">请选择</option><option v-for="member in project.members" :key="member.id" :value="String(memberUserId(member.id))">{{ member.name }}</option></select></label>
