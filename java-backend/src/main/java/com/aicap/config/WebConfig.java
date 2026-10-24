@@ -1,6 +1,7 @@
 package com.aicap.config;
 
 import com.aicap.security.AuthInterceptor;
+import com.aicap.security.MeetingScopeInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -13,11 +14,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
+    private final MeetingScopeInterceptor meetingScopeInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/**");
+        // AuthContext is initialized above before project membership is checked.
+        registry.addInterceptor(meetingScopeInterceptor)
+                .addPathPatterns("/api/meetings/{meetingId}/**");
     }
 
     @Override

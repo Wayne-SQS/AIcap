@@ -2,11 +2,14 @@ package com.aicap.service;
 
 import com.aicap.profile.GitHubProperties;
 import com.aicap.profile.ProjectRepositoryResolver;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -182,5 +185,34 @@ class QualityEvidenceServiceTest {
         assertTrue(evidence.containsKey("repository"));
         assertFalse((Boolean) ((Map<String, Object>) evidence.get("ci")).get("available"));
         assertEquals(List.of("code_activity", "ci", "repository"), List.copyOf(evidence.keySet()));
+    }
+
+    @Test void redirectedLogDownloadDropsAuthorizationHeader() throws Exception {
+        var target = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        target.createContext("/blob", exchange -> {
+            boolean withAuth = exchange.getRequestHeaders().containsKey("Authorization");
+            byte[] body = (withAuth ? "AUTH_LEAKED" : "OK").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(withAuth ? 401 : 200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        target.start();
+        var source = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        source.createContext("/logs", exchange -> {
+            exchange.getResponseHeaders().add("Location",
+                    "http://127.0.0.1:" + target.getAddress().getPort() + "/blob");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        source.start();
+        try {
+            var props = new GitHubProperties();
+            props.setToken("secret-token");
+            var svc = new QualityEvidenceService(props, jdbc, mock(ProjectRepositoryResolver.class));
+            assertEquals("OK", svc.get("http://127.0.0.1:" + source.getAddress().getPort() + "/logs"));
+        } finally {
+            source.stop(0);
+            target.stop(0);
+        }
     }
 }

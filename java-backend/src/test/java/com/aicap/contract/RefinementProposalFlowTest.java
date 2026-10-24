@@ -56,6 +56,20 @@ class RefinementProposalFlowTest extends RefinementAnalysisStorageTest {
         assertEquals(200,review(id,decision("approve")).getStatus()); assertEquals(200,execute(id).getStatus());
     }
 
+    @Test void editingStoryScopeInvalidatesOriginalEffortEstimate() throws Exception {
+        var input=body();
+        ((ObjectNode)input.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":8,"max_hours":20,"basis":"按原范围粗估","uncertainty":"字段待确认"}
+            """));
+        String id=mapper.readTree(submit(input).getContentAsByteArray()).path("id").asText();
+        role("owner");
+        var response=review(id,amended());
+        assertEquals(200,response.getStatus(),response.getContentAsString());
+        var result=mapper.readTree(response.getContentAsByteArray());
+        assertEquals(8,result.at("/original_proposal/effort_estimate/min_hours").asInt());
+        assertTrue(result.at("/approved_proposal/effort_estimate").isMissingNode());
+    }
+
     @Test void pendingRejectedAndUnauthorizedCannotCreateStories() throws Exception {
         String id=saved();
         for(String role:java.util.List.of("member","viewer")) {

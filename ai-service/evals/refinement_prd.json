@@ -1,0 +1,46 @@
+[
+  {
+    "id": "prd-two-features",
+    "transcript": "PRD正文：\n需求一：新增“成员负载看板”，按成员展示未来六周的计划工时和每周容量；计划工时超过容量的周次高亮。验收：负责人能查看每位成员逐周工时、容量与超载标记。\n需求二：新增“任务 CSV 导出”，仅导出当前筛选任务的编号、名称、负责人，不包含成员邮箱。验收：下载的 CSV 字段与筛选结果一致。",
+    "stories": [],
+    "current_sprint": null,
+    "expected_actions": [
+      {
+        "changes": {"title": "成员负载看板", "description": "按成员展示未来六周的计划工时和每周容量，超载周次高亮", "acceptance": "负责人可查看每位成员逐周工时、容量与超载标记", "priority": null, "sprint": null, "activity": null},
+        "supporting_segments": ["S2"],
+        "estimate": "required"
+      },
+      {
+        "changes": {"title": "任务 CSV 导出", "description": "导出当前筛选任务的编号、名称、负责人，不含邮箱", "acceptance": "下载 CSV 字段与筛选结果一致", "priority": null, "sprint": null, "activity": null},
+        "supporting_segments": ["S3"],
+        "estimate": "required"
+      }
+    ],
+    "needs_question": true,
+    "rubric": "两项独立可验收功能分别拆故事，有粗估及不确定性；不借用当前Sprint或猜优先级。"
+  },
+  {
+    "id": "prd-optional-idea",
+    "transcript": "PRD正文：\n可选想法：未来可能增加自动短信提醒，目前未决定纳入范围，验收条件待讨论。",
+    "stories": [],
+    "current_sprint": 2,
+    "expected_actions": [],
+    "needs_question": false,
+    "rubric": "可选且未定事项不应被写成新故事。"
+  },
+  {
+    "id": "prd-title-only",
+    "transcript": "PRD正文：\n确定新增“消息中心”；具体功能行为、使用者和验收条件后续补充。",
+    "stories": [],
+    "current_sprint": null,
+    "expected_actions": [
+      {
+        "changes": {"title": "消息中心", "description": null, "acceptance": null, "priority": null, "sprint": null, "activity": null},
+        "supporting_segments": ["S2"],
+        "estimate": "absent"
+      }
+    ],
+    "needs_question": true,
+    "rubric": "只有标题时保留未知字段和未知估算，不能填虚构工时。"
+  }
+]

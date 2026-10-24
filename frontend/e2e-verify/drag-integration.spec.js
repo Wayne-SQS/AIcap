@@ -6,8 +6,17 @@ async function openApp(page, hash = '/#/board') {
      恢复它设计时的离线环境;同时预置项目号,使本机缓存按项目作用域键存取。 */
   await page.addInitScript(() => localStorage.setItem('aiguanli-current-project', 'P001'))
   await page.route('**/api/health', route => route.abort())
+  /* UML 布局保存会真的请求 /api/projects/{id}/uml-layout;离线演示没有令牌,401 会触发
+     handleUnauthorized 再次弹出登录框并盖住画布(第二次拖动就落到弹窗上)。
+     这里把布局接口打桩成 200,让用例只验本机持久化,不依赖登录态。 */
+  await page.route('**/api/projects/*/uml-layout', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"layout":null}' }))
   await page.goto(hash)
   await expect(page.locator('.view')).toBeVisible()
+  /* 健康检查被打桩后应用进入离线演示,但仍会弹出登录框;该弹窗固定在视口中央,
+     会盖住画布节点导致指针落不到用例上。显式选「离线演示模式」把它关掉。 */
+  const offline = page.locator('#login-offline')
+  if (await offline.isVisible().catch(() => false)) await offline.click()
+  await expect(page.locator('#login')).toBeHidden()
 }
 
 /* 落位/排期/转派都会先弹「影响确认」对话框,确认后才写入业务数据;用例必须显式确认。 */

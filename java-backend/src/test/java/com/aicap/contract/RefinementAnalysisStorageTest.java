@@ -105,9 +105,9 @@ class RefinementAnalysisStorageTest {
         var guard = new com.aicap.service.MeetingAccessGuard(jdbc, context.getBean(com.aicap.service.ProjectAccessService.class));
         mvc = MockMvcBuilders.standaloneSetup(new RefinementAnalysisController(service, guard),
                 new com.aicap.controller.RefinementProposalReviewController(context.getBean(com.aicap.service.RefinementProposalReviewService.class),
-                        context.getBean(com.aicap.service.ProjectAccessService.class)),
+                        guard),
                 new com.aicap.controller.RefinementProposalExecutionController(context.getBean(com.aicap.service.RefinementProposalExecutionService.class),
-                        context.getBean(com.aicap.service.ProjectAccessService.class)))
+                        guard))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         role("member");
     }
@@ -163,8 +163,36 @@ class RefinementAnalysisStorageTest {
         assertEquals(403, write.getStatus(), write.getContentAsString());
         assertEquals(0, count());
         assertEquals(403, mvc.perform(get("/api/meetings/m2/refinement-analyses")).andReturn().getResponse().getStatus());
+        String reviews = "/api/meetings/m2/refinement-analyses/unknown/proposal-reviews";
+        String executions = "/api/meetings/m2/refinement-analyses/unknown/proposal-executions";
+        assertEquals(403, mvc.perform(get(reviews).param("projectId", "P001")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(post(reviews).param("projectId", "P001")
+                .contentType("application/json").content("{}")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(get(executions).param("projectId", "P001")).andReturn().getResponse().getStatus());
+        assertEquals(403, mvc.perform(post(executions).param("projectId", "P001")
+                .contentType("application/json").content("{}")).andReturn().getResponse().getStatus());
+        // Even a user with access to both projects cannot redirect this meeting to the other project.
+        assertEquals(403, mvc.perform(get("/api/meetings/m1/refinement-analyses/unknown/proposal-reviews")
+                .param("projectId", "P002")).andReturn().getResponse().getStatus());
         // 会议不存在时是 404,不能与"存在但无权"混同
         assertEquals(404, mvc.perform(get("/api/meetings/nope/refinement-analyses")).andReturn().getResponse().getStatus());
+    }
+
+    @Test void prdEffortEstimateIsSavedButInvalidRangeIsRejected() throws Exception {
+        var input=body();
+        ((ObjectNode)input.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":8,"max_hours":20,"basis":"按导出范围粗估","uncertainty":"字段映射待确认"}
+            """));
+        var response=submit(input);
+        assertEquals(200,response.getStatus(),response.getContentAsString());
+        var saved=mapper.readTree(response.getContentAsByteArray());
+        assertEquals(8,saved.at("/result/proposed_actions/0/effort_estimate/min_hours").asInt());
+        assertEquals(20,saved.at("/result/proposed_actions/0/effort_estimate/max_hours").asInt());
+        var invalid=body(); invalid.put("client_request_id","invalid-range");
+        ((ObjectNode)invalid.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":20,"max_hours":8,"basis":"按导出范围粗估","uncertainty":"字段映射待确认"}
+            """));
+        assertEquals(422,submit(invalid).getStatus());
     }
 
     @Test void exactRetryPreservesSnapshotAndChangedPayloadConflicts() throws Exception {

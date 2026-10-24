@@ -19,7 +19,7 @@ export default defineConfig({
   testDir: '.',
   /* 只跑当前基线的回归套件:qa/ 下另有 5 个针对已归档 legacy/index.html + FastAPI 的旧 spec,
      它们不是本工程的一部分,显式排除在收集范围外(文件保留归档,不删除) */
-  testMatch: 'vue-baseline-e2e.spec.js',
+  testMatch: ['vue-baseline-e2e.spec.js', 'permission-revision-e2e.spec.js'],
   timeout: 120000,
   expect: { timeout: 15000 },
   fullyParallel: false,

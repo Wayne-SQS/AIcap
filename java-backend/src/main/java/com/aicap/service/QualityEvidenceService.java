@@ -37,7 +37,7 @@ public class QualityEvidenceService {
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     private static final long CACHE_TTL_MS = 5 * 60_000L;
@@ -387,19 +387,41 @@ public class QualityEvidenceService {
 
     // ---------- 工具 ----------
 
-    private String get(String url) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .header("Authorization", "Bearer " + props.getToken())
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "aicap-quality-analysis")
-                .timeout(Duration.ofSeconds(12))
-                .GET().build();
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() == 401) throw new IllegalStateException("GitHub token 无效(401)");
-        if (resp.statusCode() == 403) throw new IllegalStateException("GitHub 限流或权限不足(403)");
-        if (resp.statusCode() == 404) throw new IllegalStateException("仓库不存在或无权限(404)");
-        if (resp.statusCode() >= 400) throw new IllegalStateException("HTTP " + resp.statusCode());
-        return resp.body();
+    String get(String url) throws Exception {
+        URI current = URI.create(url);
+        String authOrigin = origin(current);
+        for (int hop = 0; hop < 3; hop++) {
+            HttpRequest.Builder builder = HttpRequest.newBuilder(current)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "aicap-quality-analysis")
+                    .timeout(Duration.ofSeconds(12))
+                    .GET();
+            // Actions 日志会 302 到 Azure Blob(带 SAS)。跨域重定向不能再带我们的 Bearer,
+            // 否则 Blob 直接 401 —— 覆盖率与失败测试名会整段变成「token 无效」。
+            if (origin(current).equals(authOrigin)) {
+                builder.header("Authorization", "Bearer " + props.getToken());
+            }
+            HttpResponse<String> resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            int code = resp.statusCode();
+            if (code >= 300 && code < 400) {
+                String location = resp.headers().firstValue("location")
+                        .orElseThrow(() -> new IllegalStateException("重定向缺少 Location"));
+                current = current.resolve(location);
+                continue;
+            }
+            if (code == 401) throw new IllegalStateException("GitHub token 无效(401)");
+            if (code == 403) throw new IllegalStateException("GitHub 限流或权限不足(403)");
+            if (code == 404) throw new IllegalStateException("仓库不存在或无权限(404)");
+            if (code >= 400) throw new IllegalStateException("HTTP " + code);
+            return resp.body();
+        }
+        throw new IllegalStateException("GitHub 重定向次数过多");
+    }
+
+    private static String origin(URI uri) {
+        int port = uri.getPort();
+        if (port < 0) port = "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+        return uri.getScheme() + "://" + uri.getHost() + ":" + port;
     }
 
     private static String brief(Exception e) {
