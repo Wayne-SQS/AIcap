@@ -5,6 +5,8 @@ import com.aicap.dto.TaskDtos;
 import com.aicap.security.Roles;
 import com.aicap.service.ProjectAccessService;
 import com.aicap.service.QualityEvidenceService;
+import com.aicap.service.RepoQualityFetcher;
+import com.aicap.service.SemanticReviewService;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,6 +37,8 @@ public class QualityAnalysisController {
     private final JdbcTemplate jdbc;
     private final TaskPoolController tasks;
     private final QualityEvidenceService evidence;
+    private final RepoQualityFetcher codeQualityFetcher;
+    private final SemanticReviewService semanticReviewer;
 
     private static final Set<String> FINDING_KINDS =
             Set.of("story_missing_acceptance", "story_missing_owner", "task_without_story");
@@ -50,6 +54,10 @@ public class QualityAnalysisController {
         Map<String, Object> payload = calculate(scoped).payload();
         Map<String, Object> ev = evidence.collect(scoped);
         payload.put("evidence", ev);
+        // 代码质量评估较慢(要拉仓库文件),这里只回已有缓存;没评估过就提示可触发,不拖慢页面加载。
+        Map<String, Object> cq = codeQualityFetcher.peek(scoped);
+        payload.put("code_quality", cq != null ? cq : Map.of(
+                "available", false, "reason", "尚未评估，可调用 /code-quality 触发"));
         // limitations 按证据实际可用性动态生成,不再硬编码「未接入」。
         payload.put("limitations", buildLimitations(ev));
         return payload;
@@ -66,6 +74,40 @@ public class QualityAnalysisController {
         else sb.append("部分外部证据不可用（见 evidence 各段 reason）；");
         sb.append("不评估代码/文档/测试的真实质量，也不虚构覆盖率结论。建议需人工复核。");
         return sb.toString();
+    }
+
+    /** 对项目映射仓库做代码质量评估（抽样静态分析）；首次约数秒，之后 10 分钟内走缓存。 */
+    @GetMapping("/code-quality")
+    public Map<String, Object> evaluateCodeQuality(@PathVariable String projectId) {
+        Roles.any();
+        String scoped = ProjectAccessService.normalize(projectId);
+        projects.requireMember(scoped);
+        return codeQualityFetcher.evaluate(scoped);
+    }
+
+    /**
+     * 语义评审：判断 README / 测试代码「读者能否照做」，需 LLM。
+     * body: {"scope":"readme|tests", "text":"可选，不传则自动从仓库取"}
+     * 未配置模型或取不到文本时降级 available=false + reason，不编分数。
+     */
+    @PostMapping("/semantic-review")
+    public Map<String, Object> reviewSemantics(@PathVariable String projectId,
+                                              @RequestBody(required = false) Map<String, String> body) {
+        Roles.any();
+        String scoped = ProjectAccessService.normalize(projectId);
+        projects.requireMember(scoped);
+        String scope = body == null ? "readme" : body.getOrDefault("scope", "readme");
+        if (!"readme".equals(scope) && !"tests".equals(scope))
+            throw ApiException.unprocessable("scope 只能是 readme 或 tests");
+        String text = body == null ? null : body.get("text");
+        String context = body == null ? null : body.get("context");
+        if (text == null || text.isBlank()) {
+            Map<String, Object> sample = codeQualityFetcher.sampleText(scoped, scope);
+            if (!Boolean.TRUE.equals(sample.get("available"))) return sample;
+            text = String.valueOf(sample.get("text"));
+            context = sample.get("context") == null ? context : String.valueOf(sample.get("context"));
+        }
+        return semanticReviewer.review(scope, text, context);
     }
 
     /** 人工确认一条缺口,生成一项管理任务并登记追踪;同一缺口只允许一个未重复的任务。 */

@@ -25,3 +25,15 @@ export function createQualityImprovement(projectId, sourceCode, payload) {
     method: 'POST', body: JSON.stringify(payload)
   })
 }
+
+/** 代码质量评估（抽样静态分析，首次约数秒，之后 10 分钟内走缓存） */
+export function evaluateCodeQuality(projectId) {
+  return api(`/api/projects/${encodeURIComponent(projectId)}/quality-analysis/code-quality`)
+}
+
+/** 语义评审（LLM）：判断 README / 测试代码「读者能否照做」。首次约 10 秒，同文本 2 小时内走缓存。 */
+export function reviewSemantics(projectId, payload) {
+  return api('/api/projects/' + encodeURIComponent(projectId) + '/quality-analysis/semantic-review', {
+    method: 'POST', body: JSON.stringify(payload)
+  })
+}

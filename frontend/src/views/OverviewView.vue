@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSessionStore } from '@/stores/session'
 import { getProgressForecast, getProgressForecastRecords, recordProgressForecast, decideProgressForecast } from '@/api/progressForecast'
 import { getEfficiencyInsights, createEfficiencyImprovement } from '@/api/efficiencyInsights'
-import { getQualityAnalysis, createQualityImprovement } from '@/api/qualityAnalysis'
+import { getQualityAnalysis, createQualityImprovement, evaluateCodeQuality, reviewSemantics } from '@/api/qualityAnalysis'
 import { profileAgentApi } from '@/api/profileAgent'
 import { memberUserId } from '@/data/memberIdentity'
 import { READONLY_TITLE } from '@/composables/usePermissionGuard'
@@ -184,6 +184,55 @@ async function confirmQuality() {
 }
 watch(() => projects.currentProjectId, () => { qualityIssue.value = null; qualityError.value = '' })
 
+/* 代码质量评估：按需触发，首次约数秒（抽样拉取仓库文件），之后走 10 分钟缓存 */
+const codeQuality = ref(null), cqLoading = ref(false), cqError = ref('')
+async function runCodeQuality() {
+  const id = projects.currentProjectId
+  if (!id || cqLoading.value) return
+  cqLoading.value = true; cqError.value = ''
+  try {
+    const result = await evaluateCodeQuality(id)
+    codeQuality.value = result
+    if (result && result.available === false && result.reason) cqError.value = result.reason
+  } catch (error) {
+    cqError.value = error.message || '代码质量评估失败'
+  } finally {
+    cqLoading.value = false
+  }
+}
+watch(() => projects.currentProjectId, () => { codeQuality.value = null; cqError.value = '' })
+
+/* 语义评审：按需触发，单次约 10 秒（LLM），同文本 2 小时内走缓存 */
+const semantic = ref(null), semanticLoading = ref(false), semanticError = ref(''), semanticScope = ref('')
+async function runSemantic(scope) {
+  const id = projects.currentProjectId
+  if (!id || semanticLoading.value) return
+  semanticLoading.value = true; semanticError.value = ''; semanticScope.value = scope
+  try {
+    const result = await reviewSemantics(id, { scope })
+    semantic.value = result
+    if (result && result.available === false) semanticError.value = result.reason || '语义评审未返回结果'
+  } catch (error) {
+    semanticError.value = error.message || '语义评审失败'
+  } finally {
+    semanticLoading.value = false; semanticScope.value = ''
+  }
+}
+watch(() => projects.currentProjectId, () => { semantic.value = null; semanticError.value = '' })
+
+/* 质量卡展示用的映射：只影响样式，不改判定逻辑 */
+const QUALITY_KIND_CLASS = {
+  story_missing_acceptance: 'tag-orange',
+  story_missing_owner: 'tag-blue',
+  task_without_story: 'tag-lilac'
+}
+const kindClass = kind => QUALITY_KIND_CLASS[kind] || 'tag-gray'
+const gradeClass = g => ({ '优': 'g-good', '良': 'g-ok', '中': 'g-mid', '差': 'g-bad' }[g] || 'g-mid')
+const barClass = score => (score >= 85 ? 'bar-good' : score >= 60 ? 'bar-mid' : 'bar-bad')
+const riskLabel = r => ({ blocking: '阻断', high: '高', medium: '中', low: '低' }[r] || r)
+const sevLabel = v => ({ blocking: '阻断', high: '高', medium: '中', low: '低' }[v] || v)
+
+
 /* US20 快速入口：按需读取现有团队风险，不在总览加载时触发整包画像分析。 */
 const teamRisks = ref(null), riskError = ref(''), riskLoading = ref(false), riskSubmitting = ref(false), riskNotice = ref('')
 let riskVersion = 0
@@ -355,40 +404,174 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     </div>
 
     <div class="h-sec">质量分析 · 需求与任务规范缺口（US22）</div>
-    <div class="stat" role="region" aria-label="项目质量分析">
-      <button type="button" :disabled="qualityLoading || !session.online" @click="refreshQuality">刷新分析</button>
-      <p v-if="!session.online">连接项目服务后可查看规范缺口。</p>
-      <p v-else-if="qualityLoading" role="status">正在读取故事与任务字段…</p>
-      <p v-else-if="qualityError" role="alert">{{ qualityError }}</p>
+    <div class="qa" role="region" aria-label="项目质量分析">
+      <header class="qa-head">
+        <div class="qa-head-l">
+          <span class="qa-chip">US22</span>
+          <div>
+            <h3>质量分析</h3>
+            <p>规范缺口定位 · 代码质量诊断</p>
+          </div>
+        </div>
+        <button type="button" class="qa-btn" :disabled="qualityLoading || !session.online" @click="refreshQuality">{{ qualityLoading ? '读取中…' : '刷新分析' }}</button>
+      </header>
+
+      <p v-if="!session.online" class="qa-note">连接项目服务后可查看规范缺口。</p>
+      <p v-else-if="qualityLoading" class="qa-note" role="status">正在读取故事与任务字段…</p>
+      <p v-else-if="qualityError" class="qa-note err" role="alert">{{ qualityError }}</p>
+
       <template v-else-if="quality">
-        <p>故事 {{ quality.stories_total }} 条、待办/进行中任务 {{ quality.open_tasks }} 项；识别到 {{ quality.findings.length }} 项规范缺口。</p>
-        <p v-if="!quality.findings.length">暂无基于现有记录可识别的验收条件、认领或追溯缺口。</p>
-        <ul v-else>
-          <li v-for="finding in quality.findings" :key="`${finding.kind}-${finding.source_code}`">
-            <strong>{{ finding.source_code }} · {{ finding.source_name }}</strong>：{{ finding.detail }}
-            {{ finding.suggestion }}
-            <span v-if="qualityImprovementFor(finding)">已确认，改进任务 {{ qualityImprovementFor(finding).improvement_task_code }}。</span>
-            <button v-else type="button" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginQuality(finding)">确认并创建改进任务</button>
+        <div class="qa-metrics">
+          <div class="qa-metric"><b>{{ quality.stories_total }}</b><span>故事</span></div>
+          <div class="qa-metric"><b>{{ quality.open_tasks }}</b><span>待办 / 进行中任务</span></div>
+          <div class="qa-metric" :class="{ alert: quality.findings.length }"><b>{{ quality.findings.length }}</b><span>规范缺口</span></div>
+        </div>
+        <p class="qa-lead">识别到 <b>{{ quality.findings.length }}</b> 项规范缺口。</p>
+
+        <ul v-if="quality.findings.length" class="qa-findings">
+          <li v-for="finding in quality.findings" :key="finding.kind + finding.source_code" class="qa-finding">
+            <span class="qa-tag" :class="kindClass(finding.kind)">{{ QUALITY_KINDS[finding.kind] }}</span>
+            <div class="qa-finding-body">
+              <p class="qa-finding-title"><b>{{ finding.source_code }} · {{ finding.source_name }}</b>：{{ finding.detail }}</p>
+              <p class="qa-finding-tip">{{ finding.suggestion }}</p>
+            </div>
+            <span v-if="qualityImprovementFor(finding)" class="qa-done">已确认 · {{ qualityImprovementFor(finding).improvement_task_code }}</span>
+            <button v-else type="button" class="qa-btn ghost" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="beginQuality(finding)">确认并创建改进任务</button>
           </li>
         </ul>
-        <form v-if="qualityIssue" @submit.prevent="confirmQuality">
-          <p>确认 {{ qualityIssue.source_code }} 的「{{ QUALITY_KINDS[qualityIssue.kind] }}」缺口，创建一项管理任务：</p>
+        <p v-else class="qa-note">暂无基于现有记录可识别的验收条件、认领或追溯缺口。</p>
+
+        <form v-if="qualityIssue" class="qa-form" @submit.prevent="confirmQuality">
+          <p class="qa-form-title">确认 {{ qualityIssue.source_code }} 的「{{ QUALITY_KINDS[qualityIssue.kind] }}」缺口，创建管理任务</p>
           <label>负责人 <select v-model="qualityForm.owner_id" required><option value="">请选择</option><option v-for="member in project.members" :key="member.id" :value="String(memberUserId(member.id))">{{ member.name }}</option></select></label>
           <label>工时 <input v-model="qualityForm.hours" type="number" min="0" max="999" required></label>
           <label>开始周 <input v-model="qualityForm.week_start" type="number" min="1" max="6" required></label>
           <label>结束周 <input v-model="qualityForm.week_end" type="number" min="1" max="6" required></label>
-          <button type="submit" :disabled="qualitySaving">{{ qualitySaving ? '正在创建…' : '确认创建' }}</button>
-          <button type="button" @click="qualityIssue = null">取消</button>
+          <button type="submit" class="qa-btn" :disabled="qualitySaving">{{ qualitySaving ? '正在创建…' : '确认创建' }}</button>
+          <button type="button" class="qa-btn ghost" @click="qualityIssue = null">取消</button>
         </form>
-        <p v-if="qualityFormError" role="alert">{{ qualityFormError }}</p>
-        <div v-if="quality.improvements.length">
-          <p>改进任务追踪</p>
-          <ul><li v-for="record in quality.improvements" :key="`${record.source_code}-${record.finding_kind}`">
-            {{ record.source_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span>
-          </li></ul>
+        <p v-if="qualityFormError" class="qa-note err" role="alert">{{ qualityFormError }}</p>
+
+        <div v-if="quality.improvements.length" class="qa-track">
+          <p class="qa-sub">改进任务追踪</p>
+          <ul>
+            <li v-for="record in quality.improvements" :key="record.source_code + record.finding_kind">
+              <span class="qa-track-code">{{ record.source_code }} → {{ record.improvement_task_code }}：{{ record.improvement_status === 2 ? '已完成' : record.improvement_status === 3 ? '已取消' : record.improvement_status === 1 ? '进行中' : record.improvement_status === 0 ? '待办' : '任务已不存在' }}<span v-if="record.improvement_status !== null">（{{ record.improvement_progress }}%）</span></span>
+            </li>
+          </ul>
         </div>
-        <p class="small">{{ quality.limitations }}</p>
-        <div v-if="quality.evidence" class="evi">
+
+        <section class="qa-score">
+          <header class="qa-score-head">
+            <div>
+              <h4>代码质量评估</h4>
+              <p>10 维度静态扫描 · 抽样排查，非全仓审计</p>
+            </div>
+            <button type="button" class="qa-btn" :disabled="cqLoading || !session.online" @click="runCodeQuality">{{ cqLoading ? '正在拉取仓库…' : (codeQuality && codeQuality.available ? '重新评估' : '评估代码质量') }}</button>
+          </header>
+
+          <p v-if="cqError && !codeQuality" class="qa-note err" role="alert">{{ cqError }}</p>
+
+          <template v-if="codeQuality && codeQuality.available">
+            <div class="qa-score-body">
+              <div class="qa-ring" :class="gradeClass(codeQuality.grade)" :style="{ '--p': (codeQuality.total || 0) + '%' }">
+                <b>{{ codeQuality.total }}</b><span>分</span>
+              </div>
+              <div class="qa-score-info">
+                <div class="qa-badges">
+                  <span class="qa-grade" :class="gradeClass(codeQuality.grade)">{{ codeQuality.grade }}</span>
+                  <span class="qa-risk" :class="'risk-' + codeQuality.risk_level">风险 {{ riskLabel(codeQuality.risk_level) }}</span>
+                </div>
+                <p class="qa-verdict">{{ codeQuality.verdict }}</p>
+                <p class="qa-sample">{{ codeQuality.sample_note }}</p>
+              </div>
+            </div>
+
+            <div v-if="codeQuality.dimensions && codeQuality.dimensions.length" class="qa-dims">
+              <div v-for="d in codeQuality.dimensions" :key="d.key" class="qa-dim">
+                <span class="qa-dim-name">{{ d.name }}</span>
+                <div class="qa-bar"><i :class="barClass(d.score)" :style="{ width: d.score + '%' }"></i></div>
+                <b class="qa-dim-score">{{ d.score }}</b>
+              </div>
+            </div>
+
+            <ul v-if="codeQuality.findings && codeQuality.findings.length" class="qa-issues">
+              <li v-for="f in codeQuality.findings.slice(0, 4)" :key="f.category" class="qa-issue">
+                <span class="qa-sev" :class="'sev-' + f.severity">{{ sevLabel(f.severity) }}</span>
+                <div class="qa-issue-body">
+                  <p class="qa-issue-title">{{ f.title }}</p>
+                  <p class="qa-issue-line"><em>影响</em>{{ f.impact }}</p>
+                  <p class="qa-issue-line"><em>改法</em>{{ f.action }}<span class="qa-gain">+{{ f.recoverable_points }} 分</span></p>
+                </div>
+              </li>
+            </ul>
+
+            <p v-if="codeQuality.strengths && codeQuality.strengths.length" class="qa-strong">达标维度：{{ codeQuality.strengths.join('、') }}</p>
+            <p class="qa-fine">{{ codeQuality.limitations }}</p>
+          </template>
+        </section>
+
+                <section class="qa-sem">
+          <header class="qa-score-head">
+            <div>
+              <h4>语义评审 <span class="qa-llm">LLM</span></h4>
+              <p>判断「读者能否照着做」——静态规则分不出完整与空话，这一层可以</p>
+            </div>
+            <div class="qa-sem-actions">
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('readme')">{{ semanticLoading && semanticScope === 'readme' ? '评审中…' : '评 README' }}</button>
+              <button type="button" class="qa-btn" :disabled="semanticLoading || !session.online" @click="runSemantic('tests')">{{ semanticLoading && semanticScope === 'tests' ? '评审中…' : '评测试代码' }}</button>
+            </div>
+          </header>
+
+          <p v-if="semanticError" class="qa-note err" role="alert">{{ semanticError }}</p>
+
+          <template v-if="semantic && semantic.available">
+            <div class="qa-score-body">
+              <div class="qa-ring" :class="gradeClass(semantic.grade)" :style="{ '--p': (semantic.score || 0) + '%' }">
+                <b>{{ semantic.score }}</b><span>分</span>
+              </div>
+              <div class="qa-score-info">
+                <div class="qa-badges">
+                  <span class="qa-grade" :class="gradeClass(semantic.grade)">{{ semantic.grade }}</span>
+                  <span class="qa-risk">置信 {{ riskLabel(semantic.confidence) }}</span>
+                  <span class="qa-risk">{{ semantic.scope === 'readme' ? 'README' : '测试代码' }}</span>
+                  <span v-if="semantic.cached" class="qa-risk">缓存</span>
+                </div>
+                <p class="qa-verdict">{{ semantic.verdict }}</p>
+                <p class="qa-sample">
+                  可照做：<b>{{ semantic.reader_can_act ? '是' : '否' }}</b>
+                  <span v-if="semantic.unverified_quotes">　未在原文核实的引用：{{ semantic.unverified_quotes }} 条</span>
+                  <span v-if="semantic.input_truncated">　文本已截断</span>
+                </p>
+              </div>
+            </div>
+
+            <ul v-if="semantic.issues && semantic.issues.length" class="qa-issues">
+              <li v-for="(item, i) in semantic.issues" :key="'si' + i" class="qa-issue">
+                <span class="qa-sev" :class="item.verified ? 'sev-medium' : 'sev-low'">{{ item.verified ? '原文' : '未核实' }}</span>
+                <div class="qa-issue-body">
+                  <p class="qa-issue-quote">「{{ item.quote }}」</p>
+                  <p class="qa-issue-line"><em>问题</em>{{ item.problem }}</p>
+                  <p class="qa-issue-line"><em>改法</em>{{ item.suggestion }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <div v-if="semantic.missing && semantic.missing.length" class="qa-missing">
+              <p class="qa-sub">读者需要但文中没有</p>
+              <ul class="qa-chips">
+                <li v-for="(m, i) in semantic.missing" :key="'sm' + i">{{ m }}</li>
+              </ul>
+            </div>
+
+            <p v-if="semantic.strengths && semantic.strengths.length" class="qa-strong">
+              可保留：{{ semantic.strengths[0].why }}
+            </p>
+            <p class="qa-fine">{{ semantic.limitations }}</p>
+          </template>
+        </section>
+
+                        <div v-if="quality.evidence" class="evi">
           <p>真实证据（不推断质量）</p>
           <p v-if="quality.evidence.code_activity">
             代码活动：提交 {{ quality.evidence.code_activity.commits_total }} 次（近 14 天 {{ quality.evidence.code_activity.commits_last_14d }} 次）、
@@ -428,6 +611,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
             <template v-else>仓库证据：未接入（{{ quality.evidence.repository.reason }}）。</template>
           </p>
         </div>
+<p class="qa-fine">{{ quality.limitations }}</p>
       </template>
     </div>
 
@@ -463,3 +647,139 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.qa{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);padding:18px 18px 16px;margin-top:4px}
+.qa-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:2px dashed var(--line)}
+.qa-head-l{display:flex;gap:10px;align-items:center}
+.qa-chip{font-family:var(--mono);font-size:11px;letter-spacing:1px;border:2px solid var(--ink);background:var(--green);padding:3px 7px}
+.qa-head h3{margin:0;font-size:18px;line-height:1.2}
+.qa-head p{margin:3px 0 0;font-size:12px;color:var(--muted)}
+.qa-btn{font:inherit;font-size:12px;border:2px solid var(--ink);background:var(--paper);padding:6px 11px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);transition:transform .08s,box-shadow .08s;white-space:nowrap}
+.qa-btn:hover:not(:disabled){transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
+.qa-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none}
+.qa-btn.ghost{background:transparent;box-shadow:none;font-size:11px;padding:4px 9px}
+.qa-btn.ghost:hover:not(:disabled){background:var(--paper-2)}
+
+.qa-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:14px 0 8px;border:2px solid var(--ink);background:var(--paper-2)}
+.qa-metric{padding:10px 14px;border-right:1px dashed var(--line)}
+.qa-metric:last-child{border-right:0}
+.qa-metric b{display:block;font-family:var(--mono);font-size:26px;line-height:1}
+.qa-metric span{display:block;margin-top:4px;font-size:11px;color:var(--muted)}
+.qa-metric.alert{background:#fbeee8}
+.qa-metric.alert b{color:#a8482f}
+
+.qa-lead{margin:0 0 10px;font-size:13px}
+.qa-lead b{font-family:var(--mono)}
+
+.qa-findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.qa-finding{display:flex;gap:10px;align-items:flex-start;border:2px solid var(--ink);background:#fff;padding:10px 12px 10px 15px;position:relative}
+.qa-finding::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--orange-2)}
+.qa-tag{font-family:var(--mono);font-size:10px;letter-spacing:.5px;border:1.5px solid var(--ink);padding:2px 6px;white-space:nowrap;flex:0 0 auto}
+.tag-orange{background:var(--orange)}
+.tag-blue{background:var(--blue)}
+.tag-lilac{background:var(--lilac)}
+.tag-gray{background:var(--gray)}
+.qa-finding-body{flex:1;min-width:0}
+.qa-finding-title{margin:0;font-size:13px;line-height:1.5}
+.qa-finding-tip{margin:3px 0 0;font-size:12px;color:var(--muted)}
+.qa-done{font-size:11px;color:#2f7a4f;border:1.5px dashed #7fb894;padding:2px 7px;white-space:nowrap;flex:0 0 auto}
+
+.qa-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 12px;margin-top:12px;border:2px dashed var(--line);background:var(--paper-2);padding:12px}
+.qa-form-title{flex-basis:100%;margin:0;font-size:12px;color:var(--ink-soft)}
+.qa-form label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted)}
+.qa-form input,.qa-form select{font:inherit;font-size:12px;border:2px solid var(--ink);background:#fff;padding:4px 6px;width:96px}
+.qa-form select{width:120px}
+
+.qa-track{margin-top:12px}
+.qa-sub{margin:0 0 6px;font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+.qa-track ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.qa-track li{border:1.5px solid var(--line);background:#fff;padding:3px 8px;font-size:11px}
+.qa-track-code{font-family:var(--mono)}
+
+.qa-score{margin-top:16px;border:2px solid var(--ink);background:#fff}
+.qa-score-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--paper-2);border-bottom:2px solid var(--ink)}
+.qa-score-head h4{margin:0;font-size:14px}
+.qa-score-head p{margin:2px 0 0;font-size:11px;color:var(--muted)}
+.qa-score-body{display:flex;gap:16px;padding:14px 12px 6px;align-items:center}
+.qa-ring{--p:0%;width:92px;height:92px;border-radius:50%;border:2px solid var(--ink);background:conic-gradient(var(--green-2) var(--p),var(--paper-2) 0);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;flex:0 0 auto}
+.qa-ring::before{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--paper);border:1px solid var(--line)}
+.qa-ring b{position:relative;font-family:var(--mono);font-size:28px;line-height:1}
+.qa-ring span{position:relative;font-size:10px;color:var(--muted)}
+.qa-ring.g-ok{background:conic-gradient(var(--green) var(--p),var(--paper-2) 0)}
+.qa-ring.g-mid{background:conic-gradient(var(--orange-2) var(--p),var(--paper-2) 0)}
+.qa-ring.g-bad{background:conic-gradient(var(--red) var(--p),var(--paper-2) 0)}
+.qa-score-info{flex:1;min-width:0}
+.qa-badges{display:flex;gap:6px;margin-bottom:6px}
+.qa-grade{font-family:var(--mono);font-size:11px;border:1.5px solid var(--ink);padding:2px 8px;background:var(--green)}
+.qa-grade.g-ok{background:var(--green)}
+.qa-grade.g-mid{background:var(--orange)}
+.qa-grade.g-bad{background:var(--red)}
+.qa-risk{font-size:11px;border:1.5px dashed var(--line);padding:2px 8px;color:var(--ink-soft)}
+.qa-risk.risk-blocking{border-color:#c06a52;color:#a8482f;background:#fbeee8}
+.qa-risk.risk-high{border-color:#c99a4e;color:#8a5a1c;background:#fdf3e3}
+.qa-verdict{margin:0 0 4px;font-size:12.5px;line-height:1.6}
+.qa-sample{margin:0;font-size:11px;color:var(--muted)}
+
+.qa-dims{display:grid;grid-template-columns:repeat(2,1fr);gap:7px 18px;padding:8px 12px 12px}
+.qa-dim{display:grid;grid-template-columns:76px 1fr 30px;align-items:center;gap:8px;font-size:11px}
+.qa-dim-name{color:var(--muted)}
+.qa-bar{height:8px;background:var(--paper-2);border:1px solid var(--line);position:relative;overflow:hidden}
+.qa-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--green-2)}
+.qa-bar i.bar-mid{background:var(--orange-2)}
+.qa-bar i.bar-bad{background:var(--red)}
+.qa-dim-score{font-family:var(--mono);text-align:right}
+
+.qa-issues{list-style:none;margin:0;padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
+.qa-issue{display:flex;gap:10px;padding:8px 10px;border:1.5px dashed var(--line);background:var(--paper)}
+.qa-sev{font-family:var(--mono);font-size:10px;padding:2px 7px;border:1.5px solid var(--ink);white-space:nowrap;height:fit-content}
+.sev-blocking{background:var(--red)}
+.sev-high{background:var(--orange)}
+.sev-medium{background:var(--yellow)}
+.sev-low{background:var(--gray)}
+.qa-issue-body{flex:1;min-width:0}
+.qa-issue-title{margin:0 0 3px;font-size:12.5px;font-weight:700}
+.qa-issue-line{margin:2px 0;font-size:11.5px;color:var(--ink-soft);line-height:1.55}
+.qa-issue-line em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line);padding:0 4px;margin-right:6px}
+.qa-gain{font-family:var(--mono);font-size:10px;color:#2f7a4f;border:1px dashed #7fb894;padding:0 4px;margin-left:6px;white-space:nowrap}
+.qa-strong{margin:0 12px 10px;font-size:11.5px;color:#2f7a4f}
+
+.qa-evi{margin-top:16px;padding-top:12px;border-top:2px dashed var(--line)}
+.qa-evi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.qa-evi-col{border:1.5px solid var(--line);background:#fff;padding:8px 10px;min-width:0}
+.qa-evi-col h5{margin:0 0 4px;font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+.qa-evi-col p{margin:2px 0;font-size:11px;line-height:1.55;word-break:break-word}
+.qa-evi-col .small{color:var(--muted);font-size:10.5px}
+
+.qa-note{margin:10px 0;font-size:12px;color:var(--muted)}
+.qa-note.err{color:#a8482f}
+.qa-fine{margin:12px 0 0;font-size:10.5px;line-height:1.6;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+
+@media (max-width: 980px){
+  .qa-evi-grid{grid-template-columns:1fr}
+  .qa-dims{grid-template-columns:1fr}
+  .qa-metrics{grid-template-columns:repeat(3,1fr)}
+}
+
+.evi { margin-top: 16px; padding-top: 12px; border-top: 2px dashed var(--line); }
+.evi > p { margin: 4px 0; font-size: 11px; line-height: 1.6; color: var(--ink-soft); word-break: break-word; }
+.evi > p:first-child { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+.evi .small { font-size: 10.5px; color: var(--muted); }
+.evi a { color: #2f6f4f; border-bottom: 1px dashed currentColor; margin-left: 4px; }
+
+.qa-sem { margin-top: 16px; border: 2px solid var(--ink); background: #fff; }
+.qa-llm { font-family: var(--mono); font-size: 9px; border: 1.5px solid var(--ink); background: var(--lilac); padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+.qa-sem-actions { display: flex; gap: 8px; }
+.qa-issue-quote { margin: 0 0 4px; font-size: 12px; color: var(--ink); background: var(--paper-2); border-left: 3px solid var(--orange-2); padding: 3px 8px; }
+.qa-missing { padding: 0 12px 12px; }
+.qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
+
+.qa-sem { margin-top: 16px; border: 2px solid var(--ink); background: #fff; }
+.qa-llm { font-family: var(--mono); font-size: 9px; border: 1.5px solid var(--ink); background: var(--lilac); padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+.qa-sem-actions { display: flex; gap: 8px; }
+.qa-issue-quote { margin: 0 0 4px; font-size: 12px; color: var(--ink); background: var(--paper-2); border-left: 3px solid var(--orange-2); padding: 3px 8px; }
+.qa-missing { padding: 0 12px 12px; }
+.qa-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qa-chips li { font-size: 11px; border: 1.5px dashed #c99a4e; background: #fdf3e3; color: #8a5a1c; padding: 2px 8px; }
+</style>

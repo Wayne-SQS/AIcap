@@ -8,6 +8,8 @@ import com.aicap.entity.User;
 import com.aicap.security.AuthContext;
 import com.aicap.service.ProjectAccessService;
 import com.aicap.service.QualityEvidenceService;
+import com.aicap.service.RepoQualityFetcher;
+import com.aicap.service.SemanticReviewService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,8 @@ class QualityAnalysisControllerTest {
     private ProjectAccessService projects;
     private TaskPoolController taskController;
     private QualityEvidenceService evidence;
+    private RepoQualityFetcher codeQualityFetcher;
+    private SemanticReviewService semanticReviewer;
 
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID()
@@ -49,8 +53,10 @@ class QualityAnalysisControllerTest {
         projects = mock(ProjectAccessService.class);
         taskController = mock(TaskPoolController.class);
         evidence = mock(QualityEvidenceService.class);
+        codeQualityFetcher = mock(RepoQualityFetcher.class);
+        semanticReviewer = mock(SemanticReviewService.class);
         when(evidence.collect(anyString())).thenReturn(new java.util.LinkedHashMap<>());
-        controller = new QualityAnalysisController(projects, jdbc, taskController, evidence);
+        controller = new QualityAnalysisController(projects, jdbc, taskController, evidence, codeQualityFetcher, semanticReviewer);
     }
 
     @AfterEach void clearAuth() { AuthContext.clear(); }

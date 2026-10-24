@@ -123,6 +123,11 @@ github:
   # 单仓库部署的显式项目归属(如 P002):仅当被同步仓库 == repo 时生效,
   # 映射表(repository-project-mapping)优先;多项目场景不要用它
   project-id: ${GITHUB_PROJECT_ID:}
+  # 仓库 → 项目 显式映射（多项目场景用这个，优先于 project-id 兜底）。
+  # 键用 [owner/repo] 方括号写法，避免 Spring 把 / 和 . 当路径分隔。
+  repository-project-mapping:
+    "[Wayne-SQS/AIcap]": P001
+    "[lili618li/aiglcs]": P002
   api-base: ${GITHUB_API_BASE:https://api.github.com}
   # GitHub 登录名 → 系统 username 的映射(JSON 字符串,环境变量注入)
   # 例: GITHUB_USER_MAPPING='{"li-ming":"李锐铭","zhang-san":"孙秋实"}'
