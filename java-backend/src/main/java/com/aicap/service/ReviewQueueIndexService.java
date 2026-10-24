@@ -113,11 +113,14 @@ public class ReviewQueueIndexService {
         for (String source : List.of("assignment", "general", "efficiency")) {
             String sourceSql = parts.get(source);
             if ("efficiency".equals(source)) {
+                var viewer = com.aicap.security.AuthContext.currentUser();
+                if (viewer == null) continue; // Direct service callers have no request auth context.
                 Map<String,Object> efficiencyCounts = jdbc.queryForMap("SELECT " +
                     "COALESCE(SUM(p.status='pending'),0) AS pending_count," +
                     "COALESCE(SUM(p.status='approved'),0) AS execution_count FROM efficiency_proposals p " +
-                    "JOIN project_members pm ON pm.project_id=p.project_id WHERE pm.user_id=?",
-                    com.aicap.security.AuthContext.currentUser().getId());
+                    "JOIN project_members pm ON pm.project_id COLLATE utf8mb4_unicode_ci " +
+                    "= p.project_id COLLATE utf8mb4_unicode_ci WHERE pm.user_id=?",
+                    viewer.getId());
                 pending += ((Number)efficiencyCounts.get("pending_count")).longValue();
                 continue;
             }
@@ -192,7 +195,8 @@ public class ReviewQueueIndexService {
         if ((selectedSource.equals("all") || selectedSource.equals("efficiency")) && projectId != null && !projectId.isBlank()) {
             StringBuilder statement = new StringBuilder("SELECT q.*,CAST(UNIX_TIMESTAMP(q.created_at)*1000000 AS SIGNED) AS sort_time FROM (")
                 .append(sql().get("efficiency")).append(") q JOIN efficiency_proposals p ON p.id=q.proposal_id "
-                    + "JOIN project_members pm ON pm.project_id=p.project_id WHERE pm.user_id=? AND p.project_id=?");
+                    + "JOIN project_members pm ON pm.project_id COLLATE utf8mb4_unicode_ci "
+                    + "= p.project_id COLLATE utf8mb4_unicode_ci WHERE pm.user_id=? AND p.project_id=?");
             List<Object> args = new ArrayList<>(); args.add(com.aicap.security.AuthContext.currentUser().getId());
             args.add(ProjectAccessService.normalize(projectId));
             if (!selectedStatus.equals("all")) statement.append(selectedStatus.equals("pending") ? " AND q.status='pending'" :

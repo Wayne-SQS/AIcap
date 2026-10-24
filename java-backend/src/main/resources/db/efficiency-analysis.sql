@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS efficiency_analysis_runs (
  created_at datetime NOT NULL,
  updated_at datetime NOT NULL,
  KEY ix_efficiency_runs_project (project_id,created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS efficiency_proposals (
  id varchar(36) NOT NULL PRIMARY KEY,
  project_id varchar(20) NOT NULL,
@@ -23,4 +23,4 @@ CREATE TABLE IF NOT EXISTS efficiency_proposals (
  reason varchar(1000) NOT NULL DEFAULT '',
  UNIQUE KEY uq_efficiency_recommendation (project_id,analysis_id,recommendation_id),
  KEY ix_efficiency_proposals_project (project_id,status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
