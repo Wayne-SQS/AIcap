@@ -28,6 +28,10 @@ public class RefinementAnalysisService extends AbstractMeetingAnalysisService {
                     .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
             var input = strict.treeToValue(body, RefinementAnalysisDtos.Submit.class);
             if (input == null || !validator.validate(input).isEmpty()) throw new IllegalArgumentException();
+            for (var proposal : input.result().proposedActions()) {
+                var estimate = proposal.effortEstimate();
+                if (estimate != null && estimate.maxHours() < estimate.minHours()) throw new IllegalArgumentException();
+            }
             return input;
         } catch (Exception e) {
             throw ApiException.unprocessable("需求细化分析载荷无效");

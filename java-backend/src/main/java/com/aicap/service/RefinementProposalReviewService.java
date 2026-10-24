@@ -77,7 +77,11 @@ public class RefinementProposalReviewService {
         if (index < 0) throw ApiException.notFound("提案不存在");
         var original = proposals.get(index);
         ObjectNode approved = input.decision().equals("reject") ? null : original.deepCopy();
-        if (input.changes()!=null) approved.set("changes",mapper.valueToTree(input.changes()));
+        if (input.changes()!=null) {
+            approved.set("changes",mapper.valueToTree(input.changes()));
+            // An estimate for the original scope is stale after an editor changes that scope.
+            approved.remove("effort_estimate");
+        }
         var existing = jdbc.queryForList("SELECT * FROM meeting_refinement_proposal_reviews WHERE analysis_id=? AND proposal_index=?", analysisId,index);
         if (!existing.isEmpty()) {
             var previous = existing.getFirst();

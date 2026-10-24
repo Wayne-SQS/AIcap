@@ -145,6 +145,23 @@ class RefinementAnalysisStorageTest {
         assertEquals(200,mvc.perform(get(path)).andReturn().getResponse().getStatus());
     }
 
+    @Test void prdEffortEstimateIsSavedButInvalidRangeIsRejected() throws Exception {
+        var input=body();
+        ((ObjectNode)input.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":8,"max_hours":20,"basis":"按导出范围粗估","uncertainty":"字段映射待确认"}
+            """));
+        var response=submit(input);
+        assertEquals(200,response.getStatus(),response.getContentAsString());
+        var saved=mapper.readTree(response.getContentAsByteArray());
+        assertEquals(8,saved.at("/result/proposed_actions/0/effort_estimate/min_hours").asInt());
+        assertEquals(20,saved.at("/result/proposed_actions/0/effort_estimate/max_hours").asInt());
+        var invalid=body(); invalid.put("client_request_id","invalid-range");
+        ((ObjectNode)invalid.at("/result/proposed_actions/0")).set("effort_estimate",mapper.readTree("""
+            {"min_hours":20,"max_hours":8,"basis":"按导出范围粗估","uncertainty":"字段映射待确认"}
+            """));
+        assertEquals(422,submit(invalid).getStatus());
+    }
+
     @Test void exactRetryPreservesSnapshotAndChangedPayloadConflicts() throws Exception {
         var input=body(); var first=mapper.readTree(submit(input).getContentAsByteArray());
         jdbc.update("UPDATE stories SET title='周报导出' WHERE id='US13'");

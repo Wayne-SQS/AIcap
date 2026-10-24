@@ -149,6 +149,7 @@ onBeforeUnmount(() => { mounted = false; ++listVersion; ++detailVersion })
             <h4>{{ item.original_proposal.changes.title }}</h4>
             <p class="small">提案 {{ item.proposal_id }} · {{ reviewName(item.status) }} · {{ executionName(execution(item.proposal_id) ? 'succeeded' : item.execution_status) }}</p>
             <h5>原始提案</h5><RefinementStoryFields :changes="item.original_proposal.changes" />
+            <p v-if="item.original_proposal.effort_estimate" class="preserve">AI 工作量粗估：{{ item.original_proposal.effort_estimate.min_hours }}–{{ item.original_proposal.effort_estimate.max_hours }} 计划工时<br>依据与假设：{{ item.original_proposal.effort_estimate.basis }}<br>不确定性：{{ item.original_proposal.effort_estimate.uncertainty }}<br>仅供审核参考，不是工时承诺；修改故事范围后需重新估算。</p>
             <template v-if="item.approved_proposal"><h5>批准后的故事</h5><RefinementStoryFields :changes="item.approved_proposal.changes" /></template>
             <p class="preserve">提案原因：{{ item.original_proposal.reason }}</p>
             <div class="evidence">

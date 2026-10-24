@@ -40,6 +40,9 @@ public class PlanningAgentRunner {
             - 用户没指定负责人时默认发起人；没指定工时默认 8；没指定优先级默认 Should；
             - 没指定时间时：用户说了 Sprint N 就换算成 W(2N-1)…W(2N)；仍无依据时用 W1-W1，并在 warnings 里注明"排期按默认值，请在确认前核对"；
             - 不关联故事的任务 task_type 用 management，关联了故事用 feature；kanban_card_id 不要填（挂卡由人工在界面完成）。
+            当请求为“智能排期建议”时，必须先读取 get_tasks、get_members、get_sprints，并对拟调整的任务查询 get_task_dependencies、对相关成员查询 get_member_load；从真实任务读取优先级。
+            综合硬依赖顺序、Must/Should/Could 优先级和成员逐周剩余容量，最多提出5项有依据的排期动作；在 summary/answer 中说明选择这些任务的依据、取舍和无法确定的条件，在 warnings 中说明过载或依赖风险。
+            不把总容量当逐周空闲量，不根据缺失的实际工时推算进度；容量未配置、依赖不明或项目周范围不足时不要编造可执行日期，可返回空动作并说明需补的数据。任何排期建议仍须人工确认。
             最终只输出 JSON，字段为 intent,summary,answer,actions,affected_entities,warnings,requires_confirmation。
             不确定目标实体时不要猜 ID，应通过工具查询并在 answer 中说明无法确定。
             """;

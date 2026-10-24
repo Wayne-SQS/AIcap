@@ -1,0 +1,243 @@
+{
+  "created_at": "2026-10-24T11:55:22.114557+00:00",
+  "skill_version": "refinement-prd-v4",
+  "model": "deepseek-v4-flash",
+  "data": "synthetic_only",
+  "planned": 3,
+  "cases": [
+    {
+      "id": "prd-two-features",
+      "rubric": "两项独立可验收功能分别拆故事，有粗估及不确定性；不借用当前Sprint或猜优先级。",
+      "candidate": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-two-features",
+        "meeting_type": "backlog_refinement",
+        "summary": "收到一份标记为“PRD正文”的需求文档，包含两个明确写出的独立功能要求：成员负载看板（按成员展示未来六周计划工时与每周容量，超容量周次高亮）和任务 CSV 导出（仅导出当前筛选任务的编号、名称、负责人，不含成员邮箱）。以上仅为从需求文档分析出的新故事候选，尚待人工审核，不代表文档已批准或故事已创建。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P-001",
+            "action": "create_story",
+            "changes": {
+              "title": "成员负载看板",
+              "description": "按成员展示未来六周的计划工时和每周容量，计划工时超过容量的周次高亮。",
+              "acceptance": "负责人能查看每位成员逐周工时、容量与超载标记。",
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "PRD正文中明确写出的独立功能要求，可独立按“查看逐周工时、容量与超载标记”验收，尚未经人工批准或创建。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "需求一：新增“成员负载看板”，按成员展示未来六周的计划工时和每周容量；计划工时超过容量的周次高亮。验收：负责人能查看每位成员逐周工时、容量与超载标记。"
+              }
+            ],
+            "effort_estimate": {
+              "min_hours": 16,
+              "max_hours": 40,
+              "basis": "估算依据为按成员汇总未来六周计划工时与容量、逐周展示及超载高亮的界面与数据取数工作；假设已有工时和容量数据来源。",
+              "uncertainty": "PRD未说明数据来源、容量定义口径、展示形式及权限范围，实际工作量可能上下浮动。"
+            }
+          },
+          {
+            "proposal_id": "P-002",
+            "action": "create_story",
+            "changes": {
+              "title": "任务 CSV 导出",
+              "description": "仅导出当前筛选任务的编号、名称、负责人，不包含成员邮箱。",
+              "acceptance": "下载的 CSV 字段与筛选结果一致。",
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "PRD正文中明确写出的独立功能要求，可独立按“CSV字段与筛选结果一致”验收，尚未经人工批准或创建。",
+            "evidence": [
+              {
+                "segment_id": "S3",
+                "quote": "需求二：新增“任务 CSV 导出”，仅导出当前筛选任务的编号、名称、负责人，不包含成员邮箱。验收：下载的 CSV 字段与筛选结果一致。"
+              }
+            ],
+            "effort_estimate": {
+              "min_hours": 8,
+              "max_hours": 24,
+              "basis": "估算依据为基于当前筛选条件生成仅含编号、名称、负责人三列的CSV并支持下载；假设筛选逻辑已存在。",
+              "uncertainty": "PRD未说明导出条数上限、CSV编码与列顺序、筛选条件如何传递，实际工作量可能上下浮动。"
+            }
+          }
+        ],
+        "open_questions": [
+          "成员负载看板的计划工时和每周容量数据来自哪个系统或数据源？",
+          "成员负载看板以何种形式呈现（如表格或矩阵看板），是否只对“负责人”角色开放？",
+          "任务 CSV 导出是否需要限制导出条数上限，CSV 的列顺序和文件编码是否有要求？"
+        ]
+      },
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-two-features",
+        "meeting_type": "backlog_refinement",
+        "summary": "收到一份标记为“PRD正文”的需求文档，包含两个明确写出的独立功能要求：成员负载看板（按成员展示未来六周计划工时与每周容量，超容量周次高亮）和任务 CSV 导出（仅导出当前筛选任务的编号、名称、负责人，不含成员邮箱）。以上仅为从需求文档分析出的新故事候选，尚待人工审核，不代表文档已批准或故事已创建。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P-001",
+            "action": "create_story",
+            "changes": {
+              "title": "成员负载看板",
+              "description": "按成员展示未来六周的计划工时和每周容量，计划工时超过容量的周次高亮。",
+              "acceptance": "负责人能查看每位成员逐周工时、容量与超载标记。",
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "PRD正文中明确写出的独立功能要求，可独立按“查看逐周工时、容量与超载标记”验收，尚未经人工批准或创建。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "需求一：新增“成员负载看板”，按成员展示未来六周的计划工时和每周容量；计划工时超过容量的周次高亮。验收：负责人能查看每位成员逐周工时、容量与超载标记。"
+              }
+            ],
+            "effort_estimate": {
+              "min_hours": 16,
+              "max_hours": 40,
+              "basis": "估算依据为按成员汇总未来六周计划工时与容量、逐周展示及超载高亮的界面与数据取数工作；假设已有工时和容量数据来源。",
+              "uncertainty": "PRD未说明数据来源、容量定义口径、展示形式及权限范围，实际工作量可能上下浮动。"
+            }
+          },
+          {
+            "proposal_id": "P-002",
+            "action": "create_story",
+            "changes": {
+              "title": "任务 CSV 导出",
+              "description": "仅导出当前筛选任务的编号、名称、负责人，不包含成员邮箱。",
+              "acceptance": "下载的 CSV 字段与筛选结果一致。",
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "PRD正文中明确写出的独立功能要求，可独立按“CSV字段与筛选结果一致”验收，尚未经人工批准或创建。",
+            "evidence": [
+              {
+                "segment_id": "S3",
+                "quote": "需求二：新增“任务 CSV 导出”，仅导出当前筛选任务的编号、名称、负责人，不包含成员邮箱。验收：下载的 CSV 字段与筛选结果一致。"
+              }
+            ],
+            "effort_estimate": {
+              "min_hours": 8,
+              "max_hours": 24,
+              "basis": "估算依据为基于当前筛选条件生成仅含编号、名称、负责人三列的CSV并支持下载；假设筛选逻辑已存在。",
+              "uncertainty": "PRD未说明导出条数上限、CSV编码与列顺序、筛选条件如何传递，实际工作量可能上下浮动。"
+            }
+          }
+        ],
+        "open_questions": [
+          "成员负载看板的计划工时和每周容量数据来自哪个系统或数据源？",
+          "成员负载看板以何种形式呈现（如表格或矩阵看板），是否只对“负责人”角色开放？",
+          "任务 CSV 导出是否需要限制导出条数上限，CSV 的列顺序和文件编码是否有要求？"
+        ]
+      }
+    },
+    {
+      "id": "prd-optional-idea",
+      "rubric": "可选且未定事项不应被写成新故事。",
+      "candidate": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-optional-idea",
+        "meeting_type": "backlog_refinement",
+        "summary": "输入被标记为需求文档，但正文仅列出一条明确标为“可选想法”的自动短信提醒，并说明目前未决定纳入范围、验收条件待讨论。因此没有形成可确认的新增需求，未生成新增故事候选。",
+        "proposed_actions": [],
+        "open_questions": [
+          "自动短信提醒是否已正式决定纳入需求范围？若纳入，需要明确其行为、适用对象和边界。",
+          "若后续决定纳入自动短信提醒，其验收条件是什么？"
+        ]
+      },
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-optional-idea",
+        "meeting_type": "backlog_refinement",
+        "summary": "输入被标记为需求文档，但正文仅列出一条明确标为“可选想法”的自动短信提醒，并说明目前未决定纳入范围、验收条件待讨论。因此没有形成可确认的新增需求，未生成新增故事候选。",
+        "proposed_actions": [],
+        "open_questions": [
+          "自动短信提醒是否已正式决定纳入需求范围？若纳入，需要明确其行为、适用对象和边界。",
+          "若后续决定纳入自动短信提醒，其验收条件是什么？"
+        ]
+      }
+    },
+    {
+      "id": "prd-title-only",
+      "rubric": "只有标题时保留未知字段和未知估算，不能填虚构工时。",
+      "candidate": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-title-only",
+        "summary": "输入被标记为待人工审核的PRD内容。首段仅标记为PRD正文，随后内容确定新增“消息中心”，但具体功能行为、使用者和验收条件均未给出；这仅是分析得到的待审新故事候选，不代表文档已批准或故事已创建。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1",
+            "action": "create_story",
+            "changes": {
+              "title": "消息中心",
+              "description": null,
+              "acceptance": null,
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "原文明确写出确定新增“消息中心”，可生成一个待人工审核的新故事候选；因仅给出名称、未给出独立功能行为或范围，描述与验收标准留空。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "确定新增“消息中心”；具体功能行为、使用者和验收条件后续补充。"
+              }
+            ],
+            "effort_estimate": null
+          }
+        ],
+        "open_questions": [
+          "“消息中心”的具体功能行为和使用者是什么？",
+          "“消息中心”的验收条件是什么？",
+          "“消息中心”的优先级、目标Sprint和业务活动编号是否已有明确安排？"
+        ]
+      },
+      "status": "passed",
+      "failures": [],
+      "result": {
+        "schema_version": "1.0",
+        "meeting_id": "prd-title-only",
+        "meeting_type": "backlog_refinement",
+        "summary": "输入被标记为待人工审核的PRD内容。首段仅标记为PRD正文，随后内容确定新增“消息中心”，但具体功能行为、使用者和验收条件均未给出；这仅是分析得到的待审新故事候选，不代表文档已批准或故事已创建。",
+        "proposed_actions": [
+          {
+            "proposal_id": "P1",
+            "action": "create_story",
+            "changes": {
+              "title": "消息中心",
+              "description": null,
+              "acceptance": null,
+              "priority": null,
+              "sprint": null,
+              "activity": null
+            },
+            "reason": "原文明确写出确定新增“消息中心”，可生成一个待人工审核的新故事候选；因仅给出名称、未给出独立功能行为或范围，描述与验收标准留空。",
+            "evidence": [
+              {
+                "segment_id": "S2",
+                "quote": "确定新增“消息中心”；具体功能行为、使用者和验收条件后续补充。"
+              }
+            ],
+            "effort_estimate": null
+          }
+        ],
+        "open_questions": [
+          "“消息中心”的具体功能行为和使用者是什么？",
+          "“消息中心”的验收条件是什么？",
+          "“消息中心”的优先级、目标Sprint和业务活动编号是否已有明确安排？"
+        ]
+      }
+    }
+  ],
+  "manual_review_required": true,
+  "passed": 3,
+  "automated_acceptance_passed": true
+}
