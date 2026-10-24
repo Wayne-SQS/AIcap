@@ -432,33 +432,6 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
             <p class="small">{{ codeQuality.limitations }}</p>
           </template>
         </div>
-        <div class="cq">
-          <p>
-            <strong>代码质量评估</strong>
-            <button type="button" :disabled="cqLoading || !session.online" @click="runCodeQuality">
-              {{ cqLoading ? '正在拉取仓库…' : (codeQuality && codeQuality.available ? '重新评估' : '评估代码质量') }}
-            </button>
-          </p>
-          <p v-if="cqError && !codeQuality" role="alert">{{ cqError }}</p>
-          <template v-if="codeQuality && codeQuality.available">
-            <p>
-              得分 <strong>{{ codeQuality.total }}</strong> / 100（{{ codeQuality.grade }}），
-              风险级别 <strong>{{ codeQuality.risk_level }}</strong>；
-              {{ codeQuality.sample_note }}
-            </p>
-            <p>{{ codeQuality.verdict }}</p>
-            <ul>
-              <li v-for="f in (codeQuality.findings || []).slice(0, 4)" :key="f.category">
-                <strong>[{{ f.severity }}] {{ f.title }}</strong>——{{ f.impact }}
-                <br />改法：{{ f.action }}（可回收 {{ f.recoverable_points }} 分）
-              </li>
-            </ul>
-            <p v-if="codeQuality.strengths && codeQuality.strengths.length">
-              达标维度：{{ codeQuality.strengths.join('、') }}。
-            </p>
-            <p class="small">{{ codeQuality.limitations }}</p>
-          </template>
-        </div>
         <p class="small">{{ quality.limitations }}</p>
         <div v-if="quality.evidence" class="evi">
           <p>真实证据（不推断质量）</p>
