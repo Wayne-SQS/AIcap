@@ -399,7 +399,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
           <p v-if="quality.evidence.ci">
             <template v-if="quality.evidence.ci.available">
               CI：最近 {{ quality.evidence.ci.runs_total }} 次已定论运行（另有 {{ quality.evidence.ci.runs_cancelled }} 次取消），最近结论 {{ quality.evidence.ci.last_conclusion }}，通过率 {{ quality.evidence.ci.pass_rate }}%。
-              <span v-if="quality.evidence.ci.last_run">最新运行 #{{ quality.evidence.ci.last_run.run_number }}（{{ quality.evidence.ci.last_run.head_sha?.slice(0, 7) }}，{{ quality.evidence.ci.last_run.conclusion }}）<a v-if="quality.evidence.ci.last_run.html_url" :href="quality.evidence.ci.last_run.html_url" target="_blank" rel="noopener noreferrer">查看 CI</a>。</span>
+              <span v-if="quality.evidence.ci.last_run">最近已完成运行 #{{ quality.evidence.ci.last_run.run_number }}（{{ quality.evidence.ci.last_run.head_sha?.slice(0, 7) }}，{{ quality.evidence.ci.last_run.conclusion }}）<a v-if="quality.evidence.ci.last_run.html_url" :href="quality.evidence.ci.last_run.html_url" target="_blank" rel="noopener noreferrer">查看 CI</a>。</span>
               <span v-if="quality.evidence.ci.last_failed">历史最近失败：{{ quality.evidence.ci.last_failed.run_name }} #{{ quality.evidence.ci.last_failed.run_number }}。</span>
             </template>
             <template v-else>CI：未接入（{{ quality.evidence.ci.reason }}）。</template>

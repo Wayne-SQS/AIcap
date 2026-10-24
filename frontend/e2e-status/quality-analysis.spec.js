@@ -44,7 +44,7 @@ test('quality card shows specification gaps with real evidence and honesty limit
   await expect(card).toContainText('T3 · 联调脚本：开发任务未关联任何故事')
   await expect(card).toContainText('不虚构覆盖率结论')
   await expect(card).toContainText('CI：最近 2 次已定论运行（另有 0 次取消），最近结论 success，通过率 50%')
-  await expect(card).toContainText('最新运行 #22（abcdef1，success）')
+  await expect(card).toContainText('最近已完成运行 #22（abcdef1，success）')
   await expect(card).toContainText('历史最近失败：CI #21')
   await expect(card).toContainText('Java 后端覆盖率（JaCoCo）：指令 70%')
   await expect(card).toContainText('历史最近失败运行的测试 3 项（run #21')
