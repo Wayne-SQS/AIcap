@@ -46,6 +46,8 @@ public class QualityEvidenceService {
     private static final long CACHE_TTL_MS = 5 * 60_000L;
     /** 失败结果只缓存 20s：网络抖动/超时不该让前端连续 5 分钟都看到「不可用」。 */
     private static final long FAIL_TTL_MS = 20_000L;
+    /** 主体可用、子块（覆盖率/失败测试）缺：缓存 60s，够点一次刷新重试。 */
+    private static final long PARTIAL_TTL_MS = 60_000L;
     /** 复述"最近 N 次运行"的窗口。GitHub 的 workflow_run 单条约 14KB，30 条=430KB/23s，
      *  已逼近超时；10 条足够判断近期是否稳定，且体积降到 1/3。 */
     private static final int RUNS_WINDOW = 10;
@@ -142,7 +144,13 @@ public class QualityEvidenceService {
 
     /** 可用结果缓存 5 分钟；不可用（超时/限流/未映射）只缓存 20 秒，方便用户点刷新立即重试。 */
     private static long ttlOf(Map<String, Object> m) {
-        return Boolean.TRUE.equals(m.get("available")) ? CACHE_TTL_MS : FAIL_TTL_MS;
+        if (!Boolean.TRUE.equals(m.get("available"))) return FAIL_TTL_MS;
+        // 主体可用但子块（覆盖率/失败测试）没取到：多半是取日志时链路抖动，
+        // 缓存 60 秒即可，别让「无法读取覆盖率」钉在界面上 5 分钟。
+        for (String k : new String[]{"coverage", "failed_tests"}) {
+            if (m.get(k) instanceof Map<?, ?> sub && !Boolean.TRUE.equals(sub.get("available"))) return PARTIAL_TTL_MS;
+        }
+        return CACHE_TTL_MS;
     }
 
     Map<String, Object> buildCiEvidence(String projectId) {
