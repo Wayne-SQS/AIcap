@@ -6,4 +6,5 @@ export const efficiencyAnalysisApi = {
   get: (id, runId) => api(`${base(id)}/runs/${encodeURIComponent(runId)}`),
   submit: (id, runId, recommendationId) => api(`${base(id)}/runs/${encodeURIComponent(runId)}/recommendations/${encodeURIComponent(recommendationId)}/submit`, { method: 'POST' })
   ,planApproved: (id, proposalId) => api(`${base(id)}/proposals/${encodeURIComponent(proposalId)}/planning-run`, { method: 'POST' })
+  ,check: (id, proposalId) => api(`${base(id)}/proposals/${encodeURIComponent(proposalId)}/checks`, { method: 'POST' })
 }

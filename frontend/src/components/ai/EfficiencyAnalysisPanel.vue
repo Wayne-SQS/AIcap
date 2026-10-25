@@ -13,6 +13,9 @@ const result = ref(null), loading = ref(false), error = ref(''), submitError = r
 const reviewReason = ref({}), reviewNotice = ref('')
 const canManage = () => Boolean(projects.currentProject?.can_manage)
 const severity = { HIGH: '高', MEDIUM: '中', LOW: '低' }
+const typeLabels = { TASK_BLOCKING: '任务执行瓶颈', WORKLOAD_IMBALANCE: '成员负载不均', REWORK_SIGNAL: '返工/重复修改信号', PROCESS_DELAY: '流程等待', PROCESS_QUEUE: '审核积压' }
+const confidenceLabels = { HIGH: '高', MEDIUM: '中', LOW: '低' }
+const metricLabels = { open_task_count_change_over_28_days: '近28天待办数量变化', same_bottleneck_rule_active: '同类瓶颈规则是否仍触发' }
 const severityClass = value => ({ HIGH: 'high', MEDIUM: 'medium', LOW: 'low' }[value] || 'unknown')
 async function load() {
   if (!projects.currentProjectId || !session.online) return
@@ -62,6 +65,10 @@ async function planApproved(item) {
       query: { agent: 'planning', runId: run.id } })
   } catch (e) { reviewNotice.value = e.message || '规划草案创建失败' }
 }
+async function checkProposal(item) {
+  try { await efficiencyAnalysisApi.check(projects.currentProjectId, item.id); reviewNotice.value = '复查已记录'; await load() }
+  catch (e) { reviewNotice.value = e.message || '复查失败' }
+}
 onMounted(load)
 </script>
 <template>
@@ -77,12 +84,13 @@ onMounted(load)
           <span class="report-tag"><small>分析依据</small><strong>{{ result.engine === 'rules_and_ai' ? '规则证据 + AI解释' : '规则证据降级结果' }}</strong></span>
         </div>
       </header>
+      <section v-if="result.coverage" class="coverage-strip" aria-label="分析覆盖度"><div><small>分析覆盖度</small><strong>{{ result.coverage.taskCount }} 个任务 / {{ result.coverage.memberCount }} 名成员</strong></div><div><small>依赖与活动</small><strong>{{ result.coverage.dependencyCount }} 条依赖 / {{ result.coverage.activityRecordCount }} 条活动</strong></div><div><small>实际工时</small><strong>{{ result.coverage.actualHoursAvailable ? '可用' : '缺失，无法计算偏差' }}</strong></div><div><small>审核时间</small><strong>{{ result.coverage.reviewTimingAvailable ? '部分可用' : '暂无' }}</strong></div></section>
       <p v-if="!result.bottlenecks?.length" class="empty">暂无能被当前证据确认的效率瓶颈。</p>
       <div v-else class="bottleneck-list">
         <article v-for="item in result.bottlenecks" :key="item.id" class="efficiency-bottleneck" :class="`severity-${severityClass(item.severity)}`">
           <header class="bottleneck-heading">
             <div class="bottleneck-title"><span class="object-code">{{ item.affectedTaskCodes?.join('、') || item.affectedStoryCodes?.join('、') || item.id }}</span><h4>{{ item.title }}</h4></div>
-            <div class="bottleneck-tags"><span class="type-tag">{{ item.type }}</span><span class="severity-tag">{{ severity[item.severity] || item.severity }}</span></div>
+            <div class="bottleneck-tags"><span class="type-tag">{{ typeLabels[item.type] || item.type }}</span><span class="severity-tag">{{ severity[item.severity] || item.severity }}</span></div>
           </header>
           <p class="bottleneck-description">{{ item.description }}</p>
           <details class="evidence-details">
@@ -91,10 +99,13 @@ onMounted(load)
               <section class="detail-section evidence-section"><h5>证据</h5>
                 <p v-if="item.evidence_sufficient === false" class="evidence-caution">证据不足</p>
                 <ul><li v-for="e in item.evidence" :key="e">{{ e }}</li></ul>
+                <p class="insight-field"><b>可能原因</b>{{ item.reasoning || '需人工复核' }}</p>
                 <p v-if="item.aiExplanation?.possibleCause" class="possible-cause">可能原因：{{ item.aiExplanation.possibleCause }}</p>
               </section>
               <section class="detail-section recommendation-section"><h5>优化建议</h5>
-                <ul class="recommendation-list"><li v-for="rec in item.recommendations" :key="rec.id"><span>{{ rec.description }}</span><button type="button" :disabled="rec.status === 'submitted' || session.isViewer" @click="submit(rec)">{{ rec.status === 'submitted' ? '已提交审核' : '提交审核' }}</button></li></ul>
+                <p class="insight-field"><b>置信度</b>{{ confidenceLabels[item.confidenceLabel] || item.confidenceLabel || '待确认' }}<span v-if="item.requiresHumanConfirmation" class="confirm-tag">待人工确认</span></p>
+                <p class="insight-field"><b>可量化影响</b>{{ item.quantifiedImpact ? JSON.stringify(item.quantifiedImpact) : '当前证据不足，无法量化' }}</p>
+                <ul class="recommendation-list"><li v-for="rec in item.recommendations" :key="rec.id"><span>{{ rec.description }}<small v-if="rec.recheckMetric" class="recommendation-metric">复查指标：{{ metricLabels[rec.recheckMetric.metric] || rec.recheckMetric.metric }}；基线 {{ rec.recheckMetric.baseline }}；目标 {{ rec.recheckMetric.target }}；执行后 {{ rec.recheckMetric.reviewWindowDays }} 天</small></span><button type="button" :disabled="rec.status === 'submitted' || session.isViewer" @click="submit(rec)">{{ rec.status === 'submitted' ? '已提交审核' : '提交审核' }}</button></li></ul>
               </section>
             </div>
           </details>
@@ -107,10 +118,13 @@ onMounted(load)
         <article v-for="item in result.proposals" :key="item.id">
           <strong>{{ item.proposal?.title || item.proposal?.description }}</strong><span>{{ item.status }}</span>
           <p>{{ item.proposal?.recommendations?.[0]?.description }}</p>
+          <p v-if="item.proposal?.recheckMetric" class="recheck-metric"><b>复查指标：</b>{{ metricLabels[item.proposal.recheckMetric.metric] || item.proposal.recheckMetric.metric }}；基线 {{ item.proposal.recheckMetric.baseline }}；目标 {{ item.proposal.recheckMetric.target }}；建议执行后 {{ item.proposal.recheckMetric.reviewWindowDays }} 天复查。<span v-if="item.checks?.length">最近结果：{{ item.checks[0].outcome === 'signal_reduced' ? '信号减弱' : item.checks[0].outcome === 'still_active' ? '仍存在' : '证据不足' }}</span></p>
           <label>审核理由 <input v-model="reviewReason[item.id]" maxlength="1000"></label>
           <button type="button" :disabled="item.status !== 'pending' || !canManage()" @click="review(item, 'approve')">批准（不执行）</button>
           <button type="button" :disabled="item.status !== 'pending' || !canManage()" @click="review(item, 'reject')">拒绝</button>
-          <button type="button" :disabled="item.status !== 'approved' || !canManage()" @click="planApproved(item)">生成正式规划草案</button>
+          <button type="button" :disabled="item.status !== 'approved' || !canManage()" @click="planApproved(item)">{{ item.planning_run && !['failed', 'cancelled'].includes(item.planning_run.status) ? '查看规划草案' : '生成正式规划草案' }}</button>
+          <button type="button" :disabled="item.status !== 'approved' || !canManage() || item.planning_run?.status !== 'completed' || !item.planning_run?.action_count" @click="checkProposal(item)">记录复查结果</button>
+          <small v-if="item.status === 'approved' && item.planning_run?.status !== 'completed'">规划执行完成后可记录复查。</small>
         </article>
         <p v-if="reviewNotice" role="status">{{ reviewNotice }}</p>
       </section>
@@ -125,12 +139,14 @@ onMounted(load)
 .report-head{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:18px;align-items:center;margin-bottom:18px;padding:16px 18px;border:2px solid var(--ink);border-left:7px solid var(--green-2);background:var(--paper-2)}
 .report-title .eyebrow{font:10px/1.4 var(--mono);color:var(--ink-soft)}.report-title h3{margin:4px 0 5px;font-size:19px}.report-title p{margin:0;font-size:13px;line-height:1.6;color:var(--ink-soft)}
 .report-meta{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}.report-tag{display:flex;flex-direction:column;gap:4px;min-width:112px;max-width:220px;padding:8px 10px;border:1px solid var(--line);background:var(--paper)}.report-tag small{font-size:10px;color:var(--muted)}.report-tag strong{font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.coverage-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 16px}.coverage-strip>div{padding:9px 10px;border:1px solid var(--line);background:#f5f7f1}.coverage-strip small,.coverage-strip strong{display:block}.coverage-strip small{font-size:10px;color:var(--muted)}.coverage-strip strong{margin-top:4px;font-size:12px;line-height:1.45}
 .bottleneck-list{display:grid;gap:12px}.efficiency-bottleneck{min-width:0;padding:14px 16px;border:1.5px solid var(--line);border-left:5px solid #aeb9a8;background:var(--paper)}.efficiency-bottleneck.severity-high{border-left-color:#b64b31}.efficiency-bottleneck.severity-medium{border-left-color:#c77c36}.efficiency-bottleneck.severity-low{border-left-color:#8a9a80}
 .bottleneck-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.bottleneck-title{min-width:0}.object-code{display:block;margin-bottom:4px;font:11px/1.4 var(--mono);color:var(--ink-soft)}.bottleneck-title h4{margin:0;font-size:16px;line-height:1.45;overflow-wrap:anywhere}.bottleneck-tags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex-shrink:0}.type-tag,.severity-tag{display:inline-flex;align-items:center;min-height:24px;padding:3px 7px;border:1px solid var(--line);font:10px/1.3 var(--mono);white-space:normal}.type-tag{background:var(--paper-2);color:var(--ink-soft)}.severity-tag{font-family:inherit;font-weight:700;background:#edf0e8}.severity-high .severity-tag{background:#f3dfd5;border-color:#c98268;color:#773e20}.severity-medium .severity-tag{background:#f4e8d6;border-color:#d0a36d;color:#704a20}.severity-low .severity-tag{background:#e8eee4;border-color:#aab79f;color:#465741}
 .bottleneck-description{margin:9px 0 12px;font-size:13px;line-height:1.65;overflow-wrap:anywhere}.evidence-details{border:1px solid #bbc7b6;background:#f5f7f1}.evidence-details summary{min-height:38px;padding:9px 11px;cursor:pointer;list-style:none;font-size:12px;font-weight:700;color:#234c39}.evidence-details summary::-webkit-details-marker{display:none}.evidence-details summary::before{content:'▸';margin-right:9px;font-size:14px}.evidence-details[open] summary::before{content:'▾'}.evidence-details summary:hover{background:#e9efe5}
 .evidence-advice-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;padding:0 10px 10px}.detail-section{min-width:0;padding:10px 11px;border:1px solid #d4dbce;background:var(--paper)}.detail-section h5{margin:0 0 8px;font-size:12px}.detail-section ul{margin:0;padding-left:18px}.detail-section li{margin:5px 0;font-size:12px;line-height:1.55;overflow-wrap:anywhere}.evidence-caution{display:inline-block;margin:0 0 7px;padding:3px 7px;border:1px solid #d0a36d;background:#f4e8d6;color:#704a20;font-size:11px;font-weight:700}.possible-cause{margin:9px 0 0;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;line-height:1.6}.recommendation-list{list-style:none;padding:0!important}.recommendation-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.recommendation-list li span{font-size:12px;line-height:1.6}.recommendation-list button{flex:0 0 auto;padding:5px 8px;font-size:11px}
+.insight-field{margin:7px 0;font-size:12px;line-height:1.55}.insight-field b{display:inline-block;margin-right:7px;color:var(--ink-soft)}.confirm-tag{display:inline-block;margin-left:8px;padding:2px 6px;border:1px solid #d0a36d;background:#f4e8d6;color:#704a20;font-size:10px}
 .analysis-limitations{margin-top:18px;padding:11px 14px;border:1px dashed #aab5a2;background:#f5f7f1}.analysis-limitations h4{margin:0 0 7px;font-size:12px}.analysis-limitations ul{margin:0;padding-left:18px}.analysis-limitations li{margin:4px 0;color:var(--ink-soft);font-size:11px;line-height:1.55;overflow-wrap:anywhere}
 .empty{padding:16px;border:1px solid var(--line);background:var(--paper-2);font-size:13px}.efficiency-proposals{margin-top:20px;padding-top:14px;border-top:2px solid var(--ink)}.efficiency-proposals>h3{font-size:15px}.efficiency-proposals article{margin:10px 0;padding:12px;border:1px solid var(--line);background:var(--paper-2)}.efficiency-proposals article>strong{margin-right:10px}.efficiency-proposals article p{font-size:12px;line-height:1.55}.efficiency-proposals label{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px}.efficiency-proposals input{min-width:0;flex:1}.efficiency-proposals button{margin:4px 5px 0 0}
-@media(max-width:760px){.report-head{grid-template-columns:1fr}.report-meta{justify-content:flex-start}.evidence-advice-grid{grid-template-columns:1fr}.bottleneck-heading{flex-direction:column}.bottleneck-tags{justify-content:flex-start}.analysis-actions{flex-wrap:wrap}}
+@media(max-width:760px){.report-head{grid-template-columns:1fr}.report-meta{justify-content:flex-start}.coverage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.evidence-advice-grid{grid-template-columns:1fr}.bottleneck-heading{flex-direction:column}.bottleneck-tags{justify-content:flex-start}.analysis-actions{flex-wrap:wrap}}
 @media(max-width:480px){.efficiency-analysis-panel{padding-inline:0}.report-head{padding:13px}.report-tag{min-width:calc(50% - 5px);flex:1}.efficiency-bottleneck{padding:12px}.recommendation-list li{flex-direction:column}.recommendation-list button{align-self:flex-start}}
 </style>
