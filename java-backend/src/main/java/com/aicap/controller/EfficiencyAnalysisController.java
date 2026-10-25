@@ -54,6 +54,11 @@ public class EfficiencyAnalysisController {
         access.requireOwner(scoped);
         Map<String,Object> proposal=service.proposal(scoped,id);
         if (!"approved".equals(proposal.get("status"))) throw ApiException.conflict("仅已批准的效率建议可以交给规划智能体");
+        Map<String,Object> existing = service.latestPlanningRun(scoped,id);
+        if (existing != null && existing.get("status") != null
+                && !List.of("failed","cancelled").contains(existing.get("status"))
+                && !("completed".equals(existing.get("status")) && (int)existing.get("action_count") == 0))
+            return planning.get(String.valueOf(existing.get("id")),scoped);
         JsonNode source = (JsonNode) proposal.get("proposal");
         JsonNode selected = null;
         for (JsonNode item : source.path("recommendations"))
@@ -70,7 +75,9 @@ public class EfficiencyAnalysisController {
             "；证据=" + compactList(source.path("evidence"), 3, 100) +
             "。以上为有界摘要，必要时查询项目实时数据核实，不能从省略内容推断事实。";
         if (request.length() > 2000) throw ApiException.unprocessable("建议内容超过规划输入限制");
-        return planning.create(scoped,request,Roles.any());
+        Map<String,Object> run = planning.create(scoped,request,Roles.any());
+        service.linkPlanningRun(scoped,id,String.valueOf(run.get("id")));
+        return run;
     }
     @PostMapping("/proposals/{id}/checks")
     public Map<String,Object> check(@PathVariable String projectId,@PathVariable String id) {

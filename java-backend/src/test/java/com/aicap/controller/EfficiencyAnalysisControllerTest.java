@@ -53,7 +53,19 @@ class EfficiencyAnalysisControllerTest {
         assertEquals("plan-1", result.get("id"));
         verify(access).requireOwner("P001");
         verify(planning).create(eq("P001"), startsWith("基于已批准的US23效率建议生成规划草案"), any());
+        verify(service).linkPlanningRun("P001", "proposal-1", "plan-1");
         assertTrue(result.containsKey("status"));
+    }
+
+    @Test void repeatedPlanningRequestReturnsExistingRun() {
+        when(service.proposal("P001", "proposal-1"))
+                .thenReturn(Map.of("status", "approved"));
+        when(service.latestPlanningRun("P001", "proposal-1"))
+                .thenReturn(Map.of("id", "plan-1", "status", "waiting_confirmation", "action_count", 1));
+        when(planning.get("plan-1", "P001")).thenReturn(Map.of("id", "plan-1", "status", "waiting_confirmation"));
+
+        assertEquals("plan-1", controller.planApproved("P001", "proposal-1").get("id"));
+        verify(planning, never()).create(any(), any(), any());
     }
 
     @Test void longEvidenceIsBoundedBeforeSavingPlanningRequest() {

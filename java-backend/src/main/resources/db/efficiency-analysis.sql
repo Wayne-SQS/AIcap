@@ -35,3 +35,12 @@ CREATE TABLE IF NOT EXISTS efficiency_proposal_checks (
  checked_at datetime NOT NULL,
  KEY ix_efficiency_checks_proposal (project_id,proposal_id,checked_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS efficiency_proposal_planning_runs (
+ project_id varchar(20) NOT NULL,
+ proposal_id varchar(36) NOT NULL,
+ planning_run_id varchar(36) NOT NULL,
+ created_at datetime NOT NULL,
+ PRIMARY KEY (planning_run_id),
+ KEY ix_efficiency_proposal_plan (project_id,proposal_id,created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

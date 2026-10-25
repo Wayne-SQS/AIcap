@@ -33,6 +33,8 @@ class EfficiencyAnalysisServiceTest {
         jdbc.execute("CREATE TABLE efficiency_analysis_runs(id varchar(36),project_id varchar(20),requested_by int,status varchar(30),result_json text,created_at timestamp,updated_at timestamp)");
         jdbc.execute("CREATE TABLE efficiency_proposals(id varchar(36),project_id varchar(20),analysis_id varchar(36),recommendation_id varchar(40),proposal_json text,status varchar(30),submitted_by int,created_at timestamp,reviewed_by int,reviewed_at timestamp,reason varchar(1000),unique(project_id,analysis_id,recommendation_id))");
         jdbc.execute("CREATE TABLE efficiency_proposal_checks(id varchar(36),project_id varchar(20),proposal_id varchar(36),metric_json text,measured_value decimal(12,4),outcome varchar(30),checked_by int,checked_at timestamp)");
+        jdbc.execute("CREATE TABLE planning_agent_runs(id varchar(36),project_id varchar(20),status varchar(30),result_json text)");
+        jdbc.execute("CREATE TABLE efficiency_proposal_planning_runs(project_id varchar(20),proposal_id varchar(36),planning_run_id varchar(36),created_at timestamp)");
         jdbc.execute("CREATE TABLE meetings(id varchar(36),project_id varchar(20))");
         jdbc.execute("CREATE TABLE suggestions(id varchar(10),status varchar(20),created_at timestamp)");
         jdbc.execute("CREATE TABLE meeting_suggestion_records(id int,suggestion_id varchar(10),meeting_id varchar(36),reviewed_at timestamp)");
@@ -106,8 +108,17 @@ class EfficiencyAnalysisServiceTest {
         jdbc.update("INSERT INTO projects VALUES('P001','2026-10-01','2026-10-31',2)");
         jdbc.update("INSERT INTO efficiency_proposals VALUES('proposal-1','P001','run-1','R1',?,'approved',1,CURRENT_TIMESTAMP,1,CURRENT_TIMESTAMP,'ok')",
             "{\"type\":\"TASK_BLOCKING\",\"affectedTaskCodes\":[\"T01\"],\"affectedMemberIds\":[],\"recheckMetric\":{\"metric\":\"same_bottleneck_rule_active\",\"baseline\":1,\"target\":0,\"reviewWindowDays\":14}}");
+        assertEquals(409, assertThrows(com.aicap.common.ApiException.class,
+            () -> service.recordReviewCheck("P001","proposal-1",1)).getStatus());
+        jdbc.update("INSERT INTO planning_agent_runs VALUES('plan-1','P001','waiting_confirmation','{}')");
+        service.linkPlanningRun("P001","proposal-1","plan-1");
+        assertEquals(409, assertThrows(com.aicap.common.ApiException.class,
+            () -> service.recordReviewCheck("P001","proposal-1",1)).getStatus());
+        jdbc.update("UPDATE planning_agent_runs SET status='completed',result_json=? WHERE id='plan-1'",
+            "{\"actions\":[{\"type\":\"UPDATE_TASK_SCHEDULE\",\"task_id\":\"T01\"}]}");
         var check=service.recordReviewCheck("P001","proposal-1",1);
         assertEquals("signal_reduced",check.get("outcome"));
+        assertTrue(check.get("metric").toString().contains("plan-1"));
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM efficiency_proposal_checks WHERE project_id='P001'",Integer.class));
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM tasks",Integer.class));
         assertThrows(com.aicap.common.ApiException.class,()->service.recordReviewCheck("P002","proposal-1",1));

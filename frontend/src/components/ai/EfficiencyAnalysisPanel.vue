@@ -122,8 +122,9 @@ onMounted(load)
           <label>审核理由 <input v-model="reviewReason[item.id]" maxlength="1000"></label>
           <button type="button" :disabled="item.status !== 'pending' || !canManage()" @click="review(item, 'approve')">批准（不执行）</button>
           <button type="button" :disabled="item.status !== 'pending' || !canManage()" @click="review(item, 'reject')">拒绝</button>
-          <button type="button" :disabled="item.status !== 'approved' || !canManage()" @click="planApproved(item)">生成正式规划草案</button>
-          <button type="button" :disabled="item.status !== 'approved' || !canManage()" @click="checkProposal(item)">记录复查结果</button>
+          <button type="button" :disabled="item.status !== 'approved' || !canManage()" @click="planApproved(item)">{{ item.planning_run && !['failed', 'cancelled'].includes(item.planning_run.status) ? '查看规划草案' : '生成正式规划草案' }}</button>
+          <button type="button" :disabled="item.status !== 'approved' || !canManage() || item.planning_run?.status !== 'completed' || !item.planning_run?.action_count" @click="checkProposal(item)">记录复查结果</button>
+          <small v-if="item.status === 'approved' && item.planning_run?.status !== 'completed'">规划执行完成后可记录复查。</small>
         </article>
         <p v-if="reviewNotice" role="status">{{ reviewNotice }}</p>
       </section>

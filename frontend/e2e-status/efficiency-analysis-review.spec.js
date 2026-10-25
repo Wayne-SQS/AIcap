@@ -55,6 +55,7 @@ test('approved efficiency recommendation requires a second confirmation before e
   await panel.getByLabel('审核理由').fill('确认需要复核')
   await panel.getByRole('button', { name: '批准（不执行）' }).click()
   await expect(panel).toContainText('建议已批准')
+  await expect(panel.getByRole('button', { name: '记录复查结果' })).toBeDisabled()
   expect(decision).toEqual({ decision: 'approve', reason: '确认需要复核' })
   await panel.getByRole('button', { name: '生成正式规划草案' }).click()
   await expect(page).toHaveURL(/agent=planning.*runId=plan-1/)

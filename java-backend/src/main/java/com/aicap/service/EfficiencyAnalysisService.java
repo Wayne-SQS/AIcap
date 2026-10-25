@@ -251,7 +251,9 @@ public class EfficiencyAnalysisService {
     public Map<String,Object> proposal(String projectId,String id) {
         var rows = jdbc.queryForList("SELECT * FROM efficiency_proposals WHERE project_id=? AND id=?",projectId,id);
         if (rows.isEmpty()) throw ApiException.notFound("效率提案不存在");
-        var out = new LinkedHashMap<>(rows.getFirst()); out.put("proposal",json(text(out.remove("proposal_json")))); return out;
+        var out = new LinkedHashMap<>(rows.getFirst()); out.put("proposal",json(text(out.remove("proposal_json"))));
+        out.put("planning_run", latestPlanningRun(projectId,id));
+        return out;
     }
     public List<Map<String,Object>> proposalsForAnalysis(String projectId,String analysisId) {
         List<Map<String,Object>> result = new ArrayList<>();
@@ -259,14 +261,40 @@ public class EfficiencyAnalysisService {
             + "FROM efficiency_proposals WHERE project_id=? AND analysis_id=? ORDER BY created_at DESC",projectId,analysisId)) {
             Map<String,Object> copy = new LinkedHashMap<>(row);
             copy.put("proposal",json(text(copy.remove("proposal_json"))));
+            copy.put("planning_run", latestPlanningRun(projectId,text(copy.get("id"))));
             copy.put("checks", checks(projectId, text(copy.get("id"))));
             result.add(copy);
         }
         return result;
     }
+    public Map<String,Object> latestPlanningRun(String projectId, String proposalId) {
+        var rows = jdbc.queryForList("SELECT r.id,r.status,r.result_json FROM efficiency_proposal_planning_runs l "
+                + "JOIN planning_agent_runs r ON r.id=l.planning_run_id AND r.project_id=l.project_id "
+                + "WHERE l.project_id=? AND l.proposal_id=? ORDER BY l.created_at DESC,l.planning_run_id DESC LIMIT 1",
+                projectId,proposalId);
+        if (rows.isEmpty()) return null;
+        var row = rows.getFirst();
+        String resultJson = text(row.get("result_json"));
+        return Map.of("id",text(row.get("id")), "status",text(row.get("status")),
+                "action_count",resultJson.isBlank() ? 0 : json(resultJson).path("actions").size());
+    }
+    @Transactional
+    public void linkPlanningRun(String projectId, String proposalId, String runId) {
+        var approved = jdbc.queryForObject("SELECT COUNT(*) FROM efficiency_proposals "
+                + "WHERE project_id=? AND id=? AND status='approved'",Integer.class,projectId,proposalId);
+        var scopedRun = jdbc.queryForObject("SELECT COUNT(*) FROM planning_agent_runs "
+                + "WHERE project_id=? AND id=?",Integer.class,projectId,runId);
+        if (approved == null || approved == 0 || scopedRun == null || scopedRun == 0)
+            throw ApiException.conflict("提案或规划运行已失效，请刷新");
+        jdbc.update("INSERT INTO efficiency_proposal_planning_runs(project_id,proposal_id,planning_run_id,created_at) "
+                + "VALUES(?,?,?,CURRENT_TIMESTAMP)",projectId,proposalId,runId);
+    }
     public Map<String,Object> recordReviewCheck(String projectId, String proposalId, int actor) {
         Map<String,Object> saved = proposal(projectId, proposalId);
         if (!"approved".equals(saved.get("status"))) throw ApiException.conflict("仅已批准建议可以复查");
+        Map<String,Object> plan = latestPlanningRun(projectId,proposalId);
+        if (plan == null || !"completed".equals(plan.get("status")) || (int)plan.get("action_count") == 0)
+            throw ApiException.conflict("规划尚未完成实际变更，不能记录改善复查");
         JsonNode source = (JsonNode) saved.get("proposal");
         ObjectNode current = calculate(projectId, LocalDate.now());
         String type = source.path("type").asText();
@@ -300,6 +328,7 @@ public class EfficiencyAnalysisService {
         metricResult.put("metric", metric); metricResult.put("baseline", planned.path("baseline"));
         metricResult.put("target", planned.path("target")); metricResult.put("measuredValue", measured);
         metricResult.put("windowDays", planned.path("reviewWindowDays").asInt(14));
+        metricResult.put("planningRunId",plan.get("id"));
         metricResult.put("evidence", "按当前项目任务状态/状态历史重新计算；不代表改进动作单独导致结果变化");
         String checkId = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO efficiency_proposal_checks(id,project_id,proposal_id,metric_json,measured_value,outcome,checked_by,checked_at) "
