@@ -4,11 +4,12 @@
 
 - 项目：AIcap（爱管理）
 - 发布用途：东北大学软件项目管理课程实验四最终交付
-- 发布日期：2026 年 10 月 25 日
-- 基准提交：[`a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c`](https://github.com/Wayne-SQS/AIcap/commit/a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c)
-- 代码基准版本标识：`a49cc35`
-- 课程发布 Tag：候选为 `v1.0.6`，当前尚未创建，需项目负责人明确批准后再创建并推送
-- GitHub Release：尚未创建
+- 课程最终交付统计基准日期：2026 年 10 月 25 日
+- GitHub Release 发布日期：2026 年 10 月 26 日
+- 课程发布版本：[`v1.0.6`](https://github.com/Wayne-SQS/AIcap/releases/tag/v1.0.6)
+- 发布 Tag 指向包含本发布说明和归档清单的文档提交；实际完整 SHA 以 GitHub Tag 页面为准
+- 经过 CI 验证的代码基准：[`a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c`](https://github.com/Wayne-SQS/AIcap/commit/a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c)
+- CI：[`40192979032`](https://github.com/Wayne-SQS/AIcap/actions/runs/40192979032)，对应代码基准 `a49cc35`，结果 success；该 CI 不是在文档提交上执行
 
 ## 项目简介
 
@@ -44,7 +45,7 @@ US37 的项目层面协调建议并入 US36 交付，不作为独立发布项。
 
 ## 测试与质量保证
 
-最终基准提交对应 GitHub Actions：
+经过 CI 验证的代码基准对应 GitHub Actions：
 
 - [CI 40192979032](https://github.com/Wayne-SQS/AIcap/actions/runs/40192979032)，提交 `a49cc35`
 - Java 契约测试：932 项，0 failures，0 errors，1 skipped
@@ -81,4 +82,4 @@ US37 的项目层面协调建议并入 US36 交付，不作为独立发布项。
 - 发布范围与验收：[`qa/sprint3-closure/2026-10-22_六项能力验收对照.md`](qa/sprint3-closure/2026-10-22_六项能力验收对照.md)
 - 回归与 CI 说明：[`docs/_process/2026-10-19_回归复测与CI收口.md`](docs/_process/2026-10-19_回归复测与CI收口.md)
 
-本文档是实验四正式发布说明，内容以经过 CI 验证的代码基准 `a49cc35` 为准。Tag 和 GitHub Release 尚未创建，须经项目负责人批准后执行；后续文档提交不改变该代码基准及其 CI 证据。
+本文档是 AIcap 实验四正式发布说明。课程发布版本为 `v1.0.6`；该 Tag 包含本发布说明和最终交付材料清单。功能代码及测试结论以 `a49cc35` 为基准，CI `40192979032` 验证的是该代码提交，不是后续文档提交。
