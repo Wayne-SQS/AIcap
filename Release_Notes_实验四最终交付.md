@@ -5,9 +5,9 @@
 - 项目：AIcap（爱管理）
 - 发布用途：东北大学软件项目管理课程实验四最终交付
 - 课程最终交付统计基准日期：2026 年 10 月 25 日
-- 拟定 GitHub Release 日期：2026 年 10 月 26 日（尚未发布）
-- 拟定课程发布版本：`v1.0.6`（Tag 尚未创建）
-- 发布 Tag 计划指向包含本发布说明和归档清单的文档提交；最终完整 SHA 以实际发布后的 Tag 为准
+- GitHub Release 正式发布日期：2026 年 10 月 26 日（GitHub `published_at`：2026-10-25 16:44:54 UTC）
+- 正式发布版本：[`v1.0.6`](https://github.com/Wayne-SQS/AIcap/releases/tag/v1.0.6)
+- 发布 Tag 已创建，指向包含本发布说明和归档清单的文档提交 [`b3db29c404cc7f74e9453319f2ad601457e665ae`](https://github.com/Wayne-SQS/AIcap/commit/b3db29c404cc7f74e9453319f2ad601457e665ae)
 - 经过 CI 验证的代码基准：[`a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c`](https://github.com/Wayne-SQS/AIcap/commit/a49cc3525ce7902c2f71fccd4a5cf6bffeb0b57c)
 - CI：[`40192979032`](https://github.com/Wayne-SQS/AIcap/actions/runs/40192979032)，对应代码基准 `a49cc35`，结果 success；该 CI 不是在文档提交上执行
 
@@ -82,4 +82,4 @@ US37 的项目层面协调建议并入 US36 交付，不作为独立发布项。
 - 发布范围与验收：[`qa/sprint3-closure/2026-10-22_六项能力验收对照.md`](qa/sprint3-closure/2026-10-22_六项能力验收对照.md)
 - 回归与 CI 说明：[`docs/_process/2026-10-19_回归复测与CI收口.md`](docs/_process/2026-10-19_回归复测与CI收口.md)
 
-本文档是 AIcap 实验四正式发布说明的本地候选稿。拟定课程发布版本为 `v1.0.6`，拟在远端 Tag 和 Release 创建后作为正式发布说明。功能代码及测试结论以 `a49cc35` 为基准，CI `40192979032` 验证的是该代码提交，不是后续文档提交。
+本文档为 AIcap 实验四正式发布说明。正式发布版本 `v1.0.6` 已发布，Tag 指向文档提交 `b3db29c`。功能代码及测试结论以 `a49cc35` 为基准，CI `40192979032` 验证的是该代码提交，不是后续文档提交。发布后的状态文字修订作为普通文档更新进入 `main`，不移动已发布的 `v1.0.6` Tag，也不表示重新执行了 CI。
