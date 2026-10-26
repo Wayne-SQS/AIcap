@@ -602,7 +602,8 @@ public class ProjectGenerationRunner {
 
     private boolean requiresStagedGeneration(String request) {
         String value = request == null ? "" : request;
-        return value.length() >= 2000 || Pattern.compile("(?i)(?:约|至少|不少于)?\\s*(?:2[8-9]|3[0-2])\\s*(?:个|条)?\\s*(?:story|用户故事)").matcher(value).find();
+        StoryCountControl.Limit storyLimit = StoryCountControl.parse(value);
+        return value.length() >= 2000 || storyLimit != null && storyLimit.target() >= 28;
     }
 
     private ArrayNode extractCompleteStageItems(String partial, String stage) {

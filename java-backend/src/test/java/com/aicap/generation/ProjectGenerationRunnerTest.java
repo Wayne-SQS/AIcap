@@ -78,6 +78,21 @@ class ProjectGenerationRunnerTest {
     }
 
     @Test
+    void storyCountPhrasedAsApproximateThirtyEnablesStagedGeneration() throws Exception {
+        ModelClient client = mock(ModelClient.class);
+        when(client.completeAllowIncomplete(anyList(), eq(List.of()), eq(true), eq(8192)))
+                .thenReturn(completion(detailedStoryStage(30).toString(), "stop"))
+                .thenReturn(completion(validTaskStage().toString(), "stop"))
+                .thenReturn(completion(validMilestoneStage().toString(), "stop"));
+
+        ObjectNode result = runner.generate("NEW-test", "请生成项目规划，用户故事数量希望在30条左右。",
+                "detailed", client, "");
+
+        assertEquals(30, result.path("stories").size());
+        verify(client, times(3)).completeAllowIncomplete(anyList(), eq(List.of()), eq(true), eq(8192));
+    }
+
+    @Test
     void failedRepairIsBoundedAndReportedAsRetryExhausted() {
         ModelClient client = mock(ModelClient.class);
         when(client.completeAllowIncomplete(anyList(), eq(List.of()), eq(true), eq(8192)))
