@@ -11,7 +11,7 @@
  */
 const { chromium } = require('playwright-core');
 const path = require('path');
-const { defaultPageUrl, waitScale, openApp: openFlavor } = require('./e2e-helpers');
+const { defaultPageUrl, waitScale, openApp: openFlavor, isVue } = require('./e2e-helpers');
 
 const REPO = path.resolve(__dirname, '..');
 const PAGE_URL = defaultPageUrl();
@@ -67,11 +67,18 @@ async function suiteOffline(browser) {
   // Sprint1=(16+1.5)/(无子卡5+Σeh52)=31%;S2/S3 子任务全未完成 → 0%
   await page.click('.navitem[data-view="overview"]');
   await waitFor(() => page.locator('#ov-percent').textContent().then(t => t.trim() !== ''));
+  const totalPct = (await page.locator('#ov-percent').textContent()).trim();
+  // Sprint 进度面板已迁至「项目分析中心 · Sprint 进度」专题(Vue);legacy 归档版仍在总览页
+  if (isVue()) {
+    await page.click('.navitem[data-view="insights"]');
+    await page.getByRole('button', { name: /Sprint 进度/ }).click();
+    await waitFor(() => page.locator('#sprint-grid .sprint').count() > 0);
+  }
   const pcts = await page.evaluate(() => ({
-    total: document.querySelector('#ov-percent').textContent.trim(),
+    total: document.querySelector('#ov-percent') ? document.querySelector('#ov-percent').textContent.trim() : '',
     sprints: [...document.querySelectorAll('#sprint-grid .sprint .pct')].map(x => x.textContent.trim()),
   }));
-  check('FE-KGN-02 总览工时加权=10%(非纯计数 9%)', pcts.total === '10%', JSON.stringify(pcts));
+  check('FE-KGN-02 总览工时加权=10%(非纯计数 9%)', totalPct === '10%', JSON.stringify(pcts));
   check('FE-KGN-02b Sprint 加权 S1=31%/S2=0%/S3=0%', pcts.sprints.join(',') === '31%,0%,0%', pcts.sprints.join(','));
 
   // FE-KGN-03 甘特父子层级

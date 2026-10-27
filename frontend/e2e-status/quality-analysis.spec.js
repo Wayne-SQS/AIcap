@@ -46,7 +46,7 @@ test('quality card shows specification gaps with real evidence and honesty limit
     if (path.endsWith('/quality-analysis')) body = insights()
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   await expect(card).toContainText('识别到 2 项质量缺口')
   await expect(card).toContainText('［需求规范］故事 US2 · 报表导出：故事未填写验收条件')
@@ -77,7 +77,7 @@ test('truncated repository tree keeps absent evidence unknown', async ({ page })
     } })
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   await expect(card).toContainText('已发现测试文件 3 个')
   await expect(card).toContainText('CI 配置未在已返回的文件树中找到')
@@ -112,7 +112,7 @@ test('human confirmation creates a linked improvement task and tracks completion
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   await card.getByRole('button', { name: '确认并创建改进任务' }).click()
   await card.getByLabel('工时').fill('2')
@@ -169,7 +169,7 @@ test('submitted test set locates missing boundary cases and feeds the analysis c
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   await expect(card).toContainText('提交测试集（测试用例/测试代码/执行报告），检查遗漏的边界场景')
   await card.getByLabel('测试集名称').fill('登录边界测试集')
@@ -236,7 +236,7 @@ test('code quality evaluation becomes a located, confirmable gap', async ({ page
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   await card.getByRole('button', { name: '评估代码质量' }).click()
 
@@ -294,7 +294,7 @@ test('persisted semantic review is replayed and its gap can be confirmed', async
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=quality')
   const card = page.getByRole('region', { name: '项目质量分析' })
   const sem = card.locator('.qa-sem')
   await expect(sem).toContainText('55')

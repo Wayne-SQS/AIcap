@@ -6,6 +6,7 @@ import { useProjectsStore } from '@/stores/projects'
    (project-generator 还承担 /projects/new 的复用)。 */
 const workspaceViews = [
   { name: 'overview', label: '项目总览', component: () => import('@/views/OverviewView.vue') },
+  { name: 'insights', label: '项目分析中心', component: () => import('@/views/InsightsView.vue') },
   { name: 'pool', label: '需求池', component: () => import('@/views/PoolView.vue') },
   { name: 'board', label: '用户故事看板', component: () => import('@/views/BoardView.vue') },
   { name: 'gantt', label: '甘特图', component: () => import('@/views/GanttView.vue') },

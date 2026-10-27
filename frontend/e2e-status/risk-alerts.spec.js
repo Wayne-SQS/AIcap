@@ -16,7 +16,7 @@ test('project owner can inspect evidenced risks and send suggestions for review'
     if (path === '/api/profile-agent/risks/submit-suggestions') { submitted = true; body = [41] }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=risk')
   const card = page.getByRole('region', { name: '项目风险预警' })
   await card.getByRole('button', { name: '查看本月风险' }).click()
   await expect(card).toContainText('本月任务工时 48h')

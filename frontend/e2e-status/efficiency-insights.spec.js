@@ -22,7 +22,7 @@ test('efficiency card shows project evidence and missing-history limit', async (
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=efficiency')
   const card = page.getByRole('region', { name: '项目效率分析' })
   await expect(card).toContainText('识别到 2 项待复核瓶颈')
   await expect(card).toContainText('T1 · 接口联调：任务标记为阻塞')
@@ -61,7 +61,7 @@ test('human confirmation creates a linked improvement task and tracks completion
     }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=efficiency')
   const card = page.getByRole('region', { name: '项目效率分析' })
   await card.getByRole('button', { name: '确认并创建改进任务' }).click()
   await card.getByLabel('工时').fill('2')

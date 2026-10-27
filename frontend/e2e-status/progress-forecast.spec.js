@@ -28,7 +28,7 @@ test('progress forecast withholds a date until history is sufficient and exposes
     if (path.endsWith('/progress-forecast/records')) body = { project_id: 'P001', as_of: '2026-10-23', records: [], limitations: '对账只比较任务数量与计划日期。' }
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=forecast')
   const card = page.getByRole('region', { name: '项目进度预测' })
   await expect(card).toContainText('历史数据不足，暂不提供交付日期')
   await expect(card).not.toContainText('2026-11-24')
@@ -94,7 +94,7 @@ test('a recorded baseline needs an explicit decision and is reconciled afterward
     }
     return route.fulfill({ json: {} })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=baseline')
   const panel = page.getByRole('region', { name: '进度预测基线' })
   await expect(panel).toContainText('尚无基线。固化当前预测后由负责人采纳，才能事后对账')
   await panel.getByRole('button', { name: '固化当前预测' }).click()
@@ -134,7 +134,7 @@ test('a read-only account can see the baseline but cannot record or decide it', 
     }
     return route.fulfill({ json: {} })
   })
-  await page.goto('/#/projects/P001/overview')
+  await page.goto('/#/projects/P001/insights?tab=baseline')
   const panel = page.getByRole('region', { name: '进度预测基线' })
   await expect(panel.getByRole('button', { name: '固化当前预测' })).toBeDisabled()
   await expect(panel.getByRole('button', { name: '采纳为基线' })).toBeDisabled()

@@ -16,6 +16,7 @@ export const activities = DEFAULT_ACTIVITIES
 export const VIEW_NAMES = {
   projects: '项目与成员',
   overview: '项目总览',
+  insights: '项目分析中心',
   pool: '需求池',
   board: '用户故事看板',
   gantt: '甘特图',

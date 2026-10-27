@@ -409,7 +409,9 @@ test.describe('FE-OVW 项目总览', () => {
 
     /* Sprint 分片:必须覆盖全部故事。此前用 SPRINTS(仅 3 片)按 sprint===i+1 过滤,
        Sprint 4+ 的 3 条故事不进任何卡片 → 卡片故事数之和 34 ≠ 总数 37。
-       现统一到 MAP_SPRINTS 4 片,与故事地图切片、看板筛选下拉、后端 by_sprint 的 4 桶一致。 */
+       现统一到 MAP_SPRINTS 4 片,与故事地图切片、看板筛选下拉、后端 by_sprint 的 4 桶一致。
+       Sprint 面板已迁至「项目分析中心 · Sprint 进度」专题(总览页只保留入口)。 */
+    await openView(page, '/#/insights?tab=sprint')
     const cards = page.locator('#sprint-grid .sprint')
     await expect(cards).toHaveCount(4)
     await expect(cards.last().locator('h3')).toHaveText('Sprint 4+')
@@ -426,7 +428,7 @@ test.describe('FE-OVW 项目总览', () => {
     /* 分节标题里的切片数必须与真实切片数一致:此前写死「三阶段递进」,
        而界面早已是 4 片(含 Sprint 4+ 后续路线)—— 属文案与数据脱节,不是纯文案问题。
        期望值取后端 by_sprint 的桶数,不写死 4。 */
-    await expect(page.locator('.h-sec', { hasText: 'Sprint 进度' }))
+    await expect(page.locator('.insight-panel-head', { hasText: 'Sprint 进度' }))
       .toContainText(`${dash.by_sprint.length} 个发布切片`)
   })
 
