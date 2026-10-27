@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from . import config
@@ -301,7 +302,8 @@ async def _run_loop(
                 {
                     "role": "system",
                     "content": _prompt_with_limits(state["system_prompt"], catalog.limitations)
-                    + _project_line(state.get("project_id")),
+                    + _project_line(state.get("project_id"))
+                    + _today_line(),
                 },
                 *history,
                 {"role": "user", "content": state["utterance"]},
@@ -697,6 +699,15 @@ def _project_line(project_id: str | None) -> str:
         return ""
     return ("\n\n当前项目：project_id = " + project_id
             + "。调用任何需要 project_id 的工具时都必须用它，不要另猜、也不要省略。")
+
+
+def _today_line() -> str:
+    """当前日期锚点。prompt 里没有“今天”时模型会自己编日期
+    （实测把“近三十天”换算成 2026-02-13~2026-03-15，查出一堆 0）。"""
+    today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+    return ("\n\n今天是 " + today + "（Asia/Shanghai）。"
+            + "遇到“最近N天/近N天/本周/本月/至今”等相对时间范围时，"
+            + "必须以这个日期为基准换算成具体起止日期，不要凭记忆推断。")
 
 
 def _prompt_with_limits(system_prompt: str, limitations: list[str]) -> str:
