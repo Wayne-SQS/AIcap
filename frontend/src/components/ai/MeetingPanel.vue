@@ -163,7 +163,7 @@ function genDemoSuggestion() {
   <div v-if="!meeting.online">
     <div class="rec">
       <div class="eyebrow" style="margin-bottom:8px">离线演示 · 静态会议样例 · 非真实模型分析</div>
-      <div style="display:flex;align-items:center;gap:10px"><span class="sug-status">演示数据</span><b>Sprint 2 规划会示例</b><span class="small">不代表当前录音、真实转写或服务器处理状态</span></div>
+      <div style="display:flex;align-items:center;gap:10px"><span class="sug-status">演示数据</span><b>Sprint 2 规划会示例</b></div>
     </div>
     <div class="transcript" id="meeting-transcript">
       <div v-for="l in transcriptDemo" :key="l[0]" class="tl"><b>{{ l[0] }}</b><span class="spk">{{ l[1] }}</span><span>{{ l[2] }}</span></div>
@@ -175,12 +175,12 @@ function genDemoSuggestion() {
       <div class="sum-card"><h4>❓ 遗留问题</h4><ul><li>是否要求说话人分离？待确认</li><li>录音用浏览器还是平台接入？</li></ul></div>
     </div>
     <button class="primary" id="meeting-gen" @click="genDemoSuggestion">＋ 生成本机演示建议 → 查看审核演示</button>
-    <p class="small">演示建议保存在本机浏览器，不会进入服务器审核或创建真实需求。</p>
+    <p class="small">演示建议保存在本机浏览器。</p>
   </div>
 
   <!-- 在线:按用户任务分流，原有 API 与审核逻辑保持不变 -->
   <div v-else>
-    <div class="sum-card" style="margin-bottom:16px"><b>当前模式：在线服务</b><p class="small">{{ meeting.selectedMeeting ? `当前会议：${meeting.selectedMeeting.title}` : '请选择已保存会议或创建会议。' }} · 分析完成后仍需审核，批准不会自动执行业务变更。</p><span class="sug-status">{{ meeting.selectedMeeting ? '已选择会议' : '等待选择会议' }}</span></div>
+    <div class="sum-card" style="margin-bottom:16px"><b>当前模式：在线服务</b><p class="small">{{ meeting.selectedMeeting ? `当前会议：${meeting.selectedMeeting.title}` : '请选择已保存会议或创建会议。' }}</p><span class="sug-status">{{ meeting.selectedMeeting ? '已选择会议' : '等待选择会议' }}</span></div>
     <div role="tablist" aria-label="会议工作流" class="meeting-workflow-tabs">
       <button id="meeting-workflow-tab-text" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'text' ? 0 : -1" :aria-selected="workflow === 'text'" @click="selectWorkflow('text')" @keydown="handleWorkflowKeydown">文本会议</button>
       <button id="meeting-workflow-tab-prd" role="tab" aria-controls="meeting-workflow-panel" :tabindex="workflow === 'prd' ? 0 : -1" :aria-selected="workflow === 'prd'" @click="selectWorkflow('prd')" @keydown="handleWorkflowKeydown">PRD 拆解与估算</button>
@@ -189,7 +189,7 @@ function genDemoSuggestion() {
     </div>
     <div id="meeting-workflow-panel" role="tabpanel" :aria-labelledby="`meeting-workflow-tab-${workflow}`" tabindex="0">
     <div v-if="workflow !== 'manual'" class="meeting-shared">
-      <p class="pool-note">{{ workflow === 'prd' ? '粘贴 PRD 正文；明确的独立功能可拆成待审故事，工作量仅是粗估，审核与执行分开。' : workflow === 'text' ? '创建或选择会议，录入文本后选择分析类型。' : '录音和转写草稿需要人工核对并保存版本；确认文本后创建分析会议，再选择分析类型。匿名说话人标签不代表成员身份。' }}</p>
+      <p class="pool-note">{{ workflow === 'prd' ? '粘贴 PRD 正文，生成待审故事。' : workflow === 'text' ? '创建或选择会议，录入文本后选择分析类型。' : '录音或上传音频，核对转写后创建分析会议。' }}</p>
       <form v-if="workflow === 'text' || workflow === 'prd'" id="meeting-save-form" @submit.prevent="saveMeeting">
       <label class="field">{{ workflow === 'prd' ? 'PRD 标题' : '会议标题' }}<input name="title" v-model="saveForm.title" required maxlength="200"></label>
       <label class="field">{{ workflow === 'prd' ? 'PRD 正文' : '会议转写' }}<textarea name="transcript" v-model="saveForm.transcript" required :maxlength="workflow === 'prd' ? 15990 : 16000" rows="5"></textarea></label>
@@ -216,11 +216,11 @@ function genDemoSuggestion() {
       @click="deleteMeeting"
     >{{ deleting ? '删除中…' : '删除当前会议' }}</button>
       <pre id="saved-transcript" style="white-space:pre-wrap;max-height:240px;overflow:auto">{{ meeting.selectedMeeting?.transcript || '暂无会议，请先保存。' }}</pre>
-      <div v-if="workflow === 'audio'"><div class="h-sec">第 2 步：录音或上传 MP3，再转写与核对</div><RecorderPanel /><div class="small">转写是草稿。核对并保存转写版本后，创建分析会议；创建会议本身不会自动运行分析或执行提案。</div></div>
+      <div v-if="workflow === 'audio'"><div class="h-sec">第 2 步：录音或上传 MP3，再转写与核对</div><RecorderPanel /></div>
       <template v-if="meeting.selected && !isAudioSource">
         <div class="h-sec">选择会议分析类型</div>
         <label v-if="analysisType !== 'assignment'" class="field">分析类型<select v-model="analysisType" aria-label="会议分析类型"><option value="daily">Daily · 更新已有故事状态</option><option value="planning">Sprint Planning · 调整 Sprint</option><option value="review">Sprint Review · 标记验收完成</option><option value="retro">Sprint Retro · 创建独立行动项</option><option value="refinement">Backlog Refinement · 补齐并创建新故事</option></select></label>
-        <div class="sum-card"><b>当前会议 · {{ meeting.selectedMeeting?.title }}</b><p class="small">{{ analysisType === 'assignment' ? '分配候选先进行只读查询；保存建议后仍需审核，并单独执行。' : analysisType === 'daily' ? '结果可能提出已有故事状态更新。' : analysisType === 'planning' ? '结果可能提出 Sprint 调整。' : analysisType === 'review' ? '结果可能提出验收完成状态。' : analysisType === 'retro' ? '结果可能提出独立行动项。' : '结果可能提出补齐信息并创建新故事。' }} 未知信息会保持待确认。</p></div>
+        <div class="sum-card"><b>当前会议 · {{ meeting.selectedMeeting?.title }}</b></div>
         <StatusAnalysisPanel v-if="analysisType === 'daily'" :key="meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <PlanningAnalysisPanel v-else-if="analysisType === 'planning'" :key="'planning:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
         <ReviewAnalysisPanel v-else-if="analysisType === 'review'" :key="'review:' + meeting.selected + ':' + route.query.analysisId" :meeting-id="meeting.selected" :initial-analysis-id="route.query.analysisId" />
@@ -232,7 +232,7 @@ function genDemoSuggestion() {
       <p v-else class="empty">先创建或选择会议，再开始分析。</p>
     </div>
     <form v-else id="meeting-proposal-form" @submit.prevent="submitProposal" class="manual-proposal-flow">
-      <div class="sum-card"><h3>手动录入一条待审核建议</h3><p>由用户填写，未由模型生成。提交会创建一条 origin=manual 的待审建议；管理员或负责人审核后才会创建需求池条目。</p></div>
+      <div class="sum-card"><h3>手动录入一条待审核建议</h3></div>
       <label class="field">关联会议<select :value="meeting.selected" @change="meeting.select($event.target.value)" required><option value="">请选择会议</option><option v-for="m in meeting.meetings" :key="m.id" :value="m.id">{{ m.title }}</option></select></label>
       <pre class="transcript-evidence">{{ meeting.selectedMeeting?.transcript || '请先选择一条会议以核对原文证据。' }}</pre>
       <label class="field">需求标题<input name="title" v-model="proposal.title" required maxlength="200"></label>

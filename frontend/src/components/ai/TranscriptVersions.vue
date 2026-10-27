@@ -226,14 +226,13 @@ async function openAnalysis() {
             <li><b>人工核对</b><span v-if="selected.confirmation">确认人 #{{ selected.confirmation.confirmed_by }} · {{ selected.confirmation.confirmed_at }}</span><span v-else>尚未确认；确认后会创建独立分析会议。</span></li>
             <li><b>分析会议</b><span v-if="selected.confirmation">{{ analysisMeeting?.title || '分析会议记录' }} · <code>{{ selected.confirmation.analysis_meeting_id }}</code> <button type="button" :disabled="busy" @click="openAnalysis">打开分析会议</button></span><span v-else>确认转写前尚未创建。</span></li>
           </ol>
-          <p class="small">分析会议会保留为独立记录，原会议、录音和转写版本不会被覆盖。</p>
         </section>
         <details><summary>查看保存的原始片段</summary><ol><li v-for="s in selected.draft.segments" :key="s.segment_id">{{ s.start_ms/1000 }}–{{ s.end_ms/1000 }} 秒：{{ s.text }}</li></ol></details>
         <label class="field">分析会议标题<input v-model="title" maxlength="200" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit"></label>
         <label class="field">{{ usesAuditedCorrections(selected) ? '人工核对全文（由下方子段修订生成）' : '人工核对文本' }}<textarea v-model="text" maxlength="16000" rows="6" :readonly="usesAuditedCorrections(selected)" :disabled="busy || !!pending || !!selected.confirmation || !meeting.maySubmit" /></label>
         <fieldset v-if="previewFor(selected) || selected.confirmation?.input?.speaker_alignment">
           <legend>转写片段与匿名说话人对齐</legend>
-          <p>按已保存的时间段快照预填；有词时间戳时按真实词边界分组，可在词后拆分或与同一原始片段的上一组合并。合并不同主说话人的组后需重新选择。仅供人工核对，可改为未知。</p>
+          <p>可按词拆分或合并同一片段的相邻内容。合并不同说话人的内容后，请重新选择说话人。</p>
           <div class="alignment-nav" role="group" aria-label="逐段播放控制" aria-keyshortcuts="ArrowLeft Space Enter ArrowRight" tabindex="0" @keydown="handlePlaybackKey">
             <button type="button" :disabled="busy || !assignments.length || activeIndex <= 0" @click="movePlayback(-1)">播放上一子段</button>
             <span role="status">{{ activeIndex < 0 ? '尚未开始逐段核对' : `正在核对 ${activeIndex+1}/${assignments.length}` }}</span>

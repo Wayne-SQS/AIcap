@@ -78,7 +78,7 @@ async function execute() {
     <article v-if="selected" :data-source-proposal="selected.id" tabindex="-1">
       <p>记录 {{ selected.id }} · 提交人 #{{ selected.submitted_by }} · {{ selected.created_at }}</p>
       <p>故事 {{ selected.result.context.selected_stories[0].id }} · {{ selected.result.context.selected_stories[0].title }}；目标Sprint {{ selected.input.target_sprint ?? '未知' }}</p>
-      <p><strong>此处为保存时的快照。容量尚未验证，批准不会立即修改负责人，需单独执行。</strong></p>
+      <p><strong>保存时的快照 · Sprint 容量待核对</strong></p>
       <ul><li v-for="c in selected.result.candidates" :key="c.member_id">第 {{ c.rank }} 名 · {{ c.display_name }}（#{{ c.member_id }}），满足 {{ c.matched_requirements }}/{{ c.total_requirements }} 项
         <ul><li v-for="(m, i) in c.matches" :key="i">{{ dimensions[m.requirement.dimension] }} / {{ m.requirement.name }} ≥ {{ m.requirement.minimum_level }}；画像 {{ m.recorded_level ?? '无记录' }}</li></ul>
         <p>六周容量 {{ workload(c.member_id).profile.six_week_capacity_hours }} 小时（不是Sprint剩余容量）；已关联故事：{{ ids(workload(c.member_id).owned_story_ids) }}；未完成任务：{{ ids(workload(c.member_id).active_task_ids) }}；目标Sprint任务：{{ ids(workload(c.member_id).target_sprint_task_ids) }}</p>

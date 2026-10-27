@@ -34,12 +34,13 @@ async function setup(page, role = 'admin', failStoryOnce = false) {
     if (path.endsWith('/save-intent')) data = { intent: null }
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: '会议一' }, { id: 'm2', title: '会议二' }]
     if (path.endsWith('/stories')) {
-      const scoped = new URL(req.url()).searchParams.has('projectId')
-      if (failStoryOnce && !scoped) {
+      const scoped = new URL(req.url()).searchParams.get('projectId') === 'P001'
+      if (failStoryOnce) {
         failStoryOnce = false
         await route.fulfill({ status: 503, json: {} })
         return
       }
+      if (!scoped) return route.fulfill({ status: 400, json: { detail: '缺少项目编号' } })
       data = [{ id: 'US13', title: '发布检查' }, { id: 'US14', title: '接口测试' }]
     }
     await route.fulfill({ json: data })
@@ -62,7 +63,7 @@ test('Assignment explicit requirements show tied ranks, evidence and unknown cap
   await expect(panel).toContainText('画像 3；满足')
   await expect(panel).toContainText('画像 5；满足')
   await expect(panel).toContainText('与目标Sprint重叠的任务：未知')
-  await expect(panel).toContainText('容量尚未验证，不能据此直接分配')
+  await expect(panel).toContainText('Sprint 容量待核对')
   await expect(panel).toContainText('只读角色不进入候选：#9')
   expect(posts).toEqual([{ story_ids: ['US13'], target_sprint: null, requirements: [{ dimension: 'tech_stack', name: 'Python', minimum_level: 3 }] }])
   expect(writes).toEqual([])

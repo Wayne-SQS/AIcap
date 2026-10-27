@@ -488,7 +488,7 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section activity-heatmap-section" data-member-canvas="activity" aria-labelledby="activity-heatmap-title">
     <header class="member-section-header">
       <h2 id="activity-heatmap-title">成员开发活动图</h2>
-      <p>真实活动按自然周日期展示；无真实活动时，根据任务负责人、工时和项目周次显示预计开发强度。</p>
+      <p>按周查看活动记录或预计工时。</p>
     </header>
     <CanvasZoomControls :zoom="activityZoom" :min-zoom="activityMinZoom" :max-zoom="activityMaxZoom" :zoom-mode="activityZoomMode"
       :reset-zoom="activityResetZoom" :fit-to-canvas="activityFitToCanvas" :zoom-in="activityZoomIn" :zoom-out="activityZoomOut"
@@ -496,16 +496,16 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <div ref="activityViewport" class="member-module-viewport canvas-zoom-viewport activity-viewport">
       <div ref="activityShell" class="canvas-zoom-shell" :style="activityShellStyle">
         <div ref="activityCanvas" class="member-module-canvas activity-canvas" :style="activityCanvasStyle">
-          <p v-if="!online" class="small">离线演示模式：活动图需连接后端读取真实活动记录（在线登录后自动加载）。</p>
+          <p v-if="!online" class="small">登录后查看活动记录。</p>
           <p v-else-if="contribLoading" class="small">正在加载活动数据…</p>
           <p v-else-if="contribError" class="small" role="alert">活动数据加载失败：{{ contribError }}</p>
           <div v-else class="contrib-wrap" id="contrib">
       <div v-for="c in contribs" :key="c.m.id" class="contrib">
         <div class="chead">
           <span class="avatar" :class="'a' + c.m.frontId">{{ memberLabel(c.m.frontId) }}</span>{{ c.m.name }}
-          <span class="small mono" style="margin-left:auto" v-if="c.mode === 'real'">真实活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
+          <span class="small mono" style="margin-left:auto" v-if="c.mode === 'real'">活动 {{ c.total }} · 活跃天数 {{ c.activeDays }}</span>
           <span class="small mono" style="margin-left:auto" v-else-if="c.mode === 'planned'">预计工时 {{ c.total }}h · 计划周数 {{ c.activeDays }}</span>
-          <span class="small mono" style="margin-left:auto" v-else>暂无真实活动或任务规划</span>
+          <span class="small mono" style="margin-left:auto" v-else>暂无活动或任务规划</span>
         </div>
         <div class="contrib-role small">{{ project.memberRoleText(c.m.frontId) }}</div>
         <div v-if="c.mode === 'real' || c.mode === 'planned'" class="contrib-grid">
@@ -523,13 +523,12 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         </div>
       </div>
       <div class="contrib-note">
-        <span>真实模式：每格 = 某一天的活动；预计模式：每格 = 对应项目周的预计开发强度</span>
+        <span>颜色越深，活动或预计工时越多</span>
         <span>无活动</span><span class="sw c0"></span>
         <span>少</span><span class="sw c1"></span>
         <span>一般</span><span class="sw c2"></span>
         <span>较多</span><span class="sw c3"></span>
         <span>活跃</span><span class="sw c4"></span>
-        <span>预计数据来自 Task 的负责人、hours、week_start/week_end，不写入活动记录；真实数据来自活动记录（含 GitHub 同步）</span>
       </div>
     </div>
         </div>

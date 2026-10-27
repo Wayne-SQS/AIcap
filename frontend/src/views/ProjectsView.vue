@@ -2,11 +2,13 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
+import { useProjectStore } from '@/stores/project'
 import { projectsApi } from '@/api/projects'
 import { useSessionStore } from '@/stores/session'
 
 const router = useRouter()
 const projects = useProjectsStore()
+const project = useProjectStore()
 const session = useSessionStore()
 const error = ref('')
 const managing = ref(null)
@@ -29,6 +31,7 @@ async function enter(row) {
   error.value = ''
   try {
     await projects.selectProject(row.id)
+    await project.loadAll(row.id)
     router.push({ name: 'project-overview', params: { projectId: row.id } })
   } catch (e) { error.value = e.message }
 }

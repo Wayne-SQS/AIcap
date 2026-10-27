@@ -61,7 +61,7 @@ async function submit() {
           </select>
         </label>
         <p v-if="storyError" role="alert">{{ storyError }} <button type="button" @click="loadStories">重试</button></p>
-        <p class="small">原识别故事：{{ proposal.story_id }}。可纠正故事或修订理由；原提案与证据留存。</p>
+        <p class="small">原识别故事：{{ proposal.story_id }}</p>
         <label class="field">批准后的提案理由
           <textarea v-model="amendedReason" required maxlength="1000" rows="3"></textarea>
         </label>

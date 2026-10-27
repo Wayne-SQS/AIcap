@@ -64,7 +64,7 @@ test('US14 PRD text enters Refinement review with estimate shown as a draft', as
   await expect(page.locator('#saved-transcript')).toContainText('PRD正文：\n提供成员每周负载看板')
   expect(created.transcript).toBe('PRD正文：\n提供成员每周负载看板，展示成员、周、计划工时。')
   await analyze(panel)
-  await expect(panel).toContainText('AI 工作量粗估：8–24 计划工时')
+  await expect(panel).toContainText('预估工时：8–24 小时')
   await expect(panel).toContainText('接口待确认')
   expect(posts.find(body => body.meeting_type === 'backlog_refinement')).toBeTruthy()
 })

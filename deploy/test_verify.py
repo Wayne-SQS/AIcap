@@ -75,6 +75,7 @@ class DeploymentVerificationTests(unittest.TestCase):
             def do_GET(self):
                 seen.append((self.path, None, self.headers.get('Authorization')))
                 body = (b'{"id":1,"role":"admin"}' if self.path.endswith('/auth/me')
+                        else b'[{"id":"P001"}]' if self.path.endswith('/projects')
                         else b'[]')
                 self.send_response(200); self.end_headers(); self.wfile.write(body)
             def log_message(self, *args):
@@ -86,7 +87,7 @@ class DeploymentVerificationTests(unittest.TestCase):
                 f'http://127.0.0.1:{server.server_port}', 'fixture-user', 'fixture-password')
         finally:
             server.shutdown(); server.server_close(); thread.join()
-        self.assertEqual(['/api/auth/login', '/api/auth/me', '/api/meetings'],
+        self.assertEqual(['/api/auth/login', '/api/auth/me', '/api/projects', '/api/meetings?projectId=P001'],
                          [request[0] for request in seen])
         self.assertEqual('Bearer fixture-token', seen[1][2])
 

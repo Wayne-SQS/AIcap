@@ -18,7 +18,7 @@ function send(text) {
   append({ u: true, t: text, shown: text })
   input.value = ''
   const hit = CHAT_KB.find(k => text.includes(k.kw))
-  const full = hit ? hit.reply : '已收到。这是一个演示原型：真实版会基于项目数据（故事/任务/成员负载）给出可追溯的分析，并由你确认后再入库。'
+  const full = hit ? hit.reply : '这是静态演示。可以试试「拆解用户故事」或「评估团队负载」。'
   const m = { u: false, t: full, shown: '' }
   append(m)
   typing.value = true

@@ -359,11 +359,6 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
 
 <template>
   <div class="submit-agent">
-    <p class="pool-note">
-      任务提交智能体读取<b>真实活动记录</b>(activity_records,含 GitHub 同步的 commit / PR / Review / Issue 事件)。
-      结论区分<b>客观事实</b>与 <b>AI 推断</b>;不把提交次数等同于工作量或质量,也不作为人员奖惩依据。
-    </p>
-
     <!-- GitHub 同步区(状态 + 手动触发,与画像智能体共用后端服务) -->
     <div class="sa-sync" :class="{ on: githubStatus?.enabled }">
       <div class="sa-sync-info">
@@ -436,7 +431,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
     <p v-else class="pool-note">该时间范围内暂无活动记录。可先在上方触发 GitHub 同步,或在「画像智能体」面板录入活动事实。</p>
 
     <!-- 成员工作状态(事实,聚合自真实活动) -->
-    <div class="h-sec">成员工作状态(事实)</div>
+    <div class="h-sec">成员活动</div>
     <p v-if="!memberFacts.length" class="pool-note">暂无成员活动数据。</p>
     <div v-else class="sum-grid">
       <div v-for="f in memberFacts" :key="f.uid" class="sum-card">
@@ -458,8 +453,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
     <p v-else-if="analysisError" class="small" style="color:#e05555" role="alert">分析加载失败:{{ analysisError }}</p>
     <template v-else>
       <p v-if="risksEngine && !isLlmRisks" class="pool-note">
-        当前是<b>规则引擎预览</b>:按工时/依赖/活动量等规则逐条枚举,<b>未调用大模型</b>、不落画像快照;
-        它不做聚合与优先级判断,条数偏多属正常。需要模型结论请点下方「运行 LLM 分析」(消耗额度、落快照并留痕)。
+        当前显示规则分析结果。点击「运行 LLM 分析」可生成并保存模型分析。
       </p>
 
       <template v-if="risks.length">

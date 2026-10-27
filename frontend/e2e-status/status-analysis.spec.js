@@ -23,7 +23,10 @@ async function setup(page, resolve, role = 'viewer') {
     if (path === '/api/auth/me') data = { id: 1, role, display_name: '只读用户' }
     if (path === '/api/agent/config') data = { configured: false }
     if (path === '/api/projects') data = [{ id: 'P001', name: '测试项目', can_write: role !== 'viewer', can_manage: role === 'admin' }]
-    if (path === '/api/stories') data = [{ id: 'US13', title: '登录', description: '账号登录', acceptance: '可登录', priority: 'Must', sprint: 2, activity: 1, owner_id: null }]
+    if (path === '/api/stories') {
+      if (new URL(request.url()).searchParams.get('projectId') !== 'P001') return route.fulfill({ status: 400, json: { detail: '缺少项目编号' } })
+      data = [{ id: 'US13', title: '登录', description: '账号登录', acceptance: '可登录', priority: 'Must', sprint: 2, activity: 1, owner_id: null }]
+    }
     if (path === '/api/meetings') data = [{ id: 'm1', title: '站会一', transcript: '目前会议原文' }, { id: 'm2', title: '站会二', transcript: '第二场' }]
     await route.fulfill({ json: data })
   })

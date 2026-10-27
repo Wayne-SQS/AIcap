@@ -519,15 +519,10 @@ onBeforeUnmount(() => document.removeEventListener('pointermove', moveLayout))
       <div>
         <div class="eyebrow">UML DIAGRAMS / 设计视图</div>
         <h1>UML 图</h1>
-        <p>用例图（用例名跟随故事标题）· 时序图（按后端真实路由绘制）。</p>
       </div>
     </div>
 
-    <p class="uml-note">
-      用例图按当前正式需求聚合为 {{ usecases.length }} 个系统功能；点击功能用例可查看其关联的原始 Story。
-      Story 新增、删除或重命名后，功能用例明细同步更新；节点可拖动并保存布局。
-      时序图按后端真实路由绘制「登录并加载项目工作台」主流程（JWT 拦截器 + MySQL），属协议说明图。
-    </p>
+    <p class="uml-note">共 {{ usecases.length }} 个功能用例。点击查看关联故事，拖动节点可调整布局。</p>
     <p v-if="layoutSyncText" class="uml-note small">{{ layoutSyncText }}</p>
 
     <div class="h-sec">

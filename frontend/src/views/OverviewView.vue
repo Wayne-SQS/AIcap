@@ -361,8 +361,8 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
     <div class="hero">
       <div>
         <div class="eyebrow">PROJECT OVERVIEW / 项目总览</div>
-        <h1>{{ project.currentProject?.name || '我的项目' }}</h1>
-        <p>{{ project.currentProject?.description || '当前项目的需求、排期与协作数据。' }}</p>
+        <h1>{{ projects.currentProject?.name || '我的项目' }}</h1>
+        <p>{{ projects.currentProject?.description || '当前项目的需求、排期与协作数据。' }}</p>
       </div>
       <button class="primary" :disabled="session.isViewer" :title="session.isViewer ? READONLY_TITLE : ''" @click="go('board')">＋ 新建用户故事</button>
     </div>
@@ -430,7 +430,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
       <button type="button" :disabled="riskLoading || !session.online" @click="refreshRisks">{{ riskLoading ? '正在分析…' : '查看本月风险' }}</button>
       <p v-if="!session.online">连接项目服务后可分析本月团队风险。</p>
       <p v-if="riskError" role="alert">{{ riskError }}</p>
-      <p v-if="teamRisks && !teamRisks.length">本月未识别到团队风险；仅代表当前数据与规则的结果。</p>
+      <p v-if="teamRisks && !teamRisks.length">本月未识别到团队风险。</p>
       <template v-if="teamRisks?.length">
         <p>识别到 {{ teamRisks.length }} 项团队风险，提交后仍需在提案审核中心确认。</p>
         <ul><li v-for="(item, index) in teamRisks" :key="`${item.kind}-${index}`">
@@ -441,7 +441,6 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         <button type="button" @click="go('review')">打开提案审核中心</button>
       </template>
       <p v-if="riskNotice" role="status">{{ riskNotice }}</p>
-      <p class="small">仅根据当前项目数据提出预警；送审不会直接修改任务。</p>
     </div>
 
     <div class="h-sec">效率分析 · 任务阻塞与状态停滞</div>
@@ -677,7 +676,7 @@ const sprintCards = computed(() => MAP_SPRINTS.map((sp, i) => {
         </section>
 
         <div v-if="quality.evidence" class="evi">
-          <p>真实证据（不推断质量）</p>
+          <p>相关记录</p>
           <p v-if="quality.evidence.code_activity">
             代码活动：提交 {{ quality.evidence.code_activity.commits_total }} 次（近 14 天 {{ quality.evidence.code_activity.commits_last_14d }} 次）、
             PR {{ quality.evidence.code_activity.prs_total }}、评审 {{ quality.evidence.code_activity.reviews_total }}、

@@ -62,6 +62,12 @@ services:
       PROFILE_LLM_BASE_URL: ${PROFILE_LLM_BASE_URL:-https://api.deepseek.com}
       PROFILE_LLM_MODEL: ${PROFILE_LLM_MODEL:-deepseek-flash}
       AICAP_AGENT_WORKER_ENABLED: ${AICAP_AGENT_WORKER_ENABLED:-true}
+      GITHUB_ENABLED: ${GITHUB_ENABLED:-false}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_PROJECT_ID: ${GITHUB_PROJECT_ID:-}
+      GITHUB_USER_MAPPING: ${GITHUB_USER_MAPPING:-}
+      GITHUB_AUTO_SYNC_HOURS: ${GITHUB_AUTO_SYNC_HOURS:-0}
     volumes:
       - audio-data:/data/audio
     depends_on:

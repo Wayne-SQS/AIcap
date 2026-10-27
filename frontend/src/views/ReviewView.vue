@@ -271,16 +271,16 @@ async function serverEdit(id) {
     <!-- 在线:服务器建议 -->
     <div v-else id="sug-list">
       <section class="review-queue" aria-label="跨流程提案队列">
-        <div class="panel-heading"><div><h2>跨流程提案队列</h2><p class="small">汇总通用建议、各会议分析与 Assignment 的服务器记录；审核和执行沿用原接口，队列不复制决策。</p></div><button id="review-refresh" type="button" :disabled="queueLoading" @click="refresh">{{ queueLoading ? '刷新中…' : '刷新全部提案' }}</button></div>
+        <div class="panel-heading"><div><h2>跨流程提案队列</h2></div><button id="review-refresh" type="button" :disabled="queueLoading" @click="refresh">{{ queueLoading ? '刷新中…' : '刷新全部提案' }}</button></div>
         <div class="queue-filters"><label>处理状态<select v-model="queueFilter"><option value="pending">待审核</option><option value="reviewed">已审核</option><option value="execution">待执行 / 执行结果</option><option value="all">全部状态</option></select></label><label>来源流程<select v-model="queueSource"><option value="all">全部来源</option><option v-for="[key,label] in queueSources" :key="key" :value="key">{{ label }}</option></select></label><label>会议 / 提案<input v-model="queueSearch" type="search" placeholder="搜索标题或提案编号"></label><label>开始日期<input v-model="queueFrom" type="date"></label><label>结束日期<input v-model="queueTo" type="date"></label></div>
-        <p v-if="!meeting.mayReview" class="queue-permission" role="note">当前账号可查看提案记录；审核与执行仅管理员或负责人可以操作。你可以打开来源分析查看状态和处理历史。</p>
+        <p v-if="!meeting.mayReview" class="queue-permission" role="note">仅管理员和负责人可审核或执行提案。</p>
         <p v-if="queueLoading" role="status">正在读取各来源分析、审核和执行记录…</p>
         <p v-if="queueErrors.length" role="alert">有 {{ queueErrors.length }} 个来源列表暂时不可用，当前结果可能不完整。{{ queueErrors.slice(0,3).map(e => `${e.meetingTitle} · ${e.source}`).join('；') }} <button @click="refreshQueue">重试</button></p>
         <article v-for="row in visibleQueue" :key="row.id" class="sug-card queue-card" :data-queue-row="row.id" :data-meeting-suggestion="row.source === 'general' ? row.proposalId : null">
           <div class="sug-head"><b>{{ row.sourceLabel }}</b><span class="sug-status" :class="row.status">{{ row.status === 'pending' ? '待审核' : row.status === 'approved' ? '已批准' : row.status === 'rejected' ? '已拒绝' : row.status }}</span><span class="small">{{ row.createdAt }}</span></div>
           <div class="sug-row"><b>来源</b><span>{{ row.meetingId ? row.meetingTitle : '项目风险分析' }}</span></div>
           <div class="sug-row"><b>提案 / 影响</b><span>{{ row.proposalId }} · {{ row.summaryText }}</span></div>
-          <div class="sug-row"><b>审核方式</b><span>{{ row.source === 'general' ? '新需求建议：在此采纳或修改后采纳，采纳时创建需求池条目。' : '现有记录变更：打开来源分析核对证据、修改批准内容；审核后另行执行。' }}</span></div>
+          <div class="sug-row"><b>审核方式</b><span>{{ row.source === 'general' ? '在此审核' : '前往来源分析审核' }}</span></div>
           <div class="sug-row"><b>流程进度</b><span>{{ row.flowStage || '分析完成 · 处理状态待确认' }}</span></div>
           <div class="sug-row"><b>审核留痕</b><span>{{ row.proposal?.decision ? `审核决定：${row.proposal.decision}` : '尚无审核决定' }}{{ row.reviewer ? ` · 审核人 #${row.reviewer}` : '' }}{{ row.reviewedAt ? ` · ${row.reviewedAt}` : '' }}{{ row.reviewReason ? ` · ${row.reviewReason}` : '' }}</span></div>
           <div class="sug-row"><b>执行状态</b><span>{{ executionLabel(row) }}{{ row.executor ? ` · 执行人 #${row.executor}` : '' }}{{ row.executedAt ? ` · ${row.executedAt}` : '' }}</span></div>

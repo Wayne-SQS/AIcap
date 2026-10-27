@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
@@ -228,7 +228,16 @@ def authenticated_smoke(origin: str, username: str, password: str) -> None:
         with opener.open(Request(origin.rstrip('/') + '/api/auth/me', headers=headers),
                          timeout=5) as response:
             me = json.loads(response.read(65537))
-        with opener.open(Request(origin.rstrip('/') + '/api/meetings', headers=headers),
+        with opener.open(Request(origin.rstrip('/') + '/api/projects', headers=headers),
+                         timeout=5) as response:
+            projects = json.loads(response.read(65537))
+        if not isinstance(projects, list) or not projects:
+            raise ValueError()
+        project_id = projects[0].get('id')
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError()
+        meetings_url = origin.rstrip('/') + '/api/meetings?projectId=' + quote(project_id, safe='')
+        with opener.open(Request(meetings_url, headers=headers),
                          timeout=5) as response:
             meetings = json.loads(response.read(65537))
         if (not isinstance(me, dict) or type(me.get('id')) is not int

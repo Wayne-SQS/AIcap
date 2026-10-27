@@ -128,7 +128,7 @@ onMounted(load)
         </article>
         <p v-if="reviewNotice" role="status">{{ reviewNotice }}</p>
       </section>
-    </template><p v-else-if="!loading && !error" class="empty">尚未生成分析结果。分析不会直接修改任务或成员数据。</p>
+    </template><p v-else-if="!loading && !error" class="empty">尚未生成分析结果。</p>
   </div>
 </template>
 

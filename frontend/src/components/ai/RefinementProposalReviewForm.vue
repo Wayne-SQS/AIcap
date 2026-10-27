@@ -54,7 +54,7 @@ async function submit() {
       <p v-if="originalMissing.length">原提案待补齐：{{ originalMissing.map(key => labels[key]).join('、') }}。</p>
       <label class="field">审核决定<select v-model="decision"><option value="approve">接受</option><option value="modify_and_approve">修改后接受</option><option value="reject">拒绝</option></select></label>
       <template v-if="decision === 'modify_and_approve'">
-        <p class="small">人工补充与原提案分开保存。请选择排期和活动，不会自动填入默认值。</p>
+        <p class="small">请选择排期和活动。</p>
         <label class="field">批准后的标题<input v-model="changes.title" required maxlength="200"></label>
         <label class="field">批准后的描述<textarea v-model="changes.description" required maxlength="4000" rows="3"></textarea></label>
         <label class="field">批准后的验收标准<textarea v-model="changes.acceptance" required maxlength="4000" rows="3"></textarea></label>

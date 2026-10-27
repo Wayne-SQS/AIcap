@@ -3,17 +3,19 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storiesApi } from '@/api/stories'
 import { recommendAssignment, assignmentSuggestionsApi, assignmentSaveIntentApi } from '@/api/assignment'
 import { useMeetingStore } from '@/stores/meeting'
+import { useProjectsStore } from '@/stores/projects'
 import AssignmentHistory from './AssignmentHistory.vue'
 
 const props = defineProps({ meetingId: String, initialAnalysisId: { type: String, default: '' } })
 const meeting = useMeetingStore()
+const projects = useProjectsStore()
 const saved = ref(null), pending = ref(null), saving = ref(false), saveError = ref(''), saveNotice = ref('')
 const intentReady = ref(false)
 const stories = ref([]), storyId = ref(''), sprint = ref(null)
 const requirements = ref([{ dimension: 'tech_stack', name: '', minimum_level: 3 }])
 const result = ref(null), error = ref(''), storyError = ref(''), loading = ref(false), busy = ref(false)
 const dimensions = { tech_stack: '技术栈', capabilities: '工作能力', process_domains: '流程领域' }
-const statuses = { provisional: '技能候选，仅供人工核对', requirements_needed: '请补充技能要求后再查询', no_eligible_members: '没有符合角色范围的候选成员', no_recorded_skill_match: '画像中暂无满足要求的记录，不代表成员不具备能力' }
+const statuses = { provisional: '技能匹配结果', requirements_needed: '请补充技能要求后再查询', no_eligible_members: '没有符合角色范围的候选成员', no_recorded_skill_match: '画像中没有匹配的技能记录' }
 const gapNames = { target_sprint_unknown: '目标Sprint尚未确定', story_estimates_unavailable: '故事估时尚不可用', sprint_capacity_unavailable: 'Sprint可用工时和剩余工时尚不可用', members_empty: '成员目录为空', profile_dimensions_empty: '成员画像存在空维度', story_owner_unresolved: '故事负责人未在成员目录中找到', task_owner_unresolved: '任务负责人未在成员目录中找到', task_story_unresolved: '任务关联的故事未找到', target_sprint_task_schedule_unavailable: '现有任务周排期不覆盖Sprint 4' }
 let mounted = true, version = 0
 onBeforeUnmount(() => { mounted = false; ++version })
@@ -21,7 +23,7 @@ watch([storyId, sprint, requirements], () => { ++version; result.value = null; e
 async function loadStories() {
   loading.value = true; storyError.value = ''; result.value = null; ++version
   try {
-    const rows = await storiesApi.list()
+    const rows = await storiesApi.list(projects.currentProjectId)
     if (!Array.isArray(rows) || rows.some(s => typeof s.id !== 'string' || typeof s.title !== 'string')) throw new Error()
     if (!mounted) return
     stories.value = rows
@@ -107,7 +109,7 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
 <template>
   <section class="assignment-panel" aria-label="Assignment分配候选">
     <h3>分配候选</h3>
-    <p>填写本次技能要求，按画像中达到最低等级的项目数等权排序。同分并列，不代表可用工时充足。</p>
+    <p>填写技能要求，查看匹配的成员。</p>
     <p><strong>查询只读；保存建议会重新读取事实并计算候选，人工审核后需单独执行才会修改负责人。</strong></p>
     <p v-if="!meetingId">请先选择已保存会议。</p>
     <p v-if="!meeting.maySubmit">管理员、负责人或成员可查询候选；只读角色不能发起查询。</p>
@@ -135,7 +137,7 @@ const ids = list => list === null ? '未知' : list.length ? list.join('、') : 
     <div v-if="result" aria-label="候选结果" role="region">
       <h4>{{ statuses[result.status] }}</h4>
       <p>故事 {{ result.context.selected_stories[0].id }} · {{ result.context.selected_stories[0].title }}；目标Sprint：{{ result.context.target_sprint ?? '未知' }}</p>
-      <p><strong>容量尚未验证，不能据此直接分配。</strong> 六周容量不能当作Sprint剩余容量；故事、成员和任务为分次读取。</p>
+      <p><strong>Sprint 容量待核对。</strong></p>
       <h4>数据缺口</h4>
       <ul><li v-for="(gap, index) in result.context.gaps" :key="index">{{ gapNames[gap.code] || '存在未识别的数据缺口，请核对' }}<span v-if="gap.member_ids?.length"> · 成员 #{{ gap.member_ids.join('、#') }}</span><span v-if="gap.story_ids?.length"> · {{ gap.story_ids.join('、') }}</span><span v-if="gap.task_ids?.length"> · {{ gap.task_ids.join('、') }}</span></li></ul>
       <article v-for="candidate in result.candidates" :key="candidate.member_id" class="candidate">

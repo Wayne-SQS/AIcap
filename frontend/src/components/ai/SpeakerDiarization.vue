@@ -24,7 +24,7 @@ const seconds = ms => (ms/1000).toFixed(2)
     <template v-if="meeting.maySubmit">
       <label>预计人数 <select v-model="hint" :disabled="busy"><option :value="null">自动估计</option><option v-for="n in 8" :key="n" :value="n">{{ n }} 人</option></select></label>
       <button type="button" :disabled="busy" @click="run">{{ busy ? '正在本地分离…' : '分析说话人时间段' }}</button>
-      <p>匿名标签只在本次音频内有效，不代表成员身份，也尚未自动分配给转写文字。</p>
+      <p>说话人标签仅用于这段音频。</p>
     </template>
     <p v-if="error" role="alert">{{ error }}</p>
     <div v-if="result">

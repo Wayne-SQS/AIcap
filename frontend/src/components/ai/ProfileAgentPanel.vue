@@ -287,11 +287,6 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
 
 <template>
   <div class="profile-agent">
-    <p class="pool-note">
-      画像智能体根据活动事实 / 任务 / 难度 / 负载分析每个人做了什么、承担了多大难度、项目有何风险。
-      每条结论带证据;区分<b>客观事实</b>与 <b>AI 推断</b>;不把提交次数等同于工作量或质量。
-    </p>
-
     <!-- 时间范围 + 操作(文档 4.9):快捷周期 + 自定义起止 -->
     <div class="pa-toolbar">
       <button class="ghost" @click="setPreset('thisWeek')">本周</button>
@@ -336,7 +331,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
 
       <div v-if="currentMember" class="sum-grid">
         <div class="sum-card">
-          <h4>🧾 客观事实(来自活动/任务数据)</h4>
+          <h4>🧾 活动与任务</h4>
           <ul>
             <li v-for="(v, k) in currentMember.objective.period_activity_counts" :key="k" v-show="v > 0">
               {{ TYPE_TEXT[k] || k }}: {{ v }} 次
@@ -347,13 +342,13 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
           <div v-if="currentMember.objective.work_items.length" class="pa-items">
             <div v-for="(w, i) in currentMember.objective.work_items.slice(0, 12)" :key="i" class="pa-item">{{ w }}</div>
           </div>
-          <p v-else class="small">该时间范围内暂无活动记录数据,需要成员补充说明。</p>
+          <p v-else class="small">暂无活动记录。</p>
           <p v-if="currentMember.objective.unlinked_activities.length" class="small" style="color:#b8860b">
             ⚠ {{ currentMember.objective.unlinked_activities.length }} 条活动未关联任务(可能属于调试/返工/拆分问题)
           </p>
         </div>
         <div class="sum-card">
-          <h4>◈ 动态能力画像(AI 推断,持续更新)</h4>
+          <h4>◈ 能力画像</h4>
           <ul>
             <li>擅长方向: {{ currentMember.dynamic_profile.good_at }}</li>
             <li>难度承受: {{ currentMember.dynamic_profile.difficulty_capacity }}</li>
@@ -365,7 +360,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
             <li>当前负载: {{ currentMember.dynamic_profile.current_load_percent }}%({{ currentMember.dynamic_profile.risk_flags }})</li>
             <li>推荐任务类型: {{ currentMember.dynamic_profile.recommended_task_types.join(';') }}</li>
           </ul>
-          <h4 style="margin-top:10px">◆ AI 推断(带依据)</h4>
+          <h4 style="margin-top:10px">◆ 分析结论</h4>
           <ul>
             <li v-for="(inf, i) in currentMember.ai_inference" :key="i">{{ inf }}</li>
           </ul>
@@ -381,14 +376,14 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
                   ✓ {{ c.corrected_value }} <span style="opacity:.7">({{ c.created_at }})</span>
                 </div>
               </div>
-              <p v-else class="small" style="margin:4px 0 0">暂无纠正记录。画像会随数据更新;若与实际不符,成员有权在此纠正。</p>
+              <p v-else class="small" style="margin:4px 0 0">暂无纠正记录。</p>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 贡献绿格子热力图(4.10):活动分布≠工作质量 -->
-      <div class="h-sec" style="margin-top:12px">贡献活动热力图(绿格子 = 活动分布,不代表工作质量)</div>
+      <!-- 贡献活动热力图 -->
+      <div class="h-sec" style="margin-top:12px">活动热力图</div>
       <div class="pa-heatmap">
         <div v-for="row in heatmapRows" :key="row.date" class="pa-cell"
              :class="{ sel: selectedDay === row.date }"
@@ -397,10 +392,6 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
         </div>
       </div>
       <p v-if="heatmapError" class="small" style="color:#e05555" role="alert">热力图加载失败:{{ heatmapError }}</p>
-      <p class="small" style="margin:4px 0 0">
-        颜色深浅 = 当日活动数量(Commit/PR/Review/缺陷修复/任务完成/状态更新);点击某天查看当天具体活动。
-        绿格子展示的是<b>活动分布</b>,不等于工作质量。
-      </p>
       <div v-if="selectedDay && selectedDayActs.length" class="sum-card pa-day-acts">
         <h4>{{ selectedDay }} 的具体活动({{ selectedDayActs.length }} 条)</h4>
         <div v-for="a in selectedDayActs" :key="a.activity_id" class="pa-item">
@@ -422,7 +413,7 @@ onBeforeUnmount(() => window.removeEventListener(AGENT_UPDATED_EVENT, onAgentUpd
       </div>
 
       <!-- 提交异常模式(4.6) -->
-      <div class="h-sec" style="margin-top:12px">提交异常模式(证据化描述,不作个人评判)</div>
+      <div class="h-sec" style="margin-top:12px">提交异常模式</div>
       <div v-if="currentMember && anomalyItems(currentMember).length" class="sum-card pa-anomaly">
         <ul>
           <li v-for="(a, i) in anomalyItems(currentMember)" :key="i">⚠ {{ a }}</li>

@@ -91,7 +91,7 @@ async function submit() {
           </select>
         </label>
         <p v-if="storyError" role="alert">{{ storyError }} <button type="button" @click="loadStories">重试</button></p>
-        <p class="small">原识别故事：{{ proposal.story_id }}。原提案与证据保留；执行前核对批准时的故事内容。</p>
+        <p class="small">原识别故事：{{ proposal.story_id }}</p>
       </template>
       <label v-if="decision === 'modify_and_approve'" class="field">批准后的目标状态
         <select v-model="target" required>
