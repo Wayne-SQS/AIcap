@@ -26,8 +26,8 @@ test('调用中心离线不发起智能体请求，切换选择可刷新恢复',
   })
   await page.goto('/#/agents')
   await expect(page.getByRole('heading', { name: '智能体调用中心' })).toBeVisible()
-  // US23 效率分析面板并入调用中心后名单为 6 项(不是新增「同事智能体」,契约仍为 3 同事 + 1 主管)
-  await expect(page.locator('.agent-choice')).toHaveCount(6)
+  await expect(page.locator('.agent-choice')).toHaveCount(5)
+  await expect(page.getByRole('button', { name: /项目生成智能体/ })).toHaveCount(0)
   await expect(page.getByText('连接在线服务后即可调用智能体')).toBeVisible()
   await page.getByRole('button', { name: /项目规划智能体 PLANNING AGENT/ }).click()
   await expect(page).toHaveURL(/agent=planning/)
@@ -85,17 +85,30 @@ test('规划读取失败可重试，查看者不能确认执行', async ({ page 
   await expect(page.getByRole('button', { name: '确认执行', exact: true })).toHaveCount(0)
 })
 
+test('项目内隐藏生成入口，新建项目页仍可使用生成器', async ({ page }) => {
+  await mockOnline(page)
+  await page.goto('/#/projects/P001/agents?agent=generator')
+  await expect(page.locator('.agent-choice')).toHaveCount(5)
+  await expect(page.locator('#selected-agent-title')).toHaveText('会议智能体')
+  await expect(page.locator('.agent-content #view-project-generator')).toHaveCount(0)
+
+  await page.goto('/#/projects/new')
+  await expect(page.locator('#view-project-generator')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '项目基础信息' })).toBeVisible()
+})
+
 test('五类智能体在当前页加载，保留统一导航且没有运行时异常', async ({ page }, testInfo) => {
   await mockOnline(page)
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.setViewportSize({ width: 1440, height: 1050 })
   await page.goto('/#/projects/P001/agents')
+  await expect(page.locator('.agent-choice')).toHaveCount(5)
+  await expect(page.getByRole('button', { name: /项目生成智能体/ })).toHaveCount(0)
   await expect(page.locator('.agent-content #meeting-refresh')).toBeVisible()
   for (const [name, selector] of [
     ['任务提交智能体 COMMIT AGENT', '.agent-content .submit-agent'],
     ['成员画像智能体 PROFILE AGENT', '.agent-content .profile-agent'],
-    ['项目生成智能体 PROJECT GENERATOR', '.agent-content #view-project-generator'],
     ['项目规划智能体 PLANNING AGENT', '.agent-content .planning-agent-panel']
   ]) {
     await page.getByRole('button', { name, exact: false }).click()
