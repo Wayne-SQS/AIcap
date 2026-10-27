@@ -438,12 +438,16 @@ _RULES = (
     "让系统用回程查询工具查那一轮的 run_id 并答复。只有用户明确说「再建一个/另建一条」"
     "或给出了**新**的任务/负责人/时间时，才重新派发。\n"
     "13. 答复用自然语言：不要出现 week_start / week_end / owner_id / request 这类内部字段名，"
-    "说「第 3 周」「负责人李锐铭」。参数名是给代码看的，不是给用户看的。\n"
+    "说「第 3 周」「负责人李锐铭」。提到人时用 list_members 查到的显示名，"
+    "**不要**写「成员 1」「成员 2」或数字编号。参数名是给代码看的，不是给用户看的。\n"
     "14. 能力边界要准：调整现有任务（改负责人 / 挪周次 / 改优先级）也走 start_plan_draft，"
     "但**没有「修订上一份草案」这条路** —— 用户改主意时就说「我按新参数重新生成一份草案，"
     "旧的那份你可以在工作台取消」，不要给系统做不到的选项。\n"
     "15. 「把某任务分给某人 / 把某人的任务挪一周」指的是**现有任务**：原话没点明是哪一条、"
-    "而该成员名下有多条任务时，先反问是哪一条（或哪些），不要凭空新建一条同名任务。"
+    "而该成员名下有多条任务时，先反问是哪一条（或哪些），不要凭空新建一条同名任务。\n"
+    "16. 「搜一下资料 / 找找文档 / 知识库里有没有…」是**问问题**，不是派活：route 给 null、"
+    "confidence 给高，让系统用只读工具（含 semantic_search 语义检索）去查。"
+    "不许回答「没有搜资料这个能力」，也不许把用户支到别处去找。"
 )
 
 
@@ -486,6 +490,7 @@ def _plan_messages(
     limitations: Sequence[str],
     project_id: str | None = None,
     history: Sequence[dict[str, Any]] | None = None,
+    read_only_tools: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """拼规划用的消息。`limitations` 必须带上（契约 §2.2）：
     不带的话模型会假设平台有它没有的能力，然后按那个假设派活。
@@ -511,6 +516,15 @@ def _plan_messages(
         "",
         _RULES,
     ]
+    # 只读工具**不是路由**，但模型必须知道它们存在：否则「搜一下资料」会被答成
+    # 「我这边没有搜资料这个能力」（2026-10-27 真机实测）。工具名从 /catalog 现取，
+    # 不在这里硬编码 —— 新增只读工具只改 Java。
+    if read_only_tools:
+        system += [
+            "",
+            "只读工具（**不需要路由**：问问题、查资料时系统会在工具循环里自己调用它们）："
+            + "、".join(read_only_tools),
+        ]
     if limitations:
         system += ["", "平台能力边界（必须遵守，不得假设超出范围的能力）："]
         system += [f"- {item}" for item in limitations]
@@ -828,7 +842,12 @@ async def plan(
 
     routes = routes_from_catalog(catalog)
     messages = _plan_messages(
-        utterance, routes, catalog.limitations, project_id=project_id, history=history
+        utterance,
+        routes,
+        catalog.limitations,
+        project_id=project_id,
+        history=history,
+        read_only_tools=[tool.name for tool in catalog.tools if tool.read_only],
     )
     resolved = model if model is not None else ModelClient()
     # `final=True` 要的是**结论**那一发：真实 `ModelClient` 会据此带上

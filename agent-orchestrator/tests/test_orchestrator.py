@@ -552,6 +552,38 @@ def test_plan_prompt_keeps_wording_and_capability_boundaries():
     assert "先反问是哪一条" in system
 
 
+def test_plan_prompt_lists_read_only_tools_so_search_is_not_denied():
+    """「搜一下资料」曾被答成「我这边没有搜资料这个能力」（2026-10-27 真机实测）。
+
+    规划相的 prompt 只列触发型路由，只读工具（含 `semantic_search`）一个都没列 ——
+    模型据此否认自己会检索。修法：把 catalog 里 `read_only=True` 的工具名一并写进
+    prompt，并把「搜资料 = 问问题」写进规则 16。
+    """
+    system = orchestrator._plan_messages(
+        "搜一下和导出功能相关的资料",
+        (),
+        (),
+        read_only_tools=["semantic_search", "list_tasks"],
+    )[0]["content"]
+
+    assert "semantic_search" in system, system
+    assert "不需要路由" in system, system
+    assert "没有搜资料这个能力" in system, "规则 16 要明确禁止这句否认"
+
+
+async def test_plan_tells_the_model_which_read_only_tools_exist():
+    """规划相把 catalog 里的只读工具名真送进 prompt（不是只在单测里拼字符串）。"""
+    platform = _platform_with_meetings()
+    platform.add_read_only_tool("semantic_search")
+    model = ScriptedModel(plan_reply(route=None, confidence=0.9))
+
+    await plan_with_project(platform, model, "搜一下导出功能相关的资料")
+
+    prompt = system_prompt_of(model)
+    assert "semantic_search" in prompt, prompt
+    assert "list_meetings" in prompt, "会议列表工具也应出现在只读清单里"
+
+
 def test_candidates_are_the_routes_available_and_the_chosen_one():
     routes = rule_routes()
 

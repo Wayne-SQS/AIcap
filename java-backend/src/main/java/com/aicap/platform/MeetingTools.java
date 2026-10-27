@@ -184,7 +184,12 @@ public class MeetingTools {
 
     private String keyword(String name, JsonNode arguments) throws AgentError {
         ObjectNode node = objectArgs(name, arguments);
-        if (node.size() != 2 || !node.has("keyword") || !node.has("project_id")) {
+        /* 只校验自己真正用到的那一个参数。原先这里还要求 project_id、且 size()==2，
+           于是 `search_pool` 按**自己的 schema** 传 `{"keyword":"…"}` 永远被判
+           invalid_tool_arguments（schema 里根本没有 project_id）。项目作用域由
+           search_stories 另调 requireProjectContext 负责，不归这里管。
+           2026-10-27 真机实测：主管「搜一下导出资料」时 search_pool 连续两次报参数无效。 */
+        if (!node.has("keyword")) {
             throw new AgentError("invalid_tool_arguments", "模型工具参数无效");
         }
         JsonNode kw = node.path("keyword");
