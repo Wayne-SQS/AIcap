@@ -60,9 +60,9 @@ async function review(item, decision) {
 async function planApproved(item) {
   try {
     const run = await efficiencyAnalysisApi.planApproved(projects.currentProjectId, item.id)
-    await router.push({ name: projects.currentProjectId ? 'project-agents' : 'agents',
+    await router.push({ name: projects.currentProjectId ? 'project-office' : 'office',
       params: projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined,
-      query: { agent: 'planning', runId: run.id } })
+      query: { tab: 'planning', runId: run.id } })
   } catch (e) { reviewNotice.value = e.message || '规划草案创建失败' }
 }
 async function checkProposal(item) {

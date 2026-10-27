@@ -14,9 +14,9 @@ const workspaceViews = [
   { name: 'profiles', label: '成员画像', component: () => import('@/views/ProfilesView.vue') },
   { name: 'uml', label: 'UML 图', component: () => import('@/views/UmlView.vue') },
   { name: 'office', label: 'AI 办公室', component: () => import('@/views/OfficeView.vue') },
-  /* AI 统一调用页:与办公室是同一批能力的两种入口,保留独立路由(不占用 legacyOfficeRedirects
-     里已声明的名字,否则会出现重名路由) */
-  { name: 'agents', label: '智能体调用中心', component: () => import('@/views/AgentsView.vue') },
+  /* 2026-10-27：原「智能体调用中心」(AgentsView) 与 AI 办公室重复 —— 会议/画像/提交/
+     规划四块与办公室右栏的同事工作台是同一批面板，效率分析已归「项目分析中心」。
+     页面已删，路由名留着做重定向（见 `agentsRedirect`），旧书签/审核中心深链不会 404。 */
   { name: 'review', label: '提案审核中心', component: () => import('@/views/ReviewView.vue') },
   { name: 'ai-demo', label: 'AI 对话演示', component: () => import('@/views/AiDemoView.vue') },
   { name: 'project-generator', label: '智能生成项目图', component: () => import('@/views/ProjectGeneratorView.vue') }
@@ -29,6 +29,29 @@ const legacyOfficeRedirects = ['ai', 'meetings', 'submit-agent', 'profile-agent'
 const toOffice = to => String(to.name || '').startsWith('project-')
   ? { name: 'project-office', params: to.params, query: to.query }
   : { name: 'office', query: to.query }
+
+/* `/agents` 是已删除的「智能体调用中心」的旧地址（2026-10-27）。它用 `?agent=` 选面板，
+   所以不能简单并入 toOffice：把 agent 翻成办公室工作台的 `?tab=`（效率分析现在也是
+   工作台的一页）。原 query（runId / analysisId 等）原样保留。 */
+const AGENT_TAB = {
+  meeting: 'meeting',
+  profile: 'profile',
+  submit: 'submit',
+  commit: 'submit',
+  planning: 'planning',
+  efficiency: 'efficiency'
+}
+const agentsRedirect = to => {
+  const query = { ...to.query }
+  const agent = String(query.agent || '')
+  delete query.agent
+  const scoped = String(to.name || '').startsWith('project-')
+  const tab = AGENT_TAB[agent]
+  if (tab) query.tab = tab
+  return scoped
+    ? { name: 'project-office', params: to.params, query }
+    : { name: 'office', query }
+}
 
 const routes = [
   { path: '/', redirect: { name: 'projects' } },
@@ -54,6 +77,15 @@ const routes = [
       meta: { legacyName: name, projectScoped: true }
     },
     { path: `/${name}`, name, redirect: toOffice }
+  ]),
+  ...['agents'].flatMap(name => [
+    {
+      path: `/projects/:projectId/${name}`,
+      name: `project-${name}`,
+      redirect: agentsRedirect,
+      meta: { legacyName: name, projectScoped: true }
+    },
+    { path: `/${name}`, name, redirect: agentsRedirect }
   ])
 ]
 

@@ -114,9 +114,11 @@ async function syncDrawer(query) {
   let kind = ''
   if (query.panel === 'activity') kind = 'activity'
   else if (query.desk === 'ben') kind = 'ben'
-  else if (['meeting', 'profile', 'submit', 'planning'].includes(String(query.tab))) {
+  else if (['meeting', 'profile', 'submit', 'planning', 'efficiency'].includes(String(query.tab))) {
     activeTab.value = String(query.tab)
-    kind = activeTab.value === 'submit' ? 'profile' : activeTab.value
+    kind = activeTab.value === 'submit' ? 'profile'
+      : activeTab.value === 'efficiency' ? 'planning'
+        : activeTab.value
   } else if (meetingKeys.some(key => key in query)) { activeTab.value = 'meeting'; kind = 'meeting' }
   drawerKind.value = kind
   if (kind === 'ben') chatOpened.value = true

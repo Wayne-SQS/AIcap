@@ -149,7 +149,12 @@ watch([queueFilter, queueSource, queueSearch, queueFrom, queueTo], () => {
 
 function openSource(row) {
   if (row.source === 'efficiency') {
-    router.push({ name: projects.currentProjectId ? 'project-agents' : 'agents', params: projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined, query: { agent: 'efficiency', analysisId: row.analysisId } })
+    /* 智能体调用中心已并入 AI 办公室（2026-10-27），效率分析是办公室工作台的一页 */
+    router.push({
+      name: projects.currentProjectId ? 'project-office' : 'office',
+      params: projects.currentProjectId ? { projectId: projects.currentProjectId } : undefined,
+      query: { tab: 'efficiency', analysisId: row.analysisId }
+    })
     return
   }
   const routeName = projects.currentProjectId ? 'project-meetings' : 'meetings'

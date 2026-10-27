@@ -12,6 +12,7 @@ function response(body, meetingId = 'm1') {
   }
 }
 async function setup(page, role = 'admin', failStoryOnce = false) {
+  let storyFailures = failStoryOnce ? 2 : 0
   const posts = [], writes = []
   await page.addInitScript(() => {
     localStorage.setItem('aiguanli_token', 'fixture-token')
@@ -35,8 +36,10 @@ async function setup(page, role = 'admin', failStoryOnce = false) {
     if (path.endsWith('/meetings')) data = [{ id: 'm1', title: '会议一' }, { id: 'm2', title: '会议二' }]
     if (path.endsWith('/stories')) {
       const scoped = new URL(req.url()).searchParams.get('projectId') === 'P001'
-      if (failStoryOnce) {
-        failStoryOnce = false
+      // 办公室/会议页挂载时先由项目级 loadAll 拉一次 /stories，面板自己再拉一次；
+      // 只失败一次会被前一次吃掉，面板拿到的就是成功响应。两处都失败才验得到「重试故事目录」。
+      if (storyFailures > 0) {
+        storyFailures--
         await route.fulfill({ status: 503, json: {} })
         return
       }

@@ -46,6 +46,12 @@
 > **2026-10-18 收敛**：智能协作入口落地为**两处** —— 「AI 办公室」与「提案审核中心」。
 > 下表为本轮收敛后的现行结构；原六入口设计（AI 工作台 / 会议工作区 / 任务提交分析 / 成员画像分析 / 项目规划与图示）由 AI 办公室承接（现行布局为「像素房间 + 右侧抽屉」，见《AI办公室_界面设计说明》），
 > 旧路由 `ai` / `meetings` / `submit-agent` / `profile-agent` / `drawing-agent` 全部重定向进办公室并**透传 params + query**（审核中心深链依赖 query）。
+>
+> **2026-10-27 收口（删除重复入口）**：`views/AgentsView.vue`（「智能体调用中心」）已删除 —— 它承载的会议 / 成员画像 / 提交分析 / 项目规划 / 效率分析五块，与 AI 办公室右栏 `AgentWorkbench` 是同一批业务面板，并存只会让用户不知道该点哪个。处理：
+> 1. `/agents`、`/projects/:id/agents` 保留路由名做**重定向**（`?agent=meeting|profile|submit|planning|efficiency` → 办公室 `?tab=` 同名值），旧书签与审核中心深链不 404；
+> 2. 效率分析并入工作台**第五个 tab**（`AgentWorkbench` 的 `efficiency`，沿用原 `EfficiencyAnalysisPanel` 的确认 / 审核流程）；
+> 3. 侧栏「智能协作」现在是 **AI 办公室 + 提案审核中心** 两项，与 10-18 的收敛口径一致；
+> 4. `frontend/e2e-verify/agent-center.spec.js` 由 `office-workbench.spec.js` 接管（深链重定向 + 规划面板契约 + 只读权限 + 侧栏只剩两项）。
 
 | 入口 | 用户目标 | 内容边界 |
 |---|---|---|

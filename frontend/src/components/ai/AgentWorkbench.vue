@@ -6,6 +6,7 @@ import MeetingView from '@/views/MeetingView.vue'
 import ProfileAgentPanel from '@/components/ai/ProfileAgentPanel.vue'
 import SubmitAgentPanel from '@/components/ai/SubmitAgentPanel.vue'
 import PlanningAgentPanel from '@/components/ai/PlanningAgentPanel.vue'
+import EfficiencyAnalysisPanel from '@/components/ai/EfficiencyAnalysisPanel.vue'
 
 /* 办公室右侧:三位同事的工作台 tab。
    - 译:整体复用 MeetingView —— 「返回审核中心」深链、meetingId 定位、
@@ -17,7 +18,10 @@ const tabs = [
   { id: 'meeting', colleague: '译', label: '会议工作区', component: MeetingView },
   { id: 'profile', colleague: '衡', label: '成员画像', component: ProfileAgentPanel },
   { id: 'submit', colleague: '衡', label: '提交分析', component: SubmitAgentPanel },
-  { id: 'planning', colleague: '绘', label: '规划调整', component: PlanningAgentPanel }
+  { id: 'planning', colleague: '绘', label: '规划调整', component: PlanningAgentPanel },
+  /* 2026-10-27：原「智能体调用中心」页的效率分析并入这里 —— 那页与办公室承载的是
+     同一批面板，留两个入口只会让用户不知道该点哪个。 */
+  { id: 'efficiency', colleague: '绘', label: '效率分析', component: EfficiencyAnalysisPanel }
 ]
 const route = useRoute()
 const router = useRouter()

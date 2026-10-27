@@ -30,7 +30,7 @@ test('anonymous overlapping turns and speaker hint are displayed without identit
   await expect(panel(page)).toContainText('检测 2 位匿名说话人 · 2 个时间段')
   await expect(panel(page)).toContainText('0.10–1.70 秒 · SPK1')
   await expect(panel(page)).toContainText('1.40–2.90 秒 · SPK2')
-  await expect(panel(page)).toContainText('不代表成员身份')
+  await expect(panel(page)).toContainText('说话人标签仅用于这段音频')
   expect(requests).toEqual([{audio_id:'a1',num_speakers:2}])
 })
 test('malformed identity and scope are rejected',async({page})=>{

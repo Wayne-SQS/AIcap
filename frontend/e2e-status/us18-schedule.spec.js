@@ -29,8 +29,8 @@ test('US18 suggests an evidence based schedule and waits for confirmation', asyn
     if (path.endsWith('/schedule-1/confirm')) confirmations++
     await route.fulfill({ json: body })
   })
-  await page.goto('/#/projects/P001/agents?agent=planning')
-  const panel = page.getByLabel('项目规划智能体操作区')
+  await page.goto('/#/projects/P001/office?tab=planning')
+  const panel = page.locator('.planning-agent-panel')
   await panel.getByRole('button', { name: '智能排期建议（US18）' }).click()
   await expect(panel).toContainText('根据依赖和每周容量建议调整 T1')
   await expect(panel.getByRole('button', { name: '确认执行' })).toBeVisible()

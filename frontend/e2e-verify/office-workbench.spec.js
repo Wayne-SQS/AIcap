@@ -1,3 +1,10 @@
+/* 旧「智能体调用中心」页已删除（2026-10-27，与 AI 办公室重复）。
+   这里接管原来 agent-center.spec.js 里仍有价值的契约：
+   1. `/agents` 深链重定向进办公室对应工作台 tab（效率分析也是工作台一页）；
+   2. 规划面板的生成/确认契约（原来靠调用中心承载，现在挂在办公室右栏）；
+   3. 只读角色不能确认执行、读取失败可重试；
+   4. 项目隔离：另一个项目打开同一 tab 是空的；
+   5. 侧栏「智能协作」只剩 AI 办公室 + 提案审核中心两处入口。 */
 import { test, expect } from '@playwright/test'
 
 async function mockOnline(page, role = 'member') {
@@ -13,41 +20,39 @@ async function mockOnline(page, role = 'member') {
     if (url.pathname === '/api/auth/me') body = { id: 3, display_name: '测试用户', role, can_write: role !== 'viewer' }
     if (url.pathname === '/api/projects') body = ['P001', 'P002'].map(id => ({ id, name: `项目 ${id}`, can_write: role !== 'viewer', can_manage: false }))
     if (url.pathname === '/api/dashboard') body = { total: 0, done: 0, doing: 0, todo: 0, percent: 0, by_sprint: [] }
+    if (url.pathname.endsWith('/summary')) body = { pending: 0, meetings: [], executions: [] }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
 }
 
-test('调用中心离线不发起智能体请求，切换选择可刷新恢复', async ({ page }) => {
-  const agentRequests = []
-  await page.route('**/api/**', route => {
-    if (!new URL(route.request().url()).pathname.startsWith('/api/')) return route.continue()
-    if (route.request().url().includes('agent')) agentRequests.push(route.request().url())
-    return route.fulfill({ status: 503, body: '{}' })
-  })
-  await page.goto('/#/agents')
-  await expect(page.getByRole('heading', { name: '智能体调用中心' })).toBeVisible()
-  await expect(page.locator('.agent-choice')).toHaveCount(5)
-  await expect(page.getByRole('button', { name: /项目生成智能体/ })).toHaveCount(0)
-  await expect(page.getByText('连接在线服务后即可调用智能体')).toBeVisible()
-  await page.getByRole('button', { name: /项目规划智能体 PLANNING AGENT/ }).click()
-  await expect(page).toHaveURL(/agent=planning/)
-  await page.reload()
-  await expect(page.locator('#selected-agent-title')).toHaveText('项目规划智能体')
-  await expect(page.getByRole('button', { name: '登录在线服务' })).toBeVisible()
-  expect(agentRequests).toEqual([])
-})
-
-test('调用中心真实接口契约：规划生成、结果展示、确认执行及项目隔离', async ({ page }) => {
-  await mockOnline(page)
-  const writes = []
+async function mockPlanning(page, onWrite = () => {}) {
   const run = { id: 'run-1', status: 'waiting_confirmation', request_text: '查看任务排期', events: [], result: { summary: '规划草案已生成', answer: '调整排期后可按时交付。', actions: [], warnings: [] } }
   await page.route('**/api/planning-agent/**', async route => {
     const request = route.request()
-    if (request.method() === 'POST') writes.push({ url: request.url(), body: request.postDataJSON() })
+    if (request.method() === 'POST') onWrite(request)
     const confirmed = new URL(request.url()).pathname.endsWith('/confirm')
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...run, status: confirmed ? 'completed' : run.status }) })
   })
+}
+
+test('旧调用中心深链重定向到办公室工作台，效率分析也是工作台一页', async ({ page }) => {
+  await mockOnline(page)
+
   await page.goto('/#/projects/P001/agents?agent=planning')
+  await expect(page).toHaveURL(/projects\/P001\/office\?(.*&)?tab=planning/)
+  await expect(page.getByRole('textbox', { name: '画图智能体请求' })).toBeVisible()
+
+  await page.goto('/#/projects/P001/agents?agent=efficiency&analysisId=a-1')
+  await expect(page).toHaveURL(/projects\/P001\/office\?(.*&)?tab=efficiency/)
+  await expect(page.locator('.efficiency-analysis-panel')).toBeVisible()
+})
+
+test('规划面板契约：生成与确认执行（在办公室右栏）', async ({ page }) => {
+  await mockOnline(page)
+  const writes = []
+  await mockPlanning(page, request => writes.push({ url: request.url(), body: request.postDataJSON() }))
+
+  await page.goto('/#/projects/P001/office?tab=planning')
   await expect(page.getByRole('button', { name: '生成规划' })).toBeDisabled()
   await page.getByRole('textbox', { name: '画图智能体请求' }).fill('查看任务排期')
   await page.getByRole('button', { name: '生成规划' }).click()
@@ -58,10 +63,20 @@ test('调用中心真实接口契约：规划生成、结果展示、确认执�
   await expect(page.locator('.planning-run-head')).toContainText('已完成')
   expect(writes).toHaveLength(2)
   expect(writes[1].url).toContain('/confirm?projectId=P001')
-  await page.getByRole('button', { name: /当前项目/ }).click()
-  await page.getByRole('option', { name: '项目 P002' }).click()
-  await expect(page).toHaveURL(/projects\/P002\/agents/)
-  await page.getByRole('button', { name: /项目规划智能体 PLANNING AGENT/ }).click()
+})
+
+test('项目隔离：换到另一个项目同一 tab 不保留上一项目的草案', async ({ page }) => {
+  await mockOnline(page)
+  await mockPlanning(page)
+
+  await page.goto('/#/projects/P001/office?tab=planning')
+  await page.getByRole('textbox', { name: '画图智能体请求' }).fill('查看任务排期')
+  await page.getByRole('button', { name: '生成规划' }).click()
+  await expect(page.getByText('规划草案已生成')).toBeVisible()
+
+  // 抽屉是模态（挡住侧栏切换项目），先关掉再按 URL 进 P002
+  await page.keyboard.press('Escape')
+  await page.goto('/#/projects/P002/office?tab=planning')
   await expect(page.getByRole('textbox', { name: '画图智能体请求' })).toBeEmpty()
   await expect(page.getByText('规划草案已生成')).toHaveCount(0)
 })
@@ -75,7 +90,7 @@ test('规划读取失败可重试，查看者不能确认执行', async ({ page 
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'run-2', status: 'waiting_confirmation', events: [], result: { summary: '只读规划', actions: [] } }) })
   })
-  await page.goto('/#/projects/P001/agents?agent=planning')
+  await page.goto('/#/projects/P001/office?tab=planning')
   await page.getByRole('textbox', { name: '画图智能体请求' }).fill('查看任务')
   await page.getByRole('button', { name: '生成规划' }).click()
   await expect(page.getByRole('alert')).toContainText('模型服务暂不可用')
@@ -85,36 +100,11 @@ test('规划读取失败可重试，查看者不能确认执行', async ({ page 
   await expect(page.getByRole('button', { name: '确认执行', exact: true })).toHaveCount(0)
 })
 
-test('项目内隐藏生成入口，新建项目页仍可使用生成器', async ({ page }) => {
+test('侧栏智能协作只剩 AI 办公室与提案审核中心', async ({ page }) => {
   await mockOnline(page)
-  await page.goto('/#/projects/P001/agents?agent=generator')
-  await expect(page.locator('.agent-choice')).toHaveCount(5)
-  await expect(page.locator('#selected-agent-title')).toHaveText('会议智能体')
-  await expect(page.locator('.agent-content #view-project-generator')).toHaveCount(0)
-
-  await page.goto('/#/projects/new')
-  await expect(page.locator('#view-project-generator')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '项目基础信息' })).toBeVisible()
-})
-
-test('五类智能体在当前页加载，保留统一导航且没有运行时异常', async ({ page }, testInfo) => {
-  await mockOnline(page)
-  const errors = []
-  page.on('pageerror', error => errors.push(error.message))
-  await page.setViewportSize({ width: 1440, height: 1050 })
-  await page.goto('/#/projects/P001/agents')
-  await expect(page.locator('.agent-choice')).toHaveCount(5)
-  await expect(page.getByRole('button', { name: /项目生成智能体/ })).toHaveCount(0)
-  await expect(page.locator('.agent-content #meeting-refresh')).toBeVisible()
-  for (const [name, selector] of [
-    ['任务提交智能体 COMMIT AGENT', '.agent-content .submit-agent'],
-    ['成员画像智能体 PROFILE AGENT', '.agent-content .profile-agent'],
-    ['项目规划智能体 PLANNING AGENT', '.agent-content .planning-agent-panel']
-  ]) {
-    await page.getByRole('button', { name, exact: false }).click()
-    await expect(page.locator(selector)).toBeVisible()
-    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
-  }
-  await page.screenshot({ path: testInfo.outputPath('agent-center.png'), fullPage: true })
-  expect(errors).toEqual([])
+  await page.goto('/#/projects/P001/office')
+  await expect(page.getByRole('heading', { name: 'AI 办公室' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'AI 办公室' })).toHaveCount(1)
+  await expect(page.getByRole('link', { name: '提案审核中心' })).toHaveCount(1)
+  await expect(page.getByRole('link', { name: '智能体调用中心' })).toHaveCount(0)
 })
