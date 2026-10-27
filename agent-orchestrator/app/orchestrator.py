@@ -219,6 +219,25 @@ def _normalize_title(text: str) -> str:
     return re.sub(r"[\s《》「」【】\"'“”‘’·:：,，。.!！?？\-—_/\\]+", "", text or "").lower()
 
 
+def _meetings_of_type(utterance: str, meetings: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """原话点名了会议类型时，只在**该类型**的会议里挑。
+
+    真机实测（2026-10-27）：项目里最新一条是「需求梳理会」，用户说「分析最近一次站会」，
+    旧实现按「最近」直接取了那条梳理会 —— 分析跑完才在答复里补一句"其实这场不是站会"，
+    等于先干了错的活再道歉。`list_meetings` 只回 `id/title/created_at`（无 type 字段），
+    所以类型只能从标题里按同一套关键词认。
+    """
+    wire = infer_meeting_type(utterance)
+    if wire is None:
+        return []
+    words = [word for word, mapped in _MEETING_TYPE_WORDS if mapped == wire]
+    return [
+        meeting
+        for meeting in meetings
+        if any(word in str(meeting.get("title") or "") for word in words)
+    ]
+
+
 def _match_meeting(utterance: str, meetings: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
     """在**已按时间倒序**的会议列表里挑一场；挑不出来回 `None`。"""
     if not meetings:
@@ -232,6 +251,9 @@ def _match_meeting(utterance: str, meetings: Sequence[dict[str, Any]]) -> dict[s
     ]
     if named:
         return named[0]
+    typed = _meetings_of_type(utterance, meetings)
+    if typed:
+        return typed[0]
     if any(word in (utterance or "") for word in _RECENT_WORDS):
         return meetings[0]
     if len(meetings) == 1:
@@ -405,8 +427,41 @@ _RULES = (
     "10. 新增任务（「加一个/建一个任务」）是 start_plan_draft 的能力，**不要**回答"
     "「没有新增任务这个能力」。任务的负责人与执行周是必填项：原话里已经给出（点名成员、"
     "说了第几周或 Sprint N）就直接派；缺负责人或时间时**只问一次**（把缺的项合成一句，"
-    "别一轮一轮问），拿到答复后再派。负责人用成员姓名表述即可，画图智能体会按真实成员表解析。"
+    "别一轮一轮问），拿到答复后再派。负责人用成员姓名表述即可，画图智能体会按真实成员表解析。\n"
+    "11. 若上文包含本会话此前的轮次，用户这句话很可能是在回答你上一轮的反问：把回答里的"
+    "信息并进那一轮同一个动作的 args（补齐缺的字段），不要当成全新请求，也不要重复追问"
+    "已经回答过的信息；只有用户明显换话题时才丢弃上文。\n"
+    "12. 若上文（纪要里的 [已派活: ...]）显示你已经为**同一个动作**派过活，而用户这句话"
+    "只是重复/确认已经给过的信息、没有新增内容，**不要再派一次**：直接确认上一轮的 run_id"
+    "与状态即可。例如上一轮已派「写实验报告 / 负责人李锐铭 / 第 5 周」，用户接着说"
+    "「负责人就是李锐铭」——这是确认，不是新请求：route 给 null、confidence 给高，"
+    "让系统用回程查询工具查那一轮的 run_id 并答复。只有用户明确说「再建一个/另建一条」"
+    "或给出了**新**的任务/负责人/时间时，才重新派发。\n"
+    "13. 答复用自然语言：不要出现 week_start / week_end / owner_id / request 这类内部字段名，"
+    "说「第 3 周」「负责人李锐铭」。参数名是给代码看的，不是给用户看的。\n"
+    "14. 能力边界要准：调整现有任务（改负责人 / 挪周次 / 改优先级）也走 start_plan_draft，"
+    "但**没有「修订上一份草案」这条路** —— 用户改主意时就说「我按新参数重新生成一份草案，"
+    "旧的那份你可以在工作台取消」，不要给系统做不到的选项。\n"
+    "15. 「把某任务分给某人 / 把某人的任务挪一周」指的是**现有任务**：原话没点明是哪一条、"
+    "而该成员名下有多条任务时，先反问是哪一条（或哪些），不要凭空新建一条同名任务。"
 )
+
+
+def _route_label(route: Route) -> str:
+    """路由的**短**中文名，只用于反问的兜底选项。
+
+    别拿 `route.description` 当按钮文案：真机实测里三个按钮各塞进 200 字工具描述，
+    对话框直接被撑爆、用户也无从选择。认不出来的路由退回工具名 —— 宁可漏译，不瞎猜。
+    """
+    return _SHORT_ROUTE.get(route.name, route.name)
+
+
+# 触发型工具 → 短名。新增触发型工具忘了登记时退回工具名（`_route_label`），不会崩。
+_SHORT_ROUTE = {
+    "start_plan_draft": "规划草案（新增/调整任务）",
+    "start_meeting_analysis": "会议分析",
+    "start_profile_analysis": "成员画像分析",
+}
 
 
 def _route_lines(routes: Sequence[Route]) -> str:
@@ -430,13 +485,20 @@ def _plan_messages(
     routes: Sequence[Route],
     limitations: Sequence[str],
     project_id: str | None = None,
+    history: Sequence[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """拼规划用的两条消息。`limitations` 必须带上（契约 §2.2）：
+    """拼规划用的消息。`limitations` 必须带上（契约 §2.2）：
     不带的话模型会假设平台有它没有的能力，然后按那个假设派活。
 
     `project_id` 同理：多项目之后触发型工具的入参普遍要求它，不告诉模型它就只能猜
     （实测：读查询猜中过 P001，而派活那枚漏传 `project_id` → 平台以
-    `invalid_arguments` 拒收，路由对、活派不出去）。"""
+    `invalid_arguments` 拒收，路由对、活派不出去）。
+
+    `history` 是**本会话此前轮次**的 user/assistant 对（2026-10-27 补）：规划相原先只
+    看当前这一句，于是「先反问、再补一句」这条最常用的路径每轮都从零开始 —— 真机实测
+    「帮我给李锐铭加个任务」→ 问周次；答「第 5 周，写实验报告」→ 又问负责人；
+    答「负责人就是李锐铭」→ 干脆问「想执行哪个动作」。把上文给它，模型才能把回答并进
+    同一动作的 args。**只用于拼请求，不进 `Plan`、不进检查点**（检查点只存循环状态）。"""
     system = [
         _ROLE,
         "",
@@ -460,6 +522,10 @@ def _plan_messages(
         ]
     return [
         {"role": "system", "content": "\n".join(system)},
+        # 历史纪要夹在 system 与当前 user 之间，形状与工具循环完全一致
+        # （`loop._history_messages` 的产出直接复用）：模型不会把"历史"当成 system 指令，
+        # 但能像读普通对话一样把上一轮的反问与回答接起来。
+        *(history or ()),
         {"role": "user", "content": utterance},
     ]
 
@@ -686,7 +752,7 @@ def _ask(
     if not question:
         question = _fallback_question(route=route, missing=missing, routes=routes)
     if not options:
-        options = [item.description or item.name for item in routes[:4]]
+        options = [_route_label(item) for item in routes[:4]]
 
     # 模型的原话是"为什么这么选"，系统这一句是"为什么改成问" —— 两句都留着，
     # 否则 S7 复盘时只看到一次莫名的反问，看不出是模型想派还是参数不全。
@@ -729,6 +795,7 @@ async def plan(
     model: ModelProtocol | None = None,
     catalog: Catalog | None = None,
     client: JavaClient | None = None,
+    history: Sequence[dict[str, Any]] | None = None,
 ) -> Plan:
     """把一句自然语言路由成 `Plan`（契约 §5.4）。
 
@@ -746,6 +813,9 @@ async def plan(
     一处**增补**：调用方（`main` 的规划相）同一个 run 里只拉一次清单，把已经拿到的那份
     传进来，就省掉一次重复往返。
 
+    `history` 是本会话此前轮次（`loop.plan_history_messages` 现拼的 user/assistant 对）。
+    省略即无上文，行为与旧版逐字一致 —— 老调用方与老测试不受影响。
+
     失败一律是 `ModelError` / `PlatformError`（不抛裸异常），且**没有任何"兜底路由"**：
     没配模型密钥就是 `not_configured` 如实上报，绝不用关键词硬凑一个路由或 confidence
     去骗过阈值（那正是本仓最反感的静默降级）。**没有任何工具可派生的诉求一律走反问** ——
@@ -757,7 +827,9 @@ async def plan(
         catalog = await client.catalog(user_jwt)
 
     routes = routes_from_catalog(catalog)
-    messages = _plan_messages(utterance, routes, catalog.limitations, project_id=project_id)
+    messages = _plan_messages(
+        utterance, routes, catalog.limitations, project_id=project_id, history=history
+    )
     resolved = model if model is not None else ModelClient()
     # `final=True` 要的是**结论**那一发：真实 `ModelClient` 会据此带上
     # `response_format=json_object` 并去掉 tools（见 model_client.complete）。

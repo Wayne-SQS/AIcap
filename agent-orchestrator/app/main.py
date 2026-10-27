@@ -213,8 +213,15 @@ async def _plan_phase(
     try:
         # 清单在同一个 run 里只拉一次：plan() 用它派生路由，本层用它拼留痕的 candidates。
         catalog = await client.catalog(jwt)
+        # 规划相也读会话纪要（2026-10-27）：不读的话，「先反问、再补一句」这条最常用的
+        # 路径每轮都从零开始 —— 真机实测：第 2 轮忘掉第 1 轮给的负责人、第 3 轮又问
+        # 「想执行哪个动作」。读失败降级空纪要（`_history_messages` 已兜住 PlatformError），
+        # 记忆是增强，不能反过来打断对话。
+        history = await loop_module.plan_history_messages(
+            client=client, jwt=jwt, session_id=session_id, current_run_id=run_id
+        )
         decision = await orchestrator.plan(utterance, jwt, model=model, catalog=catalog,
-                                           project_id=project_id, client=client)
+                                           project_id=project_id, client=client, history=history)
     except ModelError as error:
         # 没配密钥（`not_configured`）、模型不可达、返回的不是合法 JSON —— 全部如实上报。
         # **没有任何兜底路由**：这里绝不会"猜一个 route 让它继续跑"。

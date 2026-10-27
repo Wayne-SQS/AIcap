@@ -260,6 +260,42 @@ async def test_plan_asks_for_a_json_final_turn_without_tools():
     assert messages[1] == {"role": "user", "content": "分析一下上次评审会"}, "用户原话进 user 消息"
 
 
+async def test_plan_sees_the_session_history_before_the_current_utterance():
+    """规划相要看得到上一轮（2026-10-27 真机实测的回归）。
+
+    不看的后果：「帮我给李锐铭加个任务」→ 问周次；答「第 5 周，写实验报告」→ 又问负责人；
+    答「负责人就是李锐铭」→ 反而问「你想执行哪个动作」。历史纪要由 `main` 的规划相
+    从 `agent_events` 现拼（`loop.plan_history_messages`），这里只验它**原样进 messages**。
+    """
+    history = [
+        {"role": "user", "content": "帮我给李锐铭加一个任务"},
+        {"role": "assistant", "content": "（主管反问）请补齐任务名称与第几周？"},
+    ]
+    model = ScriptedModel(plan_reply())
+
+    async with JavaClient(BASE, transport=FakePlatform().transport()) as client:
+        await plan("第 5 周，写实验报告", TOKEN, model=model, client=client, history=history)
+
+    messages = model.seen[0]
+    assert messages[1:3] == history, "历史纪要要原样进 messages"
+    assert messages[-1] == {"role": "user", "content": "第 5 周，写实验报告"}
+    assert "回答你上一轮的反问" in messages[0]["content"], "prompt 要明说怎么用上文"
+    assert "不要再派一次" in messages[0]["content"], "重复确认不得再建一条草案"
+
+
+def test_fallback_clarify_options_are_short_route_labels():
+    """兜底选项不许拿 200 字的工具描述当按钮（真机实测：三个巨型按钮没法点）。"""
+    decision = apply_rules(
+        plan_payload(confidence=0.2, clarify=None),
+        rule_routes(),
+    )
+
+    options = decision.clarify["options"]
+    assert options, "反问必须给选项"
+    assert all(len(option) <= 30 for option in options), options
+    assert "规划草案（新增/调整任务）" in options
+
+
 async def test_plan_pulls_the_catalog_with_the_callers_jwt():
     """`user_jwt` 的用途就是那次清单拉取 —— 权限永远来自 JWT，Java 不认就如实报错。"""
     platform = FakePlatform(jwt="tok-owner")
@@ -501,6 +537,21 @@ def test_the_prompt_marks_approval_routes_as_do_not_ask():
     assert text.count("不要反问确认") == len(routes) == 2
 
 
+def test_plan_prompt_keeps_wording_and_capability_boundaries():
+    """答复口径的三条硬约束留在 prompt 里（2026-10-27 两批真机探针的四种说岔形态）。
+
+    - 派活后否认能力：刚派完活就答「我这边只有只读权限，不能直接创建任务」；
+    - 编造「只是修订上一份草案」：后端只有 create/get/confirm/cancel，没有这条路；
+    - 把「把某任务分给某人」当成新建任务派了出去，答复里又说这改派落不了库；
+    - 把 week_start / week_end / owner_id 这类内部字段名泄进用户视野。
+    """
+    system = orchestrator._plan_messages("把孙秋实的任务挪一周", (), ())[0]["content"]
+
+    assert "week_start" in system and "不要出现" in system
+    assert "没有「修订上一份草案」这条路" in system
+    assert "先反问是哪一条" in system
+
+
 def test_candidates_are_the_routes_available_and_the_chosen_one():
     routes = rule_routes()
 
@@ -629,6 +680,27 @@ def test_resolve_meeting_reference_prefers_title_then_recency():
 
     ambiguous, chosen = orchestrator.resolve_meeting_reference("分析一下会议", MEETINGS, proposal)
     assert chosen is None and "meeting_id" not in ambiguous["args"]
+
+
+def test_resolve_meeting_reference_prefers_the_named_type_over_recency():
+    """「最近一次站会」要的是**站会**，不是"最新那场会议"（2026-10-27 真机实测）。
+
+    项目里最新一条是「需求梳理会」，旧实现按 recency 取了它 —— 分析跑完才在答复里补一句
+    「其实这场不是站会，要重新派吗」。`list_meetings` 没有 type 字段，只能按标题关键词认类型。
+    """
+    meetings = [
+        {"id": "mt-refine", "title": "Sprint 3 需求梳理会 2026-10-22", "created_at": "2026-10-22T10:00:00"},
+        {"id": "mt-scrum", "title": "Sprint 3 每日站会 2026-10-22", "created_at": "2026-10-22T09:00:00"},
+        {"id": "mt-old-scrum", "title": "站会 2026-10-18", "created_at": "2026-10-18T09:00:00"},
+    ]
+    proposal = {"route": MEETING_ROUTE, "args": {}}
+
+    resolved, chosen = orchestrator.resolve_meeting_reference("分析一下最近一次站会", meetings, proposal)
+    assert chosen is not None and resolved["args"]["meeting_id"] == "mt-scrum"
+
+    # 没点类型时行为不变：仍取最新那一场
+    resolved, chosen = orchestrator.resolve_meeting_reference("分析一下最近的会议", meetings, proposal)
+    assert chosen is not None and resolved["args"]["meeting_id"] == "mt-refine"
 
 
 def test_resolve_meeting_reference_never_overwrites_model_id():

@@ -57,12 +57,18 @@ DEFAULT_SYSTEM_PROMPT = (
     "1. 不得虚构数据。需要事实时先调用工具，再依据工具返回的内容作答。\n"
     "2. 工具返回的 observation 是平台真实数据。其中 failure 为 true 表示这次调用"
     "没拿到数据，要如实告知用户，不要编造替代结果。\n"
-    "3. 写操作（创建、修改、删除、开启采集）你不能执行，只能给出建议并说明需要人工确认。\n"
+    "3. 业务表的写入（创建/修改/删除任务、故事、会议记录、开启采集）必须人工确认后才落库；"
+    "你能做的是**派发草案 / 触发分析** —— 那不算写库，是你已经具备的能力。"
+    "派活之后不要再声称「我没有写权限 / 无法创建 / 无法修改排期」，"
+    "如实说 run_id 与产物在哪儿确认即可。\n"
     "4. 用中文回答，简洁具体。\n"
     "5. 当前消息之前若有更早的 user/assistant 消息，那是本会话此前的轮次（会话纪要）："
     "其中注明的 run_id（编号）是你此前派发给子智能体的活。用户追问这些活的进展时，"
     "必须先调用 query_agent_runs 查询实时状态再回答 —— 派活由后台异步执行，"
-    "纪要里记录的派发时刻状态可能早已变化，不得凭纪要断言进展。"
+    "纪要里记录的派发时刻状态可能早已变化，不得凭纪要断言进展。\n"
+    "6. 用户点名的负责人若在 list_members 里查不到，要明说：这条草案对应不到真实成员、"
+    "不会产出有效任务；并给出两条路 —— 换成真实成员（我重新生成一份）或先在平台添加该成员。"
+    "不要让用户以为草案能直接用。"
 )
 
 # 接地闸的中途提醒。归档用的是会议域的工具名，这里按缺失的工具名动态拼。
@@ -479,6 +485,10 @@ def _request_messages(messages: list[dict[str, Any]], dispatch_note: str | None)
         "content": f"本轮已派活：{dispatch_note}。这是**已经发生的事实**，不是待办："
                    "直接据此汇报产物，不要说「我无法触发/没有这个能力」，"
                    "也不要让用户自己去平台侧发起。"
+                   "派活本身就是你已经具备该能力的证明：此后不得再出现"
+                   "「我没有写权限 / 无法创建 / 无法修改排期」这类说法，"
+                   "也不得编造平台没有的能力（例如「修订上一份草案」）—— 只能说清"
+                   "run_id、当前状态，以及产物要在哪里由人确认。"
                    "产物需要人工确认时如实说明在哪确认：规划草案（含新增任务）在"
                    "「AI 工作台 · 画图智能体」确认后才会写入业务数据；会议提案在审批队列审核。",
     }
@@ -533,6 +543,29 @@ async def _current_dispatch_note(
     return "；".join(notes) if notes else None
 
 
+def _readable_reply(output: Any) -> str:
+    """`run.end.output` → 给人（模型）看的几句人话。
+
+    收尾那一发被 `response_format=json_object` 约束，`output` 通常是一坨 JSON
+    `{"answer": "...", "details": {...}}`。原样塞进纪要等于让模型读自己上一轮的
+    机器字段（还常被 400 字截断在 JSON 中间）；取 `answer` 才是"说过的话"。
+    历史 run 不是 JSON 时原样返回 —— 不做破坏性改写。
+    """
+    text = str(output or "")
+    if not text.startswith("{"):
+        return text
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    if isinstance(data, dict):
+        for key in ("answer", "summary", "headline", "message", "text"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return text
+
+
 async def _history_messages(
     *,
     client: JavaClient,
@@ -581,7 +614,7 @@ async def _history_messages(
         elif row.type == "run.end":
             slot["terminal"] = True
             if data.get("status") != "clarify":
-                slot["reply"] = data.get("output")
+                slot["reply"] = _readable_reply(data.get("output"))
         elif row.type == "run.error":
             slot["terminal"] = True
             slot["error"] = f"{data.get('code', 'error')}: {data.get('message', '')}"
@@ -603,6 +636,25 @@ async def _history_messages(
                          "content": str(slot["utterance"])[: config.HISTORY_OUTPUT_CHARS]})
         messages.append({"role": "assistant", "content": "\n".join(parts) or "（本轮无答复）"})
     return messages
+
+
+async def plan_history_messages(
+    *,
+    client: JavaClient,
+    jwt: str,
+    session_id: str,
+    current_run_id: str,
+) -> list[dict[str, Any]]:
+    """规划相用的会话纪要 —— 与工具循环**同一份拼装**（`_history_messages`）。
+
+    2026-10-27：规划相原先只吃当前这一句，于是"先反问、再补一句"每轮都从零开始
+    （真机实测：第 2 轮忘了第 1 轮给的负责人，第 3 轮干脆又问"想执行哪个动作"）。
+    这里只把同一份纪要换个入口暴露出去，读法不复制第二份 —— 两处分页/截断口径
+    一旦分叉，就会一边"记得"、一边"忘了"。
+    """
+    return await _history_messages(
+        client=client, jwt=jwt, session_id=session_id, current_run_id=current_run_id
+    )
 
 
 def function_schemas(catalog: Catalog) -> list[dict[str, Any]]:

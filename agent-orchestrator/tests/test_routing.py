@@ -238,6 +238,49 @@ async def test_clarify_turn_asks_writes_the_sample_and_never_dispatches():
     assert row["route"] is None and row["session_id"] == session_id
 
 
+def _finished(platform: FakePlatform, run_id: str) -> bool:
+    return any(
+        event["run_id"] == run_id and event["type"] in ("run.end", "run.error")
+        for event in platform.events
+    )
+
+
+async def test_second_turn_plan_gets_the_previous_clarify_question():
+    """同会话第二轮：规划相要看到上一轮的反问，「回答反问」才不至于从零开始。
+
+    2026-10-27 真机实测的回归：第 2 轮补「第 5 周，写实验报告」时又问负责人（第 1 轮
+    已经给过李锐铭），第 3 轮补「负责人就是李锐铭」时反而问「你想执行哪个动作」。
+    这里钉住的是「历史纪要真的进了规划那一发模型请求」。
+    """
+    platform = FakePlatform()
+    model = ScriptedModel(
+        clarify_plan(question="请补齐任务名称与第几周？"),
+        clarify_plan(question="还缺负责人，请补充"),
+    )
+    app = _app(platform, model)
+    async with _client(app) as client:
+        first = await client.post(
+            "/chat", json={"utterance": "帮我给李锐铭加一个任务"}, headers=AUTH
+        )
+        assert first.status_code == 200, first.text
+        session_id = first.json()["session_id"]
+        assert await _wait_for(lambda: _finished(platform, first.json()["run_id"])), "第一轮没有终局"
+
+        second = await client.post(
+            "/chat",
+            json={"utterance": "第 5 周，写实验报告", "session_id": session_id},
+            headers=AUTH,
+        )
+        assert second.status_code == 200, second.text
+        assert await _wait_for(lambda: _finished(platform, second.json()["run_id"])), "第二轮没有终局"
+
+    # 第一轮是反问、不进循环 → 只调一次模型；第二轮规划那一发是 seen[1]
+    plan_messages = model.seen[1]
+    assert plan_messages[1] == {"role": "user", "content": "帮我给李锐铭加一个任务"}
+    assert "（主管反问）请补齐任务名称与第几周？" in plan_messages[2]["content"]
+    assert plan_messages[-1] == {"role": "user", "content": "第 5 周，写实验报告"}
+
+
 async def test_a_question_turn_routes_then_lets_the_loop_answer_it():
     """问问题的回合：`intent.routed{route: null}` → 循环自己调只读工具作答。
 

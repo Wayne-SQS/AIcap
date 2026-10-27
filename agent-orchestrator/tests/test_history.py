@@ -267,3 +267,57 @@ async def test_current_turn_dispatch_is_visible_to_the_model_but_not_in_the_chec
     blob = json.dumps(platform.checkpoint_state(run_id), ensure_ascii=False)
     assert "start_meeting_analysis" not in blob, "规划相的事实不得进检查点"
     assert analysis_id not in blob, "派活回执不得进检查点"
+
+async def test_history_turns_json_output_into_the_readable_answer():
+    """纪要里的「上一轮答复」取 answer 人话，不把裸 JSON 塞回模型（2026-10-27）。
+
+    收尾那一发是 `response_format=json_object`，`run.end.output` 因此是一坨 JSON；
+    原样回灌等于让模型读自己上一轮的机器字段（还常在 400 字处截断在 JSON 中间）。
+    """
+    platform = FakePlatform()
+    session_id = platform.make_session()
+    platform.add_event(session_id, "run-json", "session.start", {"utterance": "现在有几个任务？"})
+    platform.add_event(
+        session_id,
+        "run-json",
+        "run.end",
+        {
+            "status": "ok",
+            "output": json.dumps(
+                {"answer": "16 个任务", "details": {"total": 16}}, ensure_ascii=False
+            ),
+        },
+    )
+
+    model = RecordingModel()
+    await _run_turn(platform, session_id, "那 T01 呢", model)
+
+    history = _history_of(model.first_messages)
+    assert history[0]["content"] == "现在有几个任务？"
+    assert history[1]["content"] == "16 个任务"
+
+
+async def test_dispatch_note_forbids_denying_the_capability_it_just_used():
+    """派活注记必须禁止「我没有写权限 / 无法修改排期」这类自相矛盾的说法。
+
+    2026-10-27 两批真机探针实测（派活成功之后）：
+    - 「另外，我这边只有只读权限，不能直接创建任务」
+    - 「我无法直接修改任务排期，需要你确认要挪哪些任务后由人工在平台任务编辑处调整」
+
+    事件与答复打架，正是用户抱怨"说话没有逻辑"的形态。旧注记只禁了「我无法触发/
+    没有这个能力」这几种措辞，模型换了个马甲继续否认；这里把口径钉成三件事：
+    派活是已具备的能力、不得再否认、也不得编造平台没有的「修订上一份草案」。
+    """
+    messages = loop_module._request_messages(
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "把孙秋实的任务挪一周"}],
+        "start_plan_draft → run_id job-1, 派发时状态 queued",
+    )
+
+    note = messages[1]["content"]
+    assert "没有写权限" in note and "无法创建" in note, note
+    assert "修订上一份草案" in note, "不得编造后端没有的修订能力: " + note
+    assert "已经发生的事实" in note, note
+
+    # 循环的常驻系统提示也要讲同一件事：写库需人工确认，但派发草案本身不算写库
+    assert "派发草案" in loop_module.DEFAULT_SYSTEM_PROMPT
+    assert "我没有写权限" in loop_module.DEFAULT_SYSTEM_PROMPT
