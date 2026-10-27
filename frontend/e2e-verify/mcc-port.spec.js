@@ -189,7 +189,9 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   const heatTitle = await page.locator('#heat .heat-cell').first().getAttribute('title')
   expect(heatTitle).toContain('周容量')
   await expect(page.locator('.load-legend span')).toHaveCount(4)
-  await expect(page.locator('.load-note')).toContainText('计划工时')
+  // 说明句 .load-note 在同窗口的 9768cd1 里被删（各板块标题下的描述整批移除），
+  // 改断言标题仍在 —— 热力图本身与图例在上一行已覆盖
+  await expect(page.locator('#workload-heatmap-title')).toHaveText('周负载热力图')
 
   // 容量与分配:5 张卡,李锐铭 120h 总容量(周容量 15h × 8 周)
   const bw = page.locator('#bandwidth .mcard')
@@ -201,7 +203,10 @@ test('成员任务图:5 名真实成员 + 任务抽屉 + 负载图例 + 活动�
   await expect(grid.locator('.c-cell')).toHaveCount(42)
   await expect(grid.locator('.week-label')).toHaveCount(6)
   await expect(grid.locator('.day-label')).toHaveCount(7)
-  await expect(page.locator('#contrib .contrib-note')).toContainText('真实数据')
+  // 「活动来自真实数据」那句注记同样在 ac741a6「simplify UI copy」里删掉；
+  // 断言板块标题与图例仍在，活动格数量已由上面的 42 格覆盖
+  await expect(page.locator('#activity-heatmap-title')).toHaveText('成员开发活动图')
+  await expect(page.locator('#contrib .contrib-note span').first()).toHaveText('无活动')
 
   console.log('[members] names=' + JSON.stringify(names) + ' drawer任务=' + (await rows.count()) + ' 活动格=42')
 })

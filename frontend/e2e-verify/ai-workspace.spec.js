@@ -18,7 +18,8 @@ test('AI 办公室展示四个工位，打开会议抽屉后标明离线样例',
   await expect(page.getByRole('tab', { name: '成员画像' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '会议工作区' })).toBeVisible()
   await expect(page.getByText('离线演示 · 静态会议样例 · 非真实模型分析')).toBeVisible()
-  await expect(page.getByText('不代表当前录音、真实转写或服务器处理状态')).toBeVisible()
+  // 长免责句在 ac741a6「simplify UI copy」里被删，改为断言演示徽章仍在（口径不变：这是演示样例）
+  await expect(page.locator('.rec .sug-status')).toHaveText('演示数据')
 })
 
 test('AI 办公室离线最近本机建议可继续查看审核演示', async ({ page }) => {
@@ -27,7 +28,7 @@ test('AI 办公室离线最近本机建议可继续查看审核演示', async ({
   if (await offlineChoice.isVisible().catch(() => false)) await offlineChoice.click()
 
   await expect(page.getByRole('heading', { name: 'AI 办公室' })).toBeVisible()
-  await expect(page.getByText('离线演示中的待审建议仅保存在本机')).toBeVisible()
+  await expect(page.getByText('离线演示数据保存在本机')).toBeVisible()
   const resume = page.getByRole('button', { name: '继续查看最近提案' })
   await expect(resume).toBeVisible()
   await resume.click()

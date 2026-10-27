@@ -68,7 +68,7 @@ test('提案队列只读权限：查看者可查看但没有审核写操作', as
 
   await page.goto('/#/review')
   await expect(page.getByRole('heading', { name: '提案审核中心' })).toBeVisible()
-  await expect(page.getByText('当前账号可查看提案记录；审核与执行仅管理员或负责人可以操作。')).toBeVisible()
+  await expect(page.getByText('仅管理员和负责人可审核或执行提案。')).toBeVisible()
   await expect(page.locator('.queue-card').first()).toContainText('需求 #US01')
   await expect(page.getByRole('button', { name: '查看来源分析与处理记录' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '查看来源会议' })).toHaveCount(1)
