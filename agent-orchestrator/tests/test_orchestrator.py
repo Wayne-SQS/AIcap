@@ -98,12 +98,12 @@ async def test_prompt_omits_the_project_line_when_not_given():
     assert "当前项目" not in system_prompt_of(model)
 
 
-def test_catalog_declares_project_id_follows_the_schema_only():
-    """`declares_project_id` 只认 schema 的 properties，不认猜。
+def test_catalog_declares_project_id_for_scoped_tools():
+    """结构化 schema 和画像域的工具都可接收项目上下文。
 
     它决定"能不能给这枚工具兜底注入 project_id"：会议域的 list_members 严格校验未知参数，
     多塞一个就会被判 invalid_tool_arguments（真机实测的回归），所以只有自己声明了要它的
-    工具才允许补。只有 args_hint 的画像工具一律 False（无从判断，交给模型）。"""
+    工具才允许补。画像域由 Java 统一入口要求项目，虽然只有 args_hint 也要补。"""
     catalog = Catalog(
         platform_version="1.0",
         tools=[
@@ -121,7 +121,7 @@ def test_catalog_declares_project_id_follows_the_schema_only():
 
     assert catalog.declares_project_id("start_plan_draft") is True
     assert catalog.declares_project_id("list_members") is False
-    assert catalog.declares_project_id("query_member_profile") is False
+    assert catalog.declares_project_id("query_member_profile") is True
     assert catalog.declares_project_id("不存在") is False
 
 

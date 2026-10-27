@@ -57,6 +57,35 @@ class ProjectAccessContractTest extends ContractTestSupport {
     }
 
     @Test
+    void ownerCanDeleteProjectWithoutErasingItsData() {
+        String owner = token(USER_MEMBER);
+        String other = token(USER_ADMIN);
+        ApiResponse created = post("/api/projects", owner, json(map("name", uniq("待删除项目"))));
+        assertEquals(200, created.status(), created.body());
+        String id = created.json().path("id").asText();
+        try {
+            ApiResponse story = selected(HttpMethod.POST, "/api/stories", owner, id,
+                    json(map("title", "保留的故事", "sprint", 1, "activity", 1, "status", 0)));
+            assertEquals(200, story.status(), story.body());
+            assertEquals(200, selected(HttpMethod.PUT, "/api/projects/" + id + "/members/1", owner, null,
+                    json(map("member_role", "member"))).status());
+            assertEquals(403, selected(HttpMethod.DELETE, "/api/projects/" + id, other, null, null).status());
+
+            ApiResponse deleted = selected(HttpMethod.DELETE, "/api/projects/" + id, owner, null, null);
+            assertEquals(200, deleted.status(), deleted.body());
+            assertTrue(deleted.json().path("deleted").asBoolean());
+            assertEquals("ARCHIVED", jdbc.queryForObject("SELECT status FROM projects WHERE id=?", String.class, id));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM stories WHERE project_id=?", Integer.class, id));
+            assertFalse(get("/api/projects", owner).body().contains(id));
+            assertEquals(404, get("/api/projects/" + id, owner).status());
+            assertEquals(404, selectedStatus("/api/stories", owner, id));
+            assertEquals(404, selected(HttpMethod.DELETE, "/api/projects/" + id, owner, null, null).status());
+        } finally {
+            purgeProject(id);
+        }
+    }
+
+    @Test
     void projectMembershipGatesMetadataAndAllWorkspaceRoutes() {
         String admin = token(USER_ADMIN);
         String member = token(USER_MEMBER);

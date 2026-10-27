@@ -380,9 +380,8 @@ async def _run_loop(
                     raise _Gate("invalid_tool_arguments", "模型工具参数不是 JSON") from None
                 if not isinstance(arguments, dict):
                     raise _Gate("invalid_tool_arguments", "模型工具参数不是 JSON 对象")
-                # 当前项目兜底注入 —— **只给 schema 里声明了 project_id 的工具**。
-                # 不能一律注入：会议域的 list_members 严格校验未知参数，多塞一个 project_id
-                # 会被判 invalid_tool_arguments（真机实测到的回归）。模型自己给了值就以它为准。
+                # 画像域的统一入口也要求项目；其他工具仍按 schema 判断。
+                # 会议域的 list_members 不接受额外参数，不能一律注入。
                 if (project_id and catalog.declares_project_id(name)
                         and not arguments.get("project_id") and not arguments.get("projectId")):
                     arguments = {**arguments, "project_id": project_id}

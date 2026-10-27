@@ -37,6 +37,12 @@ public class ProjectController {
     @GetMapping("/{projectId}/members") public List<Map<String,Object>> members(@PathVariable String projectId){ Roles.any(); return projects.projectMembers(projectId); }
     @PostMapping public Map<String,Object> create(@RequestBody Map<String,Object> body){ Roles.writer(); return projects.create(body); }
 
+    @DeleteMapping("/{projectId}")
+    public Map<String,Boolean> delete(@PathVariable String projectId) {
+        projects.archive(projectId);
+        return Map.of("deleted", true);
+    }
+
     @PatchMapping("/{projectId}")
     @Transactional
     public Map<String,Object> update(@PathVariable String projectId, @RequestBody JsonNode body) {

@@ -283,6 +283,20 @@ class PlatformAgentContractTest extends ContractTestSupport {
         assertTrue(r.json().path("result").path("members").isArray(), "应回 members: " + r.body());
     }
 
+    @Test
+    void profileQueriesReceiveTheValidatedProjectId() {
+        // 合同测试请求体只带 project_id；画像注册表内部使用 projectId。
+        ApiResponse tasks = post(TOOLS + "query_tasks", token(USER_ADMIN), json(map("taskId", "T01")));
+        assertEquals(200, tasks.status(), tasks.body());
+        assertTrue(tasks.json().path("ok").asBoolean(), tasks.body());
+        assertTrue(tasks.json().path("result").path("found").asBoolean(), tasks.body());
+
+        ApiResponse activities = post(TOOLS + "query_activities", token(USER_ADMIN), json(map("userId", 4)));
+        assertEquals(200, activities.status(), activities.body());
+        assertTrue(activities.json().path("ok").asBoolean(), activities.body());
+        assertTrue(activities.json().path("result").path("activities").isArray(), activities.body());
+    }
+
     /**
      * PLAT-16:query_members **不得回密码哈希**。
      *

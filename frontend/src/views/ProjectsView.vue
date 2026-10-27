@@ -18,6 +18,8 @@ const editDescription = ref('')
 const newUserId = ref('')
 const newRole = ref('member')
 const busy = ref(false)
+const deleteArmed = ref(false)
+const deleteConfirmation = ref('')
 
 onMounted(async () => {
   try { await projects.loadProjects() } catch { /* projects.loadError 提供重试入口 */ }
@@ -37,8 +39,10 @@ async function enter(row) {
 }
 
 async function manage(row) {
-  if (managing.value?.id === row.id) { managing.value = null; return }
+  if (managing.value?.id === row.id) { managing.value = null; deleteArmed.value = false; deleteConfirmation.value = ''; return }
   error.value = ''
+  deleteArmed.value = false
+  deleteConfirmation.value = ''
   try {
     managing.value = row
     editName.value = row.name
@@ -77,6 +81,26 @@ async function removeMember(member) {
     members.value = await projectsApi.members(managing.value.id)
     await projects.loadProjects()
   } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+
+async function deleteProject() {
+  const row = managing.value
+  if (!row?.can_manage || !deleteArmed.value || deleteConfirmation.value.trim() !== row.name || busy.value) return
+  busy.value = true; error.value = ''
+  try {
+    await projectsApi.remove(row.id)
+    projects.projects = projects.projects.filter(item => item.id !== row.id)
+    if (projects.currentProjectId === row.id) {
+      projects.currentProjectId = null
+      projects.persistSelection()
+      project.clearServerData()
+    }
+    managing.value = null
+    members.value = []
+    deleteArmed.value = false
+    deleteConfirmation.value = ''
+  } catch (e) { error.value = e.message || '删除项目失败' }
   finally { busy.value = false }
 }
 
@@ -132,6 +156,17 @@ async function removeMember(member) {
         <label>项目身份 <select v-model="newRole"><option value="member">成员</option><option value="owner">负责人</option><option value="viewer">查看者</option></select></label>
         <button :disabled="busy" type="submit">添加或更新成员</button>
       </form>
+      <div v-if="managing.can_manage" class="projects-delete">
+        <button v-if="!deleteArmed" type="button" :disabled="busy" @click="deleteArmed = true">删除项目</button>
+        <div v-else>
+          <p>删除后所有成员都无法访问此项目；数据仍保留在数据库中。</p>
+          <label>输入项目名称「{{ managing.name }}」以确认
+            <input v-model="deleteConfirmation" :disabled="busy" autocomplete="off">
+          </label>
+          <button type="button" :disabled="busy" @click="deleteArmed = false; deleteConfirmation = ''">取消</button>
+          <button type="button" :disabled="busy || deleteConfirmation.trim() !== managing.name" @click="deleteProject">{{ busy ? '正在删除…' : '确认删除项目' }}</button>
+        </div>
+      </div>
     </section>
   </section>
 </template>
@@ -143,4 +178,7 @@ async function removeMember(member) {
 .projects-manage input,.projects-manage select{min-width:150px}
 .projects-manage ul{padding:0;list-style:none}
 .projects-manage li{display:flex;gap:12px;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0}
+.projects-delete{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.projects-delete input{display:block;margin:8px 0 12px;min-width:min(100%,280px)}
+.projects-delete button+button{margin-left:8px}
 </style>

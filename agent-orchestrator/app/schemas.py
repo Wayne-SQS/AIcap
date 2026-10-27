@@ -62,16 +62,18 @@ class Catalog(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
     def declares_project_id(self, tool_name: str) -> bool:
-        """该工具的入参 schema 里**声明**了 `project_id` 吗（决定能不能给它兜底注入）。
+        """工具是否接受当前项目上下文（决定能不能给它兜底注入）。
 
         为什么必须先问再注入：平台工具的严格程度不一致 —— 会议域的 `list_members`
         严格校验未知参数，多塞一个 `project_id` 会被判 `invalid_tool_arguments`
         （真机实测：`{}` → ok，`{"project_id":"P001"}` → 拒）。所以"一律注入"是错的，
         只该注入给**自己声明了要它**的工具（如 `start_plan_draft`）。
-        只有 `args_hint` 没有 schema 的画像工具一律返回 False：无从判断，交给模型自己填。
+        画像工具只有 `args_hint`，但 Java 的统一工具入口对全部画像查询都要求项目。
         """
         for tool in self.tools:
             if tool.name == tool_name:
+                if tool.agent == "profile":
+                    return True
                 properties = (tool.args_schema or {}).get("properties") or {}
                 return "project_id" in properties
         return False

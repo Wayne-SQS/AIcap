@@ -180,7 +180,11 @@ public class PlatformToolService {
     }
 
     private ToolOutcome invokeProfile(String toolName, JsonNode args, String projectId, long started) {
-        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(args), projectId);
+        // 画像注册表沿用 camelCase 的 projectId，而统一工具入口接受 project_id。
+        // 用已完成权限校验的项目覆盖模型参数，避免画像查询跨项目或漏掉项目。
+        ObjectNode profileArgs = args instanceof ObjectNode obj ? obj.deepCopy() : mapper.createObjectNode();
+        profileArgs.put("projectId", projectId);
+        ProfileToolRegistry.ToolCall call = profileTools.invoke(toolName, write(profileArgs), projectId);
         if (!call.ok()) {
             return failure(toolName, call.error() == null ? "tool_failed" : call.error(),
                     readable(call.resultJson()), started);

@@ -12,6 +12,7 @@ import com.aicap.mapper.UserMapper;
 import com.aicap.security.AuthContext;
 import com.aicap.security.RolePolicy;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,6 +93,18 @@ public class ProjectAccessService {
     public Map<String, Object> detail(String projectId) {
         ProjectMember member = requireMember(projectId);
         return summary(projects.selectById(normalize(projectId)), member);
+    }
+
+    @Transactional
+    public void archive(String projectId) {
+        requireOwner(projectId);
+        String id = normalize(projectId);
+        int updated = projects.update(null, new UpdateWrapper<Project>()
+                .eq("id", id)
+                .ne("status", "ARCHIVED")
+                .set("status", "ARCHIVED")
+                .set("updated_at", LocalDateTime.now()));
+        if (updated == 0) throw ApiException.notFound("项目不存在或已删除");
     }
 
     public List<Map<String, Object>> projectMembers(String projectId) {

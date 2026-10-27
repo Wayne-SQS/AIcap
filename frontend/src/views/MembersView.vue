@@ -371,7 +371,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
       <div>
         <div class="eyebrow">TEAM LOAD / 成员负载</div>
         <h1>成员任务图</h1>
-        <p>{{ project.members.length }} 名成员（含只读查看者） · 6 周负载热力图 · 容量与分配 · 点击成员卡片查看任务明细。</p>
       </div>
     </div>
 
@@ -379,7 +378,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section members-overview-section" data-member-canvas="overview" aria-labelledby="members-overview-title">
       <header class="member-section-header">
         <h2 id="members-overview-title">成员任务总览</h2>
-        <p>成员任务、负载摘要与当前分配情况；点击任务查看明细，拖动任务可调整负责人。</p>
       </header>
       <CanvasZoomControls :zoom="overviewZoom" :min-zoom="overviewMinZoom" :max-zoom="overviewMaxZoom" :zoom-mode="overviewZoomMode"
         :reset-zoom="overviewResetZoom" :fit-to-canvas="overviewFitToCanvas" :zoom-in="overviewZoomIn" :zoom-out="overviewZoomOut"
@@ -428,7 +426,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section workload-heatmap-section" data-member-canvas="load" aria-labelledby="workload-heatmap-title">
     <header class="member-section-header">
       <h2 id="workload-heatmap-title">周负载热力图</h2>
-      <p class="load-note">数字表示该成员在该周的计划工时；颜色表示该周负载等级（按周容量占比）。0 表示该周暂无计划工时，悬停可看关联任务。</p>
     </header>
     <CanvasZoomControls :zoom="loadZoom" :min-zoom="loadMinZoom" :max-zoom="loadMaxZoom" :zoom-mode="loadZoomMode"
       :reset-zoom="loadResetZoom" :fit-to-canvas="loadFitToCanvas" :zoom-in="loadZoomIn" :zoom-out="loadZoomOut"
@@ -456,7 +453,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section bandwidth-section" data-member-canvas="capacity" aria-labelledby="bandwidth-title">
     <header class="member-section-header">
       <h2 id="bandwidth-title">容量与分配</h2>
-      <p>Bandwidth · 对比每位成员的可用容量、已分配工时与剩余空间。</p>
     </header>
     <CanvasZoomControls :zoom="capacityZoom" :min-zoom="capacityMinZoom" :max-zoom="capacityMaxZoom" :zoom-mode="capacityZoomMode"
       :reset-zoom="capacityResetZoom" :fit-to-canvas="capacityFitToCanvas" :zoom-in="capacityZoomIn" :zoom-out="capacityZoomOut"
@@ -488,7 +484,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
     <section class="member-canvas-section activity-heatmap-section" data-member-canvas="activity" aria-labelledby="activity-heatmap-title">
     <header class="member-section-header">
       <h2 id="activity-heatmap-title">成员开发活动图</h2>
-      <p>按周查看活动记录或预计工时。</p>
     </header>
     <CanvasZoomControls :zoom="activityZoom" :min-zoom="activityMinZoom" :max-zoom="activityMaxZoom" :zoom-mode="activityZoomMode"
       :reset-zoom="activityResetZoom" :fit-to-canvas="activityFitToCanvas" :zoom-in="activityZoomIn" :zoom-out="activityZoomOut"
@@ -523,7 +518,6 @@ onMounted(async () => { await loadProfiles(); await loadContribs() })
         </div>
       </div>
       <div class="contrib-note">
-        <span>颜色越深，活动或预计工时越多</span>
         <span>无活动</span><span class="sw c0"></span>
         <span>少</span><span class="sw c1"></span>
         <span>一般</span><span class="sw c2"></span>

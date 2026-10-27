@@ -165,6 +165,17 @@ async def test_project_id_is_not_injected_into_tools_that_do_not_declare_it():
     assert platform.calls[-1]["arguments"] == {}, platform.calls[-1]
 
 
+async def test_project_id_is_injected_into_profile_queries_without_a_schema():
+    platform = FakePlatform()
+    model = tool_then_answer(tool_call("c1", "query_member_profile", {"userId": 4}))
+    await _drive(platform, model, project_id="P007")
+
+    assert platform.calls[-1] == {
+        "name": "query_member_profile",
+        "arguments": {"userId": 4, "project_id": "P007"},
+    }
+
+
 def _error_of(platform: FakePlatform, run_id: str) -> dict[str, Any]:
     errors = [e for e in platform.events if e["run_id"] == run_id and e["type"] == "run.error"]
     assert errors, f"没有 run.error，实际事件：{platform.event_types(run_id)}"
