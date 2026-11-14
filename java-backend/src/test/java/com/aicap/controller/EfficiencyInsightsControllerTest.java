@@ -141,7 +141,9 @@ class EfficiencyInsightsControllerTest {
 
     @Test void staleOrCrossProjectIssueCannotCreateAnImprovement() {
         task("P001", "SOURCE", 1, 0);
-        log("P001", "SOURCE", 1, "2026-10-20");
+        // 用相对今天的日期:控制器内部按 LocalDate.now() 判定"14 天未变更",
+        // 写死日期会让用例随日历推移由"不满足瓶颈"退化成"满足瓶颈"。
+        log("P001", "SOURCE", 1, LocalDate.now().minusDays(3).toString());
         var user = new User(); user.setId(7); user.setRole("owner"); AuthContext.set(user);
         var request = new EfficiencyInsightsController.ImprovementRequest("stalled", 7, 2, 5, 5);
         assertEquals(409, assertThrows(ApiException.class,

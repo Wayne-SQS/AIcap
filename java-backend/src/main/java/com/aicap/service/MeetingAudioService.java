@@ -47,6 +47,7 @@ public class MeetingAudioService {
     private final MeetingAudioMapper audioMapper;
     private final MeetingService meetingService;
     private final MeetingMapper meetingMapper;
+    private final ProjectAccessService projectAccess;
 
     @Value("${aicap.audio.dir:./data/audio}")
     private String audioDir;
@@ -57,6 +58,8 @@ public class MeetingAudioService {
     /** 上传:写盘 + 入库,任一步失败都不留半份数据 */
     public MeetingAudioDtos.AudioOut store(String projectId, String meetingId, MultipartFile file, String source,
                                            Integer durationMs, User actor) {
+        // 上传是项目内的写操作:只判全局角色会放过"项目内 viewer"(全局 member)上传
+        projectAccess.requireWriter(projectId);
         meetingService.requireMeeting(projectId, meetingId);
         if (file == null || file.isEmpty()) {
             throw ApiException.unprocessable("请选择或录制一段音频后再提交");

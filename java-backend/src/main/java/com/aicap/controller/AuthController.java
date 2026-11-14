@@ -10,6 +10,7 @@ import com.aicap.security.Roles;
 import com.aicap.security.RolePolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import jakarta.validation.Valid;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -52,10 +53,11 @@ public class AuthController {
     private final JdbcTemplate jdbc;
 
     @PostMapping("/login")
-    public AuthDtos.TokenOut login(@RequestBody AuthDtos.LoginIn body) {
+    public AuthDtos.TokenOut login(@Valid @RequestBody AuthDtos.LoginIn body) {
         User user = userMapper.selectOne(new QueryWrapper<User>().eq("username", body.username()));
         if (user == null) {
-            String alias = LOGIN_ALIASES.get(body.username());
+            // Map.of 的 get(null) 会抛 NPE(→500);缺字段应走 422 而不是 500
+            String alias = body.username() == null ? null : LOGIN_ALIASES.get(body.username());
             if (alias != null) {
                 user = userMapper.selectOne(new QueryWrapper<User>().eq("username", alias));
             }
