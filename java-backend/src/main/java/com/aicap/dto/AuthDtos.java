@@ -3,6 +3,7 @@ package com.aicap.dto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.aicap.security.RolePolicy;
+import jakarta.validation.constraints.NotBlank;
 
 /** 认证域 DTO(输出字段名对齐 FastAPI schemas:snake_case) */
 public final class AuthDtos {
@@ -12,7 +13,8 @@ public final class AuthDtos {
 
     /** POST /api/auth/login 请求体(FastAPI LoginIn 默认忽略未知字段) */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record LoginIn(String username, String password) {
+    public record LoginIn(@NotBlank(message = "用户名不能为空") String username,
+                          @NotBlank(message = "密码不能为空") String password) {
     }
 
     /** 用户输出(不含 password_hash;对齐 UserOut) */

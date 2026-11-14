@@ -35,17 +35,22 @@ class QualityEvidenceServiceTest {
                 project, 1, type, title, module, "github", happenedAt + " 12:00:00");
     }
 
+    private static String daysAgo(long days) {
+        return java.time.LocalDate.now().minusDays(days).toString();
+    }
+
     @Test void codeActivityCountsRealSyncedEventsOnly() {
-        activity("P001", "commit", "add login", "前端", "2026-10-20");
-        activity("P001", "commit", "add unit test", "测试", "2026-10-21");
-        activity("P001", "commit", "update docs", "文档", "2026-09-01");
-        activity("P001", "commit", "补充登录测试用例", "", "2026-10-22");
-        activity("P001", "commit", "更新接口说明文档", "", "2026-10-22");
-        activity("P001", "pr", "合并登录", "", "2026-10-21");
-        activity("P001", "review", "评审登录", "", "2026-10-21");
-        activity("P001", "test", "跑通契约", "", "2026-10-22");
-        activity("P001", "commit", "旧提交", "", "2026-09-01");
-        activity("P002", "commit", "别的项目", "", "2026-10-21");
+        // "近 14 天"窗口基于 LocalDate.now() 计算,写死日期会随日历推移让用例必然失败
+        activity("P001", "commit", "add login", "前端", daysAgo(4));
+        activity("P001", "commit", "add unit test", "测试", daysAgo(3));
+        activity("P001", "commit", "update docs", "文档", daysAgo(60));
+        activity("P001", "commit", "补充登录测试用例", "", daysAgo(2));
+        activity("P001", "commit", "更新接口说明文档", "", daysAgo(2));
+        activity("P001", "pr", "合并登录", "", daysAgo(3));
+        activity("P001", "review", "评审登录", "", daysAgo(3));
+        activity("P001", "test", "跑通契约", "", daysAgo(2));
+        activity("P001", "commit", "旧提交", "", daysAgo(60));
+        activity("P002", "commit", "别的项目", "", daysAgo(3));
         var m = service.codeActivity("P001");
         assertTrue((Boolean) m.get("synced"));
         assertEquals(6, m.get("commits_total"));

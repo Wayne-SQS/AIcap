@@ -204,7 +204,7 @@ public class StoryController {
             storyMapper.update(null, new UpdateWrapper<Story>().set("epic_id", null)
                     .eq("project_id", scopedProjectId).eq("code", storyId));
         }
-        if (body.status() != null && oldStatus != body.status()) {
+        if (body.status() != null && !Objects.equals(oldStatus, body.status())) {
             addLog(scopedProjectId, storyId, "move", story.getTitle() + " → 状态 " + story.getStatus(), user.getId());
         } else {
             addLog(scopedProjectId, storyId, "edit", story.getTitle(), user.getId());
